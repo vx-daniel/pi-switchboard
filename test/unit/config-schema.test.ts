@@ -247,7 +247,10 @@ describe('normalizeConfig: repairs', () => {
     lines = []
   })
 
+  // The warning is deduplicated in module state, so each test starts from a clean config first:
+  // otherwise an earlier test ending on the same invalid fields would swallow this one's warning.
   function captureWarnings(): void {
+    normalizeConfig({})
     configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
   }
 
@@ -268,6 +271,23 @@ describe('normalizeConfig: repairs', () => {
     normalizeConfig({})
     normalizeConfig({ port: 'x4141' })
     expect(lines).toHaveLength(3)
+  })
+
+  // Catches a shape error being repaired silently, and a rounded number going unreported: each is a
+  // value the operator wrote that the proxy does not use as written.
+  test.each([
+    ['a config that is not an object', null, 'config'],
+    ['a zed block that is not an object', { zed: null }, 'zed'],
+    ['a fractional number', { port: 4141.5 }, 'port']
+  ])('%s is reported by its path', (_case, raw, path) => {
+    captureWarnings()
+    normalizeConfig(raw)
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain(`"fields":["${path}"]`)
+  })
+
+  test('a fractional number is rounded, not reset', () => {
+    expect(normalizeConfig({ port: 4141.5 }).port).toBe(4142)
   })
 
   // Catches one bad zed field resetting the whole block, which used to discard a valid provider
