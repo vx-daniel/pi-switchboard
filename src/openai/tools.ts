@@ -1,10 +1,11 @@
 /**
- * OpenAI function tools -> pi Tool conversion.
+ * Converts OpenAI function tool definitions to pi `Tool` definitions.
  *
- * Phase 2 contract:
- * - Convert OpenAI function tools to pi Tool definitions
- * - Reject unsupported JSON Schema constructs via json-schema-to-typebox
- * - Convert tool_choice to pi-compatible format
+ * @remarks
+ * Parameter schemas go through `json-schema-to-typebox`, which rejects unsupported JSON Schema
+ * constructs. `tool_choice` is not converted here; `src/pi/complete.ts` maps it per API.
+ *
+ * @packageDocumentation
  */
 
 import {
@@ -17,32 +18,47 @@ import { proxyLogger } from '@proxy/logging'
 import { jsonSchemaToTypebox } from '@proxy/openai/json-schema-to-typebox'
 import type { OpenAIFunctionTool } from '@proxy/openai/schemas'
 
+/** Logger for tool conversion. */
 const toolsLogger = proxyLogger('openai', 'tools')
 
 /**
- * pi's constrained sampling for a tool sent with `strict: true`. "prefer": strict wherever pi can
- * make it so (the model is strict-capable and the schema fits the provider's strict subset);
- * otherwise the tool is sent without strict, as before pi had this, rather than the request being
- * refused. "require" would refuse every strict tool on the many models pi does not mark
- * strict-capable, breaking clients that send `strict: true` by default (#44).
+ * pi's constrained sampling for a tool sent with `strict: true`.
+ *
+ * @remarks
+ * "prefer": strict wherever pi can make it so (the model is strict-capable and the schema fits
+ * the provider's strict subset); otherwise the tool is sent without strict rather than the
+ * request being refused. "require" would refuse every strict tool on the many models pi does not
+ * mark strict-capable, breaking clients that send `strict: true` by default (#44).
  */
 const STRICT_SAMPLING: ConstrainedSamplingConfig = { type: 'json_schema', strict: 'prefer' }
 
+/** Successful conversion: the pi tools, in request order. */
 export interface ToolConversionSuccess {
   readonly ok: true
   readonly tools: Tool[]
 }
 
+/** Failed conversion: why, and the request path of the offending schema node. */
 export interface ToolConversionError {
   readonly ok: false
   readonly message: string
   readonly param: string
 }
 
+/** Outcome of {@link convertTools}, discriminated on `ok`. */
 export type ToolConversionResult = ToolConversionSuccess | ToolConversionError
 
 /**
- * Convert an array of OpenAI function tool definitions to pi Tool definitions.
+ * Converts OpenAI function tool definitions to pi `Tool` definitions.
+ *
+ * @remarks
+ * A tool without `parameters` gets an empty object schema and a missing `description` becomes
+ * `''`. `strict: true` adds {@link STRICT_SAMPLING}. Stops at the first schema that fails to
+ * convert.
+ *
+ * @param openaiTools - the request's `tools` array
+ * @returns the pi tools, or the first conversion error with a path like
+ *   `tools[0].function.parameters.city`
  */
 export function convertTools(openaiTools: OpenAIFunctionTool[]): ToolConversionResult {
   const piTools: Tool[] = []
@@ -55,7 +71,7 @@ export function convertTools(openaiTools: OpenAIFunctionTool[]): ToolConversionR
     let parameters: TSchema
 
     if (fn.parameters === undefined) {
-      // No parameters specified -- empty object
+      // No parameters specified: empty object schema
       parameters = Type.Object({})
     } else {
       const result = jsonSchemaToTypebox(

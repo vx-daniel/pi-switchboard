@@ -1,13 +1,15 @@
 /**
- * OpenAI messages -> pi Context conversion.
+ * Converts OpenAI chat messages into a pi Context.
  *
- * Phase 0 contract:
- * - `system` and `developer` messages before the first conversation turn -> the system prompt
- * - later `system` and `developer` messages -> pi SystemMessages in place (#45)
- * - `user` text -> pi UserMessage
- * - `assistant` text -> pi AssistantMessage history
- * - `tool` -> pi ToolResultMessage
- * - Reject unsupported content parts clearly
+ * @remarks
+ * - `system` and `developer` messages before the first conversation turn: the system prompt
+ * - later `system` and `developer` messages: pi SystemMessages in place (#45)
+ * - `user` text, or text and base64 image parts: pi UserMessage
+ * - `assistant` text and tool calls: pi AssistantMessage history
+ * - `tool`: pi ToolResultMessage
+ * - unsupported content parts and remote image URLs are rejected with a param path
+ *
+ * @packageDocumentation
  */
 
 import type {
@@ -25,32 +27,40 @@ import { proxyLogger } from '@proxy/logging'
 import type { OpenAIMessage } from '@proxy/openai/schemas'
 import * as z from 'zod'
 
+/** Logger for message conversion. */
 const messagesLogger = proxyLogger('openai', 'messages')
 
-// Tool-call arguments are JSON values (Pi 1.x types them as JsonObject), not arbitrary objects.
+/** Tool-call arguments: a JSON object (pi types them as `JsonObject`), not arbitrary values. */
 const toolArgsSchema = z.record(z.string().trim(), z.json())
 
+/** Successful conversion: the pi Context. */
 export interface ConversionSuccess {
   readonly ok: true
   readonly context: Context
 }
 
+/** Failed conversion: why, and the request path of the offending field. */
 export interface ConversionError {
   readonly ok: false
   readonly message: string
   readonly param: string
 }
 
+/** Outcome of {@link convertMessages}, discriminated on `ok`. */
 export type ConversionResult = ConversionSuccess | ConversionError
 
 /**
- * Convert OpenAI messages array into a pi Context.
+ * Converts an OpenAI messages array into a pi Context.
  *
- * System and developer messages before the first conversation turn are merged into
- * `systemPrompt`. A later one stays where the client put it, as a pi SystemMessage: pi keeps it in
- * place on models that accept mid-conversation instructions (`supportsMidConvoSystemMessages`) and
- * merges it into the leading prompt for the others, as the proxy used to for every model.
- * Conversation messages are mapped into pi message types.
+ * @remarks
+ * System and developer messages before the first conversation turn are joined with blank lines
+ * into `systemPrompt`. A later one stays where the client put it, as a pi SystemMessage: pi keeps
+ * it in place on models that accept mid-conversation instructions
+ * (`supportsMidConvoSystemMessages`) and merges it into the leading prompt for the others.
+ * Conversation messages are mapped to pi message types.
+ *
+ * @param messages - the request's `messages`
+ * @returns the Context, or the first conversion error (a rejected user content part)
  */
 export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
   const systemParts: string[] = []
@@ -102,9 +112,14 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
 }
 
 /**
- * Build a map of tool_call_id -> function name from assistant messages.
- * The OpenAI tool message only has tool_call_id + content, but some providers
- * (Google) require the function name on tool result messages.
+ * Maps each tool_call_id in the assistant messages to its function name.
+ *
+ * @remarks
+ * An OpenAI tool message only has `tool_call_id` and content, but some providers (Google)
+ * require the function name on tool results.
+ *
+ * @param messages - the request's `messages`
+ * @returns tool_call_id to function name; a repeated ID keeps the last name
  */
 function collectToolCallNames(messages: OpenAIMessage[]): Map<string, string> {
   const toolCallNames = new Map<string, string>()
@@ -120,16 +135,23 @@ function collectToolCallNames(messages: OpenAIMessage[]): Map<string, string> {
 
 // --- Internal converters ---
 
+/** Outcome of converting one user message. */
 type UserConversionResult = { readonly ok: true; readonly message: UserMessage } | ConversionError
 
+/** Outcome of converting one conversation message. */
 type MessageConversionResult = { readonly ok: true; readonly message: Message } | ConversionError
 
 /** An OpenAI message that is a conversation turn rather than a system or developer instruction. */
 type ConversationMessage = Exclude<OpenAIMessage, { role: 'system' | 'developer' }>
 
 /**
- * Convert one user, assistant or tool message into its pi message.
- * Returns the pi message, or the conversion error for a user message with a rejected part.
+ * Converts one user, assistant or tool message into its pi message.
+ *
+ * @param message - the conversation message
+ * @param messageIndex - its index in `messages`, for error paths and logs
+ * @param toolCallNames - tool_call_id to function name, from {@link collectToolCallNames}
+ * @returns the pi message, or the error for a user message with a rejected part; a tool message
+ *   whose call is unknown gets an empty tool name
  */
 function convertConversationMessage(
   message: ConversationMessage,
@@ -156,14 +178,24 @@ function convertConversationMessage(
   }
 }
 
+/** User message content: a string or content parts. */
 type UserContent = string | { type: string; text?: string; image_url?: { url: string } }[]
 
+/** One content part of a multi-part user message. */
 type UserContentPart = Exclude<UserContent, string>[number]
 
+/** Outcome of converting one user content part. */
 type PartConversionResult =
   | { readonly ok: true; readonly part: TextContent | ImageContent }
   | ConversionError
 
+/**
+ * Converts a user message's content into a pi UserMessage.
+ *
+ * @param content - a string, or content parts
+ * @param index - the message's index in `messages`, for error paths and logs
+ * @returns the pi message, or the error for the first rejected part
+ */
 function convertUserMessage(content: UserContent, index: number): UserConversionResult {
   if (typeof content === 'string') {
     return {
@@ -205,8 +237,12 @@ function convertUserMessage(content: UserContent, index: number): UserConversion
 }
 
 /**
- * Convert one part of a multi-part user message into a pi text or image part.
- * Returns the pi part, or the error for an unsupported part type or a rejected image.
+ * Converts one part of a multi-part user message into a pi text or image part.
+ *
+ * @param part - the content part
+ * @param messageIndex - the message's index in `messages`
+ * @param partIndex - the part's index in the message content
+ * @returns the pi part, or the error for an unsupported part type or a rejected image
  */
 function convertContentPart(
   part: UserContentPart,
@@ -229,9 +265,16 @@ function convertContentPart(
 }
 
 /**
- * Convert an image part's URL into a pi image part.
- * Only base64 data URIs are supported (remote URLs disabled by default); returns the error for a
- * remote URL or an invalid data URI.
+ * Converts an image part's URL into a pi image part.
+ *
+ * @remarks
+ * Only base64 data URIs are accepted; every other URL is rejected. The `remoteImages` config
+ * setting does not change this.
+ *
+ * @param url - the `image_url.url` value
+ * @param messageIndex - the message's index in `messages`
+ * @param partIndex - the part's index in the message content
+ * @returns the pi image part, or the error for a non-data URL or an invalid data URI
  */
 function convertImagePart(
   url: string,
@@ -279,12 +322,24 @@ function convertImagePart(
   }
 }
 
+/** An assistant tool call as it appears in request history. */
 interface OpenAIToolCallInput {
   readonly id: string
   readonly type: 'function'
   readonly function: { readonly name: string; readonly arguments: string }
 }
 
+/**
+ * Converts a history assistant message into a pi AssistantMessage.
+ *
+ * @remarks
+ * Arguments that are not a JSON object become `{}`, with a warning. The message gets
+ * placeholder metadata (`provider: 'proxy'`, `model: 'history'`, zero usage).
+ *
+ * @param textContent - the message text; `null` or empty adds no text part
+ * @param toolCalls - the message's tool calls, if any
+ * @returns the pi message
+ */
 function convertAssistantMessage(
   textContent: string | null,
   toolCalls: OpenAIToolCallInput[] | undefined
@@ -309,7 +364,7 @@ function convertAssistantMessage(
           )
         }
       } catch {
-        // Best-effort: keep empty args if parsing fails
+        // Best-effort: keep empty args when the arguments are not valid JSON
         messagesLogger.warn(
           'Arguments of history tool call {toolCallId} ({toolName}) are not valid JSON; sending empty arguments',
           {
@@ -347,6 +402,14 @@ function convertAssistantMessage(
   }
 }
 
+/**
+ * Converts an OpenAI tool message into a pi ToolResultMessage (never marked as an error).
+ *
+ * @param content - the tool output text
+ * @param toolCallId - the call it answers
+ * @param toolName - the call's function name, or `''` when unknown
+ * @returns the pi tool result
+ */
 function convertToolMessage(
   content: string,
   toolCallId: string,
@@ -364,43 +427,59 @@ function convertToolMessage(
 
 // --- Helpers ---
 
-/** The host of a remote image URL, for logs: never the path or query, which may carry tokens. */
+/**
+ * Returns the host of a remote image URL, for logs: never the path or query, which may carry
+ * tokens.
+ *
+ * @param url - the image URL
+ * @returns the host, or `(unparseable URL)`
+ */
 function imageUrlHost(url: string): string {
   return URL.canParse(url) ? new URL(url).host : '(unparseable URL)'
 }
 
-/**
- * Supported image MIME types for base64 data URIs.
- */
+/** Supported image MIME types for base64 data URIs. */
 const SUPPORTED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
 
+/** Bytes per kilobyte. */
 const BYTES_PER_KILOBYTE = 1024
+/** Bytes per megabyte. */
 const BYTES_PER_MEGABYTE = BYTES_PER_KILOBYTE * BYTES_PER_KILOBYTE
+/** Maximum base64 payload size in megabytes. */
 const MAX_BASE64_PAYLOAD_MEGABYTES = 20
-/**
- * Maximum base64 payload size (20 MB of base64 text, ~15 MB decoded).
- */
+/** Maximum base64 payload length in characters (20 MiB of base64 text, about 15 MiB decoded). */
 const MAX_BASE64_PAYLOAD_SIZE = MAX_BASE64_PAYLOAD_MEGABYTES * BYTES_PER_MEGABYTE
 
+/** The MIME type and base64 payload of a data URI. */
 interface ParsedDataUri {
   readonly data: string
   readonly mimeType: string
 }
 
+/** A rejected data URI and why. */
 interface DataUriError {
   readonly ok: false
   readonly message: string
 }
 
+/** A valid data URI, parsed. */
 interface DataUriSuccess {
   readonly ok: true
   readonly parsed: ParsedDataUri
 }
 
+/** Outcome of {@link parseAndValidateDataUri}. */
 type DataUriResult = DataUriSuccess | DataUriError
 
+/**
+ * Parses a base64 image data URI and checks its MIME type and size.
+ *
+ * @param uri - a URI starting with `data:`
+ * @returns the MIME type and payload, or the error for a malformed URI, an unsupported MIME type
+ *   or a payload over {@link MAX_BASE64_PAYLOAD_SIZE} characters
+ */
 function parseAndValidateDataUri(uri: string): DataUriResult {
-  // data:[<mediatype>][;base64],<data>
+  // Accepts only data:<mediatype>;base64,<data>
   const match = /^data:([^;]+);base64,(.+)$/.exec(uri)
   if (match === null) {
     return { ok: false, message: 'Invalid base64 data URI format' }
@@ -411,7 +490,7 @@ function parseAndValidateDataUri(uri: string): DataUriResult {
     return { ok: false, message: 'Invalid base64 data URI format' }
   }
 
-  // Validate MIME type
+  // Reject unsupported MIME types
   if (!SUPPORTED_IMAGE_MIME_TYPES.has(mimeType)) {
     return {
       ok: false,
@@ -419,7 +498,7 @@ function parseAndValidateDataUri(uri: string): DataUriResult {
     }
   }
 
-  // Validate payload size
+  // Reject oversized payloads
   if (data.length > MAX_BASE64_PAYLOAD_SIZE) {
     return {
       ok: false,

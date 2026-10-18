@@ -1,27 +1,32 @@
 /**
- * Zod schemas for the OpenAI chat-completions request subset.
+ * Zod schemas for the subset of the OpenAI chat-completions request the proxy accepts.
  *
- * Supported fields (cumulative through Phase 3D):
- * - Core: model, messages, stream, temperature, max_tokens,
- *   max_completion_tokens, stop, user, stream_options
+ * @remarks
+ * Accepted top-level fields:
+ * - Core: model, messages, stream, temperature, max_tokens, max_completion_tokens, stop, user,
+ *   stream_options
  * - Tools: tools, tool_choice, parallel_tool_calls
- * - Model control: reasoning_effort, top_p, frequency_penalty,
- *   presence_penalty, seed, response_format
- * - Client interop: metadata, prediction
- * - Unknown top-level fields are rejected with 422
- * - Explicitly rejected: n, logprobs, top_logprobs, logit_bias,
- *   functions (deprecated), function_call (deprecated)
+ * - Model control: reasoning_effort, top_p, frequency_penalty, presence_penalty, seed,
+ *   response_format
+ * - Client interop (accepted, not interpreted): metadata, prediction
+ *
+ * Unknown top-level fields fail the strict schema (422 in `validate.ts`). Explicitly rejected
+ * with a named error: n, logprobs, top_logprobs, logit_bias, functions, function_call.
+ *
+ * @packageDocumentation
  */
 
 import * as z from 'zod'
 
 // --- Message content parts ---
 
+/** A `text` content part of a user message. */
 const textContentPartSchema = z.object({
   type: z.literal('text'),
   text: z.string().trim()
 })
 
+/** An `image_url` content part of a user message, with optional `detail`. */
 const imageUrlContentPartSchema = z.object({
   type: z.literal('image_url'),
   image_url: z.object({
@@ -30,6 +35,7 @@ const imageUrlContentPartSchema = z.object({
   })
 })
 
+/** A user-message content part: text or image URL. */
 const contentPartSchema = z.discriminatedUnion('type', [
   textContentPartSchema,
   imageUrlContentPartSchema
@@ -37,30 +43,35 @@ const contentPartSchema = z.discriminatedUnion('type', [
 
 // --- Messages ---
 
+/** A `system` message with string content. */
 const systemMessageSchema = z.object({
   role: z.literal('system'),
   content: z.string().trim(),
   name: z.string().trim().optional()
 })
 
+/** A `developer` message with string content. */
 const developerMessageSchema = z.object({
   role: z.literal('developer'),
   content: z.string().trim(),
   name: z.string().trim().optional()
 })
 
+/** A `user` message with string content. */
 const userMessageTextSchema = z.object({
   role: z.literal('user'),
   content: z.string().trim(),
   name: z.string().trim().optional()
 })
 
+/** A `user` message with an array of content parts. */
 const userMessagePartsSchema = z.object({
   role: z.literal('user'),
   content: z.array(contentPartSchema),
   name: z.string().trim().optional()
 })
 
+/** An `assistant` message: optional (nullable) text content and optional function tool calls. */
 const assistantMessageSchema = z.object({
   role: z.literal('assistant'),
   content: z.string().trim().nullable().optional(),
@@ -79,12 +90,14 @@ const assistantMessageSchema = z.object({
     .optional()
 })
 
+/** A `tool` message carrying the result for one `tool_call_id`. */
 const toolMessageSchema = z.object({
   role: z.literal('tool'),
   content: z.string().trim(),
   tool_call_id: z.string().trim()
 })
 
+/** Any accepted chat message. */
 const messageSchema = z.union([
   systemMessageSchema,
   developerMessageSchema,
@@ -94,10 +107,12 @@ const messageSchema = z.union([
   toolMessageSchema
 ])
 
+/** A chat message as accepted by {@link chatCompletionRequestSchema}. */
 export type OpenAIMessage = z.infer<typeof messageSchema>
 
 // --- Stream options ---
 
+/** The `stream_options` object; only `include_usage` is accepted. */
 const streamOptionsSchema = z.object({
   include_usage: z.boolean().optional()
 })
@@ -106,8 +121,10 @@ const streamOptionsSchema = z.object({
 
 /**
  * OpenAI function tool definition.
- * The `parameters` field is a JSON Schema object validated structurally;
- * semantic conversion to TypeBox happens in json-schema-to-typebox.ts.
+ *
+ * @remarks
+ * `parameters` is only checked to be an object here; conversion to TypeBox happens in
+ * `json-schema-to-typebox.ts`.
  */
 const functionToolSchema = z.object({
   type: z.literal('function'),
@@ -119,13 +136,12 @@ const functionToolSchema = z.object({
   })
 })
 
+/** A function tool definition as accepted in the request `tools` array. */
 export type OpenAIFunctionTool = z.infer<typeof functionToolSchema>
 
 // --- Tool choice ---
 
-/**
- * OpenAI tool_choice: "none" | "auto" | "required" | { type: "function", function: { name: string } }
- */
+/** A named `tool_choice`: `{ type: "function", function: { name } }`. */
 const namedToolChoiceSchema = z.object({
   type: z.literal('function'),
   function: z.object({
@@ -133,10 +149,12 @@ const namedToolChoiceSchema = z.object({
   })
 })
 
+/** The `tool_choice` field: `"none"`, `"auto"`, `"required"`, or a named function. */
 const toolChoiceSchema = z.union([z.enum(['none', 'auto', 'required']), namedToolChoiceSchema])
 
 // --- Response format ---
 
+/** A `json_schema` response format with its name, optional schema and `strict` flag. */
 const jsonSchemaResponseFormatSchema = z.object({
   type: z.literal('json_schema'),
   json_schema: z.object({
@@ -147,23 +165,30 @@ const jsonSchemaResponseFormatSchema = z.object({
   })
 })
 
+/** The `response_format` field: `text`, `json_object` or `json_schema`. */
 const responseFormatSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('text') }),
   z.object({ type: z.literal('json_object') }),
   jsonSchemaResponseFormatSchema
 ])
 
+/** Upper bound of `temperature`. */
 const MAX_TEMPERATURE = 2
+/** Maximum number of `stop` sequences. */
 const MAX_STOP_SEQUENCES = 4
+/** Lower bound of `frequency_penalty` and `presence_penalty`. */
 const MIN_PENALTY = -2
+/** Upper bound of `frequency_penalty` and `presence_penalty`. */
 const MAX_PENALTY = 2
 
 /** OpenAI's `reasoning_effort` values, lowest first. */
 export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
+/** One of the {@link REASONING_EFFORTS} values. */
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
 
 // --- Top-level request ---
 
+/** Strict schema for a chat-completions request body; unknown top-level keys fail parsing. */
 export const chatCompletionRequestSchema = z
   .object({
     model: z.string().trim(),
@@ -177,7 +202,7 @@ export const chatCompletionRequestSchema = z
       .optional(),
     user: z.string().trim().optional(),
     stream_options: streamOptionsSchema.nullable().optional(),
-    // Phase 2 additions
+    // Tools and model control
     tools: z.array(functionToolSchema).optional(),
     tool_choice: toolChoiceSchema.optional(),
     parallel_tool_calls: z.boolean().optional(),
@@ -187,7 +212,7 @@ export const chatCompletionRequestSchema = z
     presence_penalty: z.number().min(MIN_PENALTY).max(MAX_PENALTY).optional(),
     seed: z.int().optional(),
     response_format: responseFormatSchema.optional(),
-    // Phase 3D additions — passthrough fields sent by real clients
+    // Passthrough fields sent by real clients; accepted but not interpreted
     metadata: z.record(z.string().trim(), z.unknown()).optional(),
     prediction: z
       .object({
@@ -201,19 +226,20 @@ export const chatCompletionRequestSchema = z
   })
   .strict()
 
+/** A parsed chat-completions request body. */
 export type ChatCompletionRequest = z.infer<typeof chatCompletionRequestSchema>
 
 // --- Rejected fields ---
 
 /**
- * Fields that are explicitly rejected with a helpful error.
+ * Fields rejected with a named 422 error instead of the generic unknown-parameter error.
  *
- * `n`, `logprobs`, `top_logprobs`, `logit_bias`: not supported by the pi SDK's
- * simple completion interface. The proxy returns a single choice with no token
- * probability data. Promoting these would require response-side changes.
+ * @remarks
+ * `n`, `logprobs`, `top_logprobs`, `logit_bias`: the proxy returns a single choice with no
+ * token probability data, so accepting these would need response-side changes.
  *
- * `functions`, `function_call`: deprecated OpenAI fields, superseded by `tools`
- * and `tool_choice`. Clients should migrate to the current API.
+ * `functions`, `function_call`: deprecated OpenAI fields, superseded by `tools` and
+ * `tool_choice`.
  */
 export const rejectedFields = [
   'n',

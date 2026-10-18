@@ -1,14 +1,15 @@
 /**
- * SSE encoder: bridge pi AssistantMessageEvent stream -> OpenAI SSE chunks.
+ * Encodes a pi AssistantMessageEvent stream as OpenAI chat-completion SSE chunks.
  *
- * Phase 0 contract:
- * - First chunk has delta.role = "assistant"
- * - Text deltas map to delta.content
- * - Tool call deltas map to delta.tool_calls
- * - Stable chunk ID across the full response
- * - Final [DONE] sentinel
- * - If stream_options.include_usage, emit final usage chunk with empty choices
- * - Do not emit non-standard reasoning fields on the stable path
+ * @remarks
+ * - The first chunk has `delta.role = "assistant"`
+ * - Text deltas map to `delta.content`, tool call deltas to `delta.tool_calls`
+ * - One chunk ID (the request ID) across the whole response
+ * - Ends with the `[DONE]` sentinel
+ * - With `stream_options.include_usage`, a final usage chunk with empty `choices`
+ * - Thinking events are dropped: no non-standard reasoning fields
+ *
+ * @packageDocumentation
  */
 
 import type { AssistantMessageEvent, Usage } from '@earendil-works/pi-ai'
@@ -16,8 +17,10 @@ import { proxyLogger } from '@proxy/logging'
 import { mapFinishReason, mapUsage } from '@proxy/openai/responses'
 import { mapFailedCall, type OpenAIError } from '@proxy/server/errors'
 
+/** Logger for SSE encoding. */
 const sseLogger = proxyLogger('openai', 'sse')
 
+/** One `chat.completion.chunk` SSE payload. */
 export interface SSEChunk {
   readonly id: string
   readonly object: 'chat.completion.chunk'
@@ -27,18 +30,21 @@ export interface SSEChunk {
   readonly usage?: ReturnType<typeof mapUsage> | null
 }
 
+/** One choice of an {@link SSEChunk}. */
 export interface SSEChunkChoice {
   readonly index: number
   readonly delta: SSEChunkDelta
   readonly finish_reason: string | null
 }
 
+/** The incremental `delta` of an {@link SSEChunkChoice}. */
 export interface SSEChunkDelta {
   readonly role?: 'assistant'
   readonly content?: string
   readonly tool_calls?: SSEToolCallDelta[]
 }
 
+/** One streamed tool call fragment; `id`, `type` and `name` come only in its first fragment. */
 export interface SSEToolCallDelta {
   readonly index: number
   readonly id?: string
@@ -50,36 +56,52 @@ export interface SSEToolCallDelta {
 }
 
 /**
- * Encode a single SSE data frame.
+ * Encodes a chunk as an SSE `data:` frame.
+ *
+ * @param chunk - the chunk payload
+ * @returns the frame text, ending in a blank line
  */
 export function encodeSSE(chunk: SSEChunk): string {
   return `data: ${JSON.stringify(chunk)}\n\n`
 }
 
 /**
- * Encode the terminal [DONE] frame.
+ * Encodes the terminal `[DONE]` frame.
+ *
+ * @returns the frame text
  */
 export function encodeDone(): string {
   return 'data: [DONE]\n\n'
 }
 
+/** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
 const MS_PER_SECOND = 1000
 
+/** The fields every chunk of one response shares. */
 interface ChunkMeta {
   readonly id: string
   readonly created: number
   readonly model: string
 }
 
+/** Mutable state of one stream while events are encoded. */
 interface StreamState {
   sentFirstChunk: boolean
   finishReason: string | null
   finalUsage: Usage | undefined
   terminated: boolean
-  // Track tool call indexes for stable delta sequencing
+  // Content indexes of started tool calls, in start order; the order gives the OpenAI index
   readonly toolCallIndexes: Map<number, boolean>
 }
 
+/**
+ * Encodes a chunk with a single choice at index 0.
+ *
+ * @param meta - the shared chunk fields
+ * @param delta - the choice delta
+ * @param finishReason - the finish_reason; `null` on every chunk but the last
+ * @returns the SSE frame
+ */
 function encodeChoiceChunk(
   meta: ChunkMeta,
   delta: SSEChunkDelta,
@@ -100,6 +122,14 @@ function encodeChoiceChunk(
   })
 }
 
+/**
+ * Encodes a text delta, adding `role: "assistant"` when no chunk has been sent yet.
+ *
+ * @param meta - the shared chunk fields
+ * @param state - the stream state; marks the first chunk as sent
+ * @param text - the text delta
+ * @returns the SSE frame
+ */
 function encodeTextDelta(meta: ChunkMeta, state: StreamState, text: string): string {
   if (state.sentFirstChunk) {
     return encodeChoiceChunk(meta, { content: text })
@@ -108,6 +138,14 @@ function encodeTextDelta(meta: ChunkMeta, state: StreamState, text: string): str
   return encodeChoiceChunk(meta, { role: 'assistant', content: text })
 }
 
+/**
+ * Encodes the first fragment of a tool call: its index, ID, name and empty arguments.
+ *
+ * @param meta - the shared chunk fields
+ * @param state - the stream state; records the tool call's content index
+ * @param event - the `toolcall_start` event
+ * @returns one frame, or none when the event's content is not a tool call
+ */
 function encodeToolCallStart(
   meta: ChunkMeta,
   state: StreamState,
@@ -121,7 +159,7 @@ function encodeToolCallStart(
     })
     return []
   }
-  // Determine the tool call index within the message's tool calls
+  // The OpenAI tool call index is the number of tool calls started before this one
   const tcIndex = state.toolCallIndexes.size
   state.toolCallIndexes.set(ci, true)
   return [
@@ -141,13 +179,22 @@ function encodeToolCallStart(
   ]
 }
 
+/**
+ * Encodes an arguments fragment of a started tool call.
+ *
+ * @param meta - the shared chunk fields
+ * @param state - the stream state with the started tool calls
+ * @param contentIndex - the pi content index of the tool call
+ * @param delta - the arguments JSON fragment
+ * @returns one frame, or none when no tool call started at `contentIndex`
+ */
 function encodeToolCallDelta(
   meta: ChunkMeta,
   state: StreamState,
   contentIndex: number,
   delta: string
 ): string[] {
-  // Find the tool call index
+  // The OpenAI index is the position of contentIndex among the started tool calls
   let tcIndex = 0
   for (const [ci] of state.toolCallIndexes) {
     if (ci === contentIndex) {
@@ -173,16 +220,31 @@ function encodeToolCallDelta(
 }
 
 /**
- * The error frame for an upstream failure: the body mapUpstreamError gives a non-streaming answer,
- * with the same fixed text. The upstream message can quote the request, a key or an account, so it
- * stays in the debug log (logUpstreamStreamError) and never reaches the client.
+ * Encodes the error frame for an upstream failure, followed by `[DONE]`.
+ *
+ * @remarks
+ * The body is the one `mapFailedCall` gives a non-streaming answer, with the same fixed text.
+ * The upstream message can quote the request, a key or an account, so it stays in the debug log
+ * ({@link logUpstreamStreamError}) and never reaches the client.
+ *
+ * @param body - the mapped OpenAI error body
+ * @returns the error frame and the `[DONE]` frame
  */
 function encodeUpstreamError(body: OpenAIError): string[] {
   return [`data: ${JSON.stringify(body)}\n\n`, encodeDone()]
 }
 
 /**
- * Map one pi event to the SSE frames it produces, updating stream state.
+ * Maps one pi event to the SSE frames it produces, updating stream state.
+ *
+ * @remarks
+ * `done` emits nothing: its finish_reason and usage go out in {@link closingFrames}. `error`
+ * marks the stream terminated.
+ *
+ * @param event - the pi event
+ * @param meta - the shared chunk fields
+ * @param state - the stream state to update
+ * @returns the frames to send, possibly none
  */
 function eventToFrames(
   event: AssistantMessageEvent,
@@ -227,9 +289,15 @@ function eventToFrames(
 }
 
 /**
- * Log an upstream error event. The provider's raw message goes to debug only, as in the route's
- * handler: some providers quote parts of the request back, and request content is never logged at a
- * level a default deployment writes.
+ * Logs an upstream error event.
+ *
+ * @remarks
+ * The provider's raw message goes to debug only, as in the route's handler: some providers quote
+ * parts of the request back, and request content is never logged at a level a default
+ * deployment writes.
+ *
+ * @param event - the pi `error` event
+ * @param code - the OpenAI error code sent to the client
  */
 function logUpstreamStreamError(
   event: Extract<AssistantMessageEvent, { type: 'error' }>,
@@ -251,8 +319,14 @@ function logUpstreamStreamError(
 }
 
 /**
- * The frames after the last upstream event: the finish_reason chunk, the usage chunk when
- * requested, and the terminal sentinel.
+ * Builds the frames after the last upstream event.
+ *
+ * @param meta - the shared chunk fields
+ * @param state - the final stream state
+ * @param includeUsage - whether the client asked for a usage chunk
+ * @param eventCount - the number of upstream events, for the log
+ * @returns the finish_reason chunk (omitted without a `done` event), the usage chunk when
+ *   requested and known, and the `[DONE]` frame
  */
 function closingFrames(
   meta: ChunkMeta,
@@ -287,7 +361,18 @@ function closingFrames(
 }
 
 /**
- * Create an async generator that yields SSE text frames from a pi event stream.
+ * Converts a pi event stream into SSE text frames.
+ *
+ * @remarks
+ * Stops after an upstream `error` event (its frames already end in `[DONE]`). Errors thrown by
+ * `events` are rethrown after the end of the stream is logged.
+ *
+ * @param events - pi's event stream for one response
+ * @param requestId - the chunk `id`
+ * @param model - the model ID reported in each chunk
+ * @param includeUsage - whether to send a final usage chunk
+ * @returns an async generator of SSE frames
+ * @throws whatever iterating `events` throws
  */
 export async function* streamToSSE(
   events: AsyncIterable<AssistantMessageEvent>,
@@ -342,6 +427,7 @@ export async function* streamToSSE(
   }
 }
 
+/** Counters and outcome flags for {@link logStreamEnd}. */
 interface StreamEndSummary {
   readonly completed: boolean
   readonly failed: boolean
@@ -350,7 +436,13 @@ interface StreamEndSummary {
   readonly durationMs: number
 }
 
-/** One line for how a stream ended: finished, failed (the caller logs the error), or abandoned. */
+/**
+ * Logs one line for how a stream ended: finished, failed (the caller logs the error), or
+ * abandoned by the client.
+ *
+ * @param state - the final stream state
+ * @param summary - the outcome flags and counters
+ */
 function logStreamEnd(state: StreamState, summary: StreamEndSummary): void {
   const { completed, failed, ...counts } = summary
   if (failed) {

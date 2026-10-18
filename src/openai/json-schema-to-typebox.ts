@@ -1,9 +1,10 @@
 /**
- * JSON Schema -> TypeBox conversion for OpenAI function tool parameters.
+ * Converts the JSON Schema of OpenAI function tool parameters to TypeBox.
  *
+ * @remarks
  * Contract:
  * - Support a documented subset of JSON Schema only
- * - Reject unsupported schema constructs with ConversionError
+ * - Reject unsupported schema constructs with a {@link SchemaConversionError}
  * - Do not silently downgrade schemas: every keyword is carried over, dropped as meta, or rejected
  *
  * Supported subset:
@@ -23,32 +24,38 @@
  * Dropped, logged at debug: $schema, $id, $comment (they say nothing to the model).
  *
  * Rejected:
- * - $ref, oneOf, allOf, not, if/then/else, patternProperties
- * - recursive schemas
+ * - $ref, oneOf, allOf, not, if/then/else, patternProperties (so no recursive schemas)
  * - additionalProperties as a schema (boolean true/false allowed)
  * - any other keyword, or a supported keyword with a value of the wrong kind
+ *
+ * @packageDocumentation
  */
 
 import { type TSchema, Type } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import { isRecord } from '@proxy/utils/guards'
 
+/** Successful conversion: the TypeBox schema. */
 export interface SchemaConversionSuccess {
   readonly ok: true
   readonly schema: TSchema
 }
 
+/** Failed conversion: why, and the path of the offending node. */
 export interface SchemaConversionError {
   readonly ok: false
   readonly message: string
   readonly path: string
 }
 
+/** Outcome of {@link jsonSchemaToTypebox}, discriminated on `ok`. */
 export type SchemaConversionResult = SchemaConversionSuccess | SchemaConversionError
 
 /**
- * Unsupported JSON Schema keywords that we reject explicitly.
- * Note: `anyOf` is handled separately for common patterns (nullable types, simple unions).
+ * Unsupported JSON Schema keywords rejected before anything else on a node.
+ *
+ * @remarks
+ * `anyOf` is not here: it is converted for nullable types and simple unions.
  */
 const REJECTED_KEYWORDS = [
   '$ref',
@@ -61,9 +68,12 @@ const REJECTED_KEYWORDS = [
   'not'
 ] as const
 
+/** Logger for JSON Schema conversion. */
 const schemaLogger = proxyLogger('openai', 'schema')
 
+/** Maximum number of `anyOf` branches. */
 const MAX_ANY_OF_BRANCHES = 10
+/** Length of a nullable type array: `[T, "null"]`. */
 const NULLABLE_TYPE_ARRAY_LENGTH = 2
 
 /**
@@ -118,8 +128,10 @@ const ANNOTATION_KEYWORDS: ReadonlyMap<string, KeywordValueKind> = new Map([
 /** Meta declarations: they say nothing to the model, so they are dropped (logged at debug). */
 const META_KEYWORDS: ReadonlySet<string> = new Set(['$schema', '$id', '$comment'])
 
+/** The constraint set of a node that takes no constraints. */
 const NO_CONSTRAINTS: ReadonlyMap<string, KeywordValueKind> = new Map()
 
+/** Constraints carried on a `string` node or a string enum. */
 const STRING_CONSTRAINTS: ReadonlyMap<string, KeywordValueKind> = new Map([
   ['minLength', 'count'],
   ['maxLength', 'count'],
@@ -128,6 +140,7 @@ const STRING_CONSTRAINTS: ReadonlyMap<string, KeywordValueKind> = new Map([
   ['const', 'json']
 ])
 
+/** Constraints carried on a `number` or `integer` node. */
 const NUMBER_CONSTRAINTS: ReadonlyMap<string, KeywordValueKind> = new Map([
   ['minimum', 'number'],
   ['maximum', 'number'],
@@ -153,6 +166,7 @@ interface TypeConverter {
   ): SchemaConversionResult
 }
 
+/** The converter for each supported `type`. */
 const TYPE_CONVERTERS: ReadonlyMap<string, TypeConverter> = new Map<string, TypeConverter>([
   [
     'string',
@@ -221,9 +235,11 @@ const TYPE_CONVERTERS: ReadonlyMap<string, TypeConverter> = new Map<string, Type
 ])
 
 /**
- * Convert a JSON Schema object to a TypeBox TSchema.
+ * Converts a JSON Schema object to a TypeBox schema.
  *
- * Returns a ConversionError for unsupported constructs.
+ * @param schema - the JSON Schema, of any shape
+ * @param path - the request path of the schema, prefixed to error paths; `''` for the root
+ * @returns the TypeBox schema, or the error for the first unsupported construct
  */
 export function jsonSchemaToTypebox(schema: unknown, path = ''): SchemaConversionResult {
   const result = convertSchema(schema, path)
@@ -238,6 +254,14 @@ export function jsonSchemaToTypebox(schema: unknown, path = ''): SchemaConversio
   return result
 }
 
+/**
+ * Converts one schema node, dispatching on `anyOf`, `enum`, a `type` array, a `type` name or no
+ * type.
+ *
+ * @param schema - the node, of any shape
+ * @param path - the node's path, for errors
+ * @returns the TypeBox schema, or the error for the first unsupported construct
+ */
 function convertSchema(schema: unknown, path: string): SchemaConversionResult {
   if (!isRecord(schema)) {
     return {
@@ -252,7 +276,7 @@ function convertSchema(schema: unknown, path: string): SchemaConversionResult {
     return rejected
   }
 
-  // Handle anyOf: common patterns like nullable types and simple type unions.
+  // anyOf: nullable types and simple type unions.
   // Example: anyOf: [{type: "string"}, {type: "null"}] -> Union(String, Null)
   const anyOf = schema['anyOf']
   if (Array.isArray(anyOf)) {
@@ -263,7 +287,7 @@ function convertSchema(schema: unknown, path: string): SchemaConversionResult {
     return keywords.ok ? convertAnyOf(anyOf, path, keywords.opts) : keywords
   }
 
-  // Handle enum: a string enum may also carry its type's constraints (e.g. `format`)
+  // enum: a string enum may also carry its type's constraints (e.g. `format`)
   const enumValues = schema['enum']
   if (Array.isArray(enumValues)) {
     const enumType = schema['type']
@@ -278,10 +302,10 @@ function convertSchema(schema: unknown, path: string): SchemaConversionResult {
     return keywords.ok ? convertEnum(enumValues, path, keywords.opts) : keywords
   }
 
-  // Determine the type
+  // The node's type
   const rawType = schema['type']
 
-  // Handle nullable via type: [T, "null"]
+  // Nullable via type: [T, "null"]
   if (Array.isArray(rawType)) {
     return convertNullableType(rawType, schema, path)
   }
@@ -293,6 +317,13 @@ function convertSchema(schema: unknown, path: string): SchemaConversionResult {
   return convertTyped(rawType, schema, path)
 }
 
+/**
+ * Finds the first {@link REJECTED_KEYWORDS} entry present on a node.
+ *
+ * @param schema - the node
+ * @param path - the node's path, for the error
+ * @returns the error for the first rejected keyword, or `undefined`
+ */
 function findRejectedKeyword(
   schema: Record<string, unknown>,
   path: string
@@ -313,6 +344,7 @@ function findRejectedKeyword(
   return undefined
 }
 
+/** Outcome of {@link collectKeywords}: the TypeBox options, or the error. */
 type KeywordCollection =
   | { readonly ok: true; readonly opts: Record<string, unknown> }
   | SchemaConversionError
@@ -327,12 +359,21 @@ interface AllowedKeywords {
   readonly typeName?: string
 }
 
+/** Allowed keywords of a node that takes annotations only. */
 const ANNOTATIONS_ONLY: AllowedKeywords = { structural: [], constraints: NO_CONSTRAINTS }
 
 /**
- * Check that every keyword of a node is allowed on it, and collect its annotations and
- * constraints as TypeBox options. Meta keywords are dropped (logged at debug); anything else is
- * rejected, so nothing is lost silently.
+ * Checks that every keyword of a node is allowed on it, and collects its annotations and
+ * constraints as TypeBox options.
+ *
+ * @remarks
+ * Meta keywords are dropped (logged at debug); anything else not allowed is rejected, so nothing
+ * is lost silently.
+ *
+ * @param schema - the node
+ * @param path - the node's path, for errors
+ * @param allowed - the structural keywords and constraints the node may carry
+ * @returns the TypeBox options, or the error for the first keyword not allowed
  */
 function collectKeywords(
   schema: Record<string, unknown>,
@@ -361,8 +402,14 @@ function collectKeywords(
 }
 
 /**
- * Check that a non-structural, non-meta keyword is an annotation or a constraint allowed on the
- * node, and that its value has the right kind. Returns the error, or undefined when it is carried.
+ * Checks that a non-structural, non-meta keyword is an annotation or a constraint allowed on the
+ * node, and that its value has the right kind.
+ *
+ * @param keyword - the keyword
+ * @param keywordValue - its value
+ * @param path - the node's path, for the error
+ * @param allowed - the constraints and type name of the node
+ * @returns the error, or `undefined` when the keyword is carried
  */
 function checkCarriedKeyword(
   keyword: string,
@@ -391,8 +438,15 @@ function checkCarriedKeyword(
 }
 
 /**
- * No type specified: an unconstrained schema, allowed only when it carries nothing but
- * annotations (e.g. `{}` or `{ description }`).
+ * Converts a node without a type to an unconstrained schema.
+ *
+ * @remarks
+ * Allowed only when the node carries nothing but annotations and meta keywords (e.g. `{}` or
+ * `{ description }`).
+ *
+ * @param schema - the node
+ * @param path - the node's path, for errors
+ * @returns `Type.Unknown` with the annotations, or the error for any other keyword
  */
 function convertUntyped(schema: Record<string, unknown>, path: string): SchemaConversionResult {
   const onlyAnnotations = Object.keys(schema).every(
@@ -409,6 +463,14 @@ function convertUntyped(schema: Record<string, unknown>, path: string): SchemaCo
   return keywords.ok ? { ok: true, schema: Type.Unknown(keywords.opts) } : keywords
 }
 
+/**
+ * Converts a node with a single `type` name through its {@link TYPE_CONVERTERS} entry.
+ *
+ * @param rawType - the `type` value
+ * @param schema - the node
+ * @param path - the node's path, for errors
+ * @returns the TypeBox schema, or the error for an unsupported type or keyword
+ */
 function convertTyped(
   rawType: string,
   schema: Record<string, unknown>,
@@ -431,11 +493,17 @@ function convertTyped(
 }
 
 /**
- * Convert anyOf to a TypeBox Union.
+ * Converts `anyOf` to a TypeBox Union.
  *
- * Supports:
- * - Nullable: anyOf: [{type: T}, {type: "null"}]
- * - Simple unions of supported types (max 10 branches)
+ * @remarks
+ * Supports nullable types (`anyOf: [{type: T}, {type: "null"}]`) and unions of supported
+ * schemas, up to {@link MAX_ANY_OF_BRANCHES} branches. Branch paths are
+ * `<path or root>.anyOf[i]`.
+ *
+ * @param branches - the `anyOf` array
+ * @param path - the node's path, for errors
+ * @param opts - the node's collected annotations and sibling `type`
+ * @returns the union, or the error for an empty or too long array or a failing branch
  */
 function convertAnyOf(
   branches: unknown[],
@@ -466,6 +534,14 @@ function convertAnyOf(
   return { ok: true, schema: Type.Union(converted, opts) }
 }
 
+/**
+ * Converts a string `enum` to a union of string literals.
+ *
+ * @param values - the `enum` array
+ * @param path - the node's path, for errors
+ * @param opts - the node's collected annotations and constraints
+ * @returns the union, or the error for a non-string value or an empty enum
+ */
 function convertEnum(
   values: unknown[],
   path: string,
@@ -489,14 +565,22 @@ function convertEnum(
       path
     }
   }
-  // Use Type.Union of literals for string enums
+  // A union of literals for the string enum
   const literals = stringValues.map((enumValue) => Type.Literal(enumValue))
   return { ok: true, schema: Type.Union(literals, opts) }
 }
 
 /**
- * `type: [T, "null"]`: the annotations go on the union, everything else on the `T` branch, which
- * is converted (and checked) as if `type` were `T`.
+ * Converts `type: [T, "null"]` to a union of `T` and null.
+ *
+ * @remarks
+ * The annotations go on the union, everything else on the `T` branch, which is converted (and
+ * checked) as if `type` were `T`.
+ *
+ * @param typeArray - the `type` array
+ * @param schema - the node
+ * @param path - the node's path, for errors
+ * @returns the union, or the error for any other type array or a failing `T` branch
  */
 function convertNullableType(
   typeArray: unknown[],
@@ -547,7 +631,12 @@ function convertNullableType(
   }
 }
 
-/** The string names in an object's `required` array; non-strings and a non-array are ignored. */
+/**
+ * Collects the string names in an object's `required` array.
+ *
+ * @param rawRequired - the `required` value; non-strings and a non-array are ignored
+ * @returns the required property names
+ */
 function collectRequiredNames(rawRequired: unknown): Set<string> {
   const requiredSet = new Set<string>()
   if (!Array.isArray(rawRequired)) {
@@ -561,6 +650,18 @@ function collectRequiredNames(rawRequired: unknown): Set<string> {
   return requiredSet
 }
 
+/**
+ * Converts an `object` node; properties not in `required` become optional.
+ *
+ * @remarks
+ * Property paths are `<path>.<name>`, without a `properties` segment.
+ *
+ * @param schema - the node
+ * @param path - the node's path, for errors
+ * @param opts - the node's collected annotations and constraints
+ * @returns the object schema (empty without `properties`), or the error for a non-object
+ *   `properties` or a failing property
+ */
 function convertObject(
   schema: Record<string, unknown>,
   path: string,
@@ -568,7 +669,7 @@ function convertObject(
 ): SchemaConversionResult {
   const rawProperties = schema['properties']
 
-  // Object with no properties -- just return an empty object type
+  // No properties: an empty object type
   if (rawProperties === undefined) {
     return { ok: true, schema: Type.Object({}, opts) }
   }
@@ -596,6 +697,15 @@ function convertObject(
   return { ok: true, schema: Type.Object(typeboxProperties, opts) }
 }
 
+/**
+ * Converts an `array` node.
+ *
+ * @param schema - the node
+ * @param path - the node's path, for errors; the item path is `<path>.items`
+ * @param opts - the node's collected annotations and constraints
+ * @returns the array schema (of unknown items without `items`), or the error for a failing
+ *   `items` schema
+ */
 function convertArray(
   schema: Record<string, unknown>,
   path: string,
@@ -603,7 +713,7 @@ function convertArray(
 ): SchemaConversionResult {
   const items = schema['items']
   if (items === undefined) {
-    // Array with no items schema -- allow any items
+    // No items schema: allow any items
     return { ok: true, schema: Type.Array(Type.Unknown(), opts) }
   }
 

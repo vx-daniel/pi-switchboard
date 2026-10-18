@@ -1,10 +1,13 @@
 /**
- * Build OpenAI-compatible response objects from pi results.
+ * Builds OpenAI-compatible non-streaming responses from pi results.
  *
- * Phase 0 contract:
- * - finish_reason: stop -> stop, length -> length, toolUse -> tool_calls
- * - Do not synthesize finish reasons pi cannot distinguish (e.g. content_filter)
- * - Usage maps pi Usage -> OpenAI usage with cache breakdowns under x_pi
+ * @remarks
+ * - finish_reason: stop -> stop, length -> length, toolUse -> tool_calls; everything else -> stop
+ * - No synthesized finish reasons pi cannot distinguish (e.g. content_filter)
+ * - Usage maps pi Usage to OpenAI usage, cache reads/writes in `prompt_tokens_details`; cost and
+ *   cache counts also go under `x_pi`
+ *
+ * @packageDocumentation
  */
 
 import type {
@@ -16,10 +19,13 @@ import type {
 } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 
+/** Logger for non-streaming response building. */
 const responsesLogger = proxyLogger('openai', 'responses')
 
+/** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
 const MS_PER_SECOND = 1000
 
+/** OpenAI `usage` object, with pi's cache write count added to `prompt_tokens_details`. */
 export interface OpenAIUsage {
   readonly prompt_tokens: number
   readonly completion_tokens: number
@@ -30,6 +36,7 @@ export interface OpenAIUsage {
   }
 }
 
+/** A non-streaming `chat.completion` response, with pi cost and cache data under `x_pi`. */
 export interface OpenAIChatCompletion {
   readonly id: string
   readonly object: 'chat.completion'
@@ -45,6 +52,7 @@ export interface OpenAIChatCompletion {
   }
 }
 
+/** One choice of a {@link OpenAIChatCompletion}. */
 export interface OpenAIChatCompletionChoice {
   readonly index: number
   readonly message: {
@@ -55,6 +63,7 @@ export interface OpenAIChatCompletionChoice {
   readonly finish_reason: string
 }
 
+/** An OpenAI function tool call in an assistant message. */
 export interface OpenAIToolCall {
   readonly id: string
   readonly type: 'function'
@@ -65,10 +74,11 @@ export interface OpenAIToolCall {
 }
 
 /**
- * Pi StopReason -> OpenAI finish_reason.
+ * Pi StopReason to OpenAI finish_reason.
  *
+ * @remarks
  * `pending` is a response still in flight and `deferred` one the provider continues
- * asynchronously; Pi only returns `deferred` when the caller sets `deferred` in the request
+ * asynchronously; pi only returns `deferred` when the caller sets `deferred` in the request
  * options, which this proxy never does, so neither reaches a client. They map like `error` and
  * `aborted` (a finish_reason is required, and OpenAI has no better fit).
  */
@@ -83,21 +93,29 @@ const FINISH_REASON_MAP: Record<StopReason, string> = {
 }
 
 /**
- * Map pi StopReason to OpenAI finish_reason.
+ * Maps a pi StopReason to an OpenAI finish_reason.
+ *
+ * @param reason - the pi stop reason
+ * @returns the finish_reason from {@link FINISH_REASON_MAP}
  */
 export function mapFinishReason(reason: StopReason): string {
   return FINISH_REASON_MAP[reason]
 }
 
 /**
- * Map pi Usage to OpenAI usage.
+ * Maps pi Usage to OpenAI usage.
  *
+ * @remarks
  * Pi's `input` is only the uncached input: for Anthropic with prompt caching, cache reads and
  * writes arrive separately as `cacheRead` and `cacheWrite`. OpenAI clients expect
  * `prompt_tokens` to be the whole prompt, with the cached part broken out in
  * `prompt_tokens_details`. Reporting `input` alone made a 9,650-token prompt come back as
  * `prompt_tokens: 4`, so a client that sizes its context or triggers compaction from it (Docker
  * Agent does) saw about 0.04% of the real context.
+ *
+ * @param usage - pi's usage for the response
+ * @returns OpenAI usage; `prompt_tokens` is input plus cache reads plus cache writes, and
+ *   `total_tokens` is pi's `totalTokens`
  */
 export function mapUsage(usage: Usage): OpenAIUsage {
   const cacheReadTokens = usage.cacheRead
@@ -114,19 +132,28 @@ export function mapUsage(usage: Usage): OpenAIUsage {
 }
 
 /**
- * Build a complete non-streaming OpenAI response from a pi AssistantMessage.
+ * Builds a complete non-streaming OpenAI response from a pi AssistantMessage.
+ *
+ * @remarks
+ * Text parts are concatenated (`content` is `null` when there are none); thinking parts are
+ * dropped. Tool call arguments are JSON-encoded.
+ *
+ * @param requestId - the response `id`
+ * @param canonicalModelId - the model ID reported as `model`
+ * @param message - pi's final assistant message
+ * @returns the `chat.completion` object with a single choice
  */
 export function buildChatCompletion(
   requestId: string,
   canonicalModelId: string,
   message: AssistantMessage
 ): OpenAIChatCompletion {
-  // Extract text content
+  // Concatenate text content
   const textParts = message.content.filter((part): part is TextContent => part.type === 'text')
   const textContent =
     textParts.length > 0 ? textParts.map((textPart) => textPart.text).join('') : null
 
-  // Extract tool calls
+  // Convert tool calls
   const toolCallParts = message.content.filter((part): part is ToolCall => part.type === 'toolCall')
   const toolCalls: OpenAIToolCall[] = toolCallParts.map((tc) => ({
     id: tc.id,

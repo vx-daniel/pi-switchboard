@@ -1,19 +1,25 @@
 /**
- * Shared model-exposure engine.
+ * Model-exposure engine: which models the proxy exposes, and under which public IDs.
  *
- * Computes the exposed model set and public IDs from config + available models.
- * Used by models endpoints, model detail lookup, and chat request model resolution.
+ * @remarks
+ * Computes the exposed model set and public IDs from config and the available models. Used by
+ * the models endpoints, model detail lookup, chat request model resolution and
+ * `/healthz/models`.
  *
  * Public ID modes:
  *   - "collision-prefixed": prefix only providers in conflict groups
  *   - "universal": raw model IDs only; duplicates are a config error
- *   - "always-prefixed": always prefix with <public-prefix>/<model-id>
+ *   - "always-prefixed": always `<public-prefix>/<model-id>`
  *
  * Exposure modes (all modes only expose auth-configured models):
  *   - "all": expose every available model
  *   - "scoped": the models pi's global `enabledModels` setting selects, resolved as pi resolves
  *     its patterns (`@proxy/pi/model-scope`): exact IDs, bare IDs, globs, `:level` suffixes, fuzzy
  *   - "custom": the proxy's own `customModels` config, as exact canonical IDs
+ *
+ * In "scoped" and "custom" an empty or missing list exposes every available model.
+ *
+ * @packageDocumentation
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
@@ -21,12 +27,14 @@ import type { ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
 
+/** Logger for model exposure. */
 const exposureLogger = proxyLogger('openai', 'exposure')
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/** An exposed model with its public and canonical IDs. */
 export interface ExposedModel {
   /** The public ID exposed on the HTTP API. */
   readonly publicId: string
@@ -38,12 +46,13 @@ export interface ExposedModel {
   readonly provider: string
 }
 
+/** The config inputs of {@link computeModelExposure}. */
 export interface ModelExposureConfig {
   readonly publicModelIdMode: PublicModelIdMode
   readonly modelExposureMode: ModelExposureMode
   /**
    * pi's global `enabledModels` setting: patterns, as `/scoped-models` saves them or a user wrote
-   * them. Read from `SettingsManager.getEnabledModels()` at request time.
+   * them. Read from pi's `SettingsManager.getEnabledModels()` on each request.
    * Undefined or empty means no filter (all available models exposed).
    * Used only when modelExposureMode is "scoped".
    */
@@ -52,39 +61,50 @@ export interface ModelExposureConfig {
   readonly providerPrefixes: Readonly<Record<string, string>>
 }
 
+/** A successful exposure computation: the exposed models and lookup maps. */
 export interface ModelExposureResult {
   readonly ok: true
   /** All exposed models with public IDs. */
   readonly models: readonly ExposedModel[]
   /** Public ID -> ExposedModel for O(1) lookup. */
   readonly byPublicId: ReadonlyMap<string, ExposedModel>
-  /** Canonical ID -> ExposedModel for backward-compat fallback. */
+  /** Canonical ID -> ExposedModel, so requests can also name an exposed model canonically. */
   readonly byCanonicalId: ReadonlyMap<string, ExposedModel>
   /** `enabledModels` patterns that selected nothing, or not what they name ("scoped" only). */
   readonly scopeDiagnostics: readonly ScopeDiagnostic[]
 }
 
+/** A failed exposure computation: a config conflict that makes public IDs ambiguous. */
 export interface ModelExposureError {
   readonly ok: false
   readonly message: string
 }
 
+/** Outcome of {@link computeModelExposure}, discriminated on `ok`. */
 export type ModelExposureOutcome = ModelExposureResult | ModelExposureError
 
 // ---------------------------------------------------------------------------
 // Exposure filtering
 // ---------------------------------------------------------------------------
 
+/** The models an exposure mode selects, with any `enabledModels` pattern diagnostics. */
 interface ExposedSet {
   readonly models: Model<Api>[]
   readonly scopeDiagnostics: readonly ScopeDiagnostic[]
 }
 
+/**
+ * Selects the exposed models for the configured exposure mode.
+ *
+ * @param available - the auth-configured models
+ * @param config - the exposure config
+ * @returns the selected models in `available` order, with pattern diagnostics ("scoped" only)
+ */
 function filterExposedModels(
   available: readonly Model<Api>[],
   config: ModelExposureConfig
 ): ExposedSet {
-  // "all": expose all auth-configured models — same as pi's getAvailable().
+  // "all": expose every auth-configured model.
   if (config.modelExposureMode === 'all') {
     return { models: [...available], scopeDiagnostics: [] }
   }
@@ -134,8 +154,11 @@ function filterExposedModels(
 // ---------------------------------------------------------------------------
 
 /**
- * Get the public prefix label for a provider.
- * Uses the configured override if present, otherwise the provider key itself.
+ * Returns the public prefix label for a provider.
+ *
+ * @param provider - the provider key
+ * @param prefixes - the configured `providerPrefixes`
+ * @returns the non-empty configured override, otherwise the provider key itself
  */
 function getPublicPrefix(provider: string, prefixes: Readonly<Record<string, string>>): string {
   const override = prefixes[provider]
@@ -143,8 +166,14 @@ function getPublicPrefix(provider: string, prefixes: Readonly<Record<string, str
 }
 
 /**
- * Add `value` to the set stored under `key`, creating the set on first use.
+ * Adds `value` to the set stored under `key`, creating the set on first use.
+ *
+ * @remarks
  * Insertion order of keys and values is preserved.
+ *
+ * @param map - the map of sets to update
+ * @param key - the set's key
+ * @param value - the value to add
  */
 function addToSetMap(map: Map<string, Set<string>>, key: string, value: string): void {
   const existing = map.get(key)
@@ -156,8 +185,12 @@ function addToSetMap(map: Map<string, Set<string>>, key: string, value: string):
 }
 
 /**
- * Return the union-find root for `provider`, compressing the path walked so later
- * lookups are direct.
+ * Returns the union-find root for `provider`, compressing the path walked so later lookups are
+ * direct.
+ *
+ * @param parent - the union-find parent map; updated by path compression
+ * @param provider - the provider to look up
+ * @returns the root provider of its set
  */
 function findRoot(parent: Map<string, string>, provider: string): string {
   let root = provider
@@ -177,7 +210,12 @@ function findRoot(parent: Map<string, string>, provider: string): string {
   return root
 }
 
-/** Merge every provider in `providers` into the union-find set of the first one. */
+/**
+ * Merges every provider in `providers` into the union-find set of the first one.
+ *
+ * @param parent - the union-find parent map to update
+ * @param providers - the providers to merge
+ */
 function unionAll(parent: Map<string, string>, providers: ReadonlySet<string>): void {
   const [first, ...others] = providers
   if (first === undefined) return
@@ -191,10 +229,14 @@ function unionAll(parent: Map<string, string>, providers: ReadonlySet<string>): 
 }
 
 /**
- * Find connected conflict groups: sets of providers that share at least one raw model ID.
+ * Finds connected conflict groups: sets of providers that share at least one raw model ID.
  *
+ * @remarks
  * If provider A and B share a model ID, and B and C share a different model ID,
- * then {A, B, C} form one connected conflict group.
+ * then `{A, B, C}` form one connected conflict group.
+ *
+ * @param models - the exposed models
+ * @returns the groups with more than one provider
  */
 function findConflictGroups(models: readonly Model<Api>[]): Set<string>[] {
   // Map each raw model ID to the set of providers that offer it
@@ -223,6 +265,14 @@ function findConflictGroups(models: readonly Model<Api>[]): Set<string>[] {
   return [...groupsByRoot.values()].filter((group) => group.size > 1)
 }
 
+/**
+ * Generates "collision-prefixed" public IDs: prefixed for providers in a conflict group, raw
+ * otherwise.
+ *
+ * @param models - the exposed models
+ * @param prefixes - the configured `providerPrefixes`
+ * @returns each model's public ID
+ */
 function generateCollisionPrefixedIds(
   models: readonly Model<Api>[],
   prefixes: Readonly<Record<string, string>>
@@ -257,6 +307,12 @@ function generateCollisionPrefixedIds(
   return result
 }
 
+/**
+ * Generates "universal" public IDs: the raw model IDs.
+ *
+ * @param models - the exposed models
+ * @returns each model's public ID, or the error message for the first ID two providers share
+ */
 function generateUniversalIds(models: readonly Model<Api>[]): Map<Model<Api>, string> | string {
   // Check for duplicates
   const seen = new Map<string, string>()
@@ -279,6 +335,13 @@ function generateUniversalIds(models: readonly Model<Api>[]): Map<Model<Api>, st
   return result
 }
 
+/**
+ * Generates "always-prefixed" public IDs: `<public-prefix>/<model-id>` for every model.
+ *
+ * @param models - the exposed models
+ * @param prefixes - the configured `providerPrefixes`
+ * @returns each model's public ID
+ */
 function generateAlwaysPrefixedIds(
   models: readonly Model<Api>[],
   prefixes: Readonly<Record<string, string>>
@@ -295,6 +358,14 @@ function generateAlwaysPrefixedIds(
 // Validation
 // ---------------------------------------------------------------------------
 
+/**
+ * Checks that the providers that get a prefix resolve to distinct prefix labels.
+ *
+ * @param models - the exposed models
+ * @param prefixes - the configured `providerPrefixes`
+ * @param mode - the public ID mode; "universal" uses no prefixes and always passes
+ * @returns the error message for the first duplicate label, or `undefined`
+ */
 function validatePrefixUniqueness(
   models: readonly Model<Api>[],
   prefixes: Readonly<Record<string, string>>,
@@ -340,12 +411,15 @@ function validatePrefixUniqueness(
 // ---------------------------------------------------------------------------
 
 /**
- * Compute the full model-exposure result from config and available models.
+ * Computes the full model-exposure result from config and available models.
  *
- * @param available - Models with auth configured (pi's getAvailable())
- * @param config - Model exposure configuration
+ * @remarks
+ * The routes and `/healthz/models` call this on each request, with the current config.
  *
- * Call this at startup and whenever config or the model registry changes.
+ * @param available - the models with auth configured (`getAvailableModels()`)
+ * @param config - the model exposure configuration
+ * @returns the exposed models and lookup maps, or the error for duplicate prefix labels or
+ *   (in "universal" mode) a model ID two providers share
  */
 export function computeModelExposure(
   available: readonly Model<Api>[],
@@ -431,11 +505,16 @@ export function computeModelExposure(
 }
 
 /**
- * Resolve a model ID from an incoming request against the exposure result.
+ * Resolves a request's model ID against the exposure result.
  *
+ * @remarks
  * Resolution order:
  *   1. Exact public ID match
- *   2. Exact canonical ID match (backward compat, only if model is exposed)
+ *   2. Exact canonical ID match (only exposed models are in the map)
+ *
+ * @param exposure - the exposure result
+ * @param requestModelId - the request's `model`
+ * @returns the exposed model, or `undefined` when it is not exposed
  */
 export function resolveExposedModel(
   exposure: ModelExposureResult,
