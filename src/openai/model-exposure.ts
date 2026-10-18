@@ -143,6 +143,54 @@ function getPublicPrefix(provider: string, prefixes: Readonly<Record<string, str
 }
 
 /**
+ * Add `value` to the set stored under `key`, creating the set on first use.
+ * Insertion order of keys and values is preserved.
+ */
+function addToSetMap(map: Map<string, Set<string>>, key: string, value: string): void {
+  const existing = map.get(key)
+  if (existing === undefined) {
+    map.set(key, new Set([value]))
+  } else {
+    existing.add(value)
+  }
+}
+
+/**
+ * Return the union-find root for `provider`, compressing the path walked so later
+ * lookups are direct.
+ */
+function findRoot(parent: Map<string, string>, provider: string): string {
+  let root = provider
+  while (parent.get(root) !== root) {
+    const parentProvider = parent.get(root)
+    if (parentProvider === undefined) break
+    root = parentProvider
+  }
+  // Path compression
+  let current = provider
+  while (current !== root) {
+    const next = parent.get(current)
+    if (next === undefined) break
+    parent.set(current, root)
+    current = next
+  }
+  return root
+}
+
+/** Merge every provider in `providers` into the union-find set of the first one. */
+function unionAll(parent: Map<string, string>, providers: ReadonlySet<string>): void {
+  const [first, ...others] = providers
+  if (first === undefined) return
+  for (const other of others) {
+    const rootA = findRoot(parent, first)
+    const rootB = findRoot(parent, other)
+    if (rootA !== rootB) {
+      parent.set(rootA, rootB)
+    }
+  }
+}
+
+/**
  * Find connected conflict groups: sets of providers that share at least one raw model ID.
  *
  * If provider A and B share a model ID, and B and C share a different model ID,
@@ -151,46 +199,10 @@ function getPublicPrefix(provider: string, prefixes: Readonly<Record<string, str
 function findConflictGroups(models: readonly Model<Api>[]): Set<string>[] {
   // Map each raw model ID to the set of providers that offer it
   const modelToProviders = new Map<string, Set<string>>()
-  for (const model of models) {
-    const existing = modelToProviders.get(model.id)
-    if (existing === undefined) {
-      modelToProviders.set(model.id, new Set([model.provider]))
-    } else {
-      existing.add(model.provider)
-    }
-  }
-
-  // Union-Find for providers
+  // Union-Find for providers: each provider starts as its own root
   const parent = new Map<string, string>()
-
-  function find(provider: string): string {
-    let root = provider
-    while (parent.get(root) !== root) {
-      const parentProvider = parent.get(root)
-      if (parentProvider === undefined) break
-      root = parentProvider
-    }
-    // Path compression
-    let current = provider
-    while (current !== root) {
-      const next = parent.get(current)
-      if (next === undefined) break
-      parent.set(current, root)
-      current = next
-    }
-    return root
-  }
-
-  function union(firstProvider: string, secondProvider: string): void {
-    const rootA = find(firstProvider)
-    const rootB = find(secondProvider)
-    if (rootA !== rootB) {
-      parent.set(rootA, rootB)
-    }
-  }
-
-  // Initialize each provider as its own root
   for (const model of models) {
+    addToSetMap(modelToProviders, model.id, model.provider)
     if (!parent.has(model.provider)) {
       parent.set(model.provider, model.provider)
     }
@@ -198,28 +210,13 @@ function findConflictGroups(models: readonly Model<Api>[]): Set<string>[] {
 
   // Union providers that share any model ID
   for (const providers of modelToProviders.values()) {
-    if (providers.size <= 1) continue
-    const sharingProviders = [...providers]
-    const first = sharingProviders[0]
-    if (first === undefined) continue
-    for (let providerIndex = 1; providerIndex < sharingProviders.length; providerIndex++) {
-      const other = sharingProviders[providerIndex]
-      if (other !== undefined) {
-        union(first, other)
-      }
-    }
+    unionAll(parent, providers)
   }
 
   // Collect groups by root
   const groupsByRoot = new Map<string, Set<string>>()
   for (const provider of parent.keys()) {
-    const root = find(provider)
-    const existing = groupsByRoot.get(root)
-    if (existing === undefined) {
-      groupsByRoot.set(root, new Set([provider]))
-    } else {
-      existing.add(provider)
-    }
+    addToSetMap(groupsByRoot, findRoot(parent, provider), provider)
   }
 
   // Return only groups with more than one provider (actual conflicts)
