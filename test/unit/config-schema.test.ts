@@ -5,8 +5,10 @@
  * type coercion, and produces valid defaults.
  */
 
+import { resetSync } from '@logtape/logtape'
 import { DEFAULT_CONFIG, normalizeConfig } from '@proxy/config/schema'
-import { describe, expect, test } from 'vite-plus/test'
+import { configureLogging } from '@proxy/logging'
+import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 describe('normalizeConfig', () => {
   // Catches `null` (the one non-object input with `typeof === 'object'`) slipping past the object
@@ -234,5 +236,67 @@ describe('normalizeConfig: numeric limits', () => {
     ['maxBodySizeMb', Number.POSITIVE_INFINITY, 50]
   ] as const)('%s = %s becomes %s', (field, value, expected) => {
     expect(normalizeConfig({ [field]: value })[field]).toBe(expected)
+  })
+})
+
+describe('normalizeConfig: repairs', () => {
+  let lines: string[] = []
+
+  afterEach(() => {
+    resetSync()
+    lines = []
+  })
+
+  function captureWarnings(): void {
+    configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
+  }
+
+  // Catches a typo being silently ignored, the warning leaking a value (one field is the auth
+  // token), and the warning repeating: the exposure config is read from the file on every request.
+  test('warns once per set of invalid fields, by path and never by value', () => {
+    captureWarnings()
+    const config = { port: 'x4141', authToken: 404_404, zed: { autoSync: 'yes' } }
+    normalizeConfig(config)
+    normalizeConfig(config)
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('"fields":["port","authToken","zed.autoSync"]')
+    expect(lines[0]).not.toContain('404404')
+    expect(lines[0]).not.toContain('x4141')
+
+    normalizeConfig({ port: 'x4141' })
+    expect(lines).toHaveLength(2)
+    normalizeConfig({})
+    normalizeConfig({ port: 'x4141' })
+    expect(lines).toHaveLength(3)
+  })
+
+  // Catches one bad zed field resetting the whole block, which used to discard a valid provider
+  // name along with it.
+  test('an invalid zed field keeps its valid sibling', () => {
+    expect(normalizeConfig({ zed: { providerName: 'Work', autoSync: 'yes' } }).zed).toEqual({
+      providerName: 'Work',
+      autoSync: false
+    })
+  })
+
+  // Catches exposure following anything but the config as written (constitution IV): a padded model
+  // ID or prefix label must stay padded, so it matches nothing rather than exposing a model, and a
+  // bad sibling entry must not change how a valid one comes out.
+  test('model IDs and prefix labels are kept verbatim, with or without a bad sibling', () => {
+    expect(normalizeConfig({ customModels: [' openai/gpt-4o ', 7, ''] }).customModels).toEqual([
+      ' openai/gpt-4o '
+    ])
+    expect(normalizeConfig({ customModels: [' openai/gpt-4o '] }).customModels).toEqual([
+      ' openai/gpt-4o '
+    ])
+    expect(
+      normalizeConfig({ providerPrefixes: { openai: ' oai ', bad: 7 } }).providerPrefixes
+    ).toEqual({ openai: ' oai ' })
+  })
+
+  // Catches a padded or blank host reaching the listener: padding is trimmed, blank is unset.
+  test('host is trimmed, and a blank host takes the default', () => {
+    expect(normalizeConfig({ host: ' 0.0.0.0 ' }).host).toBe('0.0.0.0')
+    expect(normalizeConfig({ host: '   ' }).host).toBe(DEFAULT_CONFIG.host)
   })
 })
