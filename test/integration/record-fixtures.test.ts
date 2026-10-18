@@ -254,6 +254,8 @@ describe('refusing to record', () => {
   // runs it. Node refuses an extensionless relative import that vitest resolves, so the in-process
   // runs above cannot see it (7b7881c broke recording that way).
   test('under plain Node, as pnpm runs it', () => {
+    // The child inherits this worker's environment, so the stub reaches the script: the run stops
+    // at its first check, before any recorder or network use.
     vi.stubEnv('PI_PROXY_RECORD_AGENT_DIR', '')
 
     const run = spawnSync(process.execPath, [RECORD_SCRIPT], { encoding: 'utf8' })
