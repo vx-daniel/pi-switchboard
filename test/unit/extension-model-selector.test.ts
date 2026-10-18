@@ -127,17 +127,17 @@ describe('Right', () => {
 })
 
 describe('Left', () => {
-  // Pins today's behaviour: Left lands on the previous provider's last model, not its first (#91).
-  // Catches Left jumping more than one provider back.
-  test('jumps to the last model of the previous provider, then to the top', () => {
+  // Catches Left landing on the previous provider's last model (#91), which made it the mirror of
+  // nothing: Right lands on the next provider's first. Also catches jumping more than one back.
+  test('jumps to the first model of the previous provider, then stays at the top', () => {
     const selector = openSelector()
     press(selector, RIGHT, RIGHT)
     expect(selectedRow(selector)).toEqual('gamma/c1 false')
 
     press(selector, LEFT)
-    expect(selectedRow(selector)).toEqual('beta/b2 false')
+    expect(selectedRow(selector)).toEqual('beta/b1 false')
     press(selector, LEFT)
-    expect(selectedRow(selector)).toEqual('alpha/a3 false')
+    expect(selectedRow(selector)).toEqual('alpha/a1 false')
     press(selector, LEFT)
     expect(selectedRow(selector)).toEqual('alpha/a1 false')
   })
