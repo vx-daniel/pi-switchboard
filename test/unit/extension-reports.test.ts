@@ -1,5 +1,5 @@
 /**
- * The `/proxy show` and `/proxy verify` reports (`extensions/proxy/reports.ts`), over a fixture
+ * The `/proxy show`, `/proxy models` and `/proxy verify` reports (`extensions/proxy/reports.ts`), over a fixture
  * agent directory: what text each config and model set produces.
  *
  * The extension imports the package through its published subpaths, which resolve to `dist/`;
@@ -14,7 +14,11 @@ import { DEFAULT_CONFIG } from '@proxy/config/schema'
 import { getRuntime } from '@proxy/pi/registry'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
-import { buildConfigReport, buildVerifyReport } from '../../extensions/proxy/reports'
+import {
+  buildConfigReport,
+  buildModelsReport,
+  buildVerifyReport
+} from '../../extensions/proxy/reports'
 import type { ProxyState } from '../../extensions/proxy/state'
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
 
@@ -141,6 +145,47 @@ describe('with models on two providers', () => {
     })
   })
 
+  describe('buildModelsReport', () => {
+    // Catches models being grouped under the wrong provider, or the canonical ID shown when it
+    // equals the public ID.
+    test('groups exposed models by provider', async () => {
+      const state = stateWith(agentDir, {
+        modelExposureMode: 'custom',
+        customModels: ['alpha/a1', 'alpha/a2', 'beta/b1'],
+        providerPrefixes: { beta: 'be' },
+        publicModelIdMode: 'always-prefixed'
+      })
+      const report = await buildModelsReport(state)
+      expect(report).toEqual({
+        message:
+          '3 exposed model(s)\n\n' +
+          'alpha (2):\n  alpha/a1\n  alpha/a2\n\n' +
+          'beta (1):\n  be/b1  (beta/b1)',
+        level: 'info'
+      })
+    })
+
+    // Catches an exposure error being hidden behind an empty or partial model list.
+    test('an exposure error', async () => {
+      const state = stateWith(agentDir, {
+        modelExposureMode: 'all',
+        publicModelIdMode: 'universal'
+      })
+      const report = await buildModelsReport(state)
+      expect(report).toEqual({
+        message: `Model exposure error: ${UNIVERSAL_CONFLICT}`,
+        level: 'warning'
+      })
+    })
+
+    // Catches the reloaded config not being stored on the state.
+    test('stores the reloaded config on the state', async () => {
+      const state = stateWith(agentDir, { port: 7171 })
+      await buildModelsReport(state)
+      expect(state.config).toEqual({ ...DEFAULT_CONFIG, port: 7171 })
+    })
+  })
+
   describe('buildVerifyReport', () => {
     // Catches a clean config reporting an issue, or the wrong exposed count.
     test('passes with every model exposed', async () => {
@@ -211,6 +256,15 @@ describe('with no models', () => {
     expect(report).toEqual(
       `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: scoped | exposed: none`
     )
+  })
+
+  // Catches an empty exposure printing a bare "0 exposed model(s)" header.
+  test('buildModelsReport points at /proxy verify', async () => {
+    const report = await buildModelsReport(stateWith(agentDir, {}))
+    expect(report).toEqual({
+      message: 'No models exposed. Check /proxy verify for details.',
+      level: 'info'
+    })
   })
 
   // Catches a model-less setup passing verification.
