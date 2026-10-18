@@ -101,14 +101,21 @@ describe('upstream timeout', () => {
   })
 
   // Catches the wait restarting only on pi's events: a provider that is still sending, but only
-  // chunks pi makes no event of, would be cut off as if it had gone quiet (#50).
+  // chunks pi makes no event of, would be cut off as if it had gone quiet (#50), streamed or not.
   test('does not cut off a provider that sends only chunks pi makes no event of', async () => {
     const complete = await chat('keep-alive', false)
-
     expect(complete.status).toBe(200)
     expect(await complete.json()).toMatchObject({
       choices: [{ message: { content: 'x' }, finish_reason: 'stop' }]
     })
+
+    const streamed = await chat('keep-alive', true)
+    const text = await streamed.text()
+    expect(streamed.status).toBe(200)
+    expect(text).not.toContain('"error"')
+    expect(text).toContain('"content":"x"')
+    expect(text).toContain('"finish_reason":"stop"')
+    expect(text.endsWith('data: [DONE]\n\n')).toBe(true)
   })
 
   // Catches a stalled provider hanging the request, or failing it as a generic upstream error that
