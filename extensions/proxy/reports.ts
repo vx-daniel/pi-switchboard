@@ -125,7 +125,14 @@ function formatExposedPreview(exposedModels: readonly ExposedModel[]): string {
 
 // --- /proxy models ---
 
+/** `/proxy models`: reloads the config and lists every exposed model by provider. */
 export async function showModels(state: ProxyState, context: ExtensionContext): Promise<void> {
+  const report = await buildModelsReport(state)
+  context.ui.notify(report.message, report.level)
+}
+
+/** Reloads the config into `state` and returns the `/proxy models` result. */
+export async function buildModelsReport(state: ProxyState): Promise<Report> {
   state.config = loadConfigFromFile()
   const models = getSessionAvailableModels(state)
   const outcome = computeModelExposure(models, await buildExposureConfig(state))
@@ -134,8 +141,7 @@ export async function showModels(state: ProxyState, context: ExtensionContext): 
     reportsLogger.warn('Model exposure error in /proxy models: {message}', {
       message: outcome.message
     })
-    context.ui.notify(`Model exposure error: ${outcome.message}`, 'warning')
-    return
+    return { message: `Model exposure error: ${outcome.message}`, level: 'warning' }
   }
 
   reportsLogger.debug('/proxy models: {availableCount} available, {exposedCount} exposed', {
@@ -143,8 +149,7 @@ export async function showModels(state: ProxyState, context: ExtensionContext): 
     exposedCount: outcome.models.length
   })
   if (outcome.models.length === 0) {
-    context.ui.notify('No models exposed. Check /proxy verify for details.', 'info')
-    return
+    return { message: 'No models exposed. Check /proxy verify for details.', level: 'info' }
   }
 
   // Group models by provider for readable output
@@ -172,7 +177,7 @@ export async function showModels(state: ProxyState, context: ExtensionContext): 
   }
 
   const header = `${String(outcome.models.length)} exposed model(s)`
-  context.ui.notify(`${header}\n\n${sections.join('\n\n')}`, 'info')
+  return { message: `${header}\n\n${sections.join('\n\n')}`, level: 'info' }
 }
 
 // --- /proxy verify ---
