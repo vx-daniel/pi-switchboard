@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path'
 
 import * as z from 'zod'
 
-import { listenOnLoopback } from './local-server'
+import { listenOnLoopback } from './local-server.ts'
 
 /** Where recordings live: `<api>/<scenario>.json`. */
 export const RECORDINGS_DIR = join(import.meta.dirname, 'recordings')

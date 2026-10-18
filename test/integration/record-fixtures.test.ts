@@ -5,9 +5,11 @@
  * `test/fixtures/recordings`. The script runs `main()` on import, so each test imports it afresh.
  */
 
+import { spawnSync } from 'node:child_process'
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { VERSION } from '@earendil-works/pi-coding-agent'
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
@@ -38,6 +40,8 @@ const SCENARIOS = ['text', 'two-tool-calls', 'thinking', 'cache-read', 'model-no
 const REQUESTS_SENT = SCENARIOS.length + 1
 const API_KEY = 'notarealsecret-record-fixtures-key'
 const EXIT_FAILURE = 1
+/** The script, as `pnpm run test:live:record` names it to `node`. */
+const RECORD_SCRIPT = fileURLToPath(new URL('../../scripts/record-fixtures.ts', import.meta.url))
 
 /** The committed recordings the mock answers with, as Anthropic once did. */
 const textAnswer = loadRecording(API, 'text')
@@ -275,6 +279,25 @@ describe('refusing to record', () => {
       stdout: '',
       stderr: `No Anthropic login in ${agentDir}\n`,
       requests: 0
+    })
+  })
+
+  // Catches the script failing to load under plain Node, which is how `pnpm run test:live:record`
+  // runs it. Node refuses an extensionless relative import that vitest resolves, so the in-process
+  // runs above cannot see it (7b7881c broke recording that way).
+  test('under plain Node, as pnpm runs it', () => {
+    // The child inherits this worker's environment, so the stub reaches the script: the run stops
+    // at its first check, before any recorder or network use.
+    vi.stubEnv('PI_PROXY_RECORD_AGENT_DIR', '')
+
+    const run = spawnSync(process.execPath, [RECORD_SCRIPT], { encoding: 'utf8' })
+
+    expect({ status: run.status, stdout: run.stdout, stderr: run.stderr }).toEqual({
+      status: EXIT_FAILURE,
+      stdout: '',
+      stderr:
+        'Set PI_PROXY_RECORD_AGENT_DIR to a pi agent dir with a login made for recording ' +
+        '(PI_CODING_AGENT_DIR=<dir> pi, then /login). See the header of scripts/record-fixtures.ts.\n'
     })
   })
 })
