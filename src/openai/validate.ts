@@ -1,7 +1,11 @@
 /**
- * Request validation: parse and reject unsupported fields.
+ * Validates chat-completion request bodies and turns schema failures into OpenAI-style errors.
  *
- * Phase 2 contract: unknown fields -> 422, rejected fields -> 422
+ * @remarks
+ * Explicitly rejected fields and unknown top-level fields get 422; any other schema failure
+ * (wrong type, out-of-range value, missing field) gets 400.
+ *
+ * @packageDocumentation
  */
 
 import { proxyLogger } from '@proxy/logging'
@@ -12,16 +16,22 @@ import {
 } from '@proxy/openai/schemas'
 import { isRecord } from '@proxy/utils/guards'
 
+/** Logger for request validation. */
 const validateLogger = proxyLogger('openai', 'validate')
 
-/** Accepted fields the proxy forwards upstream without interpreting them. */
+/**
+ * Accepted fields the proxy does not interpret; `src/pi/complete.ts` forwards them to
+ * OpenAI-compatible APIs only. Listed here for the debug log.
+ */
 const PASSTHROUGH_FIELDS = ['metadata', 'prediction'] as const
 
+/** Successful validation: the parsed request body. */
 export interface ValidationSuccess {
   readonly ok: true
   readonly data: ChatCompletionRequest
 }
 
+/** Failed validation: the HTTP status, a client-facing message, and the offending parameter. */
 export interface ValidationError {
   readonly ok: false
   readonly status: number
@@ -29,15 +39,22 @@ export interface ValidationError {
   readonly param: string | null
 }
 
+/** Outcome of {@link validateChatRequest}, discriminated on `ok`. */
 export type ValidationResult = ValidationSuccess | ValidationError
 
 /**
- * Validate a raw request body against the Phase 1 schema.
+ * Validates a raw request body against {@link chatCompletionRequestSchema}.
  *
- * Also checks for known rejected fields to give friendly errors.
+ * @remarks
+ * Fields in {@link rejectedFields} are checked first so they get a named 422 instead of the
+ * generic unknown-parameter error. Only the first Zod issue is reported.
+ *
+ * @param body - the parsed JSON request body, of any shape
+ * @returns the parsed request, or a 422 for rejected/unknown fields, or a 400 for any other
+ *   invalid value (with the dotted path as `param`, or `null` at the root)
  */
 export function validateChatRequest(body: unknown): ValidationResult {
-  // Check for rejected fields before schema parsing
+  // Check for rejected fields before schema parsing so they get a specific message.
   if (isRecord(body)) {
     for (const field of rejectedFields) {
       if (body[field] !== undefined) {
@@ -67,7 +84,7 @@ export function validateChatRequest(body: unknown): ValidationResult {
     return { ok: true, data }
   }
 
-  // Extract the first Zod error for a clean message
+  // Report only the first Zod issue, for a clean message
   const firstIssue = result.error.issues[0]
   if (firstIssue !== undefined) {
     const path = firstIssue.path.join('.')

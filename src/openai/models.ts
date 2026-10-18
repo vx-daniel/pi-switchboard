@@ -1,19 +1,24 @@
 /**
- * Build OpenAI-compatible model list and model detail responses, and the pi capability list.
+ * Builds the OpenAI-compatible model list and model objects, and the pi capability list.
  *
+ * @remarks
  * `/v1/models` keeps the standard OpenAI model object shape only, no x_pi extensions (PLAN.md,
  * Models endpoints). What pi knows about a model beyond that goes on `/v1/pi/models`.
- * Public IDs are determined by the model-exposure engine.
+ * Public IDs come from the model-exposure engine.
+ *
+ * @packageDocumentation
  */
 
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import type { ReasoningEffort } from '@proxy/openai/schemas'
 
+/** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
 const MS_PER_SECOND = 1000
 /** Unix timestamp (seconds) from when the module was first loaded. */
 const MODULE_CREATED = Math.floor(Date.now() / MS_PER_SECOND)
 
+/** An OpenAI model object, as on `/v1/models`. */
 export interface OpenAIModel {
   readonly id: string
   readonly object: 'model'
@@ -21,13 +26,18 @@ export interface OpenAIModel {
   readonly owned_by: string
 }
 
+/** The `/v1/models` list response. */
 export interface OpenAIModelList {
   readonly object: 'list'
   readonly data: readonly OpenAIModel[]
 }
 
 /**
- * Convert an ExposedModel to an OpenAI model object.
+ * Converts an exposed model to an OpenAI model object.
+ *
+ * @param exposed - the exposed model
+ * @returns the model object, with the public ID, the provider as `owned_by`, and the module load
+ *   time as `created`
  */
 export function toOpenAIModel(exposed: ExposedModel): OpenAIModel {
   return {
@@ -39,7 +49,10 @@ export function toOpenAIModel(exposed: ExposedModel): OpenAIModel {
 }
 
 /**
- * Build the full model list response.
+ * Builds the `/v1/models` list response.
+ *
+ * @param models - the exposed models, in list order
+ * @returns the list response
  */
 export function buildModelList(models: readonly ExposedModel[]): OpenAIModelList {
   return {
@@ -60,12 +73,18 @@ export interface PiModelCapabilities {
   readonly reasoning_efforts: readonly ReasoningEffort[]
 }
 
+/** The `/v1/pi/models` list response. */
 export interface PiModelList {
   readonly object: 'list'
   readonly data: readonly PiModelCapabilities[]
 }
 
-/** Build the `/v1/pi/models` response: every exposed model, with its capabilities. */
+/**
+ * Builds the `/v1/pi/models` response: every exposed model, with its capabilities.
+ *
+ * @param models - the exposed models, in list order
+ * @returns the list response
+ */
 export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
   return {
     object: 'list',
