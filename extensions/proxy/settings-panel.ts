@@ -1,5 +1,7 @@
 /**
  * /proxy settings panel: setting items, value cycling, and the overlay UI.
+ *
+ * @packageDocumentation
  */
 
 import { type ExtensionCommandContext, getSettingsListTheme } from '@earendil-works/pi-coding-agent'
@@ -29,50 +31,87 @@ const SETTINGS_PANEL_VISIBLE_ROWS = 12
 const MAX_PORT = 65535
 /** Random bytes in a generated auth token (rendered as hex, so twice as many characters). */
 const AUTH_TOKEN_BYTES = 16
+/** Radix for rendering token bytes as hex. */
 const HEX_RADIX = 16
 /** Hex characters per byte. */
 const HEX_BYTE_WIDTH = 2
 /** Token characters shown in the auth setting description. */
 const AUTH_TOKEN_PREVIEW_LENGTH = 8
 
+/** Logger for settings changes made in the panel. */
 const settingsLogger = proxyLogger('extension', 'settings')
 
 // --- Dynamic descriptions ---
 
+/** Description shown for each public model ID mode. */
 const ID_MODE_DESCRIPTIONS: Record<string, string> = {
   'collision-prefixed': 'Short names; adds provider/ prefix only when models collide',
   'universal': 'Short names only; fails if any model name is shared by two providers',
   'always-prefixed': 'Always provider/model-id for every model'
 }
 
+/** Description shown for each model exposure mode. */
 const EXPOSURE_MODE_DESCRIPTIONS: Record<string, string> = {
   scoped: "Expose models from pi's configured auth (default)",
   all: 'Expose all registered models, including those without auth',
   custom: 'Expose only manually selected models'
 }
 
+/**
+ * Returns the description for the configured public model ID mode.
+ *
+ * @param config - the current proxy config
+ * @returns the description, or an empty string for an unknown mode
+ */
 function idModeDescription(config: ProxyConfig): string {
   return ID_MODE_DESCRIPTIONS[config.publicModelIdMode] ?? ''
 }
 
+/**
+ * Returns the description for the configured model exposure mode.
+ *
+ * @param config - the current proxy config
+ * @returns the description, or an empty string for an unknown mode
+ */
 function exposureModeDescription(config: ProxyConfig): string {
   return EXPOSURE_MODE_DESCRIPTIONS[config.modelExposureMode] ?? ''
 }
 
+/**
+ * Returns the "Select models" row description, which depends on the exposure mode.
+ *
+ * @param config - the current proxy config
+ * @returns how to open the selector in custom mode, otherwise how to reach custom mode
+ */
 function customModelsDescription(config: ProxyConfig): string {
   if (config.modelExposureMode === 'custom') return 'Press Enter to open model selector'
   return "Switch exposure mode to 'custom' to select models"
 }
 
 /**
- * The auth setting's state: `invalid` when `authToken` in proxy-config.json is not a string, which
- * the proxy refuses requests for (#82), not `disabled`, which would read as auth off.
+ * Returns the auth setting's state.
+ *
+ * @remarks
+ * `invalid` when `authToken` in proxy-config.json is not a string, which the proxy refuses
+ * requests for (#82), not `disabled`, which would read as auth off.
+ *
+ * @param config - the current proxy config
+ * @param invalid - whether the file's `authToken` is invalid; read from the file by default
+ * @returns `invalid`, `enabled`, or `disabled`
  */
 function authDisplay(config: ProxyConfig, invalid = configFileAuthTokenInvalid()): string {
   if (invalid) return 'invalid'
   return config.authToken.length > 0 ? 'enabled' : 'disabled'
 }
 
+/**
+ * Returns the auth row description: the invalid-token warning, a token preview, or what enabling
+ * does.
+ *
+ * @param config - the current proxy config
+ * @param invalid - whether the file's `authToken` is invalid; read from the file by default
+ * @returns the description
+ */
 function authDescription(config: ProxyConfig, invalid = configFileAuthTokenInvalid()): string {
   if (invalid) {
     return 'authToken in proxy-config.json is not a string: every request is refused. Enable to set a new token'
@@ -83,7 +122,12 @@ function authDescription(config: ProxyConfig, invalid = configFileAuthTokenInval
   return 'Require bearer token for all requests'
 }
 
-/** The auth row, from one read of the config file. */
+/**
+ * Builds the auth row from one read of the config file.
+ *
+ * @param config - the current proxy config
+ * @returns the auth setting item
+ */
 function authSettingItem(config: ProxyConfig): SettingItem {
   const invalid = configFileAuthTokenInvalid()
   return {
@@ -97,6 +141,12 @@ function authSettingItem(config: ProxyConfig): SettingItem {
   }
 }
 
+/**
+ * Returns the "Select models" display value.
+ *
+ * @param config - the current proxy config
+ * @returns `n/a` outside custom mode, otherwise the selected count or `(none)`
+ */
 function customModelsDisplay(config: ProxyConfig): string {
   if (config.modelExposureMode !== 'custom') return 'n/a'
   return config.customModels.length > 0
@@ -123,19 +173,37 @@ const SETTING_DISPLAY_VALUES = {
   'zed.providerName': (config: ProxyConfig) => config.zed.providerName
 } satisfies Record<string, (config: ProxyConfig) => string>
 
+/** ID of a panel setting. */
 type SettingId = keyof typeof SETTING_DISPLAY_VALUES
 
+/**
+ * Checks that `id` names a panel setting.
+ *
+ * @param id - the setting ID from the list
+ * @returns whether `id` is a {@link SettingId}
+ */
 function isSettingId(id: string): id is SettingId {
   return Object.hasOwn(SETTING_DISPLAY_VALUES, id)
 }
 
 /**
- * Get the display value for a setting after it has been applied.
+ * Returns the display value for a setting after it has been applied.
+ *
+ * @param config - the reloaded proxy config
+ * @param id - the setting ID
+ * @returns the display value, or an empty string for an unknown ID
  */
 function getDisplayValue(config: ProxyConfig, id: string): string {
   return isSettingId(id) ? SETTING_DISPLAY_VALUES[id](config) : ''
 }
 
+/**
+ * Builds the server rows: lifetime, host, port, auth, remote images, body size, timeout and log
+ * level.
+ *
+ * @param config - the current proxy config
+ * @returns the server setting items
+ */
 function serverSettingItems(config: ProxyConfig): SettingItem[] {
   return [
     {
@@ -191,7 +259,12 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
   ]
 }
 
-/** The panel's rows, built from the state's config (and, for auth, the config file). */
+/**
+ * Builds the panel's rows from the state's config (and, for auth, the config file).
+ *
+ * @param state - the extension state; the model selector submenu also uses it
+ * @returns every setting item, in panel order
+ */
 export function buildSettingItems(state: ProxyState): SettingItem[] {
   const { config } = state
   return [
@@ -242,7 +315,11 @@ export function buildSettingItems(state: ProxyState): SettingItem[] {
 }
 
 /**
- * Update descriptions on items that change dynamically based on the current value.
+ * Updates, in place, the descriptions that depend on current values: ID mode, exposure mode,
+ * "Select models" and auth.
+ *
+ * @param items - the panel's setting items
+ * @param config - the reloaded proxy config
  */
 export function refreshDescriptions(items: SettingItem[], config: ProxyConfig): void {
   for (const settingItem of items) {
@@ -265,11 +342,22 @@ export function refreshDescriptions(items: SettingItem[], config: ProxyConfig): 
 
 // --- Applying changes ---
 
+/**
+ * Parses a value such as `50 MB` or `60s` to its leading positive integer.
+ *
+ * @param value - the selected value
+ * @returns the integer, or undefined when it is not a positive integer
+ */
 function parsePositiveInt(value: string): number | undefined {
   const parsed = Number.parseInt(value, 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined
 }
 
+/**
+ * Generates a random auth token of {@link AUTH_TOKEN_BYTES} bytes as lowercase hex.
+ *
+ * @returns the token
+ */
 function generateAuthToken(): string {
   const bytes = new Uint8Array(AUTH_TOKEN_BYTES)
   crypto.getRandomValues(bytes)
@@ -278,6 +366,7 @@ function generateAuthToken(): string {
     .join('')
 }
 
+/** Returns the config with a newly selected setting value applied. */
 type ConfigUpdater = (config: ProxyConfig, value: string) => ProxyConfig
 
 /** How a newly selected value changes the config. `authToken` is handled by applySetting. */
@@ -315,13 +404,27 @@ const CONFIG_UPDATERS: Record<Exclude<SettingId, 'authToken'>, ConfigUpdater> = 
     value.length > 0 ? { ...config, zed: { ...config.zed, providerName: value } } : config
 }
 
+/**
+ * Checks that `id` names a setting with an entry in {@link CONFIG_UPDATERS}.
+ *
+ * @param id - the setting ID
+ * @returns whether `id` has a config updater
+ */
 function isConfigUpdaterId(id: string): id is keyof typeof CONFIG_UPDATERS {
   return Object.hasOwn(CONFIG_UPDATERS, id)
 }
 
 /**
- * Apply a setting change, persist it, and reload the config.
- * Returns the newly generated auth token when enabling auth created one.
+ * Applies a setting change, saves it, and reloads the config.
+ *
+ * @remarks
+ * Enabling auth generates a token only when none is set. An unknown ID saves the config
+ * unchanged.
+ *
+ * @param state - the extension state; its config is replaced by the reloaded file
+ * @param id - the setting ID
+ * @param value - the newly selected value
+ * @returns the newly generated auth token when enabling auth created one, otherwise undefined
  */
 export function applySetting(state: ProxyState, id: string, value: string): string | undefined {
   let generatedToken: string | undefined
@@ -367,6 +470,13 @@ export function applySetting(state: ProxyState, id: string, value: string): stri
 
 // --- Panel ---
 
+/**
+ * Opens the settings panel as an overlay; each change is applied, saved and followed by Zed
+ * auto-sync.
+ *
+ * @param state - the extension state; its config is reloaded from the file first
+ * @param context - the command context, used for the overlay and notifications
+ */
 export async function openSettingsPanel(
   state: ProxyState,
   context: ExtensionCommandContext

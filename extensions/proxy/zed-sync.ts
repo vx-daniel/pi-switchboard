@@ -1,5 +1,7 @@
 /**
  * Zed sync: push exposed models into Zed's settings.json.
+ *
+ * @packageDocumentation
  */
 
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
@@ -10,10 +12,16 @@ import { syncToZed, type ZedSyncOptions } from '@vx-daniel/pi-openai-proxy/sync/
 
 import { buildExposureConfig, getSessionAvailableModels, type ProxyState } from './state'
 
+/** Logger for `/proxy zed-sync` and Zed auto-sync. */
 const zedSyncLogger = proxyLogger('extension', 'zed-sync')
 
 /**
- * Run Zed sync and return the result. Shared by the command and auto-sync.
+ * Runs Zed sync for the session's exposed models. Shared by the command and auto-sync.
+ *
+ * @param state - the extension state; its config supplies the proxy URL and Zed provider name
+ * @param dryRun - whether to report the changes without writing Zed's settings.json
+ * @returns `ok` and a user-facing message: the sync summary and settings path, or the error
+ * @throws Error when the session's model registry is not available yet
  */
 async function runZedSync(
   state: ProxyState,
@@ -51,6 +59,13 @@ async function runZedSync(
   return { ok: true, message: `${result.summary} (${result.configPath})` }
 }
 
+/**
+ * Handles `/proxy zed-sync`: reloads the config, syncs, and notifies the result.
+ *
+ * @param state - the extension state
+ * @param context - the extension context, used for the notification
+ * @param args - the /proxy argument string; `--dry-run` anywhere in it makes a dry run
+ */
 export async function handleZedSync(
   state: ProxyState,
   context: ExtensionContext,
@@ -68,7 +83,15 @@ export async function handleZedSync(
 }
 
 /**
- * Trigger auto-sync to Zed if enabled. Called after config save.
+ * Syncs to Zed when `zed.autoSync` is on. Called at session start and after the settings panel
+ * saves a change.
+ *
+ * @remarks
+ * A failure is logged but not shown in the UI, so auto-sync does not interrupt the user.
+ *
+ * @param state - the extension state
+ * @param context - the extension context, used for the success notification
+ * @throws Error when the session's model registry is not available yet
  */
 export async function maybeAutoSyncZed(
   state: ProxyState,

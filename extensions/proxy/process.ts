@@ -1,5 +1,7 @@
 /**
  * Proxy process management: PID file, reachability probe, start/stop/status.
+ *
+ * @packageDocumentation
  */
 
 import { spawn } from 'node:child_process'
@@ -23,8 +25,10 @@ const READY_POLL_INTERVAL_MS = 300
 /** Pause after killing a proxy so its port is released before the next start. */
 const PROCESS_SETTLE_DELAY_MS = 500
 
+/** Logger for proxy process start, stop and status. */
 const processLogger = proxyLogger('extension', 'process')
 
+/** What a reachability probe found: whether the proxy answered, and its model count. */
 interface RuntimeStatus {
   reachable: boolean
   models: number
@@ -33,8 +37,13 @@ interface RuntimeStatus {
 /** What the probe needs from `GET /v1/models`: the model count. */
 const ProbeBodySchema = z.object({ data: z.array(z.unknown()) })
 
-// The proxy entry point: the built `dist/index.mjs` this package ships beside the extension, or
-// failing that the package's `pi-openai-proxy` bin on PATH.
+/**
+ * Resolves the proxy entry point: the built `dist/index.mjs` this package ships beside the
+ * extension, or failing that the package's `pi-openai-proxy` bin on PATH.
+ *
+ * @param packageRoot - the package root holding `dist/`
+ * @returns the absolute path of the built entry, or the bare bin name
+ */
 function findProxyBinary(packageRoot: string): string {
   const localBin = resolve(packageRoot, 'dist', 'index.mjs')
   if (existsSync(localBin)) {
@@ -48,7 +57,13 @@ function findProxyBinary(packageRoot: string): string {
   return 'pi-openai-proxy'
 }
 
-// A built entry runs on the runtime hosting pi (Node); anything else is an executable on PATH.
+/**
+ * Builds the spawn command for a proxy entry point. A built entry runs on the runtime hosting pi
+ * (Node); anything else is an executable on PATH.
+ *
+ * @param bin - the entry point from {@link findProxyBinary}
+ * @returns the command and its arguments
+ */
 function proxyCommand(bin: string): { command: string; args: string[] } {
   return bin.endsWith('.mjs')
     ? { command: process.execPath, args: [bin] }
@@ -57,17 +72,37 @@ function proxyCommand(bin: string): { command: string; args: string[] } {
 
 // --- PID file ---
 
+/**
+ * Returns the PID file path: `proxy.pid` in `PI_CODING_AGENT_DIR`, or in `~/.pi/agent`.
+ *
+ * @returns the absolute PID file path
+ */
 function getPidPath(): string {
   const piDir =
     process.env['PI_CODING_AGENT_DIR'] ?? resolve(process.env['HOME'] ?? '~', '.pi', 'agent')
   return resolve(piDir, 'proxy.pid')
 }
 
-/** Whether `error` is the EPERM `process.kill(pid, 0)` throws for a live process of another user. */
+/**
+ * Checks for the EPERM `process.kill` throws for a live process of another user (#93).
+ *
+ * @param error - the caught error
+ * @returns whether `error` is an EPERM error
+ */
 function isPermissionDenied(error: unknown): boolean {
   return error instanceof Error && 'code' in error && error.code === 'EPERM'
 }
 
+/**
+ * Reads the PID file and checks that the process it names exists.
+ *
+ * @remarks
+ * A missing process (ESRCH) makes the file stale, so it is removed. A process of another user
+ * (EPERM) still counts as live (#93).
+ *
+ * @returns the PID, or undefined when there is no file, its content is not a PID, the process is
+ *   gone, or the file cannot be read
+ */
 function readPid(): number | undefined {
   const pidPath = getPidPath()
   if (!existsSync(pidPath)) {
@@ -111,6 +146,11 @@ function readPid(): number | undefined {
   }
 }
 
+/**
+ * Writes `pid` to the PID file, creating its directory.
+ *
+ * @param pid - the spawned proxy's PID
+ */
 function writePid(pid: number): void {
   const pidPath = getPidPath()
   mkdirSync(dirname(pidPath), { recursive: true })
@@ -118,6 +158,7 @@ function writePid(pid: number): void {
   processLogger.debug('Wrote PID {pid} to {pidPath}', { pid, pidPath })
 }
 
+/** Removes the PID file if it exists; a failed removal is logged and ignored. */
 function removePid(): void {
   const pidPath = getPidPath()
   if (existsSync(pidPath)) {
@@ -132,6 +173,14 @@ function removePid(): void {
 
 // --- Reachability ---
 
+/**
+ * Probes `GET /v1/models` with the configured auth token, giving up after
+ * {@link PROBE_TIMEOUT_MS}.
+ *
+ * @param state - the extension state; its config supplies the URL and token
+ * @returns reachable with the model count on HTTP 2xx (count 0 for an unexpected body), otherwise
+ *   unreachable with 0 models
+ */
 async function probe(state: ProxyState): Promise<RuntimeStatus> {
   const url = `${proxyUrl(state.config)}/v1/models`
   try {
@@ -164,6 +213,13 @@ async function probe(state: ProxyState): Promise<RuntimeStatus> {
   return { reachable: false, models: 0 }
 }
 
+/**
+ * Probes until the proxy answers or `timeoutMs` passes, every {@link READY_POLL_INTERVAL_MS}.
+ *
+ * @param state - the extension state
+ * @param timeoutMs - how long to keep probing, in milliseconds
+ * @returns the first reachable status, or unreachable with 0 models
+ */
 async function waitForReady(state: ProxyState, timeoutMs: number): Promise<RuntimeStatus> {
   const start = Date.now()
   let attempts = 0
@@ -186,6 +242,13 @@ async function waitForReady(state: ProxyState, timeoutMs: number): Promise<Runti
   return { reachable: false, models: 0 }
 }
 
+/**
+ * Probes the proxy and sets pi's `proxy` status line: URL and model count, or cleared when the
+ * proxy does not answer.
+ *
+ * @param state - the extension state
+ * @param context - the extension context, used for the status line
+ */
 export async function refreshStatus(state: ProxyState, context: ExtensionContext): Promise<void> {
   const status = await probe(state)
   if (status.reachable) {
@@ -200,6 +263,13 @@ export async function refreshStatus(state: ProxyState, context: ExtensionContext
 
 // --- Start ---
 
+/**
+ * Spawns a detached proxy that outlives the pi session and records its PID.
+ *
+ * @param bin - the entry point from {@link findProxyBinary}
+ * @param env - the config as environment variables, added to pi's environment
+ * @throws Error when spawn returns no PID
+ */
 function startDetached(bin: string, env: Record<string, string>): void {
   const { command, args } = proxyCommand(bin)
 
@@ -231,6 +301,18 @@ function startDetached(bin: string, env: Record<string, string>): void {
   writePid(child.pid)
 }
 
+/**
+ * Spawns a proxy tied to the pi session, unless one is already running.
+ *
+ * @remarks
+ * No PID file is written; the child is kept in `state.sessionProcess`, cleared when it exits or
+ * fails, and stopped at session shutdown by {@link stopSessionProcess}.
+ *
+ * @param state - the extension state that holds the session process
+ * @param context - the extension context, used for notifications and the status line
+ * @param bin - the entry point from {@link findProxyBinary}
+ * @param env - the config as environment variables, added to pi's environment
+ */
 function startSessionTied(
   state: ProxyState,
   context: ExtensionContext,
@@ -294,7 +376,12 @@ function startSessionTied(
 /** How sending SIGTERM to a process went: delivered, already gone, or it belongs to another user. */
 type SignalOutcome = 'signalled' | 'gone' | 'foreign'
 
-/** Send SIGTERM to `pid` and say how it went; EPERM means another user's process (#93). */
+/**
+ * Sends SIGTERM to `pid` and says how it went; EPERM means another user's process (#93).
+ *
+ * @param pid - the process to signal
+ * @returns `signalled`, `foreign` on EPERM, or `gone` on any other error
+ */
 function terminate(pid: number): SignalOutcome {
   try {
     process.kill(pid, 'SIGTERM')
@@ -307,10 +394,15 @@ function terminate(pid: number): SignalOutcome {
 }
 
 /**
- * Clear a PID file left behind before starting. `startProxy` calls this only when no proxy answers,
- * so a process the file names is stale: it is signalled, and the file goes. Another user's process
- * cannot be signalled (a recycled PID, or a proxy this user cannot stop); the file is still replaced
- * so a start is never blocked, and the user is told it was not killed (#93).
+ * Clears a PID file left behind before starting.
+ *
+ * @remarks
+ * `startProxy` calls this only when no proxy answers, so a process the file names is stale: it is
+ * sent SIGTERM, and the file goes. Another user's process cannot be signalled (a recycled PID, or
+ * a proxy this user cannot stop); the file is still removed so a start is never blocked, and the
+ * user is told it was not killed (#93).
+ *
+ * @param context - the extension context, used for the warning
  */
 export async function killStalePid(context: ExtensionContext): Promise<void> {
   const existingPid = readPid()
@@ -334,6 +426,14 @@ export async function killStalePid(context: ExtensionContext): Promise<void> {
   await sleep(PROCESS_SETTLE_DELAY_MS)
 }
 
+/**
+ * Spawns the proxy with the configured lifetime, waits up to {@link READY_TIMEOUT_MS} for it to
+ * answer, and notifies the result.
+ *
+ * @param state - the extension state
+ * @param context - the extension context, used for notifications and the status line
+ * @throws Error when a detached spawn returns no PID
+ */
 async function spawnProxy(state: ProxyState, context: ExtensionContext): Promise<void> {
   const proxyEnv = configToEnv(state.config)
   const bin = findProxyBinary(state.packageRoot)
@@ -370,6 +470,15 @@ async function spawnProxy(state: ProxyState, context: ExtensionContext): Promise
   await refreshStatus(state, context)
 }
 
+/**
+ * Handles `/proxy start`: reloads the config and starts the proxy unless one already answers.
+ *
+ * @remarks
+ * Clears a stale PID file first; a failed start is notified, not thrown.
+ *
+ * @param state - the extension state; its config is replaced by the file's
+ * @param context - the extension context, used for notifications and the status line
+ */
 export async function startProxy(state: ProxyState, context: ExtensionContext): Promise<void> {
   state.config = loadConfigFromFile()
 
@@ -387,7 +496,6 @@ export async function startProxy(state: ProxyState, context: ExtensionContext): 
     return
   }
 
-  // Clean up stale PID
   await killStalePid(context)
 
   context.ui.setStatus('proxy', 'proxy: starting...')
@@ -404,6 +512,16 @@ export async function startProxy(state: ProxyState, context: ExtensionContext): 
 
 // --- Stop / restart / status ---
 
+/**
+ * Handles `/proxy stop`: stops the session proxy, or the proxy the PID file names.
+ *
+ * @remarks
+ * A proxy of another user that still answers keeps its PID file and is left running (#93); a
+ * proxy this extension did not start is left running with a hint.
+ *
+ * @param state - the extension state
+ * @param context - the extension context, used for notifications and the status line
+ */
 export async function stopProxy(state: ProxyState, context: ExtensionContext): Promise<void> {
   if (state.sessionProcess !== undefined) {
     const sent = state.sessionProcess.kill('SIGTERM')
@@ -461,6 +579,12 @@ export async function stopProxy(state: ProxyState, context: ExtensionContext): P
   }
 }
 
+/**
+ * Handles `/proxy restart`: stops, waits {@link PROCESS_SETTLE_DELAY_MS}, then starts.
+ *
+ * @param state - the extension state
+ * @param context - the extension context
+ */
 export async function restartProxy(state: ProxyState, context: ExtensionContext): Promise<void> {
   processLogger.info('Restarting proxy')
   await stopProxy(state, context)
@@ -468,6 +592,13 @@ export async function restartProxy(state: ProxyState, context: ExtensionContext)
   await startProxy(state, context)
 }
 
+/**
+ * Handles `/proxy status`: notifies the URL, model count and PID, or that the proxy is not
+ * running, and refreshes the status line.
+ *
+ * @param state - the extension state
+ * @param context - the extension context
+ */
 export async function showStatus(state: ProxyState, context: ExtensionContext): Promise<void> {
   const status = await probe(state)
   const pid = readPid()
@@ -489,7 +620,11 @@ export async function showStatus(state: ProxyState, context: ExtensionContext): 
   await refreshStatus(state, context)
 }
 
-/** Kill a session-tied proxy when the pi session ends. */
+/**
+ * Sends SIGTERM to a session-tied proxy when the pi session ends.
+ *
+ * @param state - the extension state holding the session process
+ */
 export function stopSessionProcess(state: ProxyState): void {
   if (state.sessionProcess !== undefined) {
     processLogger.info('Stopping session proxy {pid} at session shutdown', {

@@ -1,6 +1,8 @@
 /**
  * Custom-model selector submenu: a toggleable checklist of every available model,
  * with Left/Right jumping between providers.
+ *
+ * @packageDocumentation
  */
 
 import { getSettingsListTheme } from '@earendil-works/pi-coding-agent'
@@ -19,8 +21,10 @@ const MODEL_SELECTOR_EXTRA_ROWS = 2
 /** Cap on visible rows in the selector. */
 const MODEL_SELECTOR_MAX_ROWS = 20
 
+/** Logger for settings changes made in the selector. */
 const settingsLogger = proxyLogger('extension', 'settings')
 
+/** Direction of a provider jump: Left is `prev`, Right is `next`. */
 type JumpDirection = 'prev' | 'next'
 
 // HACK: SettingsList (pi-tui 1.3.0) can move the selection (`selectItem`) but has no public way to
@@ -30,12 +34,23 @@ type JumpDirection = 'prev' | 'next'
 // when SettingsList exposes the selected item and the displayed rows.
 // The unsafe access is isolated here so jumpProvider itself is fully type-safe.
 
-/** The selected row's index in the displayed rows, or undefined if pi-tui changed the field. */
+/**
+ * Reads the selected row's index in the displayed rows from SettingsList's private field.
+ *
+ * @param list - the settings list to read
+ * @returns the index, or undefined if pi-tui changed the field
+ */
 function getSelectedIndex(list: SettingsList): number | undefined {
   const selectedIndex: unknown = Reflect.get(list, 'selectedIndex')
   return typeof selectedIndex === 'number' ? selectedIndex : undefined
 }
 
+/**
+ * Checks that a value read from SettingsList's private fields looks like a setting row.
+ *
+ * @param value - the raw value
+ * @returns whether the value is an object with a string `id`
+ */
 function isSettingItem(value: unknown): value is SettingItem {
   if (value === null || typeof value !== 'object') return false
   if (!('id' in value)) return false
@@ -43,6 +58,13 @@ function isSettingItem(value: unknown): value is SettingItem {
   return typeof candidate.id === 'string'
 }
 
+/**
+ * Reads the rows SettingsList displays: the search results when search is enabled, otherwise all
+ * items.
+ *
+ * @param list - the settings list to read
+ * @returns the displayed rows, or an empty array if pi-tui changed the fields
+ */
 function getSettingsListItems(list: SettingsList): SettingItem[] {
   const rawSearch: unknown = Reflect.get(list, 'searchEnabled')
   const raw: unknown =
@@ -57,7 +79,14 @@ function getSettingsListItems(list: SettingsList): SettingItem[] {
   return result
 }
 
-/** First row of the previous provider, or the top when already on the first provider. */
+/**
+ * Finds the first row of the previous provider.
+ *
+ * @param display - the displayed rows
+ * @param providerOrder - provider names in list order
+ * @param provIdx - the current provider's index in `providerOrder` (-1 when unknown)
+ * @returns the target row index; 0 when already on the first provider or none is displayed
+ */
 function prevProviderTarget(
   display: readonly SettingItem[],
   providerOrder: readonly string[],
@@ -69,7 +98,15 @@ function prevProviderTarget(
   return found === -1 ? 0 : found
 }
 
-/** First row of the next provider, or the bottom when already on the last provider. */
+/**
+ * Finds the first row of the next provider.
+ *
+ * @param display - the displayed rows
+ * @param providerOrder - provider names in list order
+ * @param provIdx - the current provider's index in `providerOrder` (-1 when unknown)
+ * @returns the target row index; the last row when already on the last provider or none is
+ *   displayed
+ */
 function nextProviderTarget(
   display: readonly SettingItem[],
   providerOrder: readonly string[],
@@ -82,6 +119,16 @@ function nextProviderTarget(
   return found === -1 ? lastRow : found
 }
 
+/**
+ * Moves the selection to the first row of the previous or next provider.
+ *
+ * @remarks
+ * Does nothing when the selection or the displayed rows cannot be read.
+ *
+ * @param list - the settings list to move
+ * @param providerOrder - provider names in list order
+ * @param direction - which way to jump
+ */
 function jumpProvider(
   list: SettingsList,
   providerOrder: readonly string[],
@@ -106,8 +153,17 @@ function jumpProvider(
 }
 
 /**
- * Build a submenu Component for selecting custom models.
- * Shows all available models as a toggleable checklist.
+ * Builds the submenu for selecting custom models: every available model as a toggleable
+ * checklist, with search.
+ *
+ * @remarks
+ * Each toggle saves `customModels` to the config file immediately. Left/Right jump between
+ * providers.
+ *
+ * @param state - the extension state; its config holds the current selection
+ * @param done - called on close with a summary such as `3 selected`
+ * @returns the submenu component
+ * @throws Error when the session's model registry is not available yet
  */
 export function buildModelSelectorSubmenu(
   state: ProxyState,
@@ -116,7 +172,7 @@ export function buildModelSelectorSubmenu(
   const models = getSessionAvailableModels(state)
   const selected = new Set(state.config.customModels)
 
-  // Build provider order from sorted model list
+  // Providers in the order they first appear in the model list
   const providerOrder: string[] = []
   for (const model of models) {
     if (!providerOrder.includes(model.provider)) providerOrder.push(model.provider)

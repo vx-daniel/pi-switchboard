@@ -1,10 +1,12 @@
 /**
  * Pi extension: /proxy command family with config panel.
  *
+ * @remarks
  * Command family:
  *   /proxy            Open settings panel
  *   /proxy start      Start the proxy server
  *   /proxy stop       Stop the proxy server
+ *   /proxy restart    Stop, then start the proxy server
  *   /proxy status     Show proxy status
  *   /proxy verify     Validate model exposure config against available models
  *   /proxy models     List all exposed models with their public IDs
@@ -20,6 +22,8 @@
  *
  * pi loads this directory as one extension through its index.ts; the sibling modules are
  * imported here and are not discovered as separate extensions.
+ *
+ * @packageDocumentation
  */
 
 import { dirname, resolve } from 'node:path'
@@ -47,6 +51,7 @@ import { openSettingsPanel } from './settings-panel'
 import { createProxyState, type ProxyState, useModelRegistry } from './state'
 import { handleZedSync, maybeAutoSyncZed } from './zed-sync'
 
+/** /proxy subcommand names offered as argument completions. */
 const SUBCOMMANDS = [
   'start',
   'stop',
@@ -61,11 +66,14 @@ const SUBCOMMANDS = [
   'reset',
   'help'
 ]
+/** Logger for the extension's lifecycle and command dispatch. */
 const extensionLogger = proxyLogger('extension')
 
+/** Usage line shown by `/proxy help` and for an unknown subcommand. */
 const USAGE =
   '/proxy [start|stop|restart|status|verify|models|zed-sync|config|show|path|reset|help]'
 
+/** Handler for one /proxy subcommand; `args` is the full argument string, subcommand included. */
 type SubcommandHandler = (
   state: ProxyState,
   context: ExtensionCommandContext,
@@ -99,6 +107,12 @@ const SUBCOMMAND_HANDLERS: Record<string, SubcommandHandler> = {
   }
 }
 
+/**
+ * Opens the settings panel, or warns and points at `/proxy show` when pi has no interactive UI.
+ *
+ * @param state - the extension state
+ * @param context - the command context, used for the UI
+ */
 async function openSettingsPanelIfInteractive(
   state: ProxyState,
   context: ExtensionCommandContext
@@ -111,6 +125,15 @@ async function openSettingsPanelIfInteractive(
   await openSettingsPanel(state, context)
 }
 
+/**
+ * Registers the /proxy command and the session lifecycle hooks with pi.
+ *
+ * @remarks
+ * On `session_start` it loads the config, runs Zed auto-sync if enabled, and refreshes the status
+ * line; on `session_shutdown` it stops a session-tied proxy.
+ *
+ * @param pi - the pi extension API (only `on` and `registerCommand` are used)
+ */
 export default function proxyExtension(pi: Pick<ExtensionAPI, 'on' | 'registerCommand'>): void {
   // Opt-in logging: the extension writes nothing unless PI_PROXY_EXTENSION_LOG_FILE names a file,
   // because console output would corrupt pi's terminal UI.
