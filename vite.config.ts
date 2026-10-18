@@ -416,7 +416,16 @@ export default defineConfig({
       ...(process.env.PI_PROXY_LIVE_TESTS === '1'
         ? [{ extends: true, test: { name: 'live', include: ['test/conformance/**/*.test.ts'] } }]
         : [])
-    ]
+    ],
+    // Off by default; the gate's test step turns it on (`test:ci`, `--coverage`). fallow scores each
+    // function's CRAP against it (#83). Every source tree is measured, so code no test runs is
+    // reported at 0% rather than left out.
+    coverage: {
+      provider: 'v8',
+      reporter: ['json'],
+      reportsDirectory: 'coverage',
+      include: ['src/**/*.ts', 'extensions/**/*.ts', 'lint/**/*.ts', 'scripts/**/*.ts']
+    }
   },
 
   pack: {

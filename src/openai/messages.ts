@@ -334,17 +334,17 @@ const MAX_BASE64_PAYLOAD_MEGABYTES = 20
  */
 const MAX_BASE64_PAYLOAD_SIZE = MAX_BASE64_PAYLOAD_MEGABYTES * BYTES_PER_MEGABYTE
 
-export interface ParsedDataUri {
+interface ParsedDataUri {
   readonly data: string
   readonly mimeType: string
 }
 
-export interface DataUriError {
+interface DataUriError {
   readonly ok: false
   readonly message: string
 }
 
-export interface DataUriSuccess {
+interface DataUriSuccess {
   readonly ok: true
   readonly parsed: ParsedDataUri
 }

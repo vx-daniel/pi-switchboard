@@ -19,10 +19,16 @@
  *                with `typeCheck` on, so this gate is also the TypeScript type check — plus the
  *                zod, import-alias, repo (`lint/repo-rules.ts`) and naming (`lint/naming.ts`)
  *                plugins. Warnings fail it (`maxWarnings: 0`).
- *   3. test   — `vp test --project offline`: Vitest over the unit and integration suites, with
- *                no real pi login or provider credentials (test/setup/offline.ts). The live
+ *   3. test   — `vp test --project offline --coverage`: Vitest over the unit and integration suites,
+ *                with no real pi login or provider credentials (test/setup/offline.ts). It writes the
+ *                coverage the fallow gate reads (`coverage/coverage-final.json`). The live
  *                conformance suite exists only under `test:live`.
- *   4. build  — `vp pack`: the tsdown build of every published entry point and its declarations.
+ *   4. fallow — `fallow --coverage coverage/coverage-final.json --fail-on-issues`: dead code,
+ *                duplication and complexity from the module graph, with CRAP scored against the
+ *                test gate's coverage, so it runs after it. Any finding fails it, a new clone
+ *                included (`--fail-on-issues`; by default a clone only warns); exceptions live in
+ *                `.fallowrc.jsonc`, each with its reason.
+ *   5. build  — `vp pack`: the tsdown build of every published entry point and its declarations.
  *                Last, because it is the slowest and the checks above cover the source it reads.
  *
  * ⚠ Each row's name and first backticked command is CHECKED against GATES and package.json by
@@ -102,8 +108,13 @@ export const GATES: readonly Gate[] = [
   },
   {
     name: 'test',
-    describe: 'vitest: the unit and integration suites',
+    describe: 'vitest: the unit and integration suites, with coverage',
     script: 'test:ci'
+  },
+  {
+    name: 'fallow',
+    describe: 'fallow: dead code, duplication and complexity, CRAP against the coverage',
+    script: 'fallow'
   },
   {
     name: 'build',

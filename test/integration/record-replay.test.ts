@@ -15,6 +15,7 @@ import { isRecord } from '@proxy/utils/guards'
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { listenOnLoopback } from '../fixtures/local-server'
 import {
   finishChunk,
   type MockProvider,
@@ -194,11 +195,8 @@ describe('recorder whose upstream cannot be reached', () => {
 /** An origin nothing listens on: a port the OS just handed out, then released. */
 async function closedOrigin(): Promise<string> {
   const server = createServer()
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('expected a TCP address')
+  const origin = await listenOnLoopback(server)
   server.close()
   await once(server, 'close')
-  return `http://127.0.0.1:${String(address.port)}`
+  return origin
 }

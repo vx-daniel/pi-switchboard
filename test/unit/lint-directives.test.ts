@@ -1,7 +1,8 @@
 /**
- * No inline lint directives anywhere in the repository (AGENTS.md): a rule that fails is fixed in
- * the code, never switched off. A lint rule cannot enforce this, because the directive it bans
- * would switch that rule off too, so this test reads every tracked script's comments itself.
+ * No inline lint or fallow directives anywhere in the repository (CONSTITUTION.md, principle II): a
+ * rule that fails is fixed in the code, never switched off, and fallow's exceptions live in
+ * `.fallowrc.jsonc` with their reasons (#83). A lint rule cannot enforce this, because the directive
+ * it bans would switch that rule off too, so this test reads every tracked script's comments itself.
  *
  * Comments come from TypeScript's parser, so a directive inside a string or a regular expression
  * (a lint rule's test fixture, say) is not a comment and is not flagged.
@@ -21,11 +22,19 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 const SCRIPT_FILE = /\.[cm]?[jt]sx?$/
 
 /**
- * A comment that switches lint rules off or back on: `oxlint-` or `eslint-` followed by `disable`,
- * `disable-line`, `disable-next-line` or `enable`. As in ESLint, only a comment that starts with
- * one is a directive, so prose that mentions them is not.
+ * A comment that switches a check off or back on: `oxlint-` or `eslint-` followed by `disable`,
+ * `disable-line`, `disable-next-line` or `enable`, or fallow's `fallow-ignore-next-line` and
+ * `fallow-ignore-file`. As in ESLint, only a comment that starts with one is a directive, and only
+ * a `//` or `/* … *\/` comment: neither tool reads one in a doc comment, nor prose that mentions it.
  */
-const LINT_DIRECTIVE = /^(?:\/\/|\/\*)\s*(?:oxlint|eslint)-(?:disable|enable)\b/
+const DIRECTIVE = /^(?:\/\/|\/\*)\s*(?:(?:oxlint|eslint)-(?:disable|enable)|fallow-ignore)\b/
+
+/**
+ * fallow's JSDoc tag for an export kept on purpose, which hides it from the unused-export check. It
+ * counts where a JSDoc tag goes, opening the doc comment or one of its lines; mentioned mid-sentence,
+ * it is prose.
+ */
+const EXPECTED_UNUSED_TAG = /(?:^\/\*\*|\n\s*\*)\s*@expected-unused\b/
 
 /** Every tracked script file, relative to the repository root. */
 function trackedScripts(): string[] {
@@ -55,42 +64,59 @@ function commentsOf(path: string, source: string): string[] {
   return [...comments.values()]
 }
 
-/** The lint directives in `source`: its comments that start with one, sorted. */
+/** The directives in `source`: its comments that are, or carry, one, sorted. */
 function directivesIn(path: string, source: string): string[] {
   return commentsOf(path, source)
-    .filter((comment) => LINT_DIRECTIVE.test(comment))
+    .filter((comment) => DIRECTIVE.test(comment) || EXPECTED_UNUSED_TAG.test(comment))
     .toSorted()
 }
 
 // Catches a detector that finds nothing, which would let the repository-wide test below pass
-// whatever the code says: each form oxlint obeys, including one naming the rule meant to forbid it.
-test('finds every form of directive oxlint obeys', () => {
+// whatever the code says: each form oxlint or fallow obeys, including one naming the rule meant to
+// forbid it.
+test('finds every form of directive oxlint and fallow obey', () => {
   const source = [
     '/* oxlint-disable */',
     'export const first = 1 // oxlint-disable-line no-magic-numbers',
     '/* eslint-disable repo/no-enum */',
     '// oxlint-disable-next-line no-magic-numbers',
     'export const second = 2',
-    '// eslint-enable'
+    '// eslint-enable',
+    '// fallow-ignore-next-line unused-export',
+    '/* fallow-ignore-file */',
+    '/** @expected-unused */',
+    'export const third = 3',
+    '/**',
+    ' * A helper.',
+    ' * @expected-unused',
+    ' */',
+    'export const fourth = 4'
   ].join('\n')
 
   expect(directivesIn('sample.ts', source)).toEqual([
     '/* eslint-disable repo/no-enum */',
+    '/* fallow-ignore-file */',
     '/* oxlint-disable */',
+    '/**\n * A helper.\n * @expected-unused\n */',
+    '/** @expected-unused */',
     '// eslint-enable',
+    '// fallow-ignore-next-line unused-export',
     '// oxlint-disable-line no-magic-numbers',
     '// oxlint-disable-next-line no-magic-numbers'
   ])
 })
 
 // Catches false positives that would block legitimate code: directive text that is not a comment,
-// prose that mentions one, and a doc comment, which oxlint does not read as a directive.
+// prose that mentions one, and doc comments, which neither tool reads as a directive (measured on
+// fallow 3.34.1: a doc-comment fallow-ignore suppresses nothing).
 test('leaves strings, regular expressions, prose and doc comments alone', () => {
   const source = [
     "export const text = '// oxlint-disable-next-line not-a-comment'",
     'export const pattern = /\\/\\/ eslint-disable x/',
-    '// prose that mentions oxlint-disable is not a directive',
+    '// prose that mentions oxlint-disable or fallow-ignore is not a directive',
     '/** oxlint-disable no-magic-numbers */',
+    '/** fallow-ignore-next-line unused-export */',
+    '/** Unlike the @expected-unused tag, this keeps the export checked. */',
     'export const value = 1'
   ].join('\n')
 

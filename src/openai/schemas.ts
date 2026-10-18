@@ -135,8 +135,6 @@ const namedToolChoiceSchema = z.object({
 
 const toolChoiceSchema = z.union([z.enum(['none', 'auto', 'required']), namedToolChoiceSchema])
 
-export type ToolChoice = z.infer<typeof toolChoiceSchema>
-
 // --- Response format ---
 
 const jsonSchemaResponseFormatSchema = z.object({
@@ -154,8 +152,6 @@ const responseFormatSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('json_object') }),
   jsonSchemaResponseFormatSchema
 ])
-
-export type ResponseFormat = z.infer<typeof responseFormatSchema>
 
 const MAX_TEMPERATURE = 2
 const MAX_STOP_SEQUENCES = 4

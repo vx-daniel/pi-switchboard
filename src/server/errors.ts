@@ -28,7 +28,7 @@ export interface OpenAIError {
   }
 }
 
-export function makeError(
+function makeError(
   message: string,
   type: string,
   param: string | null,
@@ -65,12 +65,8 @@ export function authenticationError(message: string): OpenAIError {
   return makeError(message, 'authentication_error', null, null)
 }
 
-export function upstreamError(message: string, code?: string): OpenAIError {
+function upstreamError(message: string, code?: string): OpenAIError {
   return makeError(message, 'server_error', null, code ?? 'upstream_error')
-}
-
-export function internalError(message: string): OpenAIError {
-  return makeError(message, 'server_error', null, 'internal_error')
 }
 
 /** The statuses an upstream failure is answered with. */

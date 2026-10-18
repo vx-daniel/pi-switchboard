@@ -58,7 +58,8 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 - **Type guards**: `isRecord()` for narrowing `unknown`, never `as` casts
 - **Import aliases**: `@proxy/*` -> `src/*`, no `.js` extensions, no relative imports
 - **Typed env**: `src/env.d.ts` for `process.env` dot notation
-- **Gate** (`scripts/gate.ts`, `pnpm run check:all`): format → lint + type check → tests → build; the single definition of green, run by the pre-commit hook, CI, and the release workflow
+- **Gate** (`scripts/gate.ts`, `pnpm run check:all`): format → lint + type check → tests with coverage → fallow → build; the single definition of green, run by the pre-commit hook, CI, and the release workflow
+- **fallow** (`.fallowrc.jsonc`, `fallow-plugin-oxlint-js.jsonc`): dead code, duplication and complexity, CRAP scored against the test coverage; adopted at zero findings (#83), so any new one fails the gate. Exceptions are config entries with reasons, never inline comments; the complexity ceilings set at adoption are tracked for refactoring in #85
 - **Git hooks** (`.vite-hooks/`): pre-commit (`check:all`), commit-msg (commitlint), pre-push (lockfile sync)
 - **CI** (`.github/workflows/`): `ci.yml` (`gate` on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks, new commits only, every branch), `claude-pr-review.yml` (manual), `publish.yml` (release on `main`)
 - **commitlint**: conventional commits via `@commitlint/config-conventional`

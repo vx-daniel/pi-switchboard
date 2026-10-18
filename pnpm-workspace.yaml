@@ -7,6 +7,9 @@ allowBuilds:
 catalog:
   vite: npm:@voidzero-dev/vite-plus-core@1.2.0
   vite-plus: 1.2.0
+  # Must equal the Vitest version vite-plus bundles (5.0.4 in vite-plus 1.2.0): bump the two together. A
+  # mismatch fails the gate's coverage run (#83).
+  '@vitest/coverage-v8': 5.0.4
 overrides:
   vite@*: 'catalog:'
 peerDependencyRules:
