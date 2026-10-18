@@ -414,12 +414,16 @@ function reasoningLevel(
   model: Model<Api>,
   effort: ReasoningEffort
 ): SimpleStreamOptions['reasoning'] {
-  const level = thinkingLevelFor(model, effort)
-  const supportedEfforts = supportedReasoningEfforts(model)
-  if (!supportedEfforts.includes(effort)) {
+  const { level, clamped } = thinkingLevelFor(model, effort)
+  if (clamped) {
     completeLogger.debug(
       'Clamped reasoning_effort {reasoningEffort} to thinking level {thinkingLevel} for {modelId}',
-      { reasoningEffort: effort, thinkingLevel: level, modelId: model.id, supportedEfforts }
+      () => ({
+        reasoningEffort: effort,
+        thinkingLevel: level,
+        modelId: model.id,
+        supportedEfforts: supportedReasoningEfforts(model)
+      })
     )
   }
   return level === 'off' ? undefined : level
