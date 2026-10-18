@@ -261,6 +261,7 @@ describe('starting the server', () => {
     await runCli(['--port', 'abc', '--max-body-size', '0', '--log-format', 'json'])
     await waitForListening(`http://127.0.0.1:${String(port)}`)
 
+    // The quotes around the values are how the JSON formatter renders them today (#94).
     expect(
       logRecords()
         .map((record) => record['message'])

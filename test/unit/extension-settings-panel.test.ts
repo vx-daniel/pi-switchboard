@@ -30,7 +30,7 @@ vi.mock('@vx-daniel/pi-openai-proxy/logging', () => import('@proxy/logging'))
 const GENERATED_TOKEN = /^[0-9a-f]{32}$/u
 
 /** A token the user already has. */
-const EXISTING_TOKEN = 'abcdef0123456789-existing'
+const EXISTING_TOKEN = 'notarealsecret-existing-token'
 
 let agentDir: FixtureAgentDir
 let logLines: string[] = []
@@ -152,7 +152,8 @@ describe('applySetting: the other settings', () => {
     ])
   })
 
-  // Catches an unknown setting crashing the panel or corrupting the config.
+  // Catches an unknown setting crashing the panel or corrupting the config. The second warning is a
+  // duplicate, pinned as today's behaviour (#95, item 1).
   test('an unknown setting warns and saves the config unchanged', () => {
     const state = stateWith({ port: 5151 })
     expect(applySetting(state, 'colour', 'blue')).toBeUndefined()
@@ -199,7 +200,7 @@ describe('refreshDescriptions', () => {
         'Always provider/model-id for every model',
         'Expose only manually selected models',
         'Press Enter to open model selector',
-        'Token: abcdef01... (use /proxy show to copy)'
+        'Token: notareal... (use /proxy show to copy)'
       )
     )
   })

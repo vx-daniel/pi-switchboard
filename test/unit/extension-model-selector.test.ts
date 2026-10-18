@@ -127,7 +127,7 @@ describe('Right', () => {
 })
 
 describe('Left', () => {
-  // Pins today's behaviour: Left lands on the previous provider's last model, not its first.
+  // Pins today's behaviour: Left lands on the previous provider's last model, not its first (#91).
   // Catches Left jumping more than one provider back.
   test('jumps to the last model of the previous provider, then to the top', () => {
     const selector = openSelector()
