@@ -5,6 +5,7 @@
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { stripVTControlCharacters } from 'node:util'
 
 import { dispose, resetSync } from '@logtape/logtape'
 import {
@@ -172,8 +173,7 @@ describe('pretty output', () => {
       vi.unstubAllEnvs()
     }
 
-    // oxlint-disable-next-line no-control-regex -- strips the formatter's ANSI color codes
-    const plain = (lines[0] ?? '').replaceAll(/\u001b\[[0-9;]*m/g, '')
+    const plain = stripVTControlCharacters(lines[0] ?? '')
     expect(plain).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \+09 /)
   })
 })

@@ -66,7 +66,7 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 
 When you change code, run the smallest relevant checks first, then expand as needed.
 
-Lint rules are the Viaanix shared set, copied into `vite.config.ts`. Lint passes only with zero warnings. Fix the code, not the rule; if a line must break a rule, use `// oxlint-disable-next-line <rule> -- <reason>`.
+Lint rules are the Viaanix shared set, copied into `vite.config.ts`. Lint passes only with zero warnings. Fix the code, not the rule: inline lint directives (`oxlint-disable…`, `eslint-disable…`, `…-enable`) are not allowed anywhere, and `test/unit/lint-directives.test.ts` fails the gate on any. If a rule's premise does not fit a line, express the code differently (a named constant, a different API) and say why in an ordinary comment.
 
 Common commands:
 
