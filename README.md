@@ -140,10 +140,10 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `parallel_tool_calls` | Forwarded to OpenAI/Codex; translated to `disable_parallel_tool_use` for Anthropic |
 | `reasoning_effort` | Maps to pi's thinking level. `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`). An effort the model does not support is clamped with pi's `clampThinkingLevel`: the nearest supported level above it, else the nearest below. So `none` on a model whose reasoning cannot be turned off is its lowest level (not the provider's default), `xhigh` on a model with `max` but no `xhigh` is `max`, and any effort on a model without reasoning is off. A clamp is logged at `debug`; `GET /v1/pi/models` lists the efforts each model supports. For a custom `models.json` model with `reasoning: true`, `none` sends whatever its `thinkingLevelMap.off` says: nothing if unset, so set `off: "none"` (or `off: null` if reasoning cannot be turned off) when the endpoint reasons by default |
 | `response_format` | `text`, `json_object`, and `json_schema` (OpenAI-compatible APIs only) |
-| `top_p` | Supported by OpenAI, Anthropic (native), and Google (translated to `topP`; the Google sampling fields may be dropped, see [#110](https://github.com/vx-daniel/pi-openai-proxy/issues/110)) |
+| `top_p` | Supported by OpenAI, Anthropic (native), and Google (translated to `topP`) |
 | `frequency_penalty` | OpenAI and Google only (translated to `frequencyPenalty`) |
 | `presence_penalty` | OpenAI and Google only (translated to `presencePenalty`) |
-| `seed` | OpenAI and Google only (translated to nested `generationConfig.seed`) |
+| `seed` | OpenAI and Google only (translated to `seed` in Google's generation config) |
 | `stop` | Translated per-provider (`stop_sequences` for Anthropic, `stopSequences` for Google) |
 | `metadata` | OpenAI passthrough; arbitrary keys silently skipped for other providers |
 | `prediction` | OpenAI passthrough only (speculative decoding) |
@@ -157,7 +157,7 @@ Fields are translated to each provider's native format, not blindly forwarded:
 - **OpenAI / Mistral**: All fields passed directly (same wire format)
 - **Codex (Responses API)**: Only `tool_choice` and `parallel_tool_calls` (other fields rejected by API); `temperature` is dropped, as the Codex backend rejects it
 - **Anthropic**: `tool_choice` → `{ type }` format, `stop` → `stop_sequences`, `user` → `metadata.user_id`, `parallel_tool_calls: false` → `disable_parallel_tool_use`
-- **Google**: Nested into `generationConfig` with camelCase names (`topP`, `stopSequences`, `seed`, etc.); these may currently be dropped ([#110](https://github.com/vx-daniel/pi-openai-proxy/issues/110))
+- **Google**: Translated to camelCase names (`topP`, `stopSequences`, `seed`, `frequencyPenalty`, `presencePenalty`) in Google's generation config; `tool_choice` maps to `toolConfig.functionCallingConfig.mode`
 
 Fields that have no equivalent in a target provider are silently skipped — the request succeeds and the provider's default applies.
 

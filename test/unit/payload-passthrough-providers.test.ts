@@ -2,7 +2,7 @@
  * Provider-specific payload passthrough translation in `src/pi/complete.ts`:
  *
  * - Anthropic: translated field names and formats (`collectAnthropicPayloadFields`)
- * - Google: patching of the nested `config.generationConfig` and `config.toolConfig`
+ * - Google: fields patched flat onto `config` and into `config.toolConfig`
  *   (`patchGooglePayload`)
  */
 
@@ -11,8 +11,7 @@ import {
   patchGooglePayload,
   translateToolChoiceForAnthropic
 } from '@proxy/pi/complete'
-import { isRecord } from '@proxy/utils/guards'
-import { assert, describe, expect, test } from 'vite-plus/test'
+import { describe, expect, test } from 'vite-plus/test'
 
 import { minimalRequest } from './payload-passthrough-helpers'
 
@@ -147,128 +146,92 @@ describe('collectAnthropicPayloadFields: tool_choice + parallel', () => {
   })
 })
 
-// --- Google nested patching ---
+// --- Google patching ---
 
 describe('patchGooglePayload', () => {
   /**
-   * Builds a minimal Google-shaped payload.
+   * Builds a minimal payload shaped as pi 1.3.0 builds it for Google: generation fields flat on
+   * `config`.
    *
-   * @param genConfig - the initial `config.generationConfig`; empty by default
-   * @returns a fresh payload with `model`, empty `contents`, and `config.generationConfig`
+   * @param config - the initial `config`; empty by default
+   * @returns a fresh payload with `model`, empty `contents`, and `config`
    */
-  function googlePayload(genConfig: Record<string, unknown> = {}): Record<string, unknown> {
-    return {
-      model: 'gemini-2.5-flash',
-      contents: [],
-      config: {
-        generationConfig: genConfig
-      }
-    }
+  function googlePayload(config: Record<string, unknown> = {}): Record<string, unknown> {
+    return { model: 'gemini-2.5-flash', contents: [], config }
   }
 
-  /**
-   * Returns the record at `path` inside `value`, failing the test when a step is missing or is
-   * not a record.
-   *
-   * @param value - the object to walk
-   * @param path - the keys to follow, outermost first
-   * @returns the record found at the end of `path`
-   * @throws AssertionError when a step along `path` is not a record
-   */
-  function recordAt(value: Record<string, unknown>, ...path: string[]): Record<string, unknown> {
-    let current = value
-    const walked: string[] = []
-    for (const key of path) {
-      walked.push(key)
-      const next = current[key]
-      assert(isRecord(next), `${walked.join('.')} is not a record`)
-      current = next
+  // Catches a field translated to the wrong name or format, or written anywhere but flat on
+  // `config`, where @google/genai reads it (#110): a nested `config.generationConfig` is dropped.
+  test.each([
+    { field: 'top_p', request: { top_p: 0.9 }, config: { topP: 0.9 } },
+    { field: 'stop (string)', request: { stop: 'END' }, config: { stopSequences: ['END'] } },
+    {
+      field: 'stop (array)',
+      request: { stop: ['END', 'STOP'] },
+      config: { stopSequences: ['END', 'STOP'] }
+    },
+    { field: 'seed', request: { seed: 42 }, config: { seed: 42 } },
+    {
+      field: 'frequency_penalty',
+      request: { frequency_penalty: 0.5 },
+      config: { frequencyPenalty: 0.5 }
+    },
+    {
+      field: 'presence_penalty',
+      request: { presence_penalty: -0.5 },
+      config: { presencePenalty: -0.5 }
+    },
+    {
+      field: 'tool_choice auto',
+      request: { tool_choice: 'auto' as const },
+      config: { toolConfig: { functionCallingConfig: { mode: 'AUTO' } } }
+    },
+    {
+      field: 'tool_choice none',
+      request: { tool_choice: 'none' as const },
+      config: { toolConfig: { functionCallingConfig: { mode: 'NONE' } } }
+    },
+    {
+      field: 'tool_choice required',
+      request: { tool_choice: 'required' as const },
+      config: { toolConfig: { functionCallingConfig: { mode: 'ANY' } } }
     }
-    return current
-  }
-
-  test('patches topP into generationConfig', () => {
+  ])('$field', ({ request, config }) => {
     const payload = googlePayload()
-    const patched = patchGooglePayload(payload, minimalRequest({ top_p: 0.9 }))
-    expect(patched).toBe(true)
-    const gen = recordAt(payload, 'config', 'generationConfig')
-    expect(gen['topP']).toBe(0.9)
+
+    const patched = patchGooglePayload(payload, minimalRequest(request))
+
+    expect({ patched, config: payload['config'] }).toEqual({ patched: true, config })
   })
 
-  test('patches stopSequences from string stop', () => {
-    const payload = googlePayload()
-    patchGooglePayload(payload, minimalRequest({ stop: 'END' }))
-    const gen = recordAt(payload, 'config', 'generationConfig')
-    expect(gen['stopSequences']).toEqual(['END'])
-  })
+  // Catches the patch replacing pi's own generation fields instead of adding beside them.
+  test("keeps pi's own config fields", () => {
+    const payload = googlePayload({ temperature: 0.7, maxOutputTokens: 1024 })
 
-  test('patches stopSequences from array stop', () => {
-    const payload = googlePayload()
-    patchGooglePayload(payload, minimalRequest({ stop: ['END', 'STOP'] }))
-    const gen = recordAt(payload, 'config', 'generationConfig')
-    expect(gen['stopSequences']).toEqual(['END', 'STOP'])
-  })
-
-  test('patches seed', () => {
-    const payload = googlePayload()
-    patchGooglePayload(payload, minimalRequest({ seed: 42 }))
-    const gen = recordAt(payload, 'config', 'generationConfig')
-    expect(gen['seed']).toBe(42)
-  })
-
-  test('patches frequencyPenalty', () => {
-    const payload = googlePayload()
-    patchGooglePayload(payload, minimalRequest({ frequency_penalty: 0.5 }))
-    const gen = recordAt(payload, 'config', 'generationConfig')
-    expect(gen['frequencyPenalty']).toBe(0.5)
-  })
-
-  test('patches presencePenalty', () => {
-    const payload = googlePayload()
-    patchGooglePayload(payload, minimalRequest({ presence_penalty: -0.5 }))
-    const gen = recordAt(payload, 'config', 'generationConfig')
-    expect(gen['presencePenalty']).toBe(-0.5)
-  })
-
-  test('patches tool_choice to toolConfig mode AUTO', () => {
-    const payload = googlePayload()
-    patchGooglePayload(payload, minimalRequest({ tool_choice: 'auto' }))
-    const fc = recordAt(payload, 'config', 'toolConfig', 'functionCallingConfig')
-    expect(fc['mode']).toBe('AUTO')
-  })
-
-  test('patches tool_choice none to NONE', () => {
-    const payload = googlePayload()
-    patchGooglePayload(payload, minimalRequest({ tool_choice: 'none' }))
-    const fc = recordAt(payload, 'config', 'toolConfig', 'functionCallingConfig')
-    expect(fc['mode']).toBe('NONE')
-  })
-
-  test('patches tool_choice required to ANY', () => {
-    const payload = googlePayload()
-    patchGooglePayload(payload, minimalRequest({ tool_choice: 'required' }))
-    const fc = recordAt(payload, 'config', 'toolConfig', 'functionCallingConfig')
-    expect(fc['mode']).toBe('ANY')
-  })
-
-  test('preserves existing generationConfig fields', () => {
-    const payload = googlePayload({ temperature: 0.7 })
     patchGooglePayload(payload, minimalRequest({ top_p: 0.9 }))
-    const gen = recordAt(payload, 'config', 'generationConfig')
-    expect(gen['temperature']).toBe(0.7)
-    expect(gen['topP']).toBe(0.9)
+
+    expect(payload['config']).toEqual({ temperature: 0.7, maxOutputTokens: 1024, topP: 0.9 })
   })
 
-  test('returns false when no fields to patch', () => {
-    const payload = googlePayload()
+  // Catches a request without Google fields reported as patched, or the payload changed.
+  test('returns false and changes nothing when no field is set', () => {
+    const payload = googlePayload({ temperature: 0.7 })
+
     const patched = patchGooglePayload(payload, minimalRequest())
-    expect(patched).toBe(false)
+
+    expect({ patched, payload }).toEqual({
+      patched: false,
+      payload: googlePayload({ temperature: 0.7 })
+    })
   })
 
+  // Catches a payload without `config` gaining one, or the call throwing.
   test('returns false when payload has no config', () => {
     const payload: Record<string, unknown> = { model: 'test' }
+
     const patched = patchGooglePayload(payload, minimalRequest({ top_p: 0.9 }))
-    expect(patched).toBe(false)
+
+    expect({ patched, payload }).toEqual({ patched: false, payload: { model: 'test' } })
   })
 
   // Catches a named tool_choice mapped to AUTO (the model could then skip the tool) or dropped:
@@ -283,10 +246,7 @@ describe('patchGooglePayload', () => {
     expect(payload).toEqual({
       model: 'gemini-2.5-flash',
       contents: [],
-      config: {
-        generationConfig: {},
-        toolConfig: { functionCallingConfig: { mode: 'ANY' } }
-      }
+      config: { toolConfig: { functionCallingConfig: { mode: 'ANY' } } }
     })
   })
 
@@ -315,13 +275,11 @@ describe('patchGooglePayload', () => {
       model: 'gemini-2.5-flash',
       contents: [],
       config: {
-        generationConfig: {
-          topP: 0.9,
-          stopSequences: ['END'],
-          seed: 42,
-          frequencyPenalty: 0.5,
-          presencePenalty: -0.5
-        },
+        topP: 0.9,
+        stopSequences: ['END'],
+        seed: 42,
+        frequencyPenalty: 0.5,
+        presencePenalty: -0.5,
         toolConfig: { functionCallingConfig: { mode: 'ANY' } }
       }
     })

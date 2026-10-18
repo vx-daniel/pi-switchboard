@@ -80,7 +80,7 @@ describe('collectPayloadFields: tool_choice', () => {
     expect(fields?.['tool_choice']).toEqual({ type: 'any' })
   })
 
-  test('returns undefined for Google APIs (uses nested patching)', () => {
+  test('returns undefined for Google APIs (patched on config instead)', () => {
     const googleApis = ['google-generative-ai', 'google-gemini-cli', 'google-vertex']
     for (const api of googleApis) {
       const fields = collectPayloadFields(minimalRequest({ tool_choice: 'auto', top_p: 0.9 }), api)

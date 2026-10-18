@@ -2,7 +2,7 @@
 
 > Status: historical analysis from 2026-03-25 (`322734c`, `e99a20a`); carried out (ROADMAP.md,
 > Phase 3D). Since then passthrough also translates fields for Anthropic, Google and Codex APIs
-> (`collectPayloadFields` in `src/pi/complete.ts`; Google sampling fields are likely dropped, #110),
+> (`collectPayloadFields` and `patchGooglePayload` in `src/pi/complete.ts`),
 > and the Zed sync declares `parallel_tool_calls: true`. PLAN.md holds the current behaviour.
 
 Analysis document for deferred Phase 3C items. Each section states findings,

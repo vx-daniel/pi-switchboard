@@ -596,17 +596,18 @@ Fields translated to Anthropic's wire format:
 
 #### Google (`google-generative-ai`, `google-gemini-cli`, `google-vertex`)
 
-Fields translated into Google's nested `config.generationConfig` structure (camelCase). The
-sampling fields below are likely dropped before they reach Google
-([#110](https://github.com/vx-daniel/pi-openai-proxy/issues/110)):
+Fields translated to Google's camelCase names and set flat on the payload's `config`, beside
+pi's own `temperature` and `maxOutputTokens`. `@google/genai` builds the wire request's
+`generationConfig` from those keys; a nested `config.generationConfig` is never read, which is
+how these fields were dropped before #110.
 
 | OpenAI field | Google translation |
 |---|---|
-| `top_p` | `config.generationConfig.topP` |
-| `stop` | `config.generationConfig.stopSequences` (always array) |
-| `seed` | `config.generationConfig.seed` |
-| `frequency_penalty` | `config.generationConfig.frequencyPenalty` |
-| `presence_penalty` | `config.generationConfig.presencePenalty` |
+| `top_p` | `config.topP` |
+| `stop` | `config.stopSequences` (always array) |
+| `seed` | `config.seed` |
+| `frequency_penalty` | `config.frequencyPenalty` |
+| `presence_penalty` | `config.presencePenalty` |
 | `tool_choice: "auto"` | `config.toolConfig.functionCallingConfig.mode: "AUTO"` |
 | `tool_choice: "none"` | `config.toolConfig.functionCallingConfig.mode: "NONE"` |
 | `tool_choice: "required"` or `{ function: { name } }` | `config.toolConfig.functionCallingConfig.mode: "ANY"` |
