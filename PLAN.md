@@ -172,8 +172,9 @@ Validation rules:
 Supported exposure modes:
 
 - `all` — expose all available models
-- `scoped` — expose all available models from selected providers only
-- `custom` — expose only an allowlist of canonical model IDs
+- `scoped` (default) — expose the models pi's global `enabledModels` setting selects; with none
+  set, every available model
+- `custom` — expose only an allowlist of canonical model IDs, matched exactly
 
 Persist custom-model selections as canonical IDs, not public IDs.
 That keeps configuration stable when public ID mode or prefix labels change.
@@ -216,8 +217,17 @@ Required settings:
 - `customModels`: string[] — canonical model IDs only
 - `providerPrefixes`: record of provider key -> public prefix label
 
-Note: `scoped` mode delegates to pi's global `enabledModels` setting (from `/scoped-models` Ctrl+S).
-No proxy-side config is needed — the proxy reads `SettingsManager.getEnabledModels()` at request time.
+Note: `scoped` mode delegates to pi's global `enabledModels` setting (from `/scoped-models` Ctrl+S,
+or a hand-edited `settings.json`). No proxy-side config is needed: the proxy reads
+`SettingsManager.getEnabledModels()` at request time and resolves the entries as pi does (#46):
+exact `provider/id` or bare IDs, globs over `provider/id` or the ID (`anthropic/*`, `*sonnet*`),
+`:level` thinking suffixes (the level is dropped; exposure is per model), and fuzzy matching of IDs
+and names. pi exports only an async resolver that refreshes availability (reading the credential
+store for every provider), so `src/pi/model-scope.ts` ports its synchronous one, run against the
+same available-model snapshot the proxy exposes; `test/unit/model-scope.test.ts` checks the port
+against pi's resolver. Patterns that match nothing, match several providers, or carry an invalid
+thinking level are listed in `/healthz/models` (`scopeDiagnostics`) and in `/proxy show`. pi's
+`--models` flag is per session and does not apply.
 
 Settings-panel requirements:
 

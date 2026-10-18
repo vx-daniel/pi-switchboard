@@ -60,6 +60,9 @@ async function checkModels(
     modelExposureMode: config.modelExposureMode,
     publicModelIdMode: config.publicModelIdMode,
     exposureError: exposure.ok ? null : exposure.message,
+    // `enabledModels` patterns that matched nothing, or several providers, or carried an invalid
+    // thinking level. Patterns are model names from the settings file, not secrets.
+    scopeDiagnostics: exposure.ok ? exposure.scopeDiagnostics : [],
     modelsJsonError: getModelsJsonError() ?? null
   }
   if (!healthy) {

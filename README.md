@@ -180,9 +180,9 @@ Control which models appear in the API:
 
 | Mode | Behavior |
 |---|---|
-| `all` (default) | Expose every model with configured credentials |
-| `scoped` | Expose models from selected providers only (`scopedProviders`) |
-| `custom` | Expose an explicit allowlist of canonical IDs (`customModels`) |
+| `all` | Expose every model with configured credentials |
+| `scoped` (default) | Expose the models pi's global `enabledModels` setting selects (`/scoped-models` in pi, or `settings.json`), resolved as pi resolves them: exact `provider/id`, bare IDs, globs such as `anthropic/*` or `*sonnet*`, and `:level` suffixes. With no `enabledModels`, every model with credentials, as `all`. Patterns that match nothing are listed in `/healthz/models`. pi's `--models` flag is per session, so it does not apply |
+| `custom` | Expose an explicit allowlist of canonical IDs (`customModels`), matched exactly |
 
 ### Canonical model IDs
 
@@ -251,8 +251,7 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 | Setting | Default | Description |
 |---|---|---|
 | `publicModelIdMode` | `collision-prefixed` | Public ID format: `collision-prefixed`, `universal`, `always-prefixed` |
-| `modelExposureMode` | `all` | Which models to expose: `all`, `scoped`, `custom` |
-| `scopedProviders` | `[]` | Provider keys for `scoped` mode |
+| `modelExposureMode` | `scoped` | Which models to expose: `all`, `scoped`, `custom` |
 | `customModels` | `[]` | Canonical model IDs for `custom` mode |
 | `providerPrefixes` | `{}` | Provider key -> custom prefix label overrides |
 

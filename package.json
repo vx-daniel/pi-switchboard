@@ -77,6 +77,7 @@
     "citty": "^0.2.2",
     "hono": "^4.12.18",
     "jsonc-parser": "^3.3.1",
+    "minimatch": "^10.2.6",
     "zod": "^4.4.3"
   },
   "devDependencies": {
