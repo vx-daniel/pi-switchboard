@@ -170,9 +170,11 @@ describe('patchGooglePayload', () => {
   /** The record at `path` inside `value`; fails the test when a step is missing or not a record. */
   function recordAt(value: Record<string, unknown>, ...path: string[]): Record<string, unknown> {
     let current = value
+    const walked: string[] = []
     for (const key of path) {
+      walked.push(key)
       const next = current[key]
-      assert(isRecord(next), `${key} is not a record`)
+      assert(isRecord(next), `${walked.join('.')} is not a record`)
       current = next
     }
     return current
