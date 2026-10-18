@@ -23,11 +23,18 @@ const settingsLogger = proxyLogger('extension', 'settings')
 
 type JumpDirection = 'prev' | 'next'
 
-// HACK: SettingsList has no public API for jumping to an index.
-// Accesses private fields via Reflect for provider jumping.
-// Pinned to pi-tui behavior as of @earendil-works/pi-coding-agent ^0.63.1.
-// Remove when SettingsList exposes a jumpTo/setSelectedIndex method.
+// HACK: SettingsList (pi-tui 1.3.0) can move the selection (`selectItem`) but has no public way to
+// read it, or to read the rows a search shows. Provider jumping needs both, so they are read from
+// private fields through Reflect, pinned to pi-tui 1.3.0 (`settings-list.js`: `selectedIndex`,
+// `items`, `filteredItems`, `searchEnabled`). Writes go through `selectItem` only. Remove the reads
+// when SettingsList exposes the selected item and the displayed rows.
 // The unsafe access is isolated here so jumpProvider itself is fully type-safe.
+
+/** The selected row's index in the displayed rows, or undefined if pi-tui changed the field. */
+function getSelectedIndex(list: SettingsList): number | undefined {
+  const selectedIndex: unknown = Reflect.get(list, 'selectedIndex')
+  return typeof selectedIndex === 'number' ? selectedIndex : undefined
+}
 
 function isSettingItem(value: unknown): value is SettingItem {
   if (value === null || typeof value !== 'object') return false
@@ -80,8 +87,8 @@ function jumpProvider(
   providerOrder: readonly string[],
   direction: JumpDirection
 ): void {
-  const selectedIndex: unknown = Reflect.get(list, 'selectedIndex')
-  if (typeof selectedIndex !== 'number') return
+  const selectedIndex = getSelectedIndex(list)
+  if (selectedIndex === undefined) return
   const display = getSettingsListItems(list)
   if (display.length === 0) return
 
@@ -94,7 +101,8 @@ function jumpProvider(
     direction === 'prev'
       ? prevProviderTarget(display, providerOrder, provIdx)
       : nextProviderTarget(display, providerOrder, provIdx)
-  Reflect.set(list, 'selectedIndex', target)
+  const targetItem = display[target]
+  if (targetItem !== undefined) list.selectItem(targetItem.id)
 }
 
 /**
