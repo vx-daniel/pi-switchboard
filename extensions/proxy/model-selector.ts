@@ -58,7 +58,7 @@ function prevProviderTarget(
 ): number {
   if (provIdx <= 0) return 0
   const prev = providerOrder[provIdx - 1] ?? ''
-  const found = display.findLastIndex((item) => item.id.startsWith(`${prev}/`))
+  const found = display.findIndex((item) => item.id.startsWith(`${prev}/`))
   return found === -1 ? 0 : found
 }
 

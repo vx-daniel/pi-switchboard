@@ -28,7 +28,7 @@ import {
   vi
 } from 'vite-plus/test'
 
-import { refreshStatus, showStatus, stopProxy } from '../../extensions/proxy/process'
+import { killStalePid, refreshStatus, showStatus, stopProxy } from '../../extensions/proxy/process'
 import type { ProxyState } from '../../extensions/proxy/state'
 import { fakeCommandContext } from '../fixtures/extension-context'
 import { listenOnLoopback } from '../fixtures/local-server'
@@ -105,6 +105,18 @@ async function ownChild(): Promise<ChildProcess> {
   return child
 }
 
+/**
+ * Make `process.kill` answer EPERM for IMPOSSIBLE_PID, as it does for a live process of another
+ * user, whatever the signal; any other pid is signalled for real. `afterEach` restores it.
+ */
+function answerEpermForImpossiblePid(): void {
+  const realKill = process.kill.bind(process)
+  vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+    if (pid === IMPOSSIBLE_PID) throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' })
+    return realKill(pid, signal)
+  })
+}
+
 beforeAll(async () => {
   server = createServer((request, response) => {
     responder(request, response)
@@ -132,6 +144,7 @@ afterEach(async () => {
     }
   }
   vi.unstubAllEnvs()
+  vi.restoreAllMocks()
   rmSync(agentDir, { recursive: true, force: true })
 })
 
@@ -184,6 +197,22 @@ describe('showStatus', () => {
       { message: `http://127.0.0.1:${String(port)} -- 2 models available`, level: 'info' }
     ])
     expect(existsSync(pidPath())).toBe(false)
+  })
+
+  // Catches another user's live proxy (kill(pid, 0) answers EPERM) being read as stale, which
+  // deleted its PID file so `/proxy stop` and `status` lost track of it (#93).
+  test("another user's process (EPERM): pid shown, file kept", async () => {
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    answerEpermForImpossiblePid()
+    const { context, notifications } = fakeCommandContext({})
+    await showStatus(stateOn(port), context)
+    expect(notifications).toEqual([
+      {
+        message: `http://127.0.0.1:${String(port)} -- 2 models available [pid ${String(IMPOSSIBLE_PID)}]`,
+        level: 'info'
+      }
+    ])
+    expect(existsSync(pidPath())).toBe(true)
   })
 
   // Catches an unreadable PID file (a directory there) crashing `/proxy status`.
@@ -306,5 +335,76 @@ describe('stopProxy', () => {
     await stopProxy(stateOn(await closedPort()), context)
     expect(notifications).toEqual([{ message: 'Proxy is not running', level: 'info' }])
     expect(statuses).toEqual([{ key: STATUS_KEY, text: undefined }])
+  })
+
+  // Catches `/proxy stop` deleting the PID file of another user's live proxy (SIGTERM answers
+  // EPERM) and then saying it was not started by /proxy, so status and stop lose it (#93).
+  test("another user's proxy (EPERM) answering: says so, keeps the PID file", async () => {
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    answerEpermForImpossiblePid()
+    const { context, notifications, statuses } = fakeCommandContext({})
+    await stopProxy(stateOn(port), context)
+    expect(existsSync(pidPath())).toBe(true)
+    expect(notifications).toEqual([
+      {
+        message: `Proxy at http://127.0.0.1:${String(port)} runs as another user (pid ${String(IMPOSSIBLE_PID)}) -- stop it as that user`,
+        level: 'warning'
+      }
+    ])
+    expect(statuses).toEqual([])
+  })
+
+  // Catches an EPERM pid with no proxy answering (a PID recycled by another user's process) being
+  // kept forever: it is stale, like a missing process.
+  test('EPERM pid and nothing answering: treated as stale', async () => {
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    answerEpermForImpossiblePid()
+    const { context, notifications } = fakeCommandContext({})
+    await stopProxy(stateOn(await closedPort()), context)
+    expect(existsSync(pidPath())).toBe(false)
+    expect(notifications).toEqual([{ message: 'Proxy is not running', level: 'info' }])
+  })
+})
+
+describe('killStalePid', () => {
+  // Catches a PID file naming a dead process surviving into the next start. `readPid` finds it
+  // gone and removes the file, so there is nothing to signal and nothing to warn about.
+  test('PID file of a dead process: removed, nothing signalled', async () => {
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    const { context, notifications } = fakeCommandContext({})
+    await killStalePid(context)
+    expect(existsSync(pidPath())).toBe(false)
+    expect(notifications).toEqual([])
+  })
+
+  // Catches a leftover proxy of this user surviving into the next start (two would then fight over
+  // the port): it is signalled, and the file goes.
+  test("this user's leftover process: SIGTERMed, file removed", async () => {
+    const child = await ownChild()
+    writeFileSync(pidPath(), String(pidOf(child)))
+    const exited = once(child, 'exit')
+    const { context, notifications } = fakeCommandContext({})
+    await killStalePid(context)
+    expect(await exited).toEqual([null, 'SIGTERM'])
+    expect(existsSync(pidPath())).toBe(false)
+    expect(notifications).toEqual([
+      { message: `Stale proxy process ${String(pidOf(child))} -- killing`, level: 'warning' }
+    ])
+  })
+
+  // Catches a start blocked forever by another user's process (EPERM), or the user told it was
+  // killed when it could not be: the file is replaced and the message says why (#93).
+  test("another user's process (EPERM): file replaced, not claimed killed", async () => {
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    answerEpermForImpossiblePid()
+    const { context, notifications } = fakeCommandContext({})
+    await killStalePid(context)
+    expect(existsSync(pidPath())).toBe(false)
+    expect(notifications).toEqual([
+      {
+        message: `PID file named process ${String(IMPOSSIBLE_PID)}, which belongs to another user and is not answering -- starting a new proxy`,
+        level: 'warning'
+      }
+    ])
   })
 })

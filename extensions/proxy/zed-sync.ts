@@ -47,8 +47,8 @@ async function runZedSync(
     return { ok: false, message: result.error ?? 'Zed sync failed' }
   }
 
-  const prefix = dryRun ? '[dry-run] ' : ''
-  return { ok: true, message: `${prefix}${result.summary} (${result.configPath})` }
+  // A dry run's summary already says so: `syncToZed` starts it with "[dry-run]" (#92).
+  return { ok: true, message: `${result.summary} (${result.configPath})` }
 }
 
 export async function handleZedSync(
