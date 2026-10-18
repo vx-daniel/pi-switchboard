@@ -1,5 +1,7 @@
 /**
  * Read-only reports: /proxy show, /proxy models, /proxy verify.
+ *
+ * @packageDocumentation
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
@@ -26,16 +28,29 @@ import {
 /** How many exposed public IDs `/proxy show` lists before summarizing the rest. */
 const EXPOSED_PREVIEW_COUNT = 5
 
+/** Logger for the report subcommands. */
 const reportsLogger = proxyLogger('extension', 'reports')
 
 // --- /proxy show ---
 
-/** `/proxy show`: reloads the config and shows the server settings and exposure policy. */
+/**
+ * Handles `/proxy show`: reloads the config and shows the server settings and exposure policy.
+ *
+ * @param state - the extension state; its config is replaced by the file's
+ * @param context - the extension context, used for the notification
+ * @throws Error when the session's model registry is not available yet
+ */
 export async function showConfig(state: ProxyState, context: ExtensionContext): Promise<void> {
   context.ui.notify(await buildConfigReport(state), 'info')
 }
 
-/** Reloads the config into `state` and returns the `/proxy show` text. */
+/**
+ * Reloads the config into `state` and returns the `/proxy show` text.
+ *
+ * @param state - the extension state; its config is replaced by the file's
+ * @returns two lines: the server settings, then the exposure policy and result
+ * @throws Error when the session's model registry is not available yet
+ */
 export async function buildConfigReport(state: ProxyState): Promise<string> {
   state.config = loadConfigFromFile()
   const { config } = state
@@ -62,8 +77,14 @@ export async function buildConfigReport(state: ProxyState): Promise<string> {
 }
 
 /**
- * The `/proxy show` auth field: the token when one is set, or `invalid` when `authToken` in the
- * file is not a string, which the proxy refuses requests for (#82) rather than turning auth off.
+ * Returns the `/proxy show` auth field.
+ *
+ * @remarks
+ * Shows the token when one is set, or `invalid` when `authToken` in the file is not a string,
+ * which the proxy refuses requests for (#82) rather than turning auth off.
+ *
+ * @param config - the loaded proxy config
+ * @returns `enabled (token: …)`, `disabled`, or the `invalid` explanation
  */
 function authSummary(config: ProxyConfig): string {
   if (configFileAuthTokenInvalid()) {
@@ -72,7 +93,12 @@ function authSummary(config: ProxyConfig): string {
   return config.authToken.length > 0 ? `enabled (token: ${config.authToken})` : 'disabled'
 }
 
-/** Returns the `/proxy show` server-settings fields; the auth token is shown when one is set. */
+/**
+ * Returns the `/proxy show` server-settings fields; the auth token is shown when one is set.
+ *
+ * @param config - the loaded proxy config
+ * @returns one `name: value` string per field
+ */
 function formatServerSettings(config: ProxyConfig): string[] {
   const authDisplay = authSummary(config)
   return [
@@ -88,8 +114,11 @@ function formatServerSettings(config: ProxyConfig): string[] {
 
 /**
  * Returns the `/proxy show` exposure-policy fields: ID and exposure mode, then the pi pattern
- * count, custom model count and provider prefixes when there are any. `enabledModels` is pi's
- * `enabledModels` setting, read only in scoped mode.
+ * count, custom model count (custom mode only) and provider prefixes when there are any.
+ *
+ * @param config - the loaded proxy config
+ * @param enabledModels - pi's `enabledModels` setting; the caller reads it only in scoped mode
+ * @returns one `name: value` string per field
  */
 function formatExposurePolicy(
   config: ProxyConfig,
@@ -115,6 +144,9 @@ function formatExposurePolicy(
 /**
  * Returns the `/proxy show` exposure-result fields: the exposed public IDs and any unresolved
  * scope patterns, or the exposure error.
+ *
+ * @param outcome - the result of `computeModelExposure`
+ * @returns one `name: value` string per field
  */
 function formatExposureOutcome(outcome: ModelExposureOutcome): string[] {
   if (!outcome.ok) return [`error: ${outcome.message}`]
@@ -128,7 +160,13 @@ function formatExposureOutcome(outcome: ModelExposureOutcome): string[] {
   return lines
 }
 
-/** Returns the `exposed:` field: the first EXPOSED_PREVIEW_COUNT public IDs and how many more. */
+/**
+ * Returns the `exposed:` field: the first {@link EXPOSED_PREVIEW_COUNT} public IDs and how many
+ * more.
+ *
+ * @param exposedModels - the exposed models, in exposure order
+ * @returns the field, or `exposed: none` when the list is empty
+ */
 function formatExposedPreview(exposedModels: readonly ExposedModel[]): string {
   if (exposedModels.length === 0) return 'exposed: none'
   const preview = exposedModels.slice(0, EXPOSED_PREVIEW_COUNT).map((model) => model.publicId)
@@ -139,13 +177,26 @@ function formatExposedPreview(exposedModels: readonly ExposedModel[]): string {
 
 // --- /proxy models ---
 
-/** `/proxy models`: reloads the config and lists every exposed model by provider. */
+/**
+ * Handles `/proxy models`: reloads the config and lists every exposed model by provider.
+ *
+ * @param state - the extension state; its config is replaced by the file's
+ * @param context - the extension context, used for the notification
+ * @throws Error when the session's model registry is not available yet
+ */
 export async function showModels(state: ProxyState, context: ExtensionContext): Promise<void> {
   const report = await buildModelsReport(state)
   context.ui.notify(report.message, report.level)
 }
 
-/** Reloads the config into `state` and returns the `/proxy models` result. */
+/**
+ * Reloads the config into `state` and returns the `/proxy models` result.
+ *
+ * @param state - the extension state; its config is replaced by the file's
+ * @returns the models grouped by provider at `info`, a no-models hint at `info`, or the
+ *   exposure error at `warning`
+ * @throws Error when the session's model registry is not available yet
+ */
 export async function buildModelsReport(state: ProxyState): Promise<Report> {
   state.config = loadConfigFromFile()
   const models = getSessionAvailableModels(state)
@@ -202,13 +253,26 @@ export interface Report {
   readonly level: 'info' | 'warning'
 }
 
-/** `/proxy verify`: reloads the config and reports anything that would expose fewer models. */
+/**
+ * Handles `/proxy verify`: reloads the config and reports anything that would expose fewer
+ * models or fail exposure.
+ *
+ * @param state - the extension state; its config is replaced by the file's
+ * @param context - the extension context, used for the notification
+ * @throws Error when the session's model registry is not available yet
+ */
 export async function verifyExposure(state: ProxyState, context: ExtensionContext): Promise<void> {
   const report = await buildVerifyReport(state)
   context.ui.notify(report.message, report.level)
 }
 
-/** Reloads the config into `state` and returns the `/proxy verify` result. */
+/**
+ * Reloads the config into `state` and returns the `/proxy verify` result.
+ *
+ * @param state - the extension state; its config is replaced by the file's
+ * @returns a pass at `info`, or the issues at `warning`
+ * @throws Error when the session's model registry is not available yet
+ */
 export async function buildVerifyReport(state: ProxyState): Promise<Report> {
   state.config = loadConfigFromFile()
   const { config } = state
@@ -237,6 +301,11 @@ export async function buildVerifyReport(state: ProxyState): Promise<Report> {
 /**
  * Returns every `/proxy verify` issue, in report order: no available models, custom-mode
  * problems, then the exposure error.
+ *
+ * @param config - the loaded proxy config
+ * @param models - the session's available models
+ * @param outcome - the result of `computeModelExposure`
+ * @returns the issue messages; empty when there are none
  */
 function collectExposureIssues(
   config: ProxyConfig,
@@ -259,6 +328,10 @@ function collectExposureIssues(
 /**
  * Returns the custom-mode issues: each custom model that is not an available canonical ID, then
  * an empty custom list.
+ *
+ * @param customModels - the configured canonical IDs (`provider/model`)
+ * @param models - the session's available models
+ * @returns the issue messages; empty when there are none
  */
 function collectCustomModelIssues(
   customModels: readonly string[],
@@ -274,7 +347,13 @@ function collectCustomModelIssues(
   return issues
 }
 
-/** Returns the `/proxy verify` result: a pass with the exposed count, or the issues as a warning. */
+/**
+ * Returns the `/proxy verify` result: a pass with the exposed count, or the issues as a warning.
+ *
+ * @param issues - the issue messages
+ * @param exposedCount - how many models are exposed
+ * @returns the report to notify
+ */
 function formatVerifyReport(issues: readonly string[], exposedCount: number): Report {
   if (issues.length === 0) {
     return {
