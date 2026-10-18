@@ -49,6 +49,7 @@ import {
 } from '@logtape/logtape'
 import { getPrettyFormatter } from '@logtape/pretty'
 import { redactByField } from '@logtape/redaction'
+import * as z from 'zod'
 
 /** The category every logger in this package sits under. */
 export const ROOT_CATEGORY = 'pi-openai-proxy'
@@ -76,12 +77,14 @@ export const REDACTED_FIELDS: readonly string[] = [
 ]
 
 /** `pretty` for a person at a terminal, `json` (JSON Lines) for anything that parses logs. */
-export type LogFormat = 'pretty' | 'json'
+const LogFormatSchema = z.enum(['pretty', 'json'])
 
-export const LOG_FORMATS: readonly LogFormat[] = ['pretty', 'json']
+export type LogFormat = z.infer<typeof LogFormatSchema>
+
+export const LOG_FORMATS: readonly LogFormat[] = LogFormatSchema.options
 
 export function isLogFormat(value: string): value is LogFormat {
-  return value === 'pretty' || value === 'json'
+  return LogFormatSchema.safeParse(value).success
 }
 
 /** Pretty when stderr is a terminal, JSON Lines when it is piped or redirected. */
