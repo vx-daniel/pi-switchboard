@@ -41,49 +41,6 @@
     // passes), a CRAP ceiling the next whole number above it (a score equal to it fails). The other limits still
     // apply unchanged.
     "thresholdOverrides": [
-      // Over cognitive 15 at adoption; ceilings until #85 brings them under it.
-      // Measured cognitive 16.
-      {
-        "files": ["src/openai/json-schema-to-typebox.ts"],
-        "functions": ["collectKeywords"],
-        "maxCognitive": 16,
-        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
-      },
-      // Measured cognitive 17.
-      {
-        "files": ["src/openai/json-schema-to-typebox.ts"],
-        "functions": ["convertObject"],
-        "maxCognitive": 17,
-        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
-      },
-      // Measured cognitive 23.
-      {
-        "files": ["src/openai/messages.ts"],
-        "functions": ["convertMessages"],
-        "maxCognitive": 23,
-        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
-      },
-      // Measured cognitive 18.
-      {
-        "files": ["src/openai/messages.ts"],
-        "functions": ["convertUserMessage"],
-        "maxCognitive": 18,
-        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
-      },
-      // Measured cognitive 21.
-      {
-        "files": ["src/openai/model-exposure.ts"],
-        "functions": ["findConflictGroups"],
-        "maxCognitive": 21,
-        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
-      },
-      // Measured cognitive 20.
-      {
-        "files": ["src/pi/complete.ts"],
-        "functions": ["buildStreamOptions"],
-        "maxCognitive": 20,
-        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
-      },
       // A port of pi kept line-for-line: permanent.
       // Measured cognitive 26.
       {
@@ -92,24 +49,8 @@
         "maxCognitive": 26,
         "reason": "Line-for-line port of pi's resolveModelScopeFromModels (#46), parity-tested against pi; splitting it would drift from pi."
       },
-      // Extension functions over cognitive 15 (#85) that no test drives, so CRAP is measured at 0% coverage.
-      // Measured cognitive 17, CRAP 240.0.
-      {
-        "files": ["extensions/proxy/reports.ts"],
-        "functions": ["showConfig"],
-        "maxCognitive": 17,
-        "maxCrap": 241,
-        "reason": "Over cognitive 15 at adoption (#85), and runs in pi's TUI, which no test drives."
-      },
-      // Measured cognitive 16, CRAP 132.0.
-      {
-        "files": ["extensions/proxy/reports.ts"],
-        "functions": ["verifyExposure"],
-        "maxCognitive": 16,
-        "maxCrap": 133,
-        "reason": "Over cognitive 15 at adoption (#85), and runs in pi's TUI, which no test drives."
-      },
-      // The pi extension runs inside pi's TUI, which no test drives: CRAP at 0% coverage.
+      // Extension code no test drives yet, so CRAP is measured at 0% coverage. `test/unit/extension-reports.test.ts`
+      // shows how to test it without pi's TUI; a tested function's ceiling goes.
       // Measured CRAP 56.0.
       {
         "files": ["extensions/proxy/index.ts"],

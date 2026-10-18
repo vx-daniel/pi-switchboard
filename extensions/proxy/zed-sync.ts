@@ -8,7 +8,7 @@ import { computeModelExposure } from '@vx-daniel/pi-openai-proxy/exposure'
 import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
 import { syncToZed, type ZedSyncOptions } from '@vx-daniel/pi-openai-proxy/sync/zed'
 
-import { buildExposureConfig, getAvailableModels, type ProxyState } from './state'
+import { buildExposureConfig, getSessionAvailableModels, type ProxyState } from './state'
 
 const zedSyncLogger = proxyLogger('extension', 'zed-sync')
 
@@ -19,7 +19,7 @@ async function runZedSync(
   state: ProxyState,
   dryRun: boolean
 ): Promise<{ ok: boolean; message: string }> {
-  const available = getAvailableModels(state)
+  const available = getSessionAvailableModels(state)
   const outcome = computeModelExposure(available, await buildExposureConfig(state))
   if (!outcome.ok) {
     return { ok: false, message: `Model exposure error: ${outcome.message}` }
