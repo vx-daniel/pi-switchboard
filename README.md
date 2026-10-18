@@ -128,7 +128,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `messages` (text) | `system`, `developer`, `user`, `assistant`, `tool` roles. `system` and `developer` before the first turn form the system prompt; a later one stays in place on models that accept mid-conversation instructions (pi's `supportsMidConvoSystemMessages`; Anthropic: just before the next answer) and is merged into the system prompt on others |
 | `messages` (base64 images) | Base64 data URI image content parts (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) |
 | `stream` | SSE with `text_delta` and `toolcall_delta` mapping |
-| `temperature` | Direct passthrough, except Codex models (`openai-codex-responses`): the Codex backend rejects it, so it is dropped there and logged at `info` |
+| `temperature` | Direct passthrough, except Codex models (`openai-codex-responses`): the Codex backend rejects it, so it is dropped there; the first drop per model is logged at `info`, later ones at `debug` |
 | `max_completion_tokens` | Preferred; `max_tokens` accepted as deprecated fallback |
 | `stop` | Via passthrough |
 | `user` | Via passthrough |

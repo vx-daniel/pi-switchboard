@@ -622,7 +622,7 @@ true`. The proxy overrides both when the client sends explicit values.
 | `tool_choice` | Direct override of SDK default |
 | `parallel_tool_calls` | Direct override of SDK default |
 | All other passthrough fields | Skipped (rejected by Codex API) |
-| `temperature` | Dropped, logged at `info` (#49). The Codex backend rejects it with `400 Unsupported parameter: temperature`, though pi 1.3.0 forwards it. A deliberate exception to "reject unsupported parameters clearly": a `422` would break clients that always send a temperature, on every Codex model |
+| `temperature` | Dropped; the first drop per model is logged at `info`, later ones at `debug` (#49). The Codex backend rejects it with `400 Unsupported parameter: temperature`, though pi 1.3.0 forwards it. A deliberate exception to "reject unsupported parameters clearly": a `422` would break clients that always send a temperature, on every Codex model |
 
 #### Other APIs (`bedrock-converse-stream`)
 

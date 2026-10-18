@@ -41,8 +41,8 @@ const FAKE_CODEX_TOKEN = [
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
-/** Every JSON log line written: level and message. */
-const records: { level: string; message: string }[] = []
+/** Every log record of the temperature drop: its level and properties. */
+const dropRecords: { level: string; properties: unknown }[] = []
 
 beforeAll(async () => {
   const answer = sse([...textChunks('ok'), finishChunk('stop')])
@@ -65,15 +65,15 @@ beforeAll(async () => {
     format: 'json',
     write: (line) => {
       const parsed: unknown = JSON.parse(line)
-      const field = (name: string): string =>
-        isRecord(parsed) && typeof parsed[name] === 'string' ? parsed[name] : ''
-      records.push({ level: field('level'), message: field('message') })
+      if (!isRecord(parsed) || typeof parsed['message'] !== 'string') return
+      if (!parsed['message'].startsWith('Dropped temperature')) return
+      dropRecords.push({ level: String(parsed['level']), properties: parsed['properties'] })
     }
   })
 })
 
 beforeEach(() => {
-  records.length = 0
+  dropRecords.length = 0
 })
 
 afterAll(async () => {
@@ -83,17 +83,13 @@ afterAll(async () => {
   agentDir.remove()
 })
 
-/** Ask `model` with a temperature, and return the body of the request pi POSTed for it. */
-async function sentBody(model: string): Promise<Record<string, unknown>> {
+/** Ask `model` with this temperature, and return the body of the request pi POSTed for it. */
+async function sentBody(model: string, temperature: number): Promise<Record<string, unknown>> {
   const before = mock.requests.length
   await testApp().request('/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      model,
-      temperature: TEMPERATURE,
-      messages: [{ role: 'user', content: 'Hi' }]
-    })
+    body: JSON.stringify({ model, temperature, messages: [{ role: 'user', content: 'Hi' }] })
   })
   // The Codex adapter tries a WebSocket first (a bodyless upgrade request), then POSTs.
   const posted = mock.requests.slice(before).find((request) => isRecord(request.body))
@@ -102,23 +98,33 @@ async function sentBody(model: string): Promise<Record<string, unknown>> {
 }
 
 describe('temperature', () => {
-  // Catches temperature sent to the Codex backend, which refuses the whole request over it, or
-  // dropped without a trace an operator can find at the default log level.
-  test('is dropped for openai-codex-responses, and the drop is logged at info', async () => {
-    const body = await sentBody('codex/codex-mock')
+  // Catches temperature sent to the Codex backend, which refuses the whole request over it; a drop
+  // with no trace at the default log level; or an info line on every request of a client that
+  // always sends one (the first per model is enough).
+  test('is dropped for openai-codex-responses: logged at info once per model, then debug', async () => {
+    const first = await sentBody('codex/codex-mock', TEMPERATURE)
+    const second = await sentBody('codex/codex-mock', TEMPERATURE)
 
-    expect(body['model']).toBe('codex-mock')
-    expect(body).not.toHaveProperty('temperature')
-    expect(records).toContainEqual({
-      level: 'INFO',
-      message: `Dropped temperature ${String(TEMPERATURE)} for "codex-mock": the Codex backend does not accept it`
-    })
+    expect([first['model'], second['model']]).toEqual(['codex-mock', 'codex-mock'])
+    expect(first).not.toHaveProperty('temperature')
+    expect(second).not.toHaveProperty('temperature')
+    const properties = {
+      temperature: TEMPERATURE,
+      modelId: 'codex-mock',
+      api: 'openai-codex-responses'
+    }
+    expect(dropRecords).toEqual([
+      { level: 'INFO', properties: expect.objectContaining(properties) as unknown },
+      { level: 'DEBUG', properties: expect.objectContaining(properties) as unknown }
+    ])
   })
 
-  // Catches the Codex exception spreading to APIs that accept temperature.
-  test('is sent to every other API', async () => {
-    const body = await sentBody('completions/chat-mock')
+  // Catches the Codex exception spreading to APIs that accept temperature, and a falsy 0 lost on
+  // the way (a truthiness check instead of `!== undefined`).
+  test.each([TEMPERATURE, 0])('%s is sent to every other API', async (temperature) => {
+    const body = await sentBody('completions/chat-mock', temperature)
 
-    expect(body['temperature']).toBe(TEMPERATURE)
+    expect(body['temperature']).toBe(temperature)
+    expect(dropRecords).toEqual([])
   })
 })

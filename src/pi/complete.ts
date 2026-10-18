@@ -25,6 +25,9 @@ import { isRecord } from '@proxy/utils/guards'
 
 const completeLogger = proxyLogger('pi', 'complete')
 
+/** Codex models a temperature has been dropped for, in this process: each is logged at info once. */
+const modelsWithDroppedTemperature = new Set<string>()
+
 /**
  * Map OpenAI reasoning_effort to pi's thinking level.
  *
@@ -439,13 +442,17 @@ async function buildStreamOptions(
 
   // The Codex backend rejects temperature ("Unsupported parameter: temperature"), though pi 1.3.0
   // forwards it. Dropped rather than refused, so clients that always send one keep working on
-  // Codex models (#49); logged at info so the operator can see it.
+  // Codex models (#49). The first drop per model is logged at info so the operator sees it; the
+  // rest at debug, as a client that always sends one would otherwise log a line per request.
   if (request.temperature !== undefined) {
     if (model.api === 'openai-codex-responses') {
-      completeLogger.info(
-        'Dropped temperature {temperature} for {modelId}: the Codex backend does not accept it',
-        { temperature: request.temperature, modelId: model.id, api: model.api }
-      )
+      const firstForModel = !modelsWithDroppedTemperature.has(model.id)
+      modelsWithDroppedTemperature.add(model.id)
+      const dropped =
+        'Dropped temperature {temperature} for {modelId}: the Codex backend does not accept it'
+      const properties = { temperature: request.temperature, modelId: model.id, api: model.api }
+      if (firstForModel) completeLogger.info(dropped, properties)
+      else completeLogger.debug(dropped, properties)
     } else {
       opts.temperature = request.temperature
     }
