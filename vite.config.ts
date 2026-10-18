@@ -388,6 +388,9 @@ export default defineConfig({
           'typescript/no-unsafe-assignment': 'off',
           'typescript/no-unsafe-member-access': 'off',
           'typescript/no-unsafe-argument': 'off',
+          // Accepted `expect.<matcher>(…) as T` casts (e.g. `expect.any(Number) as number`) trip
+          // consistent-type-assertions and no-unsafe-type-assertion, and inline disables are banned,
+          // so these stay off in tests and other casts are kept out by review (AGENTS.md; issue #74).
           'typescript/consistent-type-assertions': 'off',
           'typescript/no-unnecessary-type-assertion': 'off',
           'typescript/no-unsafe-type-assertion': 'off'

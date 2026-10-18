@@ -32,21 +32,35 @@ function makeUsage(overrides: Partial<Usage> = {}): Usage {
 }
 
 /**
- * Build a mock AssistantMessage. Only populates fields used by
- * buildChatCompletion (content, stopReason, usage).
+ * A complete AssistantMessage with these content blocks. buildChatCompletion reads content,
+ * stopReason and usage; the identity fields and timestamp are fixed placeholders. The provider and
+ * model differ from every canonical ID the tests pass, so a response that took its `model` from the
+ * upstream message instead of the canonical ID fails the `model` assertions.
  */
+function makeMessage(
+  content: AssistantMessage['content'],
+  stopReason: AssistantMessage['stopReason'],
+  overrides: Partial<AssistantMessage>
+): AssistantMessage {
+  return {
+    role: 'assistant',
+    content,
+    api: 'openai-completions',
+    provider: 'upstream-provider',
+    model: 'upstream-model',
+    stopReason,
+    usage: makeUsage(),
+    timestamp: 0,
+    ...overrides
+  }
+}
+
 function makeTextMessage(
   text: string,
   overrides: Partial<AssistantMessage> = {}
 ): AssistantMessage {
   const content: TextContent = { type: 'text', text }
-  return {
-    role: 'assistant',
-    content: [content],
-    stopReason: 'stop',
-    usage: makeUsage(),
-    ...overrides
-  } as unknown as AssistantMessage
+  return makeMessage([content], 'stop', overrides)
 }
 
 function makeToolCallMessage(
@@ -59,13 +73,7 @@ function makeToolCallMessage(
     name: call.name,
     arguments: call.args
   }))
-  return {
-    role: 'assistant',
-    content,
-    stopReason: 'toolUse',
-    usage: makeUsage(),
-    ...overrides
-  } as unknown as AssistantMessage
+  return makeMessage(content, 'toolUse', overrides)
 }
 
 // ---------------------------------------------------------------------------

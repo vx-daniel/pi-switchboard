@@ -436,11 +436,12 @@ describe.each(APIS)('upstream HTTP error through %s', (api) => {
     '$label: upstream $status refuses a streaming request with the same status and body',
     async (statusCase) => {
       const outcome = await chat(`${providerName}/${failingModel(api, statusCase)}`, true)
+      const body: unknown = JSON.parse(outcome.text)
 
       expect({
         status: outcome.status,
         contentType: outcome.contentType,
-        body: JSON.parse(outcome.text) as unknown,
+        body,
         attempts: outcome.attempts
       }).toEqual({
         status: statusCase.expected.status,
