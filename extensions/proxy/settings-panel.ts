@@ -6,6 +6,7 @@ import { type ExtensionCommandContext, getSettingsListTheme } from '@earendil-wo
 import { Container, type SettingItem, SettingsList, Text } from '@earendil-works/pi-tui'
 import { getLogLevels, isLogLevel } from '@logtape/logtape'
 import {
+  configFileAuthTokenInvalid,
   getConfigPath,
   isModelExposureMode,
   isPublicModelIdMode,
@@ -63,7 +64,19 @@ function customModelsDescription(config: ProxyConfig): string {
   return "Switch exposure mode to 'custom' to select models"
 }
 
+/**
+ * The auth setting's state: `invalid` when `authToken` in proxy-config.json is not a string, which
+ * the proxy refuses requests for (#82), not `disabled`, which would read as auth off.
+ */
+function authDisplay(config: ProxyConfig): string {
+  if (configFileAuthTokenInvalid()) return 'invalid'
+  return config.authToken.length > 0 ? 'enabled' : 'disabled'
+}
+
 function authDescription(config: ProxyConfig): string {
+  if (configFileAuthTokenInvalid()) {
+    return 'authToken in proxy-config.json is not a string: every request is refused. Enable to set a new token'
+  }
   if (config.authToken.length > 0) {
     return `Token: ${config.authToken.slice(0, AUTH_TOKEN_PREVIEW_LENGTH)}... (use /proxy show to copy)`
   }
@@ -84,7 +97,7 @@ const SETTING_DISPLAY_VALUES = {
   'lifetime': (config: ProxyConfig) => config.lifetime,
   'host': (config: ProxyConfig) => config.host,
   'port': (config: ProxyConfig) => String(config.port),
-  'authToken': (config: ProxyConfig) => (config.authToken.length > 0 ? 'enabled' : 'disabled'),
+  'authToken': authDisplay,
   'remoteImages': (config: ProxyConfig) => (config.remoteImages ? 'on' : 'off'),
   'maxBodySizeMb': (config: ProxyConfig) => `${String(config.maxBodySizeMb)} MB`,
   'upstreamTimeoutSec': (config: ProxyConfig) => `${String(config.upstreamTimeoutSec)}s`,
@@ -136,8 +149,10 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
       id: 'authToken',
       label: 'Proxy auth',
       description: authDescription(config),
-      currentValue: config.authToken.length > 0 ? 'enabled' : 'disabled',
-      values: ['disabled', 'enabled']
+      currentValue: authDisplay(config),
+      // Enter moves to the first value when the current one is not listed. While the token is
+      // invalid, that must be `enabled` (a fresh token), never `disabled`, which turns auth off (#82).
+      values: configFileAuthTokenInvalid() ? ['enabled', 'disabled'] : ['disabled', 'enabled']
     },
     {
       id: 'remoteImages',
@@ -170,7 +185,8 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
   ]
 }
 
-function buildSettingItems(state: ProxyState): SettingItem[] {
+/** The panel's rows, built from the state's config (and, for auth, the config file). */
+export function buildSettingItems(state: ProxyState): SettingItem[] {
   const { config } = state
   return [
     ...serverSettingItems(config),
@@ -315,7 +331,9 @@ export function applySetting(state: ProxyState, id: string, value: string): stri
   } else {
     settingsLogger.warn('Unknown setting {settingId}; saving config unchanged', { settingId: id })
   }
-  saveConfigToFile(state.config)
+  // Only a choice made on the auth row may replace an invalid authToken in the file (#82); any
+  // other setting saves the file's value back, so it cannot quietly turn auth off.
+  saveConfigToFile(state.config, { replaceInvalidAuthToken: id === 'authToken' })
   state.config = loadConfigFromFile()
   settingsLogger.debug('Saved config to {configPath}', { configPath: getConfigPath() })
   const applied = getDisplayValue(state.config, id)

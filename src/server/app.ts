@@ -37,7 +37,7 @@ export function createApp(
   app.route('/', createRoutes(config, configReader))
 
   lifecycleLogger.debug('App wired: proxy auth {authMode}, exposure config from {exposureSource}', {
-    authMode: config.proxyAuthToken === undefined ? 'disabled' : 'enabled',
+    authMode: config.proxyAuth.kind,
     exposureSource: configReader === undefined ? 'config file' : 'custom reader'
   })
   return app

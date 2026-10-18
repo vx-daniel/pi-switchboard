@@ -7,18 +7,22 @@
  * sources, as `extension-reports.test.ts` does.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { SettingsManager } from '@earendil-works/pi-coding-agent'
 import type { SettingItem } from '@earendil-works/pi-tui'
 import { resetSync } from '@logtape/logtape'
-import { DEFAULT_CONFIG, type ProxyConfig } from '@proxy/config/schema'
+import { DEFAULT_CONFIG, loadConfigFromFile, type ProxyConfig } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
 import { isRecord } from '@proxy/utils/guards'
 import { afterEach, assert, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { applySetting, refreshDescriptions } from '../../extensions/proxy/settings-panel'
+import {
+  applySetting,
+  buildSettingItems,
+  refreshDescriptions
+} from '../../extensions/proxy/settings-panel'
 import type { ProxyState } from '../../extensions/proxy/state'
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 
@@ -218,5 +222,56 @@ describe('refreshDescriptions', () => {
         'Require bearer token for all requests'
       )
     )
+  })
+})
+
+describe('an invalid authToken in the file (#82)', () => {
+  /** Write a proxy-config.json whose authToken is not a string, and load it as the panel does. */
+  function stateFromInvalidFile(): ProxyState {
+    writeFileSync(
+      join(agentDir.path, 'proxy-config.json'),
+      JSON.stringify({ authToken: 12345, port: 4141 })
+    )
+    return { ...stateWith(), config: loadConfigFromFile() }
+  }
+
+  // Catches the panel showing a token the proxy refuses requests for as "disabled", or Enter on
+  // that row going to `disabled` first, which would turn auth off with one key press.
+  test('the auth row says invalid, and Enter goes to enabled first', () => {
+    const row = buildSettingItems(stateFromInvalidFile()).find(
+      (settingRow) => settingRow.id === 'authToken'
+    )
+
+    expect(row).toEqual({
+      id: 'authToken',
+      label: 'Proxy auth',
+      description:
+        'authToken in proxy-config.json is not a string: every request is refused. Enable to set a new token',
+      currentValue: 'invalid',
+      values: ['enabled', 'disabled']
+    })
+  })
+
+  // Catches changing another setting writing the repaired '' and so turning auth off for good.
+  test('changing another setting keeps it in the file', () => {
+    applySetting(stateFromInvalidFile(), 'port', '8080')
+
+    expect(savedConfig()).toEqual({ ...DEFAULT_CONFIG, port: 8080, authToken: 12345 })
+  })
+
+  // Catches enabling auth from the invalid state not replacing it with a usable token.
+  test('enabling replaces it with a generated token', () => {
+    const state = stateFromInvalidFile()
+    const token = applySetting(state, 'authToken', 'enabled')
+
+    expect(token).toMatch(GENERATED_TOKEN)
+    expect(savedConfig()).toEqual({ ...DEFAULT_CONFIG, authToken: token })
+  })
+
+  // Catches an explicit disable on the auth row not being able to clear it.
+  test('disabling replaces it with off', () => {
+    applySetting(stateFromInvalidFile(), 'authToken', 'disabled')
+
+    expect(savedConfig()).toEqual(DEFAULT_CONFIG)
   })
 })

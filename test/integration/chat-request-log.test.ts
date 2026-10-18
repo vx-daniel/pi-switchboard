@@ -159,7 +159,10 @@ describe('chat request logging', () => {
   test('logs a passing health check at debug and a failed one or a model list at info', async () => {
     lines = []
     configureLogging({ level: 'info', format: 'json', write: (line) => lines.push(line) })
-    const authApp = testApp({ ...testConfig(), proxyAuthToken: 'notarealsecret-token' })
+    const authApp = testApp({
+      ...testConfig(),
+      proxyAuth: { kind: 'token', token: 'notarealsecret-token' }
+    })
 
     await authApp.request('/healthz')
     expect(logged('pi-openai-proxy.server.http')).toEqual([])
@@ -211,7 +214,10 @@ describe('proxy auth logging', () => {
   // Catches a credential reaching the logs: neither the configured token nor the one a client sent
   // may appear in any line, at any level, while the rejection itself is still logged.
   test('logs a rejected token as a warning without the token or the header value', async () => {
-    const authApp = testApp({ ...testConfig(), proxyAuthToken: configuredToken })
+    const authApp = testApp({
+      ...testConfig(),
+      proxyAuth: { kind: 'token', token: configuredToken }
+    })
 
     const rejected = await authApp.request('/v1/models', {
       headers: { Authorization: `Bearer ${wrongToken}` }

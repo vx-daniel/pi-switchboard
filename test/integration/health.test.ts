@@ -46,7 +46,7 @@ describe('health endpoint authentication', () => {
   // Catches liveness probes needing the token, or the detail endpoints, which name providers and
   // models, answering without it.
   test('/healthz answers without the token; its detail endpoints require it', async () => {
-    const app = testApp({ ...testConfig(), proxyAuthToken: PROXY_TOKEN })
+    const app = testApp({ ...testConfig(), proxyAuth: { kind: 'token', token: PROXY_TOKEN } })
 
     const live = await app.request('/healthz')
     expect(live.status).toBe(200)

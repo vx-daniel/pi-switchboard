@@ -75,14 +75,31 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
 }
 
 /**
- * Optional proxy auth middleware.
- * Only active when PI_PROXY_AUTH_TOKEN is set.
+ * What a request gets while `authToken` in proxy-config.json is not a string (#82). Fixed: it never
+ * contains the value.
+ */
+export const MISCONFIGURED_AUTH_MESSAGE =
+  'Proxy auth is misconfigured: authToken in proxy-config.json is not a string. Fix it, or set a token with --auth-token or PI_PROXY_AUTH_TOKEN.'
+
+/**
+ * Proxy auth (`config.proxyAuth`): lets everything through when off, refuses everything when the
+ * configured token is invalid (#82), and otherwise needs `Authorization: Bearer <token>`.
  */
 export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<ProxyEnv> {
+  const proxyAuth = config.proxyAuth
   return async (context, next) => {
-    if (config.proxyAuthToken === undefined) {
+    if (proxyAuth.kind === 'off') {
       await next()
       return undefined
+    }
+
+    if (proxyAuth.kind === 'invalid') {
+      // Fail closed: the operator asked for a token the proxy cannot read. Never let it through.
+      authLogger.warn('Rejected {method} {path}: proxy auth is misconfigured', {
+        method: context.req.method,
+        path: context.req.path
+      })
+      return context.json(authenticationError(MISCONFIGURED_AUTH_MESSAGE), HTTP_UNAUTHORIZED)
     }
 
     const authHeader = context.req.header('authorization')
@@ -97,7 +114,7 @@ export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<Pro
     const isBearer = authHeader.startsWith(BEARER_PREFIX)
     const token = isBearer ? authHeader.slice(BEARER_PREFIX.length) : undefined
 
-    if (token !== config.proxyAuthToken) {
+    if (token !== proxyAuth.token) {
       // Never the header or token value: only whether the scheme was right.
       authLogger.warn('Rejected {method} {path}: invalid proxy auth token', {
         method: context.req.method,

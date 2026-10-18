@@ -250,7 +250,7 @@ describe('POST /v1/chat/completions - proxy auth', () => {
   test('blocks requests when proxy auth is configured', async () => {
     const authedApp = testApp({
       ...testConfig(),
-      proxyAuthToken: 'secret-token'
+      proxyAuth: { kind: 'token', token: 'secret-token' }
     })
 
     const response = await authedApp.request('/v1/chat/completions', {
@@ -267,7 +267,7 @@ describe('POST /v1/chat/completions - proxy auth', () => {
   test('accepts requests with correct proxy auth', async () => {
     const authedApp = testApp({
       ...testConfig(),
-      proxyAuthToken: 'secret-token'
+      proxyAuth: { kind: 'token', token: 'secret-token' }
     })
 
     const response = await authedApp.request('/v1/chat/completions', {

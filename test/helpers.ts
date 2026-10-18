@@ -91,7 +91,7 @@ export function testConfig(): ServerConfig {
   return {
     host: '127.0.0.1',
     port: 4141,
-    proxyAuthToken: undefined,
+    proxyAuth: { kind: 'off' },
     agenticEnabled: false,
     remoteImagesEnabled: false,
     maxBodySize: 52428800,

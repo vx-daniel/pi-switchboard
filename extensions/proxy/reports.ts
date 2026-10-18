@@ -4,7 +4,11 @@
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { loadConfigFromFile, type ProxyConfig } from '@vx-daniel/pi-openai-proxy/config'
+import {
+  configFileAuthTokenInvalid,
+  loadConfigFromFile,
+  type ProxyConfig
+} from '@vx-daniel/pi-openai-proxy/config'
 import {
   computeModelExposure,
   type ExposedModel,
@@ -57,10 +61,20 @@ export async function buildConfigReport(state: ProxyState): Promise<string> {
   return `${formatServerSettings(config).join(' | ')}\n${exposureLines.join(' | ')}`
 }
 
+/**
+ * The `/proxy show` auth field: the token when one is set, or `invalid` when `authToken` in the
+ * file is not a string, which the proxy refuses requests for (#82) rather than turning auth off.
+ */
+function authSummary(config: ProxyConfig): string {
+  if (configFileAuthTokenInvalid()) {
+    return 'invalid (authToken in proxy-config.json is not a string: every request is refused)'
+  }
+  return config.authToken.length > 0 ? `enabled (token: ${config.authToken})` : 'disabled'
+}
+
 /** Returns the `/proxy show` server-settings fields; the auth token is shown when one is set. */
 function formatServerSettings(config: ProxyConfig): string[] {
-  const authDisplay =
-    config.authToken.length > 0 ? `enabled (token: ${config.authToken})` : 'disabled'
+  const authDisplay = authSummary(config)
   return [
     `lifetime: ${config.lifetime}`,
     `host: ${config.host}`,

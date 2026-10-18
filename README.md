@@ -258,7 +258,7 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.
 
-A config file is never refused: an invalid value is replaced and the proxy starts anyway. A number outside its range is clamped to the nearest bound, a list or map keeps its valid entries, and anything else takes its default. `host` is trimmed; model IDs, prefix labels and `authToken` are used exactly as written, so a padded model ID matches no model rather than exposing one. One warning names the fields that were replaced, never their values, and it repeats only when that set of fields changes.
+A config file is never refused: an invalid value is replaced and the proxy starts anyway. A number outside its range is clamped to the nearest bound, a list or map keeps its valid entries, and anything else takes its default. One exception: an `authToken` that is not a string is not replaced by the default (which would turn auth off); the proxy fails closed instead (see [Proxy authentication](#proxy-authentication)). `host` is trimmed; model IDs, prefix labels and `authToken` are used exactly as written, so a padded model ID matches no model rather than exposing one. One warning names the fields that were replaced, never their values, and it repeats only when that set of fields changes.
 
 ### Discovering available models
 
@@ -298,6 +298,8 @@ PI_PROXY_AUTH_TOKEN=my-secret-token pi-openai-proxy
 curl http://localhost:4141/v1/models \
   -H "Authorization: Bearer my-secret-token"
 ```
+
+The token can also live in the config file (`"authToken": "…"`); a flag or `PI_PROXY_AUTH_TOKEN` wins over it, and `"authToken": ""` (the default) turns auth off. An `authToken` that is set but is not a string (`12345`, `true`, `null`, an object) does **not** turn auth off: the proxy still starts, but answers every authenticated route with `401` "Proxy auth is misconfigured" until the file is fixed or a token is set by flag or environment. `GET /healthz` stays up, and startup logs an error naming the field, never its value. The settings panel and `/proxy show` say "invalid"; saving another setting from the panel keeps the file's value, and only a choice on the auth row (or `/proxy reset`) replaces it.
 
 ### API compatibility
 
