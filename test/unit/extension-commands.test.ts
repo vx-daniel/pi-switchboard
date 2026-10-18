@@ -153,13 +153,13 @@ describe('/proxy with models on two providers', () => {
   })
 
   describe('zed-sync', () => {
-    // Catches a dry run writing Zed's settings, or not saying what it would change. The doubled
-    // `[dry-run]` label is today's behaviour, pinned until #92 fixes it.
+    // Catches a dry run writing Zed's settings, not saying what it would change, or saying it is a
+    // dry run twice (#92).
     test('--dry-run reports the change and leaves the file alone', async () => {
       writeFileSync(zedSettingsPath, ZED_SETTINGS)
       expect(await runProxy('zed-sync --dry-run')).toEqual([
         {
-          message: `Zed sync: [dry-run] [dry-run] 4 added (${zedSettingsPath})`,
+          message: `Zed sync: [dry-run] 4 added (${zedSettingsPath})`,
           level: 'info'
         }
       ])
