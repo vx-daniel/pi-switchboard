@@ -61,6 +61,8 @@
     "test:live": "PI_PROXY_LIVE_TESTS=1 vp test --project live",
     "test:live:record": "node scripts/record-fixtures.ts",
     "build": "vp pack",
+    "build:binary": "node scripts/build-binary.ts",
+    "test:binary": "node scripts/build-binary.ts && PI_PROXY_BINARY_TESTS=1 vp test --project binary",
     "prepare": "vp config --no-agent && vp pack",
     "prepack": "vp pack",
     "prepublishOnly": "vp test"

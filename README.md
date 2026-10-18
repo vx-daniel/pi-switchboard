@@ -405,9 +405,13 @@ vp test               # Offline tests (unit + integration): no real login, no ne
 pnpm run test:live    # Live conformance tests against real providers: uses your pi login and quota
 pnpm run test:live:record  # Re-record the Anthropic replay fixtures (needs a login made for recording)
 vp pack               # Build for npm (ESM + .d.ts)
+pnpm run build:binary # Standalone binary for this machine (dist-bin/pi-openai-proxy); needs Bun
+pnpm run test:binary  # Build it, then run it against the fixtures (test/binary): the only check of the compiled bytes
 ```
 
 `check:all` (`scripts/gate.ts`) is the one definition of "green": the pre-commit hook, CI, and the release workflow all run it.
+
+The standalone binary (experimental, #61) is the same proxy compiled with `bun build --compile` from `src/standalone/main.ts`, which first does the setup pi's own binary does: it registers pi-ai's OAuth flows and Bedrock provider statically (they load by variable import, so a plain compile leaves them out and OAuth refresh fails once a token expires), and it is built without `.env`/`bunfig.toml` autoloading. `node scripts/build-binary.ts --all` cross-compiles linux-x64, linux-arm64, darwin-x64 and darwin-arm64 with a `SHA256SUMS` file. Bun is only the compiler; the npm package runs on Node.
 
 Offline tests run with pi pointed at an empty agent directory and credential env vars removed (`test/setup/offline.ts`). Tests that need models or an upstream build them with `test/fixtures/agent-dir.ts` and the local mock provider in `test/fixtures/mock-provider.ts`, which serves scripted replies or replays real provider traffic recorded by `test:live:record` (`test/fixtures/recording.ts`, `test/fixtures/recordings/`). Recording forwards pi's real requests to the provider through a local recorder and saves the responses without credentials; it refuses to save one that contains a credential. Set `PI_PROXY_RECORD_AGENT_DIR` to a pi agent directory with a login made for recording: never a copy of a login another pi or proxy uses, because refreshing an expired token rotates it under every copy.
 

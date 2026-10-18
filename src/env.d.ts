@@ -22,6 +22,8 @@ declare namespace NodeJS {
     PI_PROXY_EXTENSION_LOG_FILE?: string | undefined
     /** `1` turns on the `live` test project (test/conformance); set by `pnpm run test:live`. */
     PI_PROXY_LIVE_TESTS?: string | undefined
+    /** `1` turns on the `binary` test project (test/binary); set by `pnpm run test:binary`. */
+    PI_PROXY_BINARY_TESTS?: string | undefined
     /** scripts/record-fixtures.ts: the pi agent dir holding the login used for recording. */
     PI_PROXY_RECORD_AGENT_DIR?: string | undefined
     /** scripts/record-fixtures.ts: where the recorder forwards to (default api.anthropic.com). */
