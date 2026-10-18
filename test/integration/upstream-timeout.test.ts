@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
+  chunk,
   finishChunk,
   type MockProvider,
   silent,
@@ -25,6 +26,13 @@ const IDLE_TIMEOUT_MS = 1000
 const CHUNK_INTERVAL_MS = 100
 /** 15 chunks 100 ms apart: about 1.5 s in total, past the 1 s timeout. */
 const STEADY_CHUNKS = 15
+/** 15 keep-alive chunks 100 ms apart: 1.5 s of them, past the 1 s timeout, before any answer. */
+const KEEP_ALIVE_CHUNKS = 15
+/**
+ * A chunk with no choices: no text, no tool call, so no pi event. Azure, for one, sends one before
+ * the answer with only its content-filter results.
+ */
+const KEEP_ALIVE = { ...chunk({}), choices: [] }
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
@@ -32,14 +40,23 @@ let agentDir: FixtureAgentDir
 beforeAll(async () => {
   mock = await startMockProvider({
     // A chunk every 100 ms, then the finish: the whole answer outlasts the timeout.
-    steady: sse(
+    'steady': sse(
       [...textChunks(...Array.from({ length: STEADY_CHUNKS }, () => 'x')), finishChunk('stop')],
       { intervalMs: CHUNK_INTERVAL_MS }
     ),
+    // Only chunks that carry no choices, for longer than the timeout, then the answer.
+    'keep-alive': sse(
+      [
+        ...Array.from({ length: KEEP_ALIVE_CHUNKS }, () => KEEP_ALIVE),
+        ...textChunks('x'),
+        finishChunk('stop')
+      ],
+      { intervalMs: CHUNK_INTERVAL_MS }
+    ),
     // One chunk, then nothing.
-    stall: stall(textChunks('x')),
+    'stall': stall(textChunks('x')),
     // Not even headers.
-    silent: silent()
+    'silent': silent()
   })
   agentDir = await loadFixtureAgentDir({
     modelsJson: { providers: { 'timeout-mock': mock.provider() } }
@@ -81,6 +98,17 @@ describe('upstream timeout', () => {
     expect(streamed).not.toContain('"error"')
     expect(streamed).toContain('"finish_reason":"stop"')
     expect(streamed.endsWith('data: [DONE]\n\n')).toBe(true)
+  })
+
+  // Catches the wait restarting only on pi's events: a provider that is still sending, but only
+  // chunks pi makes no event of, would be cut off as if it had gone quiet (#50).
+  test('does not cut off a provider that sends only chunks pi makes no event of', async () => {
+    const complete = await chat('keep-alive', false)
+
+    expect(complete.status).toBe(200)
+    expect(await complete.json()).toMatchObject({
+      choices: [{ message: { content: 'x' }, finish_reason: 'stop' }]
+    })
   })
 
   // Catches a stalled provider hanging the request, or failing it as a generic upstream error that

@@ -1,10 +1,15 @@
 /**
  * The upstream timeout: how long the provider may go without sending anything.
  *
- * It restarts on every event pi receives (thinking, text, tool calls), so a long answer that keeps
- * arriving is never cut off, while a call that stalls (no response, or a stream that stops) is
- * aborted after `idleMs`. It replaced a timeout on the whole call, which cut off long thinking and
- * long streamed answers mid-text.
+ * It restarts on every event pi receives (thinking, text, tool calls), and on every raw provider
+ * event, through pi's `onProviderStreamEvent` (set in `openUpstream`): a chunk pi makes no event of,
+ * such as an OpenAI Responses lifecycle event or a chat-completions chunk with no choices, still
+ * shows the provider is alive (#50). So a long answer that keeps arriving is never cut off, while a
+ * call that stalls (no response, or a stream that stops) is aborted after `idleMs`. It replaced a
+ * timeout on the whole call, which cut off long thinking and long streamed answers mid-text.
+ *
+ * What never reaches either signal cannot restart it: SSE comment lines (OpenRouter's processing
+ * notices), and Anthropic `ping` events, which pi's parser drops before the hook.
  *
  * The first wait starts with the call, before pi resolves credentials, so a hung credential lookup
  * (an OAuth refresh, a key command) is bounded by the same limit as the first response byte.

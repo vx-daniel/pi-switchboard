@@ -690,6 +690,13 @@ async function openUpstream(
     idle?.dispose()
     throw error
   }
+  // Every raw provider event restarts the wait, including those pi makes no event of (#50). The
+  // event itself is not read: it carries message content.
+  if (idle !== undefined) {
+    opts.onProviderStreamEvent = () => {
+      idle.touch()
+    }
+  }
   const call: UpstreamCall = { model, options, opts, stream, startedAt: performance.now() }
   logUpstreamStart(call, context, request)
   let eventStream: AssistantMessageEventStream
