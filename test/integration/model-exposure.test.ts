@@ -136,7 +136,10 @@ describe('GET /v1/pi/models', () => {
   // Catches the route mounted outside the proxy auth that guards /v1/models: it names every
   // exposed model.
   test('needs the proxy token when one is set', async () => {
-    const app = testApp({ ...testConfig(), proxyAuthToken: 'notarealsecret-proxy-token' })
+    const app = testApp({
+      ...testConfig(),
+      proxyAuth: { kind: 'token', token: 'notarealsecret-proxy-token' }
+    })
 
     const without = await app.request('/v1/pi/models')
     const withToken = await app.request('/v1/pi/models', {

@@ -10,18 +10,45 @@
 
 import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
 import type { ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
-import { BYTES_PER_MB, loadConfigFromFile, MS_PER_SECOND } from '@proxy/config/schema'
+import {
+  BYTES_PER_MB,
+  configFileAuthTokenInvalid,
+  loadConfigFromFile,
+  MS_PER_SECOND
+} from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 
 const configLogger = proxyLogger('config')
+
+/**
+ * Proxy auth, as configured:
+ * - `off`: every request is let through;
+ * - `token`: a request needs `Authorization: Bearer <token>`;
+ * - `invalid`: `authToken` in proxy-config.json is not a string, so the configured auth cannot be
+ *   applied. Every authenticated route refuses until it is fixed, never let through as if off (#82).
+ */
+export type ProxyAuth =
+  | { readonly kind: 'off' }
+  | { readonly kind: 'token'; readonly token: string }
+  | { readonly kind: 'invalid' }
+
+/**
+ * Proxy auth from a flag or env token (which wins), else the config file's: '' is off, and a file
+ * token that is not a string is invalid.
+ */
+function resolveProxyAuth(overrideToken: string | undefined, fileToken: string): ProxyAuth {
+  if (overrideToken !== undefined) return { kind: 'token', token: overrideToken }
+  if (configFileAuthTokenInvalid()) return { kind: 'invalid' }
+  return fileToken.length > 0 ? { kind: 'token', token: fileToken } : { kind: 'off' }
+}
 
 export interface ServerConfig {
   /** Host to bind to. */
   readonly host: string
   /** Port to listen on. */
   readonly port: number
-  /** Optional proxy auth bearer token. Undefined = no auth. */
-  readonly proxyAuthToken: string | undefined
+  /** Whether and how requests must authenticate; see `ProxyAuth`. */
+  readonly proxyAuth: ProxyAuth
   /** Whether agentic mode is enabled. */
   readonly agenticEnabled: boolean
   /** Whether remote image URL fetching is enabled. */
@@ -117,9 +144,9 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
   const host = cli.host ?? process.env.PI_PROXY_HOST ?? file.host
   const port = cli.port ?? parsePositiveInt('PI_PROXY_PORT', process.env.PI_PROXY_PORT, file.port)
 
-  // Auth token: CLI > env > file (empty string in file = disabled)
-  const fileToken = file.authToken.length > 0 ? file.authToken : undefined
-  const proxyAuthToken = cli.authToken ?? process.env.PI_PROXY_AUTH_TOKEN ?? fileToken
+  // Auth: CLI > env > file. A file token that is not a string fails closed rather than off (#82).
+  const overrideToken = cli.authToken ?? process.env.PI_PROXY_AUTH_TOKEN
+  const proxyAuth = resolveProxyAuth(overrideToken, file.authToken)
 
   const remoteImagesEnabled =
     cli.remoteImages ??
@@ -148,7 +175,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
   return {
     host,
     port,
-    proxyAuthToken,
+    proxyAuth,
     agenticEnabled,
     remoteImagesEnabled,
     maxBodySize,

@@ -103,7 +103,7 @@ describe('redaction', () => {
     'apiKey',
     'upstreamApiKey',
     'authToken',
-    'proxyAuthToken',
+    'proxyAuth',
     'authorization',
     'accessToken',
     'refreshToken',

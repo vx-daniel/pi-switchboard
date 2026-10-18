@@ -8,7 +8,7 @@
 import { serve } from '@hono/node-server'
 import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
 import { type CliOverrides, loadConfig, type ServerConfig } from '@proxy/config/env'
-import { getConfigPath, loadConfigFromFile } from '@proxy/config/schema'
+import { configFileAuthTokenInvalid, getConfigPath, loadConfigFromFile } from '@proxy/config/schema'
 import {
   configureLogging,
   isLogFormat,
@@ -24,6 +24,14 @@ const lifecycleLogger = proxyLogger('server')
 
 const JSON_INDENT = 2
 const MASKED_TOKEN = '***'
+/** What `--config` shows for an `authToken` in the file that is not a string (#82). */
+const INVALID_TOKEN_SHOWN = '<invalid: not a string>'
+
+/** The auth token as `--config` shows it: masked, empty when off, or marked invalid. */
+function shownAuthToken(fileToken: string): string {
+  if (configFileAuthTokenInvalid()) return INVALID_TOKEN_SHOWN
+  return fileToken.length > 0 ? MASKED_TOKEN : ''
+}
 
 /** Whether a bind address only accepts connections from this machine. */
 function isLoopbackHost(host: string): boolean {
@@ -168,7 +176,7 @@ const main = defineCommand({
     // where it is easily piped or captured: the auth token is masked.
     if (args.config === true) {
       const file = loadConfigFromFile()
-      const shown = { ...file, authToken: file.authToken.length > 0 ? MASKED_TOKEN : '' }
+      const shown = { ...file, authToken: shownAuthToken(file.authToken) }
       process.stdout.write(`Config file: ${getConfigPath()}\n`)
       process.stdout.write(`${JSON.stringify(shown, null, JSON_INDENT)}\n`)
       return
@@ -177,12 +185,12 @@ const main = defineCommand({
     const config = loadConfigWithLogging(args)
     if (config === undefined) return
 
-    // Never the auth token itself: only whether proxy auth is on.
+    // Never the auth token itself: only how proxy auth is set (`off`, `token` or `invalid`).
     lifecycleLogger.debug('Effective config', {
       configPath: getConfigPath(),
       host: config.host,
       port: config.port,
-      proxyAuthEnabled: config.proxyAuthToken !== undefined,
+      proxyAuthMode: config.proxyAuth.kind,
       agenticEnabled: config.agenticEnabled,
       remoteImagesEnabled: config.remoteImagesEnabled,
       maxBodySize: config.maxBodySize,
@@ -193,7 +201,13 @@ const main = defineCommand({
       providerPrefixCount: Object.keys(config.providerPrefixes).length,
       logLevel: config.logLevel
     })
-    if (config.proxyAuthToken === undefined) {
+    if (config.proxyAuth.kind === 'invalid') {
+      // Not the value: it is what the operator meant as a secret.
+      lifecycleLogger.error(
+        'Proxy auth is misconfigured: authToken in {configPath} is not a string. Every /v1 request is refused with 401 until it is fixed, or a token is set with --auth-token or PI_PROXY_AUTH_TOKEN',
+        { configPath: getConfigPath() }
+      )
+    } else if (config.proxyAuth.kind === 'off') {
       // Off-loopback without auth is an exposure worth seeing at the default level.
       if (isLoopbackHost(config.host)) {
         lifecycleLogger.debug(

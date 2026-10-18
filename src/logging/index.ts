@@ -68,7 +68,7 @@ export const REDACTED_FIELDS: readonly string[] = [
   'apiKey',
   'upstreamApiKey',
   'authToken',
-  'proxyAuthToken',
+  'proxyAuth',
   'authorization',
   'accessToken',
   'refreshToken',

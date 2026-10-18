@@ -278,12 +278,12 @@ Reason:
 - OpenAI-compatible clients already use `Authorization` for proxy authentication
 - reserving `Authorization` keeps future proxy auth compatible with ecosystem expectations
 
-### Optional proxy auth
+### Proxy auth
 
-Future-compatible design:
-
-- incoming `Authorization: Bearer <proxy-key>` may be used to protect the proxy itself
-- disabled by default for local use
+- incoming `Authorization: Bearer <proxy-key>` protects the proxy itself; off by default for local use
+- the token comes from `--auth-token`, `PI_PROXY_AUTH_TOKEN` or `authToken` in the config file, in that order; `"authToken": ""` turns it off
+- three states (`ServerConfig.proxyAuth`): `off`, `token`, and `invalid`. A file `authToken` that is not a string (`null` included) is `invalid`: the proxy starts (principle II) but every authenticated route answers `401` with a fixed message, `/healthz` stays up, and startup logs an error naming the field (principle III; #82). It never falls back to `off`, which would turn a requested token into an open proxy
+- saving the config (the extension's settings panel, the model selector) writes such a value back unchanged; only an explicit choice on the auth row or `/proxy reset` replaces it
 
 ## Request contract for `POST /v1/chat/completions`
 

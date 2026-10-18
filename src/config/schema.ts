@@ -330,13 +330,57 @@ export function loadConfigFromFile(): ProxyConfig {
   return normalizeConfig(raw)
 }
 
-export function saveConfigToFile(config: ProxyConfig): void {
+/** The config file parsed, or undefined when it is missing, unreadable or not JSON. Never logs. */
+function rawConfigFile(): unknown {
+  try {
+    return JSON.parse(readFileSync(getConfigPath(), 'utf-8'))
+  } catch {
+    return undefined
+  }
+}
+
+/** The file's `authToken` when it is set but is not a string (`null` included), else undefined. */
+function invalidAuthToken(raw: unknown): { readonly value: unknown } | undefined {
+  if (!isRecord(raw) || raw['authToken'] === undefined || typeof raw['authToken'] === 'string') {
+    return undefined
+  }
+  return { value: raw['authToken'] }
+}
+
+/**
+ * Whether the config file sets `authToken` to something that is not a string (#82). Repairing it
+ * to the default '' would mean "auth off": an operator who asked for a token would get an open
+ * proxy. So the proxy treats it as misconfigured and fails closed instead. A missing, unreadable or
+ * non-JSON file is not this case.
+ */
+export function configFileAuthTokenInvalid(): boolean {
+  return invalidAuthToken(rawConfigFile()) !== undefined
+}
+
+/** How `saveConfigToFile` treats an `authToken` the file has but that is not a string (#82). */
+export interface SaveConfigOptions {
+  /**
+   * Replace it with the config's value. Only for an explicit choice (disabling auth, a reset):
+   * otherwise the repaired '' would be written, and '' means auth off.
+   */
+  readonly replaceInvalidAuthToken?: boolean
+}
+
+export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions = {}): void {
   const configPath = getConfigPath()
   const normalized = normalizeConfig(config)
+  // A config loaded from a file with an invalid authToken carries the repaired ''. Writing it would
+  // turn auth off for good, so the file's value stays until the user chooses (#82).
+  const invalid = invalidAuthToken(rawConfigFile())
+  const keepInvalid =
+    invalid !== undefined && normalized.authToken === '' && options.replaceInvalidAuthToken !== true
+  const written: Record<string, unknown> = keepInvalid
+    ? { ...normalized, authToken: invalid.value }
+    : normalized
   const tempPath = `${configPath}.tmp`
   try {
     mkdirSync(dirname(configPath), { recursive: true })
-    writeFileSync(tempPath, `${JSON.stringify(normalized, null, '\t')}\n`, 'utf-8')
+    writeFileSync(tempPath, `${JSON.stringify(written, null, '\t')}\n`, 'utf-8')
     renameSync(tempPath, configPath)
     configLogger.debug('Saved config file {path}', { path: configPath })
   } catch (error) {
