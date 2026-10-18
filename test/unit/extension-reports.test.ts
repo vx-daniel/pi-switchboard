@@ -1,0 +1,227 @@
+/**
+ * The `/proxy show` and `/proxy verify` reports (`extensions/proxy/reports.ts`), over a fixture
+ * agent directory: what text each config and model set produces.
+ *
+ * The extension imports the package through its published subpaths, which resolve to `dist/`;
+ * these tests point them at the sources, so they run before any build.
+ */
+
+import { writeFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+import { ModelRegistry, SettingsManager } from '@earendil-works/pi-coding-agent'
+import { DEFAULT_CONFIG } from '@proxy/config/schema'
+import { getRuntime } from '@proxy/pi/registry'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
+
+import { buildConfigReport, buildVerifyReport } from '../../extensions/proxy/reports'
+import type { ProxyState } from '../../extensions/proxy/state'
+import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
+
+vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
+vi.mock('@vx-daniel/pi-openai-proxy/exposure', () => import('@proxy/openai/model-exposure'))
+vi.mock('@vx-daniel/pi-openai-proxy/logging', () => import('@proxy/logging'))
+
+/** The server line of `/proxy show` for the default config. */
+const DEFAULT_SERVER_LINE =
+  'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: disabled | remote images: false | max body: 50 MB | timeout: 120s'
+
+/** The first five public IDs, and the count of the rest, for the two-provider fixture. */
+const ALL_EXPOSED_PREVIEW = 'alpha/a1, alpha/a2, alpha/a3, alpha/a4, alpha/a5 (+3 more)'
+
+/** The exposure error `universal` mode gives when two providers share a model ID. */
+const UNIVERSAL_CONFLICT =
+  "Universal mode conflict: model ID 'shared' is provided by both 'alpha' and 'beta'. Use 'collision-prefixed' or 'always-prefixed' mode, or reduce the exposed model set."
+
+/** Writes `proxy-config.json` into the agent dir and returns a state over its models. */
+function stateWith(
+  agentDir: FixtureAgentDir,
+  config: Record<string, unknown>,
+  enabledModels?: string[]
+): ProxyState {
+  writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify(config))
+  return {
+    config: { ...DEFAULT_CONFIG },
+    sessionProcess: undefined,
+    modelRegistry: new ModelRegistry(getRuntime()),
+    settingsManager: SettingsManager.inMemory(enabledModels === undefined ? {} : { enabledModels }),
+    packageRoot: agentDir.path
+  }
+}
+
+describe('with models on two providers', () => {
+  let agentDir: FixtureAgentDir
+
+  beforeAll(async () => {
+    agentDir = await loadFixtureAgentDir({
+      modelsJson: {
+        providers: {
+          alpha: offlineProvider('a1', 'a2', 'a3', 'a4', 'a5', 'shared'),
+          beta: offlineProvider('shared', 'b1')
+        }
+      }
+    })
+  })
+
+  afterAll(() => {
+    vi.unstubAllEnvs()
+    agentDir.remove()
+  })
+
+  describe('buildConfigReport', () => {
+    // Catches the defaults losing a server field or the preview losing its "+N more" count.
+    test('defaults: auth disabled, every model exposed', async () => {
+      const report = await buildConfigReport(stateWith(agentDir, {}))
+      expect(report).toEqual(
+        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: scoped | exposed: ${ALL_EXPOSED_PREVIEW}`
+      )
+    })
+
+    // Catches the auth token, the scoped pattern count or unresolved patterns going missing.
+    test('scoped with patterns and an auth token', async () => {
+      const state = stateWith(agentDir, { authToken: 'secret-token', port: 5151 }, [
+        'alpha/a1',
+        'nothing-like-this'
+      ])
+      const report = await buildConfigReport(state)
+      expect(report).toEqual(
+        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: secret-token) | remote images: false | max body: 50 MB | timeout: 120s\n' +
+          'id mode: collision-prefixed | exposure: scoped | enabled: 2 pi pattern(s) | exposed: a1 | unresolved: nothing-like-this (no-match)'
+      )
+    })
+
+    // Catches scoped mode with an empty pattern list printing an "enabled: 0" field.
+    test('scoped with an empty pattern list', async () => {
+      const report = await buildConfigReport(stateWith(agentDir, {}, []))
+      expect(report).toEqual(
+        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: scoped | exposed: ${ALL_EXPOSED_PREVIEW}`
+      )
+    })
+
+    // Catches the custom model count or the provider prefixes going missing.
+    test('custom models and provider prefixes', async () => {
+      const state = stateWith(agentDir, {
+        modelExposureMode: 'custom',
+        customModels: ['alpha/a1', 'beta/b1'],
+        providerPrefixes: { alpha: 'al', beta: 'be' },
+        publicModelIdMode: 'always-prefixed'
+      })
+      const report = await buildConfigReport(state)
+      expect(report).toEqual(
+        `${DEFAULT_SERVER_LINE}\nid mode: always-prefixed | exposure: custom | models: 2 custom | prefixes: alpha=al, beta=be | exposed: al/a1, be/b1`
+      )
+    })
+
+    // Catches custom mode with no models printing a "models: 0 custom" field.
+    test('custom mode with no models', async () => {
+      const state = stateWith(agentDir, { modelExposureMode: 'custom', customModels: [] })
+      const report = await buildConfigReport(state)
+      expect(report).toEqual(
+        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: custom | exposed: ${ALL_EXPOSED_PREVIEW}`
+      )
+    })
+
+    // Catches an exposure error being dropped instead of shown.
+    test('an exposure error', async () => {
+      const state = stateWith(agentDir, {
+        modelExposureMode: 'all',
+        publicModelIdMode: 'universal'
+      })
+      const report = await buildConfigReport(state)
+      expect(report).toEqual(
+        `${DEFAULT_SERVER_LINE}\nid mode: universal | exposure: all | error: ${UNIVERSAL_CONFLICT}`
+      )
+    })
+
+    // Catches the reloaded config not being stored on the state.
+    test('stores the reloaded config on the state', async () => {
+      const state = stateWith(agentDir, { port: 6161 })
+      await buildConfigReport(state)
+      expect(state.config).toEqual({ ...DEFAULT_CONFIG, port: 6161 })
+    })
+  })
+
+  describe('buildVerifyReport', () => {
+    // Catches a clean config reporting an issue, or the wrong exposed count.
+    test('passes with every model exposed', async () => {
+      const report = await buildVerifyReport(stateWith(agentDir, { modelExposureMode: 'all' }))
+      expect(report).toEqual({
+        message: 'Verification passed. 8 models exposed.',
+        level: 'info'
+      })
+    })
+
+    // Catches unavailable custom models going unreported.
+    test('custom models that are not available', async () => {
+      const state = stateWith(agentDir, {
+        modelExposureMode: 'custom',
+        customModels: ['alpha/a1', 'gamma/g1', 'beta/nope']
+      })
+      const report = await buildVerifyReport(state)
+      expect(report).toEqual({
+        message:
+          'Verification found 2 issue(s):\n' +
+          "Custom model 'gamma/g1' is not available (no auth or unknown).\n" +
+          "Custom model 'beta/nope' is not available (no auth or unknown).",
+        level: 'warning'
+      })
+    })
+
+    // Catches an empty custom list going unreported.
+    test('custom mode with an empty list', async () => {
+      const state = stateWith(agentDir, { modelExposureMode: 'custom', customModels: [] })
+      const report = await buildVerifyReport(state)
+      expect(report).toEqual({
+        message:
+          'Verification found 1 issue(s):\nCustom mode with empty model list will expose 0 models.',
+        level: 'warning'
+      })
+    })
+
+    // Catches an exposure error being left out of the issues.
+    test('an exposure error', async () => {
+      const state = stateWith(agentDir, {
+        modelExposureMode: 'all',
+        publicModelIdMode: 'universal'
+      })
+      const report = await buildVerifyReport(state)
+      expect(report).toEqual({
+        message: `Verification found 1 issue(s):\n${UNIVERSAL_CONFLICT}`,
+        level: 'warning'
+      })
+    })
+  })
+})
+
+describe('with no models', () => {
+  let agentDir: FixtureAgentDir
+
+  beforeAll(async () => {
+    agentDir = await loadFixtureAgentDir()
+  })
+
+  afterAll(() => {
+    vi.unstubAllEnvs()
+    agentDir.remove()
+  })
+
+  // Catches an empty exposure printing an empty list instead of "none".
+  test('buildConfigReport shows none exposed', async () => {
+    const report = await buildConfigReport(stateWith(agentDir, {}))
+    expect(report).toEqual(
+      `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: scoped | exposed: none`
+    )
+  })
+
+  // Catches a model-less setup passing verification.
+  test('buildVerifyReport reports that no model has auth', async () => {
+    const report = await buildVerifyReport(stateWith(agentDir, { modelExposureMode: 'custom' }))
+    expect(report).toEqual({
+      message:
+        'Verification found 2 issue(s):\n' +
+        'No models have auth configured. The proxy will expose 0 models.\n' +
+        'Custom mode with empty model list will expose 0 models.',
+      level: 'warning'
+    })
+  })
+})

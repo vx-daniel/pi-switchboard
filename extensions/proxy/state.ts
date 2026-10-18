@@ -45,14 +45,21 @@ export async function useModelRegistry(
   await state.modelRegistry.refresh({ allowNetwork: false })
 }
 
-export function getAvailableModels(state: ProxyState): Model<Api>[] {
+/**
+ * The models pi's live session can use now. Not the standalone proxy's `getAvailableModels`
+ * (`src/pi/registry.ts`), which reads that process's own runtime.
+ */
+export function getSessionAvailableModels(state: ProxyState): Model<Api>[] {
   if (state.modelRegistry === undefined) {
     throw new Error('The model registry is only available once a session has started.')
   }
   return state.modelRegistry.getAvailable()
 }
 
-export async function getEnabledModels(state: ProxyState): Promise<readonly string[] | undefined> {
+/** pi's `enabledModels` setting, reloaded from disk; undefined when no filter is set. */
+export async function getSessionEnabledModels(
+  state: ProxyState
+): Promise<readonly string[] | undefined> {
   await state.settingsManager.reload()
   return state.settingsManager.getEnabledModels()
 }
@@ -61,7 +68,7 @@ export async function buildExposureConfig(state: ProxyState): Promise<ModelExpos
   return {
     publicModelIdMode: state.config.publicModelIdMode,
     modelExposureMode: state.config.modelExposureMode,
-    enabledModels: await getEnabledModels(state),
+    enabledModels: await getSessionEnabledModels(state),
     customModels: state.config.customModels,
     providerPrefixes: state.config.providerPrefixes
   }
