@@ -328,4 +328,22 @@ describe('starting the server', () => {
     expect(JSON.stringify(logRecords())).not.toContain('987654321')
     expect((await fetch(`${origin}/v1/models`)).status).toBe(HTTP_UNAUTHORIZED)
   })
+
+  // Catches --auth-token not winning over a non-string authToken in the file (#82), which would
+  // leave an operator no way to run the proxy short of editing the file.
+  test('--auth-token wins over a non-string authToken, with no error', async () => {
+    const port = await freePort()
+    const origin = `http://127.0.0.1:${String(port)}`
+    writeConfigFile({ port, authToken: 987654321 })
+
+    await runCli(['--auth-token', FIXTURE_TOKEN, '--log-format', 'json'])
+    await waitForListening(origin)
+
+    const authorized = await fetch(`${origin}/v1/models`, {
+      headers: { Authorization: `Bearer ${FIXTURE_TOKEN}` }
+    })
+    expect(authorized.status).toBe(HTTP_OK)
+    expect((await fetch(`${origin}/v1/models`)).status).toBe(HTTP_UNAUTHORIZED)
+    expect(logRecords().filter((record) => record['level'] === 'ERROR')).toEqual([])
+  })
 })

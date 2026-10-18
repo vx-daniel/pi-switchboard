@@ -68,19 +68,33 @@ function customModelsDescription(config: ProxyConfig): string {
  * The auth setting's state: `invalid` when `authToken` in proxy-config.json is not a string, which
  * the proxy refuses requests for (#82), not `disabled`, which would read as auth off.
  */
-function authDisplay(config: ProxyConfig): string {
-  if (configFileAuthTokenInvalid()) return 'invalid'
+function authDisplay(config: ProxyConfig, invalid = configFileAuthTokenInvalid()): string {
+  if (invalid) return 'invalid'
   return config.authToken.length > 0 ? 'enabled' : 'disabled'
 }
 
-function authDescription(config: ProxyConfig): string {
-  if (configFileAuthTokenInvalid()) {
+function authDescription(config: ProxyConfig, invalid = configFileAuthTokenInvalid()): string {
+  if (invalid) {
     return 'authToken in proxy-config.json is not a string: every request is refused. Enable to set a new token'
   }
   if (config.authToken.length > 0) {
     return `Token: ${config.authToken.slice(0, AUTH_TOKEN_PREVIEW_LENGTH)}... (use /proxy show to copy)`
   }
   return 'Require bearer token for all requests'
+}
+
+/** The auth row, from one read of the config file. */
+function authSettingItem(config: ProxyConfig): SettingItem {
+  const invalid = configFileAuthTokenInvalid()
+  return {
+    id: 'authToken',
+    label: 'Proxy auth',
+    description: authDescription(config, invalid),
+    currentValue: authDisplay(config, invalid),
+    // Enter moves to the first value when the current one is not listed. While the token is
+    // invalid, that must be `enabled` (a fresh token), never `disabled`, which turns auth off (#82).
+    values: invalid ? ['enabled', 'disabled'] : ['disabled', 'enabled']
+  }
 }
 
 function customModelsDisplay(config: ProxyConfig): string {
@@ -97,7 +111,7 @@ const SETTING_DISPLAY_VALUES = {
   'lifetime': (config: ProxyConfig) => config.lifetime,
   'host': (config: ProxyConfig) => config.host,
   'port': (config: ProxyConfig) => String(config.port),
-  'authToken': authDisplay,
+  'authToken': (config: ProxyConfig) => authDisplay(config),
   'remoteImages': (config: ProxyConfig) => (config.remoteImages ? 'on' : 'off'),
   'maxBodySizeMb': (config: ProxyConfig) => `${String(config.maxBodySizeMb)} MB`,
   'upstreamTimeoutSec': (config: ProxyConfig) => `${String(config.upstreamTimeoutSec)}s`,
@@ -145,15 +159,7 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
       currentValue: String(config.port),
       values: ['4141', '8080', '3000', '9090']
     },
-    {
-      id: 'authToken',
-      label: 'Proxy auth',
-      description: authDescription(config),
-      currentValue: authDisplay(config),
-      // Enter moves to the first value when the current one is not listed. While the token is
-      // invalid, that must be `enabled` (a fresh token), never `disabled`, which turns auth off (#82).
-      values: configFileAuthTokenInvalid() ? ['enabled', 'disabled'] : ['disabled', 'enabled']
-    },
+    authSettingItem(config),
     {
       id: 'remoteImages',
       label: 'Remote images',

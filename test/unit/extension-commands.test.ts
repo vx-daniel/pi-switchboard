@@ -17,6 +17,7 @@ import {
   type ExtensionCommandContext,
   ModelRegistry
 } from '@earendil-works/pi-coding-agent'
+import { DEFAULT_CONFIG } from '@proxy/config/schema'
 import { getRuntime } from '@proxy/pi/registry'
 import {
   afterAll,
@@ -138,6 +139,19 @@ describe('/proxy with models on two providers', () => {
     expect(await runProxy('path')).toEqual([
       { message: join(agentDir.path, 'proxy-config.json'), level: 'info' }
     ])
+  })
+
+  // Catches `/proxy reset` keeping an invalid authToken (#82): the reset is an explicit choice, so
+  // it must write the defaults, auth off included, rather than leave every request refused.
+  test('reset replaces an invalid authToken with the defaults', async () => {
+    writeProxyConfig({ authToken: 12345, port: 5151 })
+
+    expect(await runProxy('reset')).toEqual([
+      { message: 'Proxy settings reset to defaults', level: 'info' }
+    ])
+    expect(JSON.parse(readFileSync(join(agentDir.path, 'proxy-config.json'), 'utf-8'))).toEqual(
+      DEFAULT_CONFIG
+    )
   })
 
   // Catches `/proxy models` being routed to the wrong report.
