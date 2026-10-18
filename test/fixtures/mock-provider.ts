@@ -11,6 +11,7 @@
 import { once } from 'node:events'
 import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from 'node:http'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { zstdDecompressSync } from 'node:zlib'
 
 import { isRecord } from '@proxy/utils/guards'
 
@@ -57,12 +58,16 @@ export async function startMockProvider(
 ): Promise<MockProvider> {
   const requests: MockRequest[] = []
   const server: Server = createServer((incoming, response) => {
-    let text = ''
+    const parts: Buffer[] = []
     incoming.on('data', (part: Buffer) => {
-      text += part.toString()
+      parts.push(part)
     })
     incoming.on('end', () => {
-      const body = parseBody(text)
+      const raw = Buffer.concat(parts)
+      // pi's Codex adapter compresses its request bodies, as the Codex backend accepts
+      const decoded =
+        incoming.headers['content-encoding'] === 'zstd' ? zstdDecompressSync(raw) : raw
+      const body = parseBody(decoded.toString())
       const request: MockRequest = { path: incoming.url ?? '', headers: incoming.headers, body }
       requests.push(request)
       // Recorded either way, so a test can see what pi sent; but a provider would refuse it.

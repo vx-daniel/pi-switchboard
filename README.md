@@ -128,7 +128,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `messages` (text) | `system`, `developer`, `user`, `assistant`, `tool` roles. `system` and `developer` before the first turn form the system prompt; a later one stays in place on models that accept mid-conversation instructions (pi's `supportsMidConvoSystemMessages`; Anthropic: just before the next answer) and is merged into the system prompt on others |
 | `messages` (base64 images) | Base64 data URI image content parts (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) |
 | `stream` | SSE with `text_delta` and `toolcall_delta` mapping |
-| `temperature` | Direct passthrough |
+| `temperature` | Direct passthrough, except Codex models (`openai-codex-responses`): the Codex backend rejects it, so it is dropped there and logged at `info` |
 | `max_completion_tokens` | Preferred; `max_tokens` accepted as deprecated fallback |
 | `stop` | Via passthrough |
 | `user` | Via passthrough |
@@ -154,7 +154,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 Fields are translated to each provider's native format, not blindly forwarded:
 
 - **OpenAI / Mistral**: All fields passed directly (same wire format)
-- **Codex (Responses API)**: Only `tool_choice` and `parallel_tool_calls` (other fields rejected by API)
+- **Codex (Responses API)**: Only `tool_choice` and `parallel_tool_calls` (other fields rejected by API); `temperature` is dropped, as the Codex backend rejects it
 - **Anthropic**: `tool_choice` → `{ type }` format, `stop` → `stop_sequences`, `user` → `metadata.user_id`, `parallel_tool_calls: false` → `disable_parallel_tool_use`
 - **Google**: Nested into `generationConfig` with camelCase names (`topP`, `stopSequences`, `seed`, etc.)
 

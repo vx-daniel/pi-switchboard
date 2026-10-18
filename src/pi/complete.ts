@@ -63,9 +63,9 @@ const OPENAI_FULL_PASSTHROUGH_APIS = new Set([
 /**
  * The Codex Responses API accepts only tool_choice and parallel_tool_calls.
  * Other standard fields (top_p, seed, stop, user, frequency_penalty, etc.)
- * are rejected with "Unsupported parameter". The SDK hardcodes
- * tool_choice: "auto" and parallel_tool_calls: true; onPayload overrides
- * those when the client sends explicit values.
+ * are rejected with "Unsupported parameter". pi 1.3.0 sends
+ * `tool_choice: options.toolChoice ?? "auto"` and hardcodes `parallel_tool_calls: true`;
+ * onPayload overrides both when the client sends explicit values.
  */
 const CODEX_APIS = new Set(['openai-codex-responses'])
 
@@ -318,9 +318,9 @@ function collectGoogleGenerationFields(request: ChatCompletionRequest): Record<s
 /**
  * Collect the restricted set of fields the Codex Responses API accepts.
  *
- * Only tool_choice and parallel_tool_calls are supported. The SDK hardcodes
- * tool_choice: "auto" and parallel_tool_calls: true; these overrides let clients
- * control tool behavior explicitly.
+ * Only tool_choice and parallel_tool_calls are supported. pi sends tool_choice "auto" unless told
+ * otherwise and hardcodes parallel_tool_calls: true; these overrides let clients control tool
+ * behavior explicitly (`required`, a named tool, `parallel_tool_calls: false`).
  *
  * @internal Exported for unit testing only.
  */
@@ -437,10 +437,15 @@ async function buildStreamOptions(
 ): Promise<SimpleStreamOptions> {
   const opts: SimpleStreamOptions = {}
 
-  // openai-codex-responses API does not support temperature
+  // The Codex backend rejects temperature ("Unsupported parameter: temperature"), though pi 1.3.0
+  // forwards it. Dropped rather than refused, so clients that always send one keep working on
+  // Codex models (#49); logged at info so the operator can see it.
   if (request.temperature !== undefined) {
     if (model.api === 'openai-codex-responses') {
-      completeLogger.debug('Dropping temperature: {api} does not support it', { api: model.api })
+      completeLogger.info(
+        'Dropped temperature {temperature} for {modelId}: the Codex backend does not accept it',
+        { temperature: request.temperature, modelId: model.id, api: model.api }
+      )
     } else {
       opts.temperature = request.temperature
     }
