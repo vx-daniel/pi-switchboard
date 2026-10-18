@@ -10,15 +10,14 @@ import {
   type Api,
   type AssistantMessage,
   type AssistantMessageEventStream,
-  clampThinkingLevel,
   type Context,
   isContextOverflow,
   type Model,
-  type ModelThinkingLevel,
   type SimpleStreamOptions
 } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
-import type { ChatCompletionRequest } from '@proxy/openai/schemas'
+import { supportedReasoningEfforts, thinkingLevelFor } from '@proxy/openai/reasoning-effort'
+import type { ChatCompletionRequest, ReasoningEffort } from '@proxy/openai/schemas'
 import { getRuntime } from '@proxy/pi/registry'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
 import { isRecord } from '@proxy/utils/guards'
@@ -27,30 +26,6 @@ const completeLogger = proxyLogger('pi', 'complete')
 
 /** Codex models a temperature has been dropped for, in this process: each is logged at info once. */
 const modelsWithDroppedTemperature = new Set<string>()
-
-/**
- * Map OpenAI reasoning_effort to pi's thinking level.
- *
- * OpenAI: "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
- * Pi: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
- *
- * "none" is pi's "off". `SimpleStreamOptions.reasoning` has no "off" value: pi treats an absent
- * `reasoning` as off (no thinking on Anthropic; `reasoning.effort` "none", or the model's own off
- * value, on OpenAI Responses), so "off" means leave it unset. A model whose reasoning cannot be
- * turned off (its `thinkingLevelMap.off` is null) would then get nothing at all, which providers
- * read as their default effort (OpenAI: medium); there "off" is clamped to the lowest level the
- * model supports instead, the closest it comes to none.
- */
-const REASONING_EFFORT_MAP: Readonly<
-  Record<NonNullable<ChatCompletionRequest['reasoning_effort']>, ModelThinkingLevel>
-> = {
-  none: 'off',
-  minimal: 'minimal',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'xhigh'
-}
 
 /**
  * APIs that accept the full set of OpenAI passthrough fields (stop, seed, top_p,
@@ -430,6 +405,31 @@ function combineSignals(
 }
 
 /**
+ * reasoning_effort as the thinking level `model` runs at (`thinkingLevelFor`), or undefined for off:
+ * pi has no "off" option, an absent `reasoning` is off. pi's adapters mostly clamp too, but
+ * Anthropic's does not: without this, "none" on a model that always reasons would get the
+ * provider's default effort (#41), and an unsupported level the adapter's own fallback (#43).
+ */
+function reasoningLevel(
+  model: Model<Api>,
+  effort: ReasoningEffort
+): SimpleStreamOptions['reasoning'] {
+  const { level, clamped } = thinkingLevelFor(model, effort)
+  if (clamped) {
+    completeLogger.debug(
+      'Clamped reasoning_effort {reasoningEffort} to thinking level {thinkingLevel} for {modelId}',
+      () => ({
+        reasoningEffort: effort,
+        thinkingLevel: level,
+        modelId: model.id,
+        supportedEfforts: supportedReasoningEfforts(model)
+      })
+    )
+  }
+  return level === 'off' ? undefined : level
+}
+
+/**
  * Build pi SimpleStreamOptions from an OpenAI request.
  */
 async function buildStreamOptions(
@@ -464,14 +464,9 @@ async function buildStreamOptions(
     opts.maxTokens = maxTokens
   }
 
-  // Map reasoning_effort to pi's thinking level. Only "off" is clamped here (see
-  // REASONING_EFFORT_MAP); pi clamps the other levels to what the model supports itself.
   if (request.reasoning_effort !== undefined) {
-    const requested = REASONING_EFFORT_MAP[request.reasoning_effort]
-    const level = requested === 'off' ? clampThinkingLevel(model, 'off') : requested
-    if (level !== 'off') {
-      opts.reasoning = level
-    }
+    const level = reasoningLevel(model, request.reasoning_effort)
+    if (level !== undefined) opts.reasoning = level
   }
 
   // The client disconnect signal combined with the upstream idle timeout

@@ -99,6 +99,7 @@ curl http://localhost:4141/v1/chat/completions \
 | `GET /v1/models` | List exposed models (filtered by exposure mode, only those with configured credentials) |
 | `GET /v1/models/{model}` | Model details by public ID or canonical ID (supports URL-encoded IDs with `/`) |
 | `POST /v1/chat/completions` | Chat completions (streaming and non-streaming) |
+| `GET /v1/pi/models` | Not OpenAI's: each exposed model's pi capabilities, such as its supported `reasoning_effort` values ([below](#discovering-available-models)) |
 
 ### Health checks
 
@@ -137,7 +138,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `strict` on function tools | Applied where pi marks the model strict-capable, in each API's own shape (OpenAI, Responses, Anthropic, …). Strict rewrites the schema: every property becomes required and optional ones nullable, so the model may send `null` for a field it would otherwise omit. Elsewhere, or when the schema is outside the provider's strict subset, the tool is sent without strict, with no error (see [PLAN.md](PLAN.md#strict-on-function-tools--strict-where-supported-44)) |
 | `tool_calls` in messages | Assistant tool call + tool result roundtrip |
 | `parallel_tool_calls` | Forwarded to OpenAI/Codex; translated to `disable_parallel_tool_use` for Anthropic |
-| `reasoning_effort` | Maps to pi's thinking level. `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`); on a model whose reasoning cannot be turned off it is the lowest level the model supports, not the provider's default. `minimal` … `xhigh` map to the same pi level, clamped by pi to what the model supports. For a custom `models.json` model with `reasoning: true`, `none` sends whatever its `thinkingLevelMap.off` says: nothing if unset, so set `off: "none"` (or `off: null` if reasoning cannot be turned off) when the endpoint reasons by default |
+| `reasoning_effort` | Maps to pi's thinking level. `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`). An effort the model does not support is clamped with pi's `clampThinkingLevel`: the nearest supported level above it, else the nearest below. So `none` on a model whose reasoning cannot be turned off is its lowest level (not the provider's default), `xhigh` on a model with `max` but no `xhigh` is `max`, and any effort on a model without reasoning is off. A clamp is logged at `debug`; `GET /v1/pi/models` lists the efforts each model supports. For a custom `models.json` model with `reasoning: true`, `none` sends whatever its `thinkingLevelMap.off` says: nothing if unset, so set `off: "none"` (or `off: null` if reasoning cannot be turned off) when the endpoint reasons by default |
 | `response_format` | `text`, `json_object`, and `json_schema` (OpenAI-compatible APIs only) |
 | `top_p` | Supported by OpenAI, Anthropic (native), and Google (translated to `topP`) |
 | `frequency_penalty` | OpenAI and Google only (translated to `frequencyPenalty`) |
@@ -266,6 +267,12 @@ curl http://localhost:4141/v1/models | jq '.data[].id'
 ```
 
 Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owned_by`) with no proprietary extensions.
+
+`GET /v1/pi/models` (not part of OpenAI's API; proxy token, if set) lists what pi knows about each exposed model beyond that. Today: `reasoning_efforts`, the `reasoning_effort` values the model runs at as asked, lowest first (`["none"]` for a model without reasoning). Any other value is accepted and clamped.
+
+```json
+{ "object": "list", "data": [{ "id": "claude-sonnet-4-5", "reasoning_efforts": ["none", "minimal", "low", "medium", "high"] }] }
+```
 
 ### Per-request API key override
 

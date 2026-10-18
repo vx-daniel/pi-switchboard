@@ -5,6 +5,7 @@
  */
 
 import type { ServerConfig } from '@proxy/config/env'
+import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
@@ -107,5 +108,41 @@ describe('model resolution with exposure configs', () => {
 
     expect(response.status).toBe(200)
     expect(await jsonBody(response)).toMatchObject({ id: 'alpha/a1', owned_by: 'alpha' })
+  })
+})
+
+describe('GET /v1/pi/models', () => {
+  // Catches the capability list built from every model pi has instead of the exposed set: it
+  // would name models /v1/models hides, under IDs no route resolves.
+  test('lists the same public IDs as /v1/models', async () => {
+    const config: ServerConfig = {
+      ...testConfig(),
+      modelExposureMode: 'custom',
+      customModels: ['alpha/a1', 'beta/b1'],
+      publicModelIdMode: 'always-prefixed'
+    }
+    const response = await testApp(config).request('/v1/pi/models')
+    const body = await jsonBody(response)
+    const data: unknown[] = isRecord(body) && Array.isArray(body['data']) ? body['data'] : []
+    const ids = data.map((model) =>
+      isRecord(model) && typeof model['id'] === 'string' ? model['id'] : ''
+    )
+
+    expect(response.status).toBe(200)
+    expect(ids.toSorted()).toEqual(await listedIds(config))
+    expect(await listedIds(config)).toEqual(['alpha/a1', 'beta/b1'])
+  })
+
+  // Catches the route mounted outside the proxy auth that guards /v1/models: it names every
+  // exposed model.
+  test('needs the proxy token when one is set', async () => {
+    const app = testApp({ ...testConfig(), proxyAuthToken: 'notarealsecret-proxy-token' })
+
+    const without = await app.request('/v1/pi/models')
+    const withToken = await app.request('/v1/pi/models', {
+      headers: { Authorization: 'Bearer notarealsecret-proxy-token' }
+    })
+
+    expect([without.status, withToken.status]).toEqual([401, 200])
   })
 })

@@ -1,11 +1,15 @@
 /**
  * `reasoning_effort` end to end: what each provider receives through pi's real clients. "none" is
  * pi's "off"; on a model whose reasoning cannot be turned off it is the lowest level the model
- * supports, never the provider's default effort (#41).
+ * supports, never the provider's default effort (#41). Any other effort the model does not support
+ * is clamped with pi's `clampThinkingLevel`, reported at debug, and `/v1/pi/models` lists the
+ * efforts each model supports (#43).
  */
 
+import { resetSync } from '@logtape/logtape'
+import { configureLogging } from '@proxy/logging'
 import { isRecord } from '@proxy/utils/guards'
-import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
@@ -15,7 +19,7 @@ import {
   startMockProvider,
   textChunks
 } from '../fixtures/mock-provider'
-import { testApp } from '../helpers'
+import { jsonBody, testApp } from '../helpers'
 
 const MOCK_KEY = 'notarealsecret-mock-provider-key'
 /** pi's thinking budget for "minimal" on Anthropic budget-based models. */
@@ -23,6 +27,8 @@ const MINIMAL_THINKING_BUDGET = 1024
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
+/** Every log record of a clamped effort: its level and properties. */
+const clampRecords: { level: string; properties: unknown }[] = []
 
 beforeAll(async () => {
   const answer = sse([...textChunks('ok'), finishChunk('stop')])
@@ -34,7 +40,10 @@ beforeAll(async () => {
     'gpt-low-floor': answer,
     'chat-off-none': answer,
     'chat-always-reasoning': answer,
-    'chat-undeclared-off': answer
+    'chat-undeclared-off': answer,
+    'chat-plain': answer,
+    'chat-xhigh': answer,
+    'claude-adaptive-max': answer
   })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
@@ -45,7 +54,13 @@ beforeAll(async () => {
           apiKey: MOCK_KEY,
           models: [
             { id: 'claude-thinking', reasoning: true },
-            { id: 'claude-always-thinking', reasoning: true, thinkingLevelMap: { off: null } }
+            { id: 'claude-always-thinking', reasoning: true, thinkingLevelMap: { off: null } },
+            {
+              id: 'claude-adaptive-max',
+              reasoning: true,
+              compat: { forceAdaptiveThinking: true },
+              thinkingLevelMap: { max: 'max' }
+            }
           ]
         },
         responses: {
@@ -69,15 +84,32 @@ beforeAll(async () => {
           models: [
             { id: 'chat-off-none', reasoning: true, thinkingLevelMap: { off: 'none' } },
             { id: 'chat-always-reasoning', reasoning: true, thinkingLevelMap: { off: null } },
-            { id: 'chat-undeclared-off', reasoning: true }
+            { id: 'chat-undeclared-off', reasoning: true },
+            { id: 'chat-plain' },
+            { id: 'chat-xhigh', reasoning: true, thinkingLevelMap: { xhigh: 'xhigh' } }
           ]
         }
       }
     }
   })
+  configureLogging({
+    level: 'debug',
+    format: 'json',
+    write: (line) => {
+      const parsed: unknown = JSON.parse(line)
+      if (!isRecord(parsed) || typeof parsed['message'] !== 'string') return
+      if (!parsed['message'].startsWith('Clamped reasoning_effort')) return
+      clampRecords.push({ level: String(parsed['level']), properties: parsed['properties'] })
+    }
+  })
+})
+
+beforeEach(() => {
+  clampRecords.length = 0
 })
 
 afterAll(async () => {
+  resetSync()
   vi.unstubAllEnvs()
   await mock.close()
   agentDir.remove()
@@ -186,3 +218,75 @@ describe('reasoning_effort "minimal" is unchanged', () => {
     })
   })
 })
+
+describe('an effort the model does not support is clamped (#43)', () => {
+  // Catches Anthropic's own fallback (effort high) instead of pi's clamp, which takes the nearest
+  // supported level above the one asked for, as every other adapter and pi itself do.
+  test('anthropic-messages: xhigh on an adaptive model with max but no xhigh is max', async () => {
+    expect(await sentField('anthropic/claude-adaptive-max', 'xhigh', 'output_config')).toEqual({
+      effort: 'max'
+    })
+  })
+
+  // Catches the clamp going unreported, or reported without what the client could have asked for.
+  test('the clamp is logged at debug, with the efforts the model supports', async () => {
+    await sentField('anthropic/claude-thinking', 'xhigh', 'thinking')
+
+    expect(clampRecords).toEqual([
+      {
+        level: 'DEBUG',
+        properties: expect.objectContaining({
+          reasoningEffort: 'xhigh',
+          thinkingLevel: 'high',
+          modelId: 'claude-thinking',
+          supportedEfforts: ['none', 'minimal', 'low', 'medium', 'high']
+        }) as unknown
+      }
+    ])
+  })
+
+  // Catches a clamp reported for an effort the model runs at as asked.
+  test('a supported effort is not reported', async () => {
+    await sentField('completions/chat-xhigh', 'xhigh', 'reasoning_effort')
+
+    expect(clampRecords).toEqual([])
+  })
+})
+
+describe('GET /v1/pi/models', () => {
+  // Catches a model's efforts listed from its reasoning flag alone, ignoring the levels its
+  // definition maps or forbids: a client would pick an effort that then gets clamped.
+  test('lists the efforts each exposed model supports', async () => {
+    const upToHigh = ['none', 'minimal', 'low', 'medium', 'high']
+    // The fixture's models. The `anthropic` provider also brings pi's built-in Anthropic catalog.
+    const expected: Record<string, string[]> = {
+      'chat-always-reasoning': upToHigh.slice(1),
+      'chat-off-none': upToHigh,
+      'chat-plain': ['none'],
+      'chat-undeclared-off': upToHigh,
+      'chat-xhigh': [...upToHigh, 'xhigh'],
+      'claude-adaptive-max': upToHigh,
+      'claude-always-thinking': upToHigh.slice(1),
+      'claude-thinking': upToHigh,
+      'gpt-always-reasoning': upToHigh.slice(1),
+      'gpt-low-floor': ['low', 'medium', 'high'],
+      'gpt-reasoning': upToHigh
+    }
+
+    const response = await testApp().request('/v1/pi/models')
+
+    expect(response.status).toBe(200)
+    const body = await jsonBody(response)
+    expect(isRecord(body) && body['object']).toBe('list')
+    const data = isRecord(body) && Array.isArray(body['data']) ? body['data'] : []
+    const fixtureEntries = data.filter((model) => entryId(model) in expected)
+    expect(
+      fixtureEntries.toSorted((left, right) => entryId(left).localeCompare(entryId(right)))
+    ).toEqual(Object.entries(expected).map(([id, efforts]) => ({ id, reasoning_efforts: efforts })))
+  })
+})
+
+/** A list entry's `id`, or '' when it has none. */
+function entryId(entry: unknown): string {
+  return isRecord(entry) && typeof entry['id'] === 'string' ? entry['id'] : ''
+}
