@@ -11,15 +11,15 @@
  *
  * Exposure modes (all modes only expose auth-configured models):
  *   - "all": expose every available model
- *   - "scoped": delegates to pi's global `enabledModels` setting
- *     (the canonical IDs persisted by `/scoped-models` Ctrl+S in pi)
- *   - "custom": same per-model filtering as "scoped" but independently
- *     managed via the proxy's own `customModels` config
+ *   - "scoped": the models pi's global `enabledModels` setting selects, resolved as pi resolves
+ *     its patterns (`@proxy/pi/model-scope`): exact IDs, bare IDs, globs, `:level` suffixes, fuzzy
+ *   - "custom": the proxy's own `customModels` config, as exact canonical IDs
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import type { ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
 
 const exposureLogger = proxyLogger('openai', 'exposure')
 
@@ -42,8 +42,8 @@ export interface ModelExposureConfig {
   readonly publicModelIdMode: PublicModelIdMode
   readonly modelExposureMode: ModelExposureMode
   /**
-   * Canonical model IDs from pi's global `enabledModels` setting.
-   * Read from `SettingsManager.getEnabledModels()` at request time.
+   * pi's global `enabledModels` setting: patterns, as `/scoped-models` saves them or a user wrote
+   * them. Read from `SettingsManager.getEnabledModels()` at request time.
    * Undefined or empty means no filter (all available models exposed).
    * Used only when modelExposureMode is "scoped".
    */
@@ -60,6 +60,8 @@ export interface ModelExposureResult {
   readonly byPublicId: ReadonlyMap<string, ExposedModel>
   /** Canonical ID -> ExposedModel for backward-compat fallback. */
   readonly byCanonicalId: ReadonlyMap<string, ExposedModel>
+  /** `enabledModels` patterns that selected nothing, or not what they name ("scoped" only). */
+  readonly scopeDiagnostics: readonly ScopeDiagnostic[]
 }
 
 export interface ModelExposureError {
@@ -73,44 +75,58 @@ export type ModelExposureOutcome = ModelExposureResult | ModelExposureError
 // Exposure filtering
 // ---------------------------------------------------------------------------
 
+interface ExposedSet {
+  readonly models: Model<Api>[]
+  readonly scopeDiagnostics: readonly ScopeDiagnostic[]
+}
+
 function filterExposedModels(
   available: readonly Model<Api>[],
   config: ModelExposureConfig
-): Model<Api>[] {
+): ExposedSet {
   // "all": expose all auth-configured models — same as pi's getAvailable().
   if (config.modelExposureMode === 'all') {
-    return [...available]
+    return { models: [...available], scopeDiagnostics: [] }
   }
 
-  // "scoped" delegates to pi's global `enabledModels` setting — the canonical IDs
-  // persisted by `/scoped-models` (Ctrl+S) in pi's interactive mode.
-  // "custom" uses the same per-model canonical ID filtering, but from the
-  // proxy's own `customModels` config instead of pi's settings.
   // When no filter is configured, all available models are exposed.
-  const enabled = config.modelExposureMode === 'scoped' ? config.enabledModels : config.customModels
-  if (enabled === undefined || enabled.length === 0) {
+  const filter = config.modelExposureMode === 'scoped' ? config.enabledModels : config.customModels
+  if (filter === undefined || filter.length === 0) {
     exposureLogger.debug('No {modelExposureMode} model filter configured; exposing every model', {
       modelExposureMode: config.modelExposureMode
     })
-    return [...available]
+    return { models: [...available], scopeDiagnostics: [] }
   }
-  const allowed = new Set(enabled)
+
+  // "scoped": pi's patterns, resolved as pi resolves them. The exposed list keeps the available
+  // models' order, as the other modes do, rather than the patterns' order.
+  if (config.modelExposureMode === 'scoped') {
+    const scope = resolveModelScope(filter, available)
+    const inScope = new Set(scope.models)
+    // At debug: exposure is computed per request. /healthz/models reports the diagnostics.
+    if (scope.diagnostics.length > 0) {
+      exposureLogger.debug('{diagnosticCount} enabledModels patterns did not resolve cleanly', {
+        diagnosticCount: scope.diagnostics.length,
+        diagnostics: scope.diagnostics
+      })
+    }
+    return {
+      models: available.filter((model) => inScope.has(model)),
+      scopeDiagnostics: scope.diagnostics
+    }
+  }
+
+  // "custom": the proxy's own list of exact canonical IDs.
+  const allowed = new Set(filter)
   const filtered = available.filter((model) => allowed.has(`${model.provider}/${model.id}`))
   if (filtered.length < allowed.size) {
-    exposureLogger.debug(
-      '{unmatchedCount} {modelExposureMode} model IDs match no available model',
-      () => {
-        const availableIds = new Set(available.map((model) => `${model.provider}/${model.id}`))
-        const unmatched = [...allowed].filter((canonicalId) => !availableIds.has(canonicalId))
-        return {
-          modelExposureMode: config.modelExposureMode,
-          unmatchedCount: unmatched.length,
-          unmatched
-        }
-      }
-    )
+    exposureLogger.debug('{unmatchedCount} custom model IDs match no available model', () => {
+      const availableIds = new Set(available.map((model) => `${model.provider}/${model.id}`))
+      const unmatched = [...allowed].filter((canonicalId) => !availableIds.has(canonicalId))
+      return { unmatchedCount: unmatched.length, unmatched }
+    })
   }
-  return filtered
+  return { models: filtered, scopeDiagnostics: [] }
 }
 
 // ---------------------------------------------------------------------------
@@ -339,7 +355,7 @@ export function computeModelExposure(
   config: ModelExposureConfig
 ): ModelExposureOutcome {
   // 1. Filter to exposed set
-  const exposed = filterExposedModels(available, config)
+  const { models: exposed, scopeDiagnostics } = filterExposedModels(available, config)
 
   // 2. Validate prefix uniqueness (before generating IDs)
   const prefixError = validatePrefixUniqueness(
@@ -414,7 +430,7 @@ export function computeModelExposure(
     }
   )
 
-  return { ok: true, models, byPublicId, byCanonicalId }
+  return { ok: true, models, byPublicId, byCanonicalId, scopeDiagnostics }
 }
 
 /**

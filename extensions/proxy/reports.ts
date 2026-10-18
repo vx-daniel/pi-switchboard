@@ -42,7 +42,7 @@ export async function showConfig(state: ProxyState, context: ExtensionContext): 
   if (config.modelExposureMode === 'scoped') {
     const enabledModels = await getEnabledModels(state)
     if (enabledModels !== undefined && enabledModels.length > 0) {
-      exposureLines.push(`enabled: ${String(enabledModels.length)} pi model(s)`)
+      exposureLines.push(`enabled: ${String(enabledModels.length)} pi pattern(s)`)
     }
   }
   if (config.modelExposureMode === 'custom' && config.customModels.length > 0) {
@@ -72,6 +72,12 @@ export async function showConfig(state: ProxyState, context: ExtensionContext): 
       message: outcome.message
     })
     exposureLines.push(`error: ${outcome.message}`)
+  }
+  if (outcome.ok && outcome.scopeDiagnostics.length > 0) {
+    const patterns = outcome.scopeDiagnostics.map(
+      (diagnostic) => `${diagnostic.pattern} (${diagnostic.code})`
+    )
+    exposureLines.push(`unresolved: ${patterns.join(', ')}`)
   }
   reportsLogger.debug('/proxy show: {availableCount} available, {exposedCount} exposed', {
     availableCount: models.length,
