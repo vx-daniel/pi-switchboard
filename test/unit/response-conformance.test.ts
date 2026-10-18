@@ -33,7 +33,9 @@ function makeUsage(overrides: Partial<Usage> = {}): Usage {
 
 /**
  * A complete AssistantMessage with these content blocks. buildChatCompletion reads content,
- * stopReason and usage; the identity fields and timestamp are fixed placeholders.
+ * stopReason and usage; the identity fields and timestamp are fixed placeholders. The provider and
+ * model differ from every canonical ID the tests pass, so a response that took its `model` from the
+ * upstream message instead of the canonical ID fails the `model` assertions.
  */
 function makeMessage(
   content: AssistantMessage['content'],
@@ -44,8 +46,8 @@ function makeMessage(
     role: 'assistant',
     content,
     api: 'openai-completions',
-    provider: 'openai',
-    model: 'gpt-4o',
+    provider: 'upstream-provider',
+    model: 'upstream-model',
     stopReason,
     usage: makeUsage(),
     timestamp: 0,

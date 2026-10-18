@@ -53,15 +53,17 @@ function makeUsage(): Usage {
 
 /**
  * A complete partial AssistantMessage with these content blocks. streamToSSE reads content,
- * stopReason and usage; the identity fields and timestamp are fixed placeholders.
+ * stopReason and usage; the identity fields and timestamp are fixed placeholders. The model differs
+ * from the `test-model` the stream is opened with, so a chunk that took its `model` from the
+ * upstream message instead fails the `model` assertion.
  */
 function makePartial(content: AssistantMessage['content'] = []): AssistantMessage {
   return {
     role: 'assistant',
     content,
     api: 'openai-completions',
-    provider: 'openai',
-    model: 'test-model',
+    provider: 'upstream-provider',
+    model: 'upstream-model',
     stopReason: 'stop',
     usage: makeUsage(),
     timestamp: 0
