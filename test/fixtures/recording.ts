@@ -298,8 +298,13 @@ async function forward(
 }
 
 /**
- * Forwards one request and keeps the exchange; if the upstream cannot be reached, says so to pi
- * with a 502.
+ * Forwards one request and keeps the exchange; if the upstream fails, says so to pi.
+ *
+ * @remarks
+ * Before the upstream answered, pi gets a 502 with the reason. Once the status line has gone out
+ * a 502 can no longer be sent, so the response is cut, as a dropped upstream connection looks to
+ * pi; writing a second status there threw `ERR_HTTP_HEADERS_SENT` into an unhandled rejection
+ * (#111). Either way, no exchange is kept.
  *
  * @param upstreamOrigin - the real provider's origin
  * @param request - the request pi sent to the recorder
@@ -315,6 +320,10 @@ async function record(
   try {
     exchanges.push(await forward(upstreamOrigin, request, response))
   } catch (error) {
+    if (response.headersSent) {
+      response.destroy()
+      return
+    }
     response.writeHead(HTTP_BAD_GATEWAY, { 'content-type': 'text/plain' })
     response.end(`recorder could not reach ${upstreamOrigin}: ${String(error)}`)
   }

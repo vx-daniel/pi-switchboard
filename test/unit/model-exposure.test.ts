@@ -564,21 +564,23 @@ describe('edge cases', () => {
     expect(result.models[0]?.canonicalId).toBe('openrouter/anthropic/claude-sonnet-4-20250514')
   })
 
-  test('canonical fallback works for prefixed models', () => {
+  // Catches the canonical fallback skipped when a provider prefix label differs from the provider
+  // name: public IDs are `oai/gpt-4o` and `cx/gpt-4o`, so `openai/gpt-4o` only resolves through
+  // the fallback, and must still pick the right provider of two with the same model ID.
+  test('canonical fallback works for models behind a prefix label', () => {
     const models = [makeModel('openai', 'gpt-4o'), makeModel('codex', 'gpt-4o')]
-    const result = expose(models, defaultConfig())
+    const result = expose(
+      models,
+      defaultConfig({ providerPrefixes: { openai: 'oai', codex: 'cx' } })
+    )
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    // Public IDs are openai/gpt-4o and codex/gpt-4o
-    // Canonical IDs are the same in this case
-    const resolved = resolveExposedModel(result, 'openai/gpt-4o')
-    expect(resolved).toBeDefined()
-    expect(resolved?.model.provider).toBe('openai')
-
-    const resolved2 = resolveExposedModel(result, 'codex/gpt-4o')
-    expect(resolved2).toBeDefined()
-    expect(resolved2?.model.provider).toBe('codex')
+    expect({
+      publicIds: result.models.map((model) => model.publicId),
+      openai: resolveExposedModel(result, 'openai/gpt-4o')?.publicId,
+      codex: resolveExposedModel(result, 'codex/gpt-4o')?.publicId
+    }).toEqual({ publicIds: ['oai/gpt-4o', 'cx/gpt-4o'], openai: 'oai/gpt-4o', codex: 'cx/gpt-4o' })
   })
 
   test('single model from single provider works in all modes', () => {
