@@ -27,19 +27,34 @@
  * Add a name only with a receipt, such as a library's documented import convention, a
  * published API field, or a spec term. Unlike the Grit original, `z` is not built in: allow it
  * in config where the project uses zod's `import * as z`.
+ *
+ * @packageDocumentation
  */
 
 import type { Context, ESTree, Plugin, Rule } from 'vite-plus/lint/plugins'
 
-// Ported from eslint-plugin-unicorn's prevent-abbreviations dictionary, minus sanctioned
-// conventions (`err`, `opts`) and high-noise names (`args`, `env`). Keep it one alternation.
+/**
+ * Abbreviations flagged by `naming/no-abbreviations`, as one exact-match alternation.
+ *
+ * @remarks
+ * Ported from eslint-plugin-unicorn's prevent-abbreviations dictionary, minus sanctioned
+ * conventions (`err`, `opts`) and high-noise names (`args`, `env`). Keep it one alternation.
+ */
 const ABBREVIATION =
   /^(?:acc|amt|arr|attr|attrs|attType|auth|btn|buf|cb|cc|cfg|cn|cnt|conf|cr|ctx|cur|curr|cx|df|dir|dirs|dist|doc|docs|dst|el|elem|elems|ev|evt|ext|exts|func|hdr|idx|inp|len|lib|mod|msg|num|obj|out|pkg|qs|qty|req|res|ret|retval|sep|sig|sn|src|stdDev|str|tbl|td|temp|tit|tmp|ts|util|utils|val|vars|ver|win|bx|cmd|dec|dur|hi|lo|mem|prs|wf|sk|er)$/
-// `_` never matches; the key tier also exempts `e` (as in the Grit original).
+/**
+ * A single lowercase ASCII letter.
+ *
+ * @remarks
+ * `_` never matches; the key tier also exempts `e` (as in the Grit original).
+ */
 const SINGLE_CHAR = /^[a-z]$/
+/** Generic names flagged on iteration callback parameters and loop variables. */
 const GENERIC_ITERATION_NAME = /^(?:index|count|value|result|data|item|entry|text|name|id|obj|arr)$/
 
+/** Array methods whose arrow callback's first parameter is an iteration variable. */
 const ITERATION_METHODS = new Set(['map', 'filter', 'find', 'forEach', 'some', 'every', 'flatMap'])
+/** Scope-manager definition types that count as JS bindings (Biome's `JsIdentifierBinding`). */
 const JS_BINDING_DEFINITIONS = new Set([
   'Variable',
   'Parameter',
@@ -49,6 +64,7 @@ const JS_BINDING_DEFINITIONS = new Set([
   'ImportBinding'
 ])
 
+/** Options schema shared by every naming rule: an optional `allow` list of exact names. */
 const ALLOW_SCHEMA = [
   {
     type: 'object',
@@ -57,25 +73,50 @@ const ALLOW_SCHEMA = [
   }
 ]
 
+/** Predicate that returns whether a name should be flagged. */
 type NameCheck = (name: string) => boolean
 
+/**
+ * Keeps the string entries of a value that may be an array.
+ *
+ * @param value - any config value
+ * @returns the string elements, or an empty array when `value` is not an array
+ */
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return []
   return value.filter((candidate): candidate is string => typeof candidate === 'string')
 }
 
+/**
+ * Reads the `allow` field of a config object.
+ *
+ * @param value - a settings or options value of unknown shape
+ * @returns `value.allow`, or `undefined` when `value` is not an object with that field
+ */
 function allowField(value: unknown): unknown {
   return typeof value === 'object' && value !== null && 'allow' in value ? value.allow : undefined
 }
 
-/** Names exempt from this rule: shared `settings.naming.allow` plus the rule's `allow` option. */
+/**
+ * Collects the names exempt from a rule: shared `settings.naming.allow` plus the rule's `allow`
+ * option.
+ *
+ * @param context - the rule context carrying settings and options
+ * @returns the merged set of exact, case-sensitive allowed names
+ */
 function allowedNames(context: Context): ReadonlySet<string> {
   const shared = allowField(context.settings['naming'])
   const [options] = context.options
   return new Set([...stringArray(shared), ...stringArray(allowField(options))])
 }
 
-/** Reports every JS binding (declared name) whose name passes `check`. */
+/**
+ * Reports every JS binding (declared name) whose name passes `check` and is not allowlisted.
+ *
+ * @param context - the rule context to read scopes from and report to
+ * @param check - returns whether a name should be flagged
+ * @param messageId - the rule message to report
+ */
 function checkBindings(context: Context, check: NameCheck, messageId: string): void {
   const allow = allowedNames(context)
   for (const scope of context.sourceCode.scopeManager.scopes) {
@@ -90,9 +131,19 @@ function checkBindings(context: Context, check: NameCheck, messageId: string): v
   }
 }
 
+/** Callback invoked with a member key node and whether the key is computed. */
 type KeyVisitor = (key: ESTree.Node, computed: boolean) => void
 
-/** Visitors for every member-key shape (the Grit `JsLiteralMemberName`). */
+/**
+ * Builds visitors for every member-key shape (the Grit `JsLiteralMemberName`).
+ *
+ * @remarks
+ * Shorthand properties are skipped; computed and non-identifier keys are passed to `visit`
+ * for it to filter.
+ *
+ * @param visit - called with each member key and its `computed` flag
+ * @returns an AST visitor map keyed by node type
+ */
 function memberKeyVisitors(visit: KeyVisitor): Record<string, (node: never) => void> {
   return {
     Property(node: ESTree.ObjectProperty | ESTree.BindingProperty) {
@@ -119,7 +170,15 @@ function memberKeyVisitors(visit: KeyVisitor): Record<string, (node: never) => v
   }
 }
 
-/** Visitors that report every member key whose name passes `check`. */
+/**
+ * Builds visitors that report every non-computed identifier member key whose name passes
+ * `check` and is not allowlisted.
+ *
+ * @param context - the rule context to report to
+ * @param check - returns whether a key name should be flagged
+ * @param messageId - the rule message to report
+ * @returns an AST visitor map keyed by node type
+ */
 function reportKeys(
   context: Context,
   check: NameCheck,
@@ -134,6 +193,7 @@ function reportKeys(
   })
 }
 
+/** `naming/no-abbreviations`: flags abbreviated bindings and member keys. */
 const noAbbreviations: Rule = {
   meta: {
     type: 'suggestion',
@@ -154,6 +214,7 @@ const noAbbreviations: Rule = {
   }
 }
 
+/** `naming/no-single-char-bindings`: flags single-letter bindings. */
 const noSingleCharBindings: Rule = {
   meta: {
     type: 'suggestion',
@@ -172,6 +233,7 @@ const noSingleCharBindings: Rule = {
   }
 }
 
+/** `naming/no-single-char-keys`: flags single-letter member keys, except `e`. */
 const noSingleCharKeys: Rule = {
   meta: {
     type: 'suggestion',
@@ -185,12 +247,25 @@ const noSingleCharKeys: Rule = {
   }
 }
 
-// The Grit templates match `(item)` / `(item, _)` callbacks and `reduce((_, item) => …[, init])`.
+/**
+ * Maximum parameters of an iteration-method callback that is still checked.
+ *
+ * @remarks
+ * The Grit templates match `(item)` / `(item, _)` callbacks and `reduce((_, item) => …[, init])`.
+ */
 const MAX_ITERATION_CALLBACK_PARAMS = 2
+/** Exact parameter count of a checked `reduce` callback: `(accumulator, item)`. */
 const REDUCE_CALLBACK_PARAMS = 2
+/** Maximum arguments of a checked `reduce` call: the callback and an optional initial value. */
 const MAX_REDUCE_ARGUMENTS = 2
 
-/** The iteration variable of `xs.map(...)`-style and `xs.reduce(...)` arrow callbacks. */
+/**
+ * Finds the iteration variable of `xs.map(...)`-style and `xs.reduce(...)` arrow callbacks.
+ *
+ * @param node - a call expression to inspect
+ * @returns the iteration parameter node, or `undefined` when the call is not a matching
+ *   iteration call (or the callback has no parameters)
+ */
 function callbackIterationParam(node: ESTree.CallExpression): ESTree.Node | undefined {
   const { callee, arguments: callArguments } = node
   if (callee.type !== 'MemberExpression' || callee.computed) return undefined
@@ -207,6 +282,10 @@ function callbackIterationParam(node: ESTree.CallExpression): ESTree.Node | unde
   return undefined
 }
 
+/**
+ * `naming/no-generic-iteration-names`: flags generic names on arrow iteration callbacks and on
+ * variables declared in `for` and `for…of` heads.
+ */
 const noGenericIterationNames: Rule = {
   meta: {
     type: 'suggestion',
@@ -244,6 +323,7 @@ const noGenericIterationNames: Rule = {
   }
 }
 
+/** The `naming` plugin exposing the four naming rules. */
 const plugin: Plugin = {
   meta: { name: 'naming' },
   rules: {

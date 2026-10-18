@@ -1,5 +1,6 @@
 /**
- * Record real Anthropic traffic as replay fixtures (`test/fixtures/recordings/anthropic-messages`).
+ * Records real Anthropic traffic as replay fixtures
+ * (`test/fixtures/recordings/anthropic-messages`).
  * On demand only: `pnpm run test:live:record`. It spends a few cents of quota on the login used.
  *
  * pi's own Anthropic client sends each scenario through a pass-through recorder
@@ -14,6 +15,8 @@
  * rotates the refresh token, and every other copy stops working.
  *
  * Runs under Node directly (`node scripts/record-fixtures.ts`), so imports are relative with `.ts`.
+ *
+ * @packageDocumentation
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -31,8 +34,11 @@ import { ModelRuntime, VERSION } from '@earendil-works/pi-coding-agent'
 
 import { type Recorder, saveRecording, startRecorder } from '../test/fixtures/recording.ts'
 
+/** The pi API every recording is made through and labelled with. */
 const API = 'anthropic-messages'
+/** The pi model each scenario starts from (a scenario may override only its id). */
 const MODEL_ID = 'claude-haiku-5-5'
+/** Upstream the recorder forwards to unless PI_PROXY_RECORD_UPSTREAM is set. */
 const DEFAULT_UPSTREAM = 'https://api.anthropic.com'
 
 /** One recorded exchange: what pi is asked, and with which options. */
@@ -45,6 +51,12 @@ interface Scenario {
   readonly repeat?: number
 }
 
+/**
+ * Builds a user message stamped with the current time.
+ *
+ * @param text - the message content
+ * @returns a pi user message
+ */
 function userMessage(text: string): Context['messages'][number] {
   return { role: 'user', content: text, timestamp: Date.now() }
 }
@@ -56,6 +68,7 @@ const LONG_SYSTEM_PROMPT = Array.from(
     `Reference line ${String(lineIndex)}: the recorder pads this prompt so the provider caches it.`
 ).join('\n')
 
+/** Two tools for the `two-tool-calls` scenario. */
 const WEATHER_TOOLS: Context['tools'] = [
   {
     name: 'get_weather',
@@ -69,6 +82,7 @@ const WEATHER_TOOLS: Context['tools'] = [
   }
 ]
 
+/** The scenarios recorded, in order; each name becomes a fixture file name. */
 const SCENARIOS: readonly Scenario[] = [
   {
     name: 'text',
@@ -116,11 +130,25 @@ const SCENARIOS: readonly Scenario[] = [
   }
 ]
 
+/**
+ * Prints a message to stderr and exits with status 1.
+ *
+ * @param message - the error to print
+ */
 function fail(message: string): never {
   process.stderr.write(`${message}\n`)
   process.exit(1)
 }
 
+/**
+ * Resolves the agent dir holding the recording login from PI_PROXY_RECORD_AGENT_DIR.
+ *
+ * @remarks
+ * Exits via {@link fail} when the variable is unset or empty, or when it names the everyday
+ * `~/.pi/agent` dir, so recording never refreshes a login another pi or proxy uses.
+ *
+ * @returns the absolute agent dir path
+ */
 function recordingAgentDir(): string {
   const configured = process.env.PI_PROXY_RECORD_AGENT_DIR
   if (configured === undefined || configured === '') {
@@ -139,6 +167,19 @@ function recordingAgentDir(): string {
   return agentDir
 }
 
+/**
+ * Sends one scenario through pi (repeating it when `scenario.repeat` is set) and saves the last
+ * exchange the recorder saw.
+ *
+ * @remarks
+ * Exits via {@link fail} when pi lacks the base model or the recorder saw no request.
+ *
+ * @param runtime - the pi model runtime pointed at the recorder
+ * @param recorder - the running pass-through recorder
+ * @param scenario - the exchange to record
+ * @returns the path of the saved recording
+ * @throws Error from `saveRecording` when the recording still contains a credential
+ */
 async function recordScenario(
   runtime: ModelRuntime,
   recorder: Recorder,
@@ -168,6 +209,15 @@ async function recordScenario(
   )
 }
 
+/**
+ * Records every scenario against the login in PI_PROXY_RECORD_AGENT_DIR.
+ *
+ * @remarks
+ * Starts the recorder (upstream: PI_PROXY_RECORD_UPSTREAM, default {@link DEFAULT_UPSTREAM}),
+ * writes a temporary `models.json` that points pi's `anthropic` provider at it, and removes that
+ * file and stops the recorder when done. Exits via {@link fail} when the dir has no Anthropic
+ * login.
+ */
 async function main(): Promise<void> {
   const agentDir = recordingAgentDir()
   const recorder = await startRecorder(process.env.PI_PROXY_RECORD_UPSTREAM ?? DEFAULT_UPSTREAM)

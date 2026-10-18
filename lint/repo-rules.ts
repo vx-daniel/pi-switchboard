@@ -1,9 +1,12 @@
 /**
  * Repo lint rules with no built-in Oxlint equivalent (carried over from the Biome config).
+ *
+ * @packageDocumentation
  */
 
 import { definePlugin, defineRule } from 'vite-plus/lint/plugins'
 
+/** `repo/no-enum`: flags every TypeScript `enum` declaration. */
 const noEnum = defineRule({
   meta: { messages: { noEnum: 'Use a union or an `as const` object instead of an enum.' } },
   create(context) {
@@ -15,6 +18,7 @@ const noEnum = defineRule({
   }
 })
 
+/** `repo/no-delete`: flags every `delete` expression. */
 const noDelete = defineRule({
   meta: { messages: { noDelete: 'Avoid `delete`; assign `undefined` or build a new object.' } },
   create(context) {
@@ -26,6 +30,13 @@ const noDelete = defineRule({
   }
 })
 
+/**
+ * `repo/no-implicit-any-let`: flags `let` and `var` declarators with neither a type annotation
+ * nor an initializer.
+ *
+ * @remarks
+ * `const`, `declare` declarations, and the left side of `for…in` / `for…of` are exempt.
+ */
 const noImplicitAnyLet = defineRule({
   meta: {
     messages: { noImplicitAnyLet: 'Give this variable a type annotation or an initializer.' }

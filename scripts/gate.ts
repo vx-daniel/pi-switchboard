@@ -1,10 +1,14 @@
 #!/usr/bin/env node
 /**
+ * The single repo-wide gate: runs format, lint, test, fallow and build in that order and stops at
+ * the first failure.
+ *
+ * @remarks
  * Ported from zen-harness-foundation's `scripts/gate.ts` (itself from slop-factory's bun example).
  * The shape is deliberately identical so improvements travel in either direction; the GATES list
  * and this header are this repository's own.
  *
- * The single repo-wide gate. One ordered list of checks; `check:all` delegates here, and both the
+ * One ordered list of checks; `check:all` delegates here, and both the
  * pre-commit hook (`.vite-hooks/pre-commit`) and CI (`.github/workflows/ci.yml`, and the release
  * workflow before it publishes) invoke `check:all`, so one list is the single source of what
  * "green" means everywhere. Add a check here and every caller inherits it.
@@ -17,8 +21,8 @@
  *                `fmt` block of `vite.config.ts`; `vp fmt` writes it.
  *   2. lint   — `vp lint`: the `lint` block of `vite.config.ts` — the Viaanix rules, type-aware,
  *                with `typeCheck` on, so this gate is also the TypeScript type check — plus the
- *                zod, import-alias, repo (`lint/repo-rules.ts`) and naming (`lint/naming.ts`)
- *                plugins. Warnings fail it (`maxWarnings: 0`).
+ *                zod, import-alias, vite-plus, repo (`lint/repo-rules.ts`), naming
+ *                (`lint/naming.ts`) and @logtape plugins. Warnings fail it (`maxWarnings: 0`).
  *   3. test   — `vp test --project offline --coverage`: Vitest over the unit and integration suites,
  *                with no real pi login or provider credentials (test/setup/offline.ts). It writes the
  *                coverage the fallow gate reads (`coverage/coverage-final.json`). The live
@@ -42,13 +46,20 @@
  * Runtime is node — `check:all` runs `node scripts/gate.ts`, and Node strips the TypeScript types
  * at load. Each gate shells out through `<package manager> run <script>`, so a command's
  * definition lives in exactly one place: package.json.
+ *
+ * @packageDocumentation
  */
 import { spawn } from 'node:child_process'
 
+/** ANSI escape: green foreground. */
 const GREEN = '\x1b[32m'
+/** ANSI escape: red foreground. */
 const RED = '\x1b[31m'
+/** ANSI escape: dim text. */
 const DIM = '\x1b[2m'
+/** ANSI escape: bold text. */
 const BOLD = '\x1b[1m'
+/** ANSI escape: reset all attributes. */
 const RESET = '\x1b[0m'
 
 /**
@@ -56,12 +67,17 @@ const RESET = '\x1b[0m'
  * `<manager> run <script>`, so the invocation shape is identical and only the binary differs.
  */
 const KNOWN_PACKAGE_MANAGERS = ['npm', 'bun', 'pnpm', 'yarn'] as const
+/** One of {@link KNOWN_PACKAGE_MANAGERS}. */
 type PackageManager = (typeof KNOWN_PACKAGE_MANAGERS)[number]
 
+/** Package manager used when neither the user agent nor the runtime names one. */
 const DEFAULT_PACKAGE_MANAGER: PackageManager = 'npm'
 
 /**
- * Which package manager to shell out to for each gate.
+ * Picks the package manager to shell out to for each gate.
+ *
+ * @remarks
+ * Checked in order:
  *
  *   1. `npm_config_user_agent`: every major package manager sets it when running a script, and its
  *      first token is the manager's name (`pnpm/11.1.1 …`, `npm/11.17.0 …`). Authoritative when the
@@ -71,6 +87,8 @@ const DEFAULT_PACKAGE_MANAGER: PackageManager = 'npm'
  *
  * Falls back to npm, which is correct for `node scripts/gate.ts` on a normal Node install: npm runs
  * any package.json script, whichever manager installed the tree.
+ *
+ * @returns the detected manager name
  */
 function detectPackageManager(): PackageManager {
   const userAgent = process.env.npm_config_user_agent
@@ -84,6 +102,7 @@ function detectPackageManager(): PackageManager {
   return 'Bun' in globalThis ? 'bun' : DEFAULT_PACKAGE_MANAGER
 }
 
+/** The package manager every gate runs through, detected once at load. */
 const PACKAGE_MANAGER = detectPackageManager()
 
 /** One child-process gate: a display name, a one-line description, and the script it runs. */
@@ -94,7 +113,10 @@ interface Gate {
   readonly script: string
 }
 
-/** Exported for `test/unit/gate.test.ts`, which holds the header above equal to this list. */
+/**
+ * The gates, in run order. Exported for `test/unit/gate.test.ts`, which holds the header above
+ * equal to this list.
+ */
 export const GATES: readonly Gate[] = [
   {
     name: 'format',
@@ -137,7 +159,12 @@ export const GATES: readonly Gate[] = [
  */
 const WORKER_ABORT = /has overflowed its stack|fatal runtime error|panicked at|Segmentation fault/
 
-/** Whether a tool's stderr says it aborted. Exported for `test/unit/gate.test.ts`. */
+/**
+ * Reports whether a tool's stderr says it aborted. Exported for `test/unit/gate.test.ts`.
+ *
+ * @param stderr - a window of the tool's stderr text
+ * @returns whether it contains a runtime abort banner
+ */
 export function reportsWorkerAbort(stderr: string): boolean {
   return WORKER_ABORT.test(stderr)
 }
@@ -149,16 +176,21 @@ export function reportsWorkerAbort(stderr: string): boolean {
 const ABORT_SCAN_OVERLAP = 64
 
 /**
- * Runs one gate to completion. Both of the tool's streams are piped and written straight through as
- * they arrive — live, verbatim, unbuffered, each to the stream it came from. Only stderr is scanned
- * for a runtime abort, and nothing accumulates, so there is no output size a gate can exceed.
- * Resolves the child's exit code (non-zero = failure); a child killed by a signal, one that failed
- * to spawn, or one that aborted while claiming success, fails.
+ * Runs one gate to completion.
+ *
+ * @remarks
+ * Both of the tool's streams are piped and written straight through as they arrive — live,
+ * verbatim, unbuffered, each to the stream it came from. Only stderr is scanned for a runtime
+ * abort, and nothing accumulates, so there is no output size a gate can exceed.
  *
  * Both streams are piped rather than one, because inheriting stdout while piping stderr races a
  * direct fd against one that round-trips our event loop: a linter writing diagnostics to stdout and
  * its summary to stderr had the two spliced into each other mid-line. Delaying both by the same
  * path keeps the tool's own order.
+ *
+ * @param gate - the gate to run
+ * @returns a promise of the exit code (non-zero = failure): the child's status, or 1 when the
+ *   child was killed by a signal, failed to spawn, or aborted while claiming success
  */
 function runGate(gate: Gate): Promise<number> {
   process.stdout.write(`\n${BOLD}▶ ${gate.name}${RESET} ${DIM}— ${gate.describe}${RESET}\n`)
@@ -217,9 +249,12 @@ function runGate(gate: Gate): Promise<number> {
 }
 
 /**
- * Run only when EXECUTED, never when imported. `reportsWorkerAbort` is exported so its matcher can
- * be tested, and a test that imported this file would otherwise run every gate — including the
- * test suite itself — from inside the test run.
+ * Runs every gate in order, stops at the first failure, and sets a non-zero exit code on failure.
+ *
+ * @remarks
+ * Runs only when EXECUTED, never when imported. `GATES` and `reportsWorkerAbort` are exported so
+ * they can be tested, and a test that imported this file would otherwise run every gate —
+ * including the test suite itself — from inside the test run.
  */
 async function main(): Promise<void> {
   process.stdout.write(`${DIM}gate: running via ${PACKAGE_MANAGER}${RESET}\n`)
