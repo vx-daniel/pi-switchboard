@@ -433,7 +433,8 @@ Rejected (`422`, naming the keyword and its path; logged as a warning with the t
 - non-string enum values
 - any other keyword (e.g. `x-*` extensions, OpenAPI `nullable`, `propertyNames`), or a supported
   keyword on a type it does not apply to
-- a supported keyword whose value is of the wrong kind
+- a supported keyword whose value is of the wrong kind, including a `required` that is not an
+  array of property names (ignoring it would make every property optional)
 
 ## Known gaps and silent drops
 

@@ -2,6 +2,7 @@ import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi
 import { resetSync } from '@logtape/logtape'
 import { configureLogging } from '@proxy/logging'
 import { encodeDone, encodeSSE, streamToSSE } from '@proxy/openai/sse'
+import { isRecord } from '@proxy/utils/guards'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 describe('encodeSSE', () => {
@@ -146,6 +147,69 @@ describe('streamToSSE', () => {
     const finishFrame = JSON.parse(frames[1]?.slice(6) ?? '')
     expect(finishFrame.choices[0].finish_reason).toBe('stop')
   })
+
+  // Catches the role sent only on a `start` or text chunk (#111): a stream whose first event is a
+  // tool call, or that ends with no content at all, must still open with `role: "assistant"`, and
+  // no later chunk may repeat it.
+  test.each([
+    {
+      first: 'toolcall_start',
+      events: (message: AssistantMessage): AssistantMessageEvent[] => [
+        { type: 'toolcall_start', contentIndex: 0, partial: message },
+        { type: 'done', reason: 'toolUse', message }
+      ],
+      deltas: [
+        {
+          role: 'assistant',
+          tool_calls: [
+            {
+              index: 0,
+              id: 'call-1',
+              type: 'function',
+              function: { name: 'lookup', arguments: '' }
+            }
+          ]
+        },
+        {}
+      ]
+    },
+    {
+      first: 'done',
+      events: (message: AssistantMessage): AssistantMessageEvent[] => [
+        { type: 'done', reason: 'stop', message }
+      ],
+      deltas: [{ role: 'assistant' }]
+    }
+  ])(
+    'the first chunk carries the role when the first event is $first',
+    async ({ events, deltas }) => {
+      const message: AssistantMessage = {
+        ...makeErrorMessage(''),
+        stopReason: 'stop',
+        content: [{ type: 'toolCall', id: 'call-1', name: 'lookup', arguments: {} }]
+      }
+
+      const frames: string[] = []
+      for await (const frame of streamToSSE(
+        yieldEvents(events(message)),
+        'req-1',
+        'test/model',
+        false
+      )) {
+        frames.push(frame)
+      }
+
+      const sentDeltas = frames
+        .filter((frame) => frame !== 'data: [DONE]\n\n')
+        .map((frame): unknown => {
+          const chunk: unknown = JSON.parse(frame.slice('data: '.length))
+          const choices: unknown = isRecord(chunk) ? chunk['choices'] : undefined
+          const choice: unknown = Array.isArray(choices) ? choices.at(0) : undefined
+          return isRecord(choice) ? choice['delta'] : undefined
+        })
+      expect(sentDeltas).toEqual(deltas)
+    }
+  )
 })
 
 describe('upstream error logging', () => {

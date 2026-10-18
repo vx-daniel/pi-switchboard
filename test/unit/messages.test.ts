@@ -291,6 +291,22 @@ describe('convertMessages: images', () => {
     expect(result.message).toContain('image/bmp')
   })
 
+  // Catches the size error claiming a byte limit: the limit is on the base64 text, which is about
+  // a third longer than the image it encodes (#111).
+  test('rejects a data URI over the size limit, saying what was measured', () => {
+    const tooLong = 'A'.repeat(20 * 1024 * 1024 + 1)
+    const result = convertMessages([
+      {
+        role: 'user',
+        content: [{ type: 'image_url', image_url: { url: `data:image/png;base64,${tooLong}` } }]
+      }
+    ])
+
+    expect(result.ok ? undefined : result.message).toBe(
+      'Image data exceeds the maximum of 20971520 base64 characters at messages[0].content[0]'
+    )
+  })
+
   test('rejects invalid base64 data URI format', () => {
     const messages: OpenAIMessage[] = [
       {

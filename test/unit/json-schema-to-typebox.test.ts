@@ -100,6 +100,22 @@ describe('jsonSchemaToTypebox', () => {
       if (!result.ok) return
       expect(schemaValue(result.schema, 'type')).toBe('object')
     })
+
+    // Catches a malformed `required` ignored, which made every property optional: a silent
+    // downgrade of the client's schema (#111).
+    test.each([['name'], [['name', 1]], [{ name: true }]])('rejects required %j', (required) => {
+      const result = jsonSchemaToTypebox({
+        type: 'object',
+        properties: { name: { type: 'string' } },
+        required
+      })
+
+      expect(result).toEqual({
+        ok: false,
+        message: "'required' must be an array of property names at root",
+        path: ''
+      })
+    })
   })
 
   describe('array type', () => {
@@ -319,6 +335,21 @@ describe('jsonSchemaToTypebox', () => {
       expect(result.ok).toBe(false)
       if (result.ok) return
       expect(result.message).toContain('$ref')
+    })
+
+    // Catches a failing anyOf branch reported as `root.anyOf[…]`, a segment no other path has:
+    // a branch path reads like a property path (#111), at the root and below it.
+    test.each([
+      { at: 'the root', path: undefined, expected: 'anyOf[1]' },
+      {
+        at: 'a nested node',
+        path: 'tools[0].function.parameters',
+        expected: 'tools[0].function.parameters.anyOf[1]'
+      }
+    ])('names a failing branch at $at by its path', ({ path, expected }) => {
+      const result = jsonSchemaToTypebox({ anyOf: [{ type: 'string' }, { $ref: '#/bad' }] }, path)
+
+      expect(result.ok ? undefined : result.path).toBe(expected)
     })
 
     test('works as property type in object schema', () => {

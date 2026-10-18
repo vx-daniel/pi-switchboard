@@ -523,7 +523,9 @@ function convertAnyOf(
 
   const converted: TSchema[] = []
   for (let branchIndex = 0; branchIndex < branches.length; branchIndex++) {
-    const branchPath = `${path || 'root'}.anyOf[${String(branchIndex)}]`
+    // Same form as a property path: no `root` segment when the node is the root.
+    const branchSegment = `anyOf[${String(branchIndex)}]`
+    const branchPath = path.length > 0 ? `${path}.${branchSegment}` : branchSegment
     const result = convertSchema(branches[branchIndex], branchPath)
     if (!result.ok) {
       return result
@@ -632,20 +634,19 @@ function convertNullableType(
 }
 
 /**
- * Collects the string names in an object's `required` array.
+ * Reads an object's `required` list.
  *
- * @param rawRequired - the `required` value; non-strings and a non-array are ignored
- * @returns the required property names
+ * @param rawRequired - the `required` value, or `undefined` when the node has none
+ * @returns the required property names (empty without `required`), or `undefined` when `required`
+ *   is not an array of strings, which JSON Schema does not allow
  */
-function collectRequiredNames(rawRequired: unknown): Set<string> {
+function collectRequiredNames(rawRequired: unknown): Set<string> | undefined {
+  if (rawRequired === undefined) return new Set()
+  if (!Array.isArray(rawRequired)) return undefined
   const requiredSet = new Set<string>()
-  if (!Array.isArray(rawRequired)) {
-    return requiredSet
-  }
   for (const requiredName of rawRequired) {
-    if (typeof requiredName === 'string') {
-      requiredSet.add(requiredName)
-    }
+    if (typeof requiredName !== 'string') return undefined
+    requiredSet.add(requiredName)
   }
   return requiredSet
 }
@@ -654,19 +655,30 @@ function collectRequiredNames(rawRequired: unknown): Set<string> {
  * Converts an `object` node; properties not in `required` become optional.
  *
  * @remarks
- * Property paths are `<path>.<name>`, without a `properties` segment.
+ * Property paths are `<path>.<name>`, without a `properties` segment. A `required` that is not an
+ * array of strings is refused rather than ignored: ignoring it would make every property optional,
+ * a silent downgrade of the client's schema.
  *
  * @param schema - the node
  * @param path - the node's path, for errors
  * @param opts - the node's collected annotations and constraints
  * @returns the object schema (empty without `properties`), or the error for a non-object
- *   `properties` or a failing property
+ *   `properties`, a malformed `required` or a failing property
  */
 function convertObject(
   schema: Record<string, unknown>,
   path: string,
   opts: Record<string, unknown>
 ): SchemaConversionResult {
+  const requiredSet = collectRequiredNames(schema['required'])
+  if (requiredSet === undefined) {
+    return {
+      ok: false,
+      message: `'required' must be an array of property names at ${path || 'root'}`,
+      path
+    }
+  }
+
   const rawProperties = schema['properties']
 
   // No properties: an empty object type
@@ -682,7 +694,6 @@ function convertObject(
     }
   }
 
-  const requiredSet = collectRequiredNames(schema['required'])
   const typeboxProperties: Record<string, TSchema> = {}
 
   for (const [key, propSchema] of Object.entries(rawProperties)) {
