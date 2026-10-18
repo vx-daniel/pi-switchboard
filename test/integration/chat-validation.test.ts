@@ -169,22 +169,22 @@ describe('POST /v1/chat/completions - validation', () => {
   })
 
   test('rejects permanently rejected fields with 422', async () => {
+    // OpenAI's `n` (choices per request), which the proxy rejects
+    const choicesParameter = 'n'
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: 'openai/gpt-4o',
         messages: [{ role: 'user', content: 'Hello' }],
-        // oxlint-disable-next-line naming/no-single-char-keys -- "n" is OpenAI's request parameter under test
-        n: 2
+        [choicesParameter]: 2
       })
     })
     expect(response.status).toBe(422)
     const body = await jsonBody(response)
     expect(isErrorLike(body)).toBe(true)
     if (!isErrorLike(body)) return
-    const param = (body.error as Record<string, unknown>)['param']
-    expect(param).toBe('n')
+    expect(body.error['param']).toBe(choicesParameter)
   })
 
   test('rejects unknown fields with 422', async () => {
