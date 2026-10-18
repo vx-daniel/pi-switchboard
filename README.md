@@ -137,7 +137,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `strict` on function tools | Applied where pi marks the model strict-capable, in each API's own shape (OpenAI, Responses, Anthropic, …). Strict rewrites the schema: every property becomes required and optional ones nullable, so the model may send `null` for a field it would otherwise omit. Elsewhere, or when the schema is outside the provider's strict subset, the tool is sent without strict, with no error (see [PLAN.md](PLAN.md#strict-on-function-tools--strict-where-supported-44)) |
 | `tool_calls` in messages | Assistant tool call + tool result roundtrip |
 | `parallel_tool_calls` | Forwarded to OpenAI/Codex; translated to `disable_parallel_tool_use` for Anthropic |
-| `reasoning_effort` | Maps to pi's `ThinkingLevel` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`) |
+| `reasoning_effort` | Maps to pi's thinking level. `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`); on a model whose reasoning cannot be turned off it is the lowest level the model supports, not the provider's default. `minimal` … `xhigh` map to the same pi level, clamped by pi to what the model supports |
 | `response_format` | `text`, `json_object`, and `json_schema` (OpenAI-compatible APIs only) |
 | `top_p` | Supported by OpenAI, Anthropic (native), and Google (translated to `topP`) |
 | `frequency_penalty` | OpenAI and Google only (translated to `frequencyPenalty`) |

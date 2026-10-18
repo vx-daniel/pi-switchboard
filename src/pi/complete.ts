@@ -6,14 +6,15 @@
  * idle timeout (`src/pi/upstream-idle.ts`).
  */
 
-import type {
-  Api,
-  AssistantMessage,
-  AssistantMessageEventStream,
-  Context,
-  Model,
-  SimpleStreamOptions,
-  ThinkingLevel
+import {
+  type Api,
+  type AssistantMessage,
+  type AssistantMessageEventStream,
+  clampThinkingLevel,
+  type Context,
+  type Model,
+  type ModelThinkingLevel,
+  type SimpleStreamOptions
 } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
@@ -24,15 +25,22 @@ import { isRecord } from '@proxy/utils/guards'
 const completeLogger = proxyLogger('pi', 'complete')
 
 /**
- * Map OpenAI reasoning_effort to pi ThinkingLevel.
+ * Map OpenAI reasoning_effort to pi's thinking level.
  *
  * OpenAI: "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
- * Pi: "minimal" | "low" | "medium" | "high" | "xhigh"
+ * Pi: "off" | "minimal" | "low" | "medium" | "high" | "xhigh"
  *
- * "none" maps to "minimal" (pi has no "none" level).
+ * "none" is pi's "off". `SimpleStreamOptions.reasoning` has no "off" value: pi treats an absent
+ * `reasoning` as off (no thinking on Anthropic; `reasoning.effort` "none", or the model's own off
+ * value, on OpenAI Responses), so "off" means leave it unset. A model whose reasoning cannot be
+ * turned off (its `thinkingLevelMap.off` is null) would then get nothing at all, which providers
+ * read as their default effort (OpenAI: medium); there "off" is clamped to the lowest level the
+ * model supports instead, the closest it comes to none.
  */
-const REASONING_EFFORT_MAP: Record<string, ThinkingLevel> = {
-  none: 'minimal',
+const REASONING_EFFORT_MAP: Readonly<
+  Record<NonNullable<ChatCompletionRequest['reasoning_effort']>, ModelThinkingLevel>
+> = {
+  none: 'off',
   minimal: 'minimal',
   low: 'low',
   medium: 'medium',
@@ -440,17 +448,12 @@ async function buildStreamOptions(
     opts.maxTokens = maxTokens
   }
 
-  // Map reasoning_effort to pi ThinkingLevel
+  // Map reasoning_effort to pi's thinking level. Only "off" is clamped here (see
+  // REASONING_EFFORT_MAP); pi clamps the other levels to what the model supports itself.
   if (request.reasoning_effort !== undefined) {
-    const level = REASONING_EFFORT_MAP[request.reasoning_effort]
-    if (level === undefined) {
-      completeLogger.warn(
-        'No pi thinking level for reasoning_effort {reasoningEffort}; ignoring it',
-        {
-          reasoningEffort: request.reasoning_effort
-        }
-      )
-    } else {
+    const requested = REASONING_EFFORT_MAP[request.reasoning_effort]
+    const level = requested === 'off' ? clampThinkingLevel(model, 'off') : requested
+    if (level !== 'off') {
       opts.reasoning = level
     }
   }
