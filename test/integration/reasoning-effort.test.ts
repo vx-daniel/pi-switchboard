@@ -31,7 +31,10 @@ beforeAll(async () => {
     'claude-always-thinking': answer,
     'gpt-reasoning': answer,
     'gpt-always-reasoning': answer,
-    'gpt-low-floor': answer
+    'gpt-low-floor': answer,
+    'chat-off-none': answer,
+    'chat-always-reasoning': answer,
+    'chat-undeclared-off': answer
   })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
@@ -57,6 +60,16 @@ beforeAll(async () => {
               reasoning: true,
               thinkingLevelMap: { off: null, minimal: null }
             }
+          ]
+        },
+        completions: {
+          baseUrl: `${mock.origin}/v1`,
+          api: 'openai-completions',
+          apiKey: MOCK_KEY,
+          models: [
+            { id: 'chat-off-none', reasoning: true, thinkingLevelMap: { off: 'none' } },
+            { id: 'chat-always-reasoning', reasoning: true, thinkingLevelMap: { off: null } },
+            { id: 'chat-undeclared-off', reasoning: true }
           ]
         }
       }
@@ -129,6 +142,29 @@ describe('reasoning_effort "none" on a model that cannot turn reasoning off', ()
       budget_tokens: MINIMAL_THINKING_BUDGET,
       display: 'summarized'
     })
+  })
+})
+
+describe('reasoning_effort "none" on openai-completions follows the model definition', () => {
+  // Catches "none" not reaching a chat-completions model that declares how to say off.
+  test('a model with an off value gets it', async () => {
+    expect(await sentField('completions/chat-off-none', 'none', 'reasoning_effort')).toBe('none')
+  })
+
+  // Catches the clamp missing on chat completions, the API with the most models that cannot turn
+  // reasoning off: they would get the provider's default effort.
+  test('a model that cannot turn reasoning off gets the lowest level, minimal', async () => {
+    expect(await sentField('completions/chat-always-reasoning', 'none', 'reasoning_effort')).toBe(
+      'minimal'
+    )
+  })
+
+  // Catches the proxy overriding the model definition with an effort of its own: a model that
+  // declares no off value says that sending nothing is off (pi's contract; README).
+  test('a model that declares no off value gets no reasoning_effort', async () => {
+    expect(
+      await sentField('completions/chat-undeclared-off', 'none', 'reasoning_effort')
+    ).toBeUndefined()
   })
 })
 
