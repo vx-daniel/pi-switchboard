@@ -98,7 +98,7 @@ export function getRuntime(): ModelRuntime {
   return runtime
 }
 
-export function getSettingsManager(): SettingsManager {
+function getSettingsManager(): SettingsManager {
   if (settingsManager === undefined) {
     throw new Error('SettingsManager not initialized. Call initRegistry() first.')
   }

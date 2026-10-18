@@ -19,6 +19,8 @@ import { dirname, join } from 'node:path'
 
 import * as z from 'zod'
 
+import { listenOnLoopback } from './local-server'
+
 /** Where recordings live: `<api>/<scenario>.json`. */
 export const RECORDINGS_DIR = join(import.meta.dirname, 'recordings')
 
@@ -164,12 +166,9 @@ export async function startRecorder(upstreamOrigin: string): Promise<Recorder> {
       void record(upstreamOrigin, request, response, exchanges)
     })
   })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('recorder not on TCP')
+  const baseUrl = await listenOnLoopback(server)
   return {
-    baseUrl: `http://127.0.0.1:${String(address.port)}`,
+    baseUrl,
     exchanges,
     async close() {
       server.closeAllConnections()

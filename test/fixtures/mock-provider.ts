@@ -15,6 +15,8 @@ import { zstdDecompressSync } from 'node:zlib'
 
 import { isRecord } from '@proxy/utils/guards'
 
+import { listenOnLoopback } from './local-server'
+
 export interface MockRequest {
   readonly path: string
   readonly headers: IncomingHttpHeaders
@@ -99,11 +101,7 @@ export async function startMockProvider(
       void reply(response, request)
     })
   })
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const address = server.address()
-  if (address === null || typeof address === 'string') throw new Error('mock provider not on TCP')
-  const origin = `http://127.0.0.1:${String(address.port)}`
+  const origin = await listenOnLoopback(server)
 
   return {
     origin,
