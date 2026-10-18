@@ -784,7 +784,7 @@ Use an OpenAI-style shape:
 - `503` provider unavailable (`provider_unavailable`, upstream 503) or overloaded
   (`provider_overloaded`, upstream 529)
 - `504` upstream timeout (`timeout`): an upstream 408 or 504, or the provider sent nothing for
-  `upstreamTimeoutMs` (an idle timeout that restarts on every upstream event, not a cap on the call;
+  `upstreamTimeoutMs` (an idle timeout that restarts on every upstream event, raw provider events included (#50), not a cap on the call;
   `src/pi/upstream-idle.ts`)
 
 Upstream failures (`mapUpstreamError`, `src/server/errors.ts`): pi reports a failure as text, with
