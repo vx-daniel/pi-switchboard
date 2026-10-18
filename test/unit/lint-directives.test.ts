@@ -52,16 +52,57 @@ function commentsOf(path: string, source: string): string[] {
     typescript.forEachChild(node, visit)
   }
   visit(file)
-  collect(file.endOfFileToken.getFullStart())
   return [...comments.values()]
 }
 
-// Catches a disable comment anywhere, including one that names the rule meant to forbid it.
+/** The lint directives in `source`: its comments that start with one, sorted. */
+function directivesIn(path: string, source: string): string[] {
+  return commentsOf(path, source)
+    .filter((comment) => LINT_DIRECTIVE.test(comment))
+    .toSorted()
+}
+
+// Catches a detector that finds nothing, which would let the repository-wide test below pass
+// whatever the code says: each form oxlint obeys, including one naming the rule meant to forbid it.
+test('finds every form of directive oxlint obeys', () => {
+  const source = [
+    '/* oxlint-disable */',
+    'export const first = 1 // oxlint-disable-line no-magic-numbers',
+    '/* eslint-disable repo/no-enum */',
+    '// oxlint-disable-next-line no-magic-numbers',
+    'export const second = 2',
+    '// eslint-enable'
+  ].join('\n')
+
+  expect(directivesIn('sample.ts', source)).toEqual([
+    '/* eslint-disable repo/no-enum */',
+    '/* oxlint-disable */',
+    '// eslint-enable',
+    '// oxlint-disable-line no-magic-numbers',
+    '// oxlint-disable-next-line no-magic-numbers'
+  ])
+})
+
+// Catches false positives that would block legitimate code: directive text that is not a comment,
+// prose that mentions one, and a doc comment, which oxlint does not read as a directive.
+test('leaves strings, regular expressions, prose and doc comments alone', () => {
+  const source = [
+    "export const text = '// oxlint-disable-next-line not-a-comment'",
+    'export const pattern = /\\/\\/ eslint-disable x/',
+    '// prose that mentions oxlint-disable is not a directive',
+    '/** oxlint-disable no-magic-numbers */',
+    'export const value = 1'
+  ].join('\n')
+
+  expect(directivesIn('sample.ts', source)).toEqual([])
+})
+
+// Catches a disable comment anywhere in the repository.
 test('no tracked script disables or re-enables a lint rule in a comment', () => {
   const directives = trackedScripts().flatMap((path) =>
-    commentsOf(path, readFileSync(join(REPOSITORY_ROOT, path), 'utf8'))
-      .filter((comment) => LINT_DIRECTIVE.test(comment))
-      .map((comment) => `${path}: ${comment}`)
+    directivesIn(path, readFileSync(join(REPOSITORY_ROOT, path), 'utf8')).map(
+      (comment) => `${path}: ${comment}`
+    )
   )
 
   expect(directives).toEqual([])
