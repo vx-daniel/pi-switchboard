@@ -2,7 +2,7 @@
 
 This repo is a **local OpenAI-compatible HTTP proxy for pi**. It exposes a small OpenAI-style API on top of pi's SDK, model registry, and auth flow.
 
-`AGENTS.md` is always-on Pi context. Keep this file short, precise, and operational. Put deep architecture detail in [`PLAN.md`](PLAN.md), human onboarding in [`README.md`](README.md), the execution checklist in [`TODO.md`](TODO.md), and phase summary in [`ROADMAP.md`](ROADMAP.md).
+`AGENTS.md` is always-on Pi context. Keep this file short, precise, and operational. The project's principles live in [`CONSTITUTION.md`](CONSTITUTION.md), which supersedes conflicting guidance here or in any other doc. Put deep architecture detail in [`PLAN.md`](PLAN.md), human onboarding in [`README.md`](README.md), the execution checklist in [`TODO.md`](TODO.md), and phase summary in [`ROADMAP.md`](ROADMAP.md).
 
 User instructions override this file.
 
@@ -10,10 +10,11 @@ User instructions override this file.
 
 Before changing code:
 
-1. Read [`PLAN.md`](PLAN.md) for architecture, API compatibility policy, and security boundaries.
-2. Skim [`README.md`](README.md) for public contract and operator-facing behavior.
-3. Check `package.json`, `vite.config.ts` (fmt, lint, test, pack, staged), `lint/repo-rules.ts`, `.vite-hooks/`, and `tsconfig.json` before changing tooling.
-4. Use recent git history when behavior or workflow intent is unclear: `git log --oneline -20`.
+1. Read [`CONSTITUTION.md`](CONSTITUTION.md) for the principles every change is checked against.
+2. Read [`PLAN.md`](PLAN.md) for architecture, API compatibility policy, and security boundaries.
+3. Skim [`README.md`](README.md) for public contract and operator-facing behavior.
+4. Check `package.json`, `vite.config.ts` (fmt, lint, test, pack, staged), `lint/repo-rules.ts`, `.vite-hooks/`, and `tsconfig.json` before changing tooling.
+5. Use recent git history when behavior or workflow intent is unclear: `git log --oneline -20`.
 
 ## Repo shape
 
@@ -119,6 +120,7 @@ Practical guidance:
 
 Keep durable docs aligned with implementation:
 
+- A pull request that touches stable routes, auth semantics, model resolution, validation rules, or security defaults names the [`CONSTITUTION.md`](CONSTITUTION.md) principles it affects.
 - Update [`PLAN.md`](PLAN.md) when architecture, constraints, compatibility policy, or security boundaries change.
 - Update [`TODO.md`](TODO.md) when execution status or next tasks change.
 - Update [`ROADMAP.md`](ROADMAP.md) when the current phase summary changes.
@@ -135,6 +137,7 @@ Stop and confirm with the user before:
 - loosening validation/security behavior
 - weakening hooks, lint/type-safety rules, or release workflow
 - making a broad refactor across server/openai/pi translation layers without clear acceptance criteria
+- amending [`CONSTITUTION.md`](CONSTITUTION.md) (an amendment bumps its version and updates this file in the same change)
 
 ## Scope of this file
 

@@ -20,6 +20,7 @@ import {
   parse,
   printParseErrorCode
 } from 'jsonc-parser'
+import * as z from 'zod'
 
 const zedLogger = proxyLogger('sync', 'zed')
 
@@ -153,9 +154,23 @@ const MODIFY_OPTIONS: ModificationOptions = {
   }
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value)
-}
+/** The part of Zed's settings the sync reads. Other keys pass unchecked; the file keeps them. */
+const ZedSettingsSchema = z.object({
+  language_models: z.object({
+    // Keys untrimmed: a provider name is matched exactly, as the sync writes to that exact path.
+    openai_compatible: z.record(z.string(), z.unknown())
+  })
+})
+
+const ZedProviderBlockSchema = z.object({ available_models: z.array(z.unknown()) })
+
+/**
+ * Names as Zed's file holds them, so the added/removed/unchanged counts describe the file. Not
+ * `z.string().trim()`: they are compared verbatim with the names the sync writes.
+ */
+const ZedModelNameSchema = z.object({
+  name: z.custom<string>((value) => typeof value === 'string', 'expected a string')
+})
 
 /**
  * Parse Zed settings as Zed does: JSONC, trailing commas allowed. Any other error means Zed cannot
@@ -205,37 +220,25 @@ function refuseMalformed(configPath: string, text: string, errors: ParseError[])
  * Returns the model names, or an empty array if the path does not exist.
  */
 function readCurrentModelNames(root: unknown, providerName: string): string[] {
-  if (!isRecord(root)) {
-    zedLogger.debug('Zed settings root is not an object; treating as no existing models')
-    return []
-  }
-
-  const langModels: unknown = root['language_models']
-  if (!isRecord(langModels)) return []
-
-  const compat: unknown = langModels['openai_compatible']
-  if (!isRecord(compat)) return []
-
-  const provider: unknown = compat[providerName]
-  if (!isRecord(provider)) {
+  const settings = ZedSettingsSchema.safeParse(root)
+  const provider = settings.success
+    ? settings.data.language_models.openai_compatible[providerName]
+    : undefined
+  if (provider === undefined) {
     zedLogger.debug('No existing Zed provider block for {providerName}', { providerName })
     return []
   }
 
-  const models: unknown = provider['available_models']
-  if (!Array.isArray(models)) {
+  const block = ZedProviderBlockSchema.safeParse(provider)
+  if (!block.success) {
     zedLogger.debug('Zed provider {providerName} has no available_models array', { providerName })
     return []
   }
 
   const names: string[] = []
-  for (const availableModel of models) {
-    if (isRecord(availableModel)) {
-      const modelName: unknown = availableModel['name']
-      if (typeof modelName === 'string') {
-        names.push(modelName)
-      }
-    }
+  for (const availableModel of block.data.available_models) {
+    const parsed = ZedModelNameSchema.safeParse(availableModel)
+    if (parsed.success) names.push(parsed.data.name)
   }
   return names
 }

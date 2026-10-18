@@ -134,7 +134,8 @@ export function translateToolChoiceForAnthropic(
  * - stop -> stop_sequences (different field name)
  * - tool_choice -> Anthropic tool_choice format (object with type)
  * - parallel_tool_calls: false -> disable_parallel_tool_use on tool_choice
- * - user -> metadata.user_id
+ *
+ * `user` is not here: it goes to pi as `metadata.user_id`, set in `buildStreamOptions`.
  *
  * Not supported (silently skipped — these concepts don't exist in Anthropic):
  * - seed, frequency_penalty, presence_penalty, response_format, prediction, metadata (arbitrary keys)
@@ -171,12 +172,6 @@ export function collectAnthropicPayloadFields(
   } else if (disableParallel) {
     // No explicit tool_choice but parallel disabled: set auto with flag
     fields['tool_choice'] = { type: 'auto', disable_parallel_tool_use: true }
-    hasFields = true
-  }
-
-  // Map user to metadata.user_id (Anthropic only accepts user_id in metadata)
-  if (request.user !== undefined) {
-    fields['metadata'] = { user_id: request.user }
     hasFields = true
   }
 
@@ -469,6 +464,12 @@ async function buildStreamOptions(
     if (level !== undefined) opts.reasoning = level
   }
 
+  // Anthropic takes OpenAI's `user` as metadata.user_id, its only metadata key. pi's Anthropic
+  // adapter sends `metadata.user_id` from this option; other adapters do not read it (#48).
+  if (request.user !== undefined && ANTHROPIC_APIS.has(model.api)) {
+    opts.metadata = { user_id: request.user }
+  }
+
   // The client disconnect signal combined with the upstream idle timeout
   if (signal !== undefined) {
     opts.signal = signal
@@ -689,6 +690,13 @@ async function openUpstream(
   } catch (error) {
     idle?.dispose()
     throw error
+  }
+  // Every raw provider event restarts the wait, including those pi makes no event of (#50). The
+  // event itself is not read: it carries message content.
+  if (idle !== undefined) {
+    opts.onProviderStreamEvent = () => {
+      idle.touch()
+    }
   }
   const call: UpstreamCall = { model, options, opts, stream, startedAt: performance.now() }
   logUpstreamStart(call, context, request)

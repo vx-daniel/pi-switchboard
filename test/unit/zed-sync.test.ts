@@ -377,21 +377,6 @@ describe('syncToZed', () => {
     expect(content).toBe(ZED_SETTINGS_WITH_COMMENTS)
   })
 
-  test('reports correct diff counts', () => {
-    writeFileSync(settingsPath, ZED_SETTINGS_WITH_COMMENTS)
-
-    // old-model exists, we sync claude which is new -> 1 added, 1 removed
-    const result = syncToZed([makeExposed()], {
-      providerName: 'Pi Proxy',
-      apiUrl: 'http://127.0.0.1:4141/v1',
-      dryRun: true
-    })
-
-    expect(result.added).toBe(1)
-    expect(result.removed).toBe(1)
-    expect(result.unchanged).toBe(0)
-  })
-
   test('reports unchanged when models match', () => {
     // Write settings with the exact model we will sync
     const settingsWithClaude = `{
@@ -423,6 +408,20 @@ describe('syncToZed', () => {
     expect(result.added).toBe(0)
     expect(result.removed).toBe(0)
     expect(result.unchanged).toBe(1)
+  })
+
+  // Catches wrong diff counts, and the read counting what is not a model or failing on it: entries
+  // without a string name are not models, a list of the wrong shape holds none, and names are
+  // compared as the file holds them.
+  test.each([
+    ['entries without a string name', [{ name: 7 }, 'loose', { name: 'old-model' }], 1],
+    ['available_models that is not a list', 'not a list', 0],
+    ['names kept as the file holds them', [{ name: ' anthropic/claude-sonnet-4-20250514 ' }], 1]
+  ])('counts existing models from %s', (_case, availableModels, removed) => {
+    const block = { 'Pi Proxy': { available_models: availableModels } }
+    writeFileSync(settingsPath, JSON.stringify({ language_models: { openai_compatible: block } }))
+    const options = { providerName: 'Pi Proxy', apiUrl: DEFAULT_API_URL, dryRun: true }
+    expect(syncToZed([makeExposed()], options)).toMatchObject({ added: 1, removed, unchanged: 0 })
   })
 
   // Catches an empty sync leaving the old models in place, or deleting the provider block.

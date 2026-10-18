@@ -7,10 +7,13 @@ import { Container, type SettingItem, SettingsList, Text } from '@earendil-works
 import { getLogLevels, isLogLevel } from '@logtape/logtape'
 import {
   getConfigPath,
+  isModelExposureMode,
+  isPublicModelIdMode,
+  LifetimeSchema,
   loadConfigFromFile,
-  type ModelExposureMode,
+  ModelExposureModeSchema,
   type ProxyConfig,
-  type PublicModelIdMode,
+  PublicModelIdModeSchema,
   saveConfigToFile
 } from '@vx-daniel/pi-openai-proxy/config'
 import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
@@ -113,7 +116,7 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
       label: 'Lifetime',
       description: 'detached = background daemon, session = dies when pi exits',
       currentValue: config.lifetime,
-      values: ['detached', 'session']
+      values: [...LifetimeSchema.options]
     },
     {
       id: 'host',
@@ -177,14 +180,14 @@ function buildSettingItems(state: ProxyState): SettingItem[] {
       label: 'Model ID format',
       description: idModeDescription(config),
       currentValue: config.publicModelIdMode,
-      values: ['collision-prefixed', 'universal', 'always-prefixed']
+      values: [...PublicModelIdModeSchema.options]
     },
     {
       id: 'modelExposureMode',
       label: 'Exposure mode',
       description: exposureModeDescription(config),
       currentValue: config.modelExposureMode,
-      values: ['scoped', 'all', 'custom']
+      values: [...ModelExposureModeSchema.options]
     },
     {
       id: 'customModels',
@@ -239,16 +242,6 @@ function refreshDescriptions(items: SettingItem[], config: ProxyConfig): void {
 }
 
 // --- Applying changes ---
-
-// Local type guards — the extension resolves against the built dist, so it
-// cannot import these from the source config module during development.
-function isPublicModelIdMode(mode: string): mode is PublicModelIdMode {
-  return mode === 'collision-prefixed' || mode === 'universal' || mode === 'always-prefixed'
-}
-
-function isModelExposureMode(mode: string): mode is ModelExposureMode {
-  return mode === 'all' || mode === 'scoped' || mode === 'custom'
-}
 
 function parsePositiveInt(value: string): number | undefined {
   const parsed = Number.parseInt(value, 10)

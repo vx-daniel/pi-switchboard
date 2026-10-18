@@ -209,6 +209,7 @@ Do not rely on a single path-segment router parameter without decoding support.
 
 Shared proxy configuration must grow to include model-exposure controls.
 The JSON config file, CLI overrides, env handling, and settings panel must all agree on the same schema.
+That schema is the Zod `ProxyConfigSchema` in `src/config/schema.ts`: the config types are inferred from it, and the settings panel takes each mode's values from its enum. A config file is never refused: a field the schema rejects is repaired (numbers clamped to the schema's bounds, lists and maps keep their valid entries, anything else defaults) and named, by path only, in one warning per change. Model IDs and prefix labels are never normalized: exposure follows the config exactly as written.
 
 Required settings:
 
@@ -574,7 +575,7 @@ Fields translated to Anthropic's wire format:
 |---|---|
 | `top_p` | `top_p` (same name, natively supported) |
 | `stop` | `stop_sequences` (string or array → always array) |
-| `user` | `metadata: { user_id }` |
+| `user` | `metadata: { user_id }`, through pi's `metadata` option, which its Anthropic adapter sends (#48), not the payload patch |
 | `tool_choice: "auto"` | `tool_choice: { type: "auto" }` |
 | `tool_choice: "none"` | `tool_choice: { type: "none" }` |
 | `tool_choice: "required"` | `tool_choice: { type: "any" }` |
@@ -784,7 +785,7 @@ Use an OpenAI-style shape:
 - `503` provider unavailable (`provider_unavailable`, upstream 503) or overloaded
   (`provider_overloaded`, upstream 529)
 - `504` upstream timeout (`timeout`): an upstream 408 or 504, or the provider sent nothing for
-  `upstreamTimeoutMs` (an idle timeout that restarts on every upstream event, not a cap on the call;
+  `upstreamTimeoutMs` (an idle timeout that restarts on every upstream event, raw provider events included (#50), not a cap on the call;
   `src/pi/upstream-idle.ts`)
 
 Upstream failures (`mapUpstreamError`, `src/server/errors.ts`): pi reports a failure as text, with
@@ -855,7 +856,7 @@ src/
 ├── index.ts            -- entry point, CLI bootstrap (citty)
 ├── env.d.ts            -- typed process.env
 ├── config/
-│   ├── schema.ts         -- ProxyConfig type, defaults, JSON I/O (exported via ./config)
+│   ├── schema.ts         -- ProxyConfig Zod schema and types, defaults, repair, JSON I/O (exported via ./config)
 │   └── env.ts            -- ServerConfig from file + env + CLI overrides
 ├── logging/
 │   └── index.ts          -- LogTape setup, categories, level guide, redaction (exported via ./logging)

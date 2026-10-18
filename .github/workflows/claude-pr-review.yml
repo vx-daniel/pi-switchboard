@@ -25,9 +25,9 @@ name: Claude PR Review
 # run secrets.
 #
 # PROJECT CONVENTIONS ARE READ, NOT RESTATED. `CLAUDE.md` is a symlink to `AGENTS.md` (the repo's always-on
-# rules), so Claude Code auto-loads them; the prompt also sends the reviewer to `PLAN.md` (API compatibility
-# policy and security boundaries), so the review enforces what this project documents rather than a generic
-# checklist.
+# rules), so Claude Code auto-loads them; the prompt also sends the reviewer to `CONSTITUTION.md` (the
+# principles every change is checked against) and `PLAN.md` (API compatibility policy and security
+# boundaries), so the review enforces what this project documents rather than a generic checklist.
 #
 # SELF-CONTAINED ON PURPOSE. This is not a thin caller delegating to a shared reusable workflow: that
 # arrangement only runs where the shared repository is reachable. The cost of inlining is that improvements
@@ -148,6 +148,9 @@ jobs:
                - `AGENTS.md` (also `CLAUDE.md`, a symlink to it, so it is auto-loaded) is this
                  repository's always-on rule set — stable HTTP surface, model ID policy, header
                  contracts, coding rules. If it is not already in your context, `Read` it. Follow it.
+               - `Read` `CONSTITUTION.md`: the principles that supersede every other doc. Check the
+                 diff against each, and name the principles a change to stable routes, auth,
+                 model resolution, validation rules or security defaults affects
                - `Read` the sections of `PLAN.md` the diff touches: it holds the API compatibility
                  policy and the security boundaries
                - If `.claude/rules/*.md` exist, treat each as an additional hard rule
@@ -186,6 +189,9 @@ jobs:
             ### Runtime Verification
             Not performed — this reviewer is read-only by design and cannot execute the project's gate.
             PR body claims: {one-line summary of the PR's verification claims, or "none stated"}.
+
+            ### Constitution
+            {each principle (I–V) the diff affects: complies / conflicts, with the line. OR "No principle affected"}
 
             ### Risk Assessment
             Correctness: {one line}

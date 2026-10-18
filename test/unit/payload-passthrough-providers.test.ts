@@ -36,12 +36,6 @@ describe('collectAnthropicPayloadFields', () => {
     expect(fields?.['stop_sequences']).toEqual(['END', 'STOP'])
   })
 
-  test('translates user to metadata.user_id', () => {
-    const fields = collectAnthropicPayloadFields(minimalRequest({ user: 'user-123' }))
-    expect(fields).toBeDefined()
-    expect(fields?.['metadata']).toEqual({ user_id: 'user-123' })
-  })
-
   // Catches an Anthropic translation that leaks an unsupported field (seed, penalties,
   // response_format, prediction, arbitrary metadata) into the request, which Anthropic rejects:
   // with every passthrough field set, only the translated fields may come out.
@@ -64,8 +58,7 @@ describe('collectAnthropicPayloadFields', () => {
     expect(fields).toEqual({
       top_p: 0.9,
       stop_sequences: ['END'],
-      tool_choice: { type: 'any', disable_parallel_tool_use: true },
-      metadata: { user_id: 'user-123' }
+      tool_choice: { type: 'any', disable_parallel_tool_use: true }
     })
   })
 
