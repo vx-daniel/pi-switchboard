@@ -231,10 +231,14 @@ describe('findZedSettings', () => {
     expect(findZedSettings()).toBe(resolve(zedDir, 'settings.json'))
   })
 
-  test('falls back to XDG_CONFIG_HOME when HOME config does not exist', () => {
+  // Catches syncing into ~/.config/zed while Zed reads $XDG_CONFIG_HOME/zed: on Linux, Zed uses
+  // XDG_CONFIG_HOME when it is set, so a stale ~/.config copy must not win (#111).
+  test('XDG_CONFIG_HOME wins over HOME when both have settings', () => {
     vi.stubEnv('CUSTOM_DATA_DIR', undefined)
-    vi.stubEnv('HOME', resolve(tempDir, 'no-such-home'))
-
+    const homeZedDir = resolve(tempDir, '.config', 'zed')
+    mkdirSync(homeZedDir, { recursive: true })
+    writeFileSync(resolve(homeZedDir, 'settings.json'), '{}')
+    vi.stubEnv('HOME', tempDir)
     const xdgDir = resolve(tempDir, 'xdg-config', 'zed')
     mkdirSync(xdgDir, { recursive: true })
     writeFileSync(resolve(xdgDir, 'settings.json'), '{}')

@@ -56,13 +56,8 @@ const CODEX_APIS = new Set(['openai-codex-responses'])
 /** APIs whose passthrough fields are translated to Anthropic's names and shapes. */
 const ANTHROPIC_APIS = new Set(['anthropic-messages'])
 
-/**
- * APIs whose passthrough fields are patched onto Google's `config` by {@link patchGooglePayload}.
- *
- * @remarks
- * pi 1.3.0 has no `google-gemini-cli` API; that entry matches no model.
- */
-const GOOGLE_APIS = new Set(['google-generative-ai', 'google-gemini-cli', 'google-vertex'])
+/** APIs whose passthrough fields are patched onto Google's `config` by {@link patchGooglePayload}. */
+const GOOGLE_APIS = new Set(['google-generative-ai', 'google-vertex'])
 
 // ---------------------------------------------------------------------------
 // OpenAI-compatible payload fields

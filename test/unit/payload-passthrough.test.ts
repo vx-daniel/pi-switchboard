@@ -81,7 +81,7 @@ describe('collectPayloadFields: tool_choice', () => {
   })
 
   test('returns undefined for Google APIs (patched on config instead)', () => {
-    const googleApis = ['google-generative-ai', 'google-gemini-cli', 'google-vertex']
+    const googleApis = ['google-generative-ai', 'google-vertex']
     for (const api of googleApis) {
       const fields = collectPayloadFields(minimalRequest({ tool_choice: 'auto', top_p: 0.9 }), api)
       expect(fields).toBeUndefined()

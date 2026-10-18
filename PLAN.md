@@ -594,7 +594,7 @@ Fields translated to Anthropic's wire format:
 | `metadata` (arbitrary) | Skipped (Anthropic only accepts `user_id`) |
 | `prediction` | Skipped (not supported) |
 
-#### Google (`google-generative-ai`, `google-gemini-cli`, `google-vertex`)
+#### Google (`google-generative-ai`, `google-vertex`)
 
 Fields translated to Google's camelCase names and set flat on the payload's `config`, beside
 pi's own `temperature` and `maxOutputTokens`. `@google/genai` builds the wire request's
