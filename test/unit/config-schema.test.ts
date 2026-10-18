@@ -5,8 +5,10 @@
  * type coercion, and produces valid defaults.
  */
 
+import { resetSync } from '@logtape/logtape'
 import { DEFAULT_CONFIG, normalizeConfig } from '@proxy/config/schema'
-import { describe, expect, test } from 'vite-plus/test'
+import { configureLogging } from '@proxy/logging'
+import { afterEach, describe, expect, test } from 'vite-plus/test'
 
 describe('normalizeConfig', () => {
   // Catches `null` (the one non-object input with `typeof === 'object'`) slipping past the object
@@ -234,5 +236,57 @@ describe('normalizeConfig: numeric limits', () => {
     ['maxBodySizeMb', Number.POSITIVE_INFINITY, 50]
   ] as const)('%s = %s becomes %s', (field, value, expected) => {
     expect(normalizeConfig({ [field]: value })[field]).toBe(expected)
+  })
+})
+
+describe('normalizeConfig: repairs', () => {
+  let lines: string[] = []
+
+  afterEach(() => {
+    resetSync()
+    lines = []
+  })
+
+  function captureWarnings(): void {
+    configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
+  }
+
+  // Catches a typo being silently ignored, the warning leaking a value (one field is the auth
+  // token), and the warning repeating: the exposure config is read from the file on every request.
+  test('warns once per set of invalid fields, by path and never by value', () => {
+    captureWarnings()
+    const config = { port: 'x4141', authToken: 404_404, zed: { autoSync: 'yes' } }
+    normalizeConfig(config)
+    normalizeConfig(config)
+    expect(lines).toHaveLength(1)
+    expect(lines[0]).toContain('"fields":["port","authToken","zed.autoSync"]')
+    expect(lines[0]).not.toContain('404404')
+    expect(lines[0]).not.toContain('x4141')
+
+    normalizeConfig({ port: 'x4141' })
+    expect(lines).toHaveLength(2)
+    normalizeConfig({})
+    normalizeConfig({ port: 'x4141' })
+    expect(lines).toHaveLength(3)
+  })
+
+  // Catches one bad zed field resetting the whole block, which used to discard a valid provider
+  // name along with it.
+  test('an invalid zed field keeps its valid sibling', () => {
+    expect(normalizeConfig({ zed: { providerName: 'Work', autoSync: 'yes' } }).zed).toEqual({
+      providerName: 'Work',
+      autoSync: false
+    })
+  })
+
+  // Catches list repair diverging from the schema: a valid entry must come out the same whether or
+  // not a sibling entry is invalid.
+  test('a list with one bad entry keeps the others, trimmed as valid entries are', () => {
+    expect(normalizeConfig({ customModels: [' openai/gpt-4o ', 7, ''] }).customModels).toEqual([
+      'openai/gpt-4o'
+    ])
+    expect(normalizeConfig({ customModels: [' openai/gpt-4o '] }).customModels).toEqual([
+      'openai/gpt-4o'
+    ])
   })
 })
