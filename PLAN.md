@@ -209,6 +209,7 @@ Do not rely on a single path-segment router parameter without decoding support.
 
 Shared proxy configuration must grow to include model-exposure controls.
 The JSON config file, CLI overrides, env handling, and settings panel must all agree on the same schema.
+That schema is the Zod `ProxyConfigSchema` in `src/config/schema.ts`: the config types are inferred from it, and the settings panel takes each mode's values from its enum. A config file is never refused: a field the schema rejects is repaired (numbers clamped, lists and maps keep their valid entries, anything else defaults) and named, by path only, in one warning per change.
 
 Required settings:
 
@@ -840,7 +841,7 @@ src/
 ├── index.ts            -- entry point, CLI bootstrap (citty)
 ├── env.d.ts            -- typed process.env
 ├── config/
-│   ├── schema.ts         -- ProxyConfig type, defaults, JSON I/O (exported via ./config)
+│   ├── schema.ts         -- ProxyConfig Zod schema and types, defaults, repair, JSON I/O (exported via ./config)
 │   └── env.ts            -- ServerConfig from file + env + CLI overrides
 ├── logging/
 │   └── index.ts          -- LogTape setup, categories, level guide, redaction (exported via ./logging)
