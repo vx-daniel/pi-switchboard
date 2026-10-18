@@ -25,7 +25,8 @@
     "boundary-violation": "off",
     "policy-violation": "off",
     // The catalog's `vite` entry is used by `overrides: { vite@*: 'catalog:' }` in `pnpm-workspace.yaml`, which
-    // fallow 3.34.1 does not count as a reference; `vite-plus` is used by `package.json`. Those are the only two.
+    // fallow 3.34.1 does not count as a reference; the other entries (`vite-plus`, `@vitest/coverage-v8`) are used
+    // by `package.json`.
     "unused-catalog-entries": "off"
   },
 

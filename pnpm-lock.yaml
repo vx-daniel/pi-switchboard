@@ -6,6 +6,9 @@ settings:
 
 catalogs:
   default:
+    '@vitest/coverage-v8':
+      specifier: 5.0.4
+      version: 5.0.4
     vite-plus:
       specifier: 1.2.0
       version: 1.2.0
@@ -85,7 +88,7 @@ importers:
         specifier: ^25.6.0
         version: 25.7.0
       '@vitest/coverage-v8':
-        specifier: 5.0.4
+        specifier: 'catalog:'
         version: 5.0.4(@vitest/browser@5.0.4)(vitest@5.0.4)
       eslint-plugin-zod:
         specifier: ^3.12.0
