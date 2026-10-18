@@ -10,6 +10,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { configToEnv, loadConfigFromFile } from '@vx-daniel/pi-openai-proxy/config'
 import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
+import * as z from 'zod'
 
 import { type ProxyState, proxyUrl } from './state'
 
@@ -29,16 +30,8 @@ interface RuntimeStatus {
   models: number
 }
 
-interface ProbeBody {
-  data: unknown[]
-}
-
-function isProbeBody(value: unknown): value is ProbeBody {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false
-  if (!('data' in value)) return false
-  const candidate: { data: unknown } = value
-  return Array.isArray(candidate.data)
-}
+/** What the probe needs from `GET /v1/models`: the model count. */
+const ProbeBodySchema = z.object({ data: z.array(z.unknown()) })
 
 // The proxy entry point: the built `dist/index.mjs` this package ships beside the extension, or
 // failing that the package's `pi-openai-proxy` bin on PATH.
@@ -134,10 +127,10 @@ async function probe(state: ProxyState): Promise<RuntimeStatus> {
       headers
     })
     if (response.ok) {
-      const body: unknown = await response.json()
+      const body = ProbeBodySchema.safeParse(await response.json())
       let modelCount = 0
-      if (isProbeBody(body)) {
-        modelCount = body.data.length
+      if (body.success) {
+        modelCount = body.data.data.length
       } else {
         processLogger.warn('Probe of {url} returned a body without a data array', { url })
       }
