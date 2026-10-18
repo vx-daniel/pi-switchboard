@@ -1,13 +1,15 @@
 /**
  * Operational health endpoints. They are not part of the OpenAI-compatible surface (`/v1/*`).
  *
+ * @remarks
  *   GET /healthz          Liveness. The server starts listening only after pi's model runtime has
  *                         loaded, so any answer means both. No authentication, no body beyond
  *                         `{ "status": "ok" }`, no upstream calls: cheap enough for a container
  *                         healthcheck every few seconds.
  *   GET /healthz/models   The model runtime: models.json load error, available and exposed model
- *                         counts, exposure modes. 503 when no model is exposed or the exposure
- *                         config is invalid.
+ *                         counts, exposure modes, the exposure error and `enabledModels` scope
+ *                         diagnostics. 503 when no model is exposed or the exposure config is
+ *                         invalid.
  *   GET /healthz/creds    Per provider: how pi is authenticated (OAuth or API key, and where the
  *                         credential came from) and how many of its models are available. Local
  *                         state only; `?verify=true` asks pi to resolve each credential now, which
@@ -19,6 +21,8 @@
  *
  * The detail endpoints sit behind proxy authentication when it is on (they name providers and
  * models); `/healthz` never does. None of them returns a credential.
+ *
+ * @packageDocumentation
  */
 
 import { proxyLogger } from '@proxy/logging'
@@ -29,10 +33,20 @@ import type { ExposureConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
 
+/** Logger for health check failures. */
 const healthLogger = proxyLogger('server', 'health')
 
+/** The Hono context a health handler gets. */
 type HealthContext = Context<ProxyEnv>
 
+/**
+ * Answers 503 for a detail check that threw, logging its message instead of returning it.
+ *
+ * @param context - the request's Hono context
+ * @param check - the check's name, as it appears in the log and the response
+ * @param error - what the check threw
+ * @returns a 503 `{ status: 'unavailable', error }` response that points to the proxy log
+ */
 function failedCheck(context: HealthContext, check: string, error: unknown): Response {
   healthLogger.warn('The {check} health check threw: {error}', {
     check,
@@ -44,6 +58,14 @@ function failedCheck(context: HealthContext, check: string, error: unknown): Res
   )
 }
 
+/**
+ * Answers `GET /healthz/models`: the model runtime and the exposure it gives.
+ *
+ * @param context - the request's Hono context
+ * @param configReader - where the model exposure config comes from
+ * @returns 200 with the model report, or 503 with the same report when no model is exposed or the
+ *   exposure config is invalid
+ */
 async function checkModels(
   context: HealthContext,
   configReader: ExposureConfigReader
@@ -75,6 +97,13 @@ async function checkModels(
   return context.json(body)
 }
 
+/**
+ * Answers `GET /healthz/creds`: each provider's credential status, verified when `?verify=true`.
+ *
+ * @param context - the request's Hono context
+ * @returns 200 with the provider list, or 503 with the same list when no provider has a credential
+ *   or a verified one fails
+ */
 async function checkCredentials(context: HealthContext): Promise<Response> {
   const verify = context.req.query('verify') === 'true'
   const providers = await getCredentialStatuses(verify)
@@ -91,6 +120,15 @@ async function checkCredentials(context: HealthContext): Promise<Response> {
   return context.json(body)
 }
 
+/**
+ * Builds the health routes: `GET /healthz`, `GET /healthz/models` and `GET /healthz/creds`.
+ *
+ * @remarks
+ * Proxy auth for the detail endpoints is applied in `createApp`, not here.
+ *
+ * @param configReader - where `/healthz/models` reads the model exposure config from
+ * @returns a Hono app to mount at `/`
+ */
 export function createHealthRoutes(configReader: ExposureConfigReader): Hono<ProxyEnv> {
   const routes = new Hono<ProxyEnv>()
 

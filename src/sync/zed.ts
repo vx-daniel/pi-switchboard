@@ -1,9 +1,12 @@
 /**
  * Zed settings.json model sync.
  *
- * Discovers Zed's settings file, maps exposed proxy models to Zed's
- * openai_compatible available_models shape, and writes them back using
- * jsonc-parser's modify() to preserve comments and formatting.
+ * @remarks
+ * Discovers Zed's settings file, maps exposed proxy models to Zed's `openai_compatible`
+ * `available_models` shape, and writes them back with jsonc-parser's `modify()`, which keeps
+ * comments and formatting.
+ *
+ * @packageDocumentation
  */
 
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
@@ -22,12 +25,14 @@ import {
 } from 'jsonc-parser'
 import * as z from 'zod'
 
+/** Logger for the Zed sync. */
 const zedLogger = proxyLogger('sync', 'zed')
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
 
+/** One entry of a Zed `openai_compatible` provider's `available_models`. */
 export interface ZedAvailableModel {
   readonly name: string
   readonly display_name: string
@@ -42,6 +47,7 @@ export interface ZedAvailableModel {
   }
 }
 
+/** What a Zed sync writes, and whether it writes at all. */
 export interface ZedSyncOptions {
   /** Provider label in Zed settings (e.g. "Pi Proxy"). */
   readonly providerName: string
@@ -51,6 +57,7 @@ export interface ZedSyncOptions {
   readonly dryRun: boolean
 }
 
+/** The outcome of a Zed sync: where, what changed, or why it did not happen. */
 export interface ZedSyncResult {
   readonly ok: boolean
   readonly configPath: string
@@ -66,12 +73,17 @@ export interface ZedSyncResult {
 // ---------------------------------------------------------------------------
 
 /**
- * Resolve Zed's global settings.json path.
+ * Finds Zed's global settings.json: the first candidate that exists.
  *
- * Resolution order:
- * 1. CUSTOM_DATA_DIR env var (Zed's own override)
- * 2. ~/.config/zed/settings.json (macOS + Linux standard)
- * 3. $XDG_CONFIG_HOME/zed/settings.json (Linux XDG)
+ * @remarks
+ * Candidates, in order:
+ * 1. `$CUSTOM_DATA_DIR/settings.json`. Zed reads no such variable: its `--user-data-dir` flag sets
+ *    an internal `CUSTOM_DATA_DIR` and puts settings at `<dir>/config/settings.json` (Zed's
+ *    `crates/paths/src/paths.rs`, `config_dir`).
+ * 2. `$HOME/.config/zed/settings.json` (Zed's macOS location, and Linux's without XDG).
+ * 3. `$XDG_CONFIG_HOME/zed/settings.json` (Linux XDG).
+ *
+ * @returns the settings path, or `undefined` when none of the candidates exists
  */
 export function findZedSettings(): string | undefined {
   const candidates: { source: string; settingsPath: string }[] = []
@@ -122,7 +134,14 @@ export function findZedSettings(): string | undefined {
 // ---------------------------------------------------------------------------
 
 /**
- * Map an ExposedModel to Zed's available_models entry.
+ * Maps an exposed model to Zed's `available_models` entry.
+ *
+ * @remarks
+ * The public ID becomes `name`; tools, parallel tool calls and chat completions are always on,
+ * images follow the model's input types, and `prompt_cache_key` is always off.
+ *
+ * @param exposed - the exposed model
+ * @returns the Zed entry
  */
 export function toZedModel(exposed: ExposedModel): ZedAvailableModel {
   const model = exposed.model
@@ -145,6 +164,7 @@ export function toZedModel(exposed: ExposedModel): ZedAvailableModel {
 // JSONC surgical edit
 // ---------------------------------------------------------------------------
 
+/** jsonc-parser edit options: replace rather than insert into arrays, two-space indent, LF. */
 const MODIFY_OPTIONS: ModificationOptions = {
   isArrayInsertion: false,
   formattingOptions: {
@@ -162,6 +182,7 @@ const ZedSettingsSchema = z.object({
   })
 })
 
+/** A Zed provider block with an `available_models` array. */
 const ZedProviderBlockSchema = z.object({ available_models: z.array(z.unknown()) })
 
 /**
@@ -173,11 +194,17 @@ const ZedModelNameSchema = z.object({
 })
 
 /**
- * Parse Zed settings as Zed does: JSONC, trailing commas allowed. Any other error means Zed cannot
- * load the file either, and an edit made from a partial parse could land in the wrong place.
+ * Parses Zed settings as Zed does: JSONC, trailing commas allowed.
+ *
+ * @remarks
+ * Any other error means Zed cannot load the file either, and an edit made from a partial parse
+ * could land in the wrong place.
  *
  * A file with no value at all (empty, blank, or only comments) is not malformed but empty: it
  * parses as `{}`, and the sync writes the provider block into it as it would into `{}`.
+ *
+ * @param text - the settings file's text
+ * @returns the parsed root and the parse errors; no errors means the file can be edited
  */
 function parseSettings(text: string): { root: unknown; errors: ParseError[] } {
   const errors: ParseError[] = []
@@ -188,13 +215,27 @@ function parseSettings(text: string): { root: unknown; errors: ParseError[] } {
   return noValue ? { root: {}, errors: [] } : { root, errors }
 }
 
-/** 1-based line and column of `offset` in `text`, for an error a person can find in their editor. */
+/**
+ * Finds the 1-based line and column of `offset` in `text`, for an error a person can find in their
+ * editor.
+ *
+ * @param text - the file's text
+ * @param offset - a character offset into `text`
+ * @returns the line and column
+ */
 function lineAndColumn(text: string, offset: number): { line: number; column: number } {
   const lines = text.slice(0, offset).split('\n')
   return { line: lines.length, column: (lines.at(-1)?.length ?? 0) + 1 }
 }
 
-/** Refuse to touch settings that do not parse; the log and the result carry positions only. */
+/**
+ * Refuses to touch settings that do not parse; the log and the result carry positions only.
+ *
+ * @param configPath - the settings file's path
+ * @param text - the settings file's text, for the error position
+ * @param errors - the parse errors; the first one is reported
+ * @returns a failed result naming the first error's kind and position
+ */
 function refuseMalformed(configPath: string, text: string, errors: ParseError[]): ZedSyncResult {
   const [firstError] = errors
   const errorKind = firstError === undefined ? 'unknown' : printParseErrorCode(firstError.error)
@@ -216,8 +257,12 @@ function refuseMalformed(configPath: string, text: string, errors: ParseError[])
 }
 
 /**
- * Read the current available_models for a provider from parsed Zed settings.
- * Returns the model names, or an empty array if the path does not exist.
+ * Reads the model names in a provider's `available_models` from parsed Zed settings.
+ *
+ * @param root - the parsed settings
+ * @param providerName - the `openai_compatible` provider name, matched exactly
+ * @returns the names that are strings, or an empty array when the provider block or its
+ *   `available_models` array does not exist
  */
 function readCurrentModelNames(root: unknown, providerName: string): string[] {
   const settings = ZedSettingsSchema.safeParse(root)
@@ -244,8 +289,17 @@ function readCurrentModelNames(root: unknown, providerName: string): string[] {
 }
 
 /**
- * Apply the full provider block (api_url + available_models) to the JSONC text.
- * Returns the new text with edits applied.
+ * Writes the provider block (`api_url` and `available_models`) into the JSONC text.
+ *
+ * @remarks
+ * The whole block at `language_models.openai_compatible.<providerName>` is replaced, so any other
+ * key in it is dropped; the rest of the file keeps its comments and formatting.
+ *
+ * @param text - the settings file's text
+ * @param providerName - the `openai_compatible` provider name
+ * @param apiUrl - the proxy's API URL
+ * @param models - the models to list
+ * @returns the new text
  */
 function applyProviderBlock(
   text: string,
@@ -268,7 +322,13 @@ function applyProviderBlock(
   return applyEdits(text, edits)
 }
 
-/** Read the settings file, logging a failure before it propagates. */
+/**
+ * Reads the settings file, logging a failure before it propagates.
+ *
+ * @param configPath - the settings file's path
+ * @returns the file's text
+ * @throws the `readFileSync` error when the file cannot be read
+ */
 function readSettingsText(configPath: string): string {
   try {
     return readFileSync(configPath, 'utf-8')
@@ -281,7 +341,13 @@ function readSettingsText(configPath: string): string {
   }
 }
 
-/** Write the settings file, logging a failure before it propagates. */
+/**
+ * Writes the settings file, logging a failure before it propagates.
+ *
+ * @param configPath - the settings file's path
+ * @param text - the new text
+ * @throws the `writeFileSync` error when the file cannot be written
+ */
 function writeSettingsText(configPath: string, text: string): void {
   try {
     writeFileSync(configPath, text, 'utf-8')
@@ -294,7 +360,13 @@ function writeSettingsText(configPath: string, text: string): void {
   }
 }
 
-/** How the new model names differ from the ones already in Zed settings. */
+/**
+ * Counts how the new model names differ from the ones already in Zed settings.
+ *
+ * @param currentNames - the names in the file now
+ * @param newNames - the names the sync writes
+ * @returns how many are added, removed and unchanged
+ */
 function countModelChanges(
   currentNames: ReadonlySet<string>,
   newNames: ReadonlySet<string>
@@ -323,7 +395,16 @@ function countModelChanges(
 // ---------------------------------------------------------------------------
 
 /**
- * Sync exposed models into Zed's settings.json.
+ * Syncs exposed models into Zed's settings.json, under the provider named in `options`.
+ *
+ * @remarks
+ * A file that does not parse is left untouched. A dry run reads and counts but writes nothing.
+ *
+ * @param exposedModels - the models the proxy exposes
+ * @param options - the provider name, API URL and dry-run flag
+ * @returns the counts and summary, or a failed result when the settings file is missing or
+ *   malformed
+ * @throws the file system error when the settings file cannot be read or written
  */
 export function syncToZed(
   exposedModels: readonly ExposedModel[],
