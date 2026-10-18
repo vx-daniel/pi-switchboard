@@ -13,6 +13,13 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/tes
 
 const IDLE_MS = 1000
 
+/**
+ * Builds an empty assistant message from the mock model.
+ *
+ * @param stopReason - pi's stop reason for the message
+ * @param errorMessage - the error text; omitted from the message when `undefined`
+ * @returns the assistant message, with zero usage
+ */
 function message(
   stopReason: AssistantMessage['stopReason'],
   errorMessage?: string
@@ -44,6 +51,11 @@ const textDelta: AssistantMessageEvent = {
   partial: message('stop')
 }
 
+/**
+ * Builds the error event a pi stream ends with when its call is aborted.
+ *
+ * @returns an `error` event with reason `aborted` and the message "Request was aborted."
+ */
 function abortedEvent(): AssistantMessageEvent {
   return { type: 'error', reason: 'aborted', error: message('aborted', 'Request was aborted.') }
 }
@@ -58,6 +70,12 @@ afterEach(() => {
 
 const MODEL = { api: 'openai-completions', provider: 'mock', id: 'm1' } as const
 
+/**
+ * Starts an idle timeout and relays a fresh pi stream through it.
+ *
+ * @param clientSignal - the client's disconnect signal; none when `undefined`
+ * @returns the idle timeout, the upstream stream to push events into, and the relayed stream
+ */
 function relayed(clientSignal?: AbortSignal) {
   const idle = startUpstreamIdleTimeout(IDLE_MS)
   const upstream = createAssistantMessageEventStream()
@@ -65,7 +83,11 @@ function relayed(clientSignal?: AbortSignal) {
   return { idle, upstream, downstream }
 }
 
-/** A pi stream whose iteration throws after one event, which pi's own streams never do. */
+/**
+ * Builds a pi stream whose iteration throws after one event, which pi's own streams never do.
+ *
+ * @returns the stream; iterating it yields one text delta, then rejects
+ */
 function throwingStream(): AssistantMessageEventStream {
   const stream = createAssistantMessageEventStream()
   stream[Symbol.asyncIterator] = async function* () {
@@ -76,6 +98,12 @@ function throwingStream(): AssistantMessageEventStream {
   return stream
 }
 
+/**
+ * Reads a stream to its end.
+ *
+ * @param stream - the events to read
+ * @returns the type of each event, in order
+ */
 async function collect(stream: AsyncIterable<AssistantMessageEvent>): Promise<string[]> {
   const types: string[] = []
   for await (const event of stream) types.push(event.type)

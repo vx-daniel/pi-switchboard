@@ -54,7 +54,12 @@ let upstream: MockProvider
 const tempDirs: string[] = []
 const agentDirs: FixtureAgentDir[] = []
 
-/** A temp dir removed after the file's tests. */
+/**
+ * Creates a temp dir that `afterAll` removes.
+ *
+ * @param prefix - the dir name's prefix under the OS temp dir
+ * @returns the new dir's path
+ */
 function tempDir(prefix: string): string {
   const path = mkdtempSync(join(tmpdir(), prefix))
   tempDirs.push(path)
@@ -80,7 +85,12 @@ afterAll(async () => {
   for (const path of tempDirs) rmSync(path, { recursive: true, force: true })
 })
 
-/** A recording agent dir; with a fake Anthropic API key when `loggedIn`. */
+/**
+ * Creates a fixture agent dir for the script to record with, removed in `afterAll`.
+ *
+ * @param loggedIn - whether auth.json holds a fake Anthropic API key
+ * @returns the agent dir's path
+ */
 async function recordingAgentDir(loggedIn: boolean): Promise<string> {
   const agentDir = await loadFixtureAgentDir(
     loggedIn ? { authJson: { anthropic: { type: 'api_key', key: API_KEY } } } : {}
@@ -95,7 +105,16 @@ interface ScriptRun {
   readonly stderr: string
 }
 
-/** Run the script once, as `node scripts/record-fixtures.ts` would, and collect what it printed. */
+/**
+ * Runs the script once, as `node scripts/record-fixtures.ts` would, and collects what it printed.
+ *
+ * @remarks
+ * Stubs stdout, stderr and `process.exit` (which throws {@link ExitCalled}); `afterEach`
+ * restores them.
+ *
+ * @returns the exit code (`undefined` when the script did not exit) and the printed text
+ * @throws whatever the script throws other than {@link ExitCalled}
+ */
 async function runScript(): Promise<ScriptRun> {
   const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true)
   const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true)
@@ -115,13 +134,26 @@ async function runScript(): Promise<ScriptRun> {
   return { exitCode, stdout: printed(stdout.mock.calls), stderr: printed(stderr.mock.calls) }
 }
 
-/** The response body as one string: chunk boundaries depend on how TCP split the stream. */
+/**
+ * Joins a recording's response chunks into one body string.
+ *
+ * @remarks
+ * Chunk boundaries depend on how TCP split the stream, so tests compare the joined body.
+ *
+ * @param recording - the recording to normalise
+ * @returns the recording with `response.chunks` replaced by `response.body`
+ */
 function withJoinedBody(recording: Recording): unknown {
   const { chunks, ...response } = recording.response
   return { ...recording, response: { ...response, body: chunks.join('') } }
 }
 
-/** The recording the script should have saved for `scenario`. */
+/**
+ * Builds the recording the script should have saved for `scenario`, with the joined body.
+ *
+ * @param scenario - the scenario name
+ * @returns an expected value with asymmetric matchers for the timestamp, path, headers and body
+ */
 function expectedRecording(scenario: (typeof SCENARIOS)[number]): unknown {
   const answer = scenario === 'model-not-found' ? missingModelAnswer : textAnswer
   const model = scenario === 'model-not-found' ? MISSING_MODEL_ID : MODEL_ID

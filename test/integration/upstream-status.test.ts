@@ -318,12 +318,26 @@ const STATUS_CASES: readonly StatusCase[] = [
 
 const TRUNCATED_MODEL = 'truncated'
 
-/** The mock model that answers `api` requests as this case says. */
+/**
+ * Names the mock model that answers `api` requests as this case says.
+ *
+ * @param api - the API whose error body the model sends
+ * @param statusCase - the case whose status and body the model sends
+ * @returns the model ID, `<api>-<label with dashes>`
+ */
 function failingModel(api: Api, statusCase: StatusCase): string {
   return `${api}-${statusCase.label.replaceAll(' ', '-')}`
 }
 
-/** Starts a stream, sends these text deltas, then drops the connection: no finish, no `[DONE]`. */
+/**
+ * Builds a mock reply that starts a stream, sends these text deltas, then drops the connection.
+ *
+ * @remarks
+ * No finish chunk and no `[DONE]` are sent.
+ *
+ * @param parts - the text of each delta, in order
+ * @returns the mock provider reply
+ */
 function cutOff(...parts: string[]): MockReply {
   return (response) => {
     response.writeHead(HTTP_OK, { 'content-type': 'text/event-stream' })
@@ -370,6 +384,13 @@ interface ChatOutcome {
   readonly attempts: number
 }
 
+/**
+ * Asks `model` through the proxy and records what the client got.
+ *
+ * @param model - the public model ID to ask
+ * @param stream - whether to request a streamed answer
+ * @returns the response status, content type and body text, and the upstream request count
+ */
 async function chat(model: string, stream: boolean): Promise<ChatOutcome> {
   const before = mock.requests.length
   const response = await testApp().request('/v1/chat/completions', {
@@ -386,7 +407,13 @@ async function chat(model: string, stream: boolean): Promise<ChatOutcome> {
   }
 }
 
-/** Each SSE event's data: parsed JSON, or the `[DONE]` sentinel as is. */
+/**
+ * Parses an SSE body into its events' data.
+ *
+ * @param text - the whole SSE response body
+ * @returns each event's data: parsed JSON, or the `[DONE]` sentinel as is
+ * @throws Error when an event is not a `data:` event
+ */
 function dataEvents(text: string): unknown[] {
   return text
     .split('\n\n')
@@ -398,7 +425,13 @@ function dataEvents(text: string): unknown[] {
     })
 }
 
-/** One streamed text chunk as the proxy sends it; the id and clock come from the request. */
+/**
+ * Builds one streamed text chunk as the proxy sends it, with matchers for the id and clock.
+ *
+ * @param model - the public model ID the chunk names
+ * @param delta - the choice's `delta`
+ * @returns the expected chunk, its one choice not finished
+ */
 function textChunk(model: string, delta: Record<string, unknown>): unknown {
   return {
     id: expect.any(String),

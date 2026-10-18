@@ -15,7 +15,14 @@ const PROXY_TOKEN = 'notarealsecret-health-proxy-token'
 
 const agentDirs: FixtureAgentDir[] = []
 
-/** Point pi at a fresh agent directory holding only `models.json` (when given), and load it. */
+/**
+ * Points pi at a fresh agent directory holding only `models.json` (when given), and loads it.
+ *
+ * @remarks
+ * The directory is kept in `agentDirs` and removed in `afterAll`.
+ *
+ * @param modelsJson - the `models.json` contents; `undefined` writes no file, an empty agent dir
+ */
 async function loadAgentDir(modelsJson?: Record<string, unknown>): Promise<void> {
   agentDirs.push(await loadFixtureAgentDir(modelsJson === undefined ? {} : { modelsJson }))
 }

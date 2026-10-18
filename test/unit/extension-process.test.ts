@@ -46,7 +46,12 @@ const STATUS_KEY = 'proxy'
 /** Answers one request to the stand-in proxy. */
 type Responder = (request: IncomingMessage, response: ServerResponse) => void
 
-/** Answers `GET /v1/models` with `count` models, the way a healthy proxy does. */
+/**
+ * Builds a responder that answers like a healthy proxy's `GET /v1/models`.
+ *
+ * @param count - how many models the list holds, with IDs `m0`, `m1`, …
+ * @returns a responder that answers every request with 200 and that model list
+ */
 function healthy(count: number): Responder {
   return (_request, response) => {
     const data = Array.from({ length: count }, (_unused, index) => ({ id: `m${String(index)}` }))
@@ -55,13 +60,23 @@ function healthy(count: number): Responder {
   }
 }
 
-/** The pid of a spawned child; spawn only resolves once it has one. */
+/**
+ * Reads the PID of a spawned child.
+ *
+ * @param child - a child whose `spawn` event has fired, as {@link ownChild} awaits
+ * @returns the child's PID
+ * @throws Error when the child has no PID (it failed to spawn)
+ */
 function pidOf(child: ChildProcess): number {
   if (child.pid === undefined) throw new Error('child has no pid')
   return child.pid
 }
 
-/** A free loopback port with nothing listening on it. */
+/**
+ * Finds a loopback port with nothing listening on it.
+ *
+ * @returns a port number that was free when its probe server closed
+ */
 async function closedPort(): Promise<number> {
   const server = createServer()
   const origin = await listenOnLoopback(server)
@@ -76,12 +91,22 @@ let port: number
 let responder: Responder
 let children: ChildProcess[]
 
-/** The PID file `process.ts` reads, inside the temp agent dir. */
+/**
+ * Returns the PID file path `process.ts` reads, inside the temp agent dir.
+ *
+ * @returns `<agentDir>/proxy.pid`
+ */
 function pidPath(): string {
   return join(agentDir, 'proxy.pid')
 }
 
-/** A state whose config points the probe at `probePort`. */
+/**
+ * Builds an extension state whose config points the probe at a loopback port.
+ *
+ * @param probePort - the port the probe connects to on 127.0.0.1
+ * @param authToken - the proxy auth token the probe sends; empty (none) when omitted
+ * @returns a state with no session process and no model registry
+ */
 function stateOn(probePort: number, authToken = ''): ProxyState {
   return {
     config: { ...DEFAULT_CONFIG, host: '127.0.0.1', port: probePort, authToken },
@@ -95,6 +120,8 @@ function stateOn(probePort: number, authToken = ''): ProxyState {
 /**
  * Starts a child that idles on an open stdin until signalled (the only kind of process these
  * tests stop), and remembers it for cleanup.
+ *
+ * @returns the child, once its `spawn` event has fired
  */
 async function ownChild(): Promise<ChildProcess> {
   const child = spawn(process.execPath, ['-e', 'process.stdin.resume()'], {
@@ -106,7 +133,7 @@ async function ownChild(): Promise<ChildProcess> {
 }
 
 /**
- * Make `process.kill` answer EPERM for IMPOSSIBLE_PID, as it does for a live process of another
+ * Makes `process.kill` answer EPERM for IMPOSSIBLE_PID, as it does for a live process of another
  * user, whatever the signal; any other pid is signalled for real. `afterEach` restores it.
  */
 function answerEpermForImpossiblePid(): void {
@@ -149,7 +176,8 @@ afterEach(async () => {
 })
 
 describe('showStatus', () => {
-  // Catches `/proxy status` claiming a proxy runs, or crashing, when nothing answers and no PID file exists.
+  // Catches `/proxy status` claiming a proxy runs, or crashing, when nothing answers and no PID
+  // file exists.
   test('no server and no PID file: tells the user to start it', async () => {
     const { context, notifications, statuses } = fakeCommandContext({})
     await showStatus(stateOn(await closedPort()), context)
@@ -188,7 +216,8 @@ describe('showStatus', () => {
     expect(existsSync(pidPath())).toBe(true)
   })
 
-  // Catches a PID file naming a dead process being shown, or left behind for the next start to kill.
+  // Catches a PID file naming a dead process being shown, or left behind for the next start to
+  // kill.
   test('stale PID file: no pid shown, file removed', async () => {
     writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
     const { context, notifications } = fakeCommandContext({})
@@ -270,7 +299,8 @@ describe('refreshStatus', () => {
     expect(statuses).toEqual([{ key: STATUS_KEY, text: undefined }])
   })
 
-  // Catches a server that answers with no model list crashing the probe instead of showing 0 models.
+  // Catches a server that answers with no model list crashing the probe instead of showing 0
+  // models.
   test('body without a data array: reachable with 0 models', async () => {
     responder = (_request, response) => {
       response.writeHead(200, { 'content-type': 'application/json' })

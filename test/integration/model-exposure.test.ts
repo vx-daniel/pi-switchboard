@@ -24,7 +24,12 @@ afterAll(() => {
   agentDir.remove()
 })
 
-/** The public model IDs `GET /v1/models` lists under this config, sorted. */
+/**
+ * Returns the public model IDs `GET /v1/models` lists under a config, sorted.
+ *
+ * @param overrides - config fields applied over {@link testConfig}
+ * @returns the listed IDs, sorted; empty when the body is not a model list (which also fails)
+ */
 async function listedIds(overrides: Partial<ServerConfig>): Promise<string[]> {
   const response = await testApp({ ...testConfig(), ...overrides }).request('/v1/models')
   expect(response.status).toBe(200)

@@ -28,7 +28,7 @@ const records: { level: string; message: string }[] = []
 
 beforeAll(async () => {
   mock = await startMockProvider({ echo: sse([...textChunks('ok'), finishChunk('stop')]) })
-  // Strict-capable, so `strict: true` applies and pi checks the schema against strict mode (#44).
+  // Strict-capable, so `strict: true` applies and pi rewrites the schema for strict mode (#44).
   const provider = {
     ...mock.provider(),
     models: [{ id: 'echo', compat: { supportsStrictMode: true } }]
@@ -57,7 +57,12 @@ afterAll(async () => {
   agentDir.remove()
 })
 
-/** Ask `mock/echo` something with one strict tool whose parameters are `parameters`. */
+/**
+ * Asks `mock/echo` something with one strict tool, `get_weather`.
+ *
+ * @param parameters - the tool's JSON Schema `parameters`
+ * @returns the proxy's response
+ */
 async function chatWithTool(parameters: Record<string, unknown>): Promise<Response> {
   return testApp().request('/v1/chat/completions', {
     method: 'POST',
@@ -75,7 +80,11 @@ async function chatWithTool(parameters: Record<string, unknown>): Promise<Respon
   })
 }
 
-/** The `tools` of the last request the provider received. */
+/**
+ * Reads the `tools` of the last request the provider received.
+ *
+ * @returns that request body's `tools`, or `undefined` when there is none
+ */
 function lastUpstreamTools(): unknown {
   const body = mock.requests.at(-1)?.body
   return isRecord(body) ? body['tools'] : undefined

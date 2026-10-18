@@ -50,6 +50,13 @@ afterAll(async () => {
   agentDir.remove()
 })
 
+/**
+ * Sends one chat completion to the proxy for a mock provider model.
+ *
+ * @param model - the mock model ID; the request uses `mock/<model>`
+ * @param stream - whether to request a streamed (SSE) response
+ * @returns the proxy's raw response
+ */
 async function chat(model: string, stream = false): Promise<Response> {
   return testApp().request('/v1/chat/completions', {
     method: 'POST',
@@ -62,7 +69,12 @@ async function chat(model: string, stream = false): Promise<Response> {
   })
 }
 
-/** The JSON payloads of an SSE body's `data:` events, without the closing `[DONE]`. */
+/**
+ * Parses the JSON payloads of an SSE body's `data:` events, without the closing `[DONE]`.
+ *
+ * @param body - the full SSE response text
+ * @returns each event's parsed payload, in order
+ */
 function sseEvents(body: string): unknown[] {
   return body
     .split('\n\n')

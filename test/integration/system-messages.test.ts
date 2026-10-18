@@ -1,9 +1,9 @@
 /**
- * Where a system or developer message ends up upstream (#45), through pi's real clients. Ones before
- * the first conversation turn form the system prompt. A later one stays where the client put it on
- * a model that accepts mid-conversation instructions (`compat.supportsMidConvoSystemMessages`); on
- * any other model pi merges it into the leading prompt, which is what the proxy did for every model
- * before, so those payloads are unchanged.
+ * Where a system or developer message ends up upstream (#45), through pi's real clients. Ones
+ * before the first conversation turn form the system prompt. A later one stays where the client
+ * put it on a model that accepts mid-conversation instructions
+ * (`compat.supportsMidConvoSystemMessages`); on any other model pi merges it into the leading
+ * prompt, which is what the proxy did for every model before, so those payloads are unchanged.
  */
 
 import { isRecord } from '@proxy/utils/guards'
@@ -68,7 +68,17 @@ const WITH_LATER_INSTRUCTION = [
   { role: 'user', content: 'Weather?' }
 ]
 
-/** The `system` and `messages` fields of what pi sent upstream for these messages. */
+/**
+ * Asks `model` with `messages` and returns the conversation pi sent upstream.
+ *
+ * @remarks
+ * Also asserts that the request reached the mock provider exactly once.
+ *
+ * @param model - the public model ID to ask
+ * @param messages - the OpenAI chat messages to send
+ * @returns the upstream body's `system` and `messages` fields (`undefined` when absent)
+ * @throws Error when the upstream body is not a JSON object
+ */
 async function sentConversation(
   model: string,
   messages: readonly unknown[]
@@ -145,7 +155,12 @@ describe('a later instruction between a tool call and its result', () => {
     { role: 'tool', tool_call_id: 'call_1', content: '{"temp":5}' }
   ]
 
-  /** Each upstream message's role, with the tool call it answers. */
+  /**
+   * Reduces upstream messages to their roles, writing a tool result as `tool(<tool_call_id>)`.
+   *
+   * @param messages - the upstream body's `messages` field
+   * @returns one entry per message, or `messages` itself when it is not an array
+   */
   function roles(messages: unknown): unknown {
     if (!Array.isArray(messages)) return messages
     return messages.map((message: unknown) => {

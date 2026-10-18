@@ -1,8 +1,9 @@
 /**
- * Unit tests for onPayload passthrough logic in pi/complete.ts.
+ * `collectPayloadFields` (`src/pi/complete.ts`): which OpenAI request fields go into the upstream
+ * payload as flat fields, per API family.
  *
- * Tests OpenAI-compatible flat field injection via collectPayloadFields.
- * Provider translation and tool strict flags live in sibling test files.
+ * Anthropic and Google translation is in `payload-passthrough-providers.test.ts`; tool `strict`
+ * flags are in `test/integration/tool-strict.test.ts`.
  */
 
 import { collectPayloadFields } from '@proxy/pi/complete'
@@ -121,7 +122,7 @@ describe('collectPayloadFields: tool_choice', () => {
     expect(fields).toBeDefined()
     expect(fields?.['tool_choice']).toBe('required')
     expect(fields?.['parallel_tool_calls']).toBe(false)
-    // These should NOT be included for codex
+    // Codex takes only tool_choice and parallel_tool_calls from the passthrough set.
     expect(fields?.['top_p']).toBeUndefined()
     expect(fields?.['seed']).toBeUndefined()
     expect(fields?.['stop']).toBeUndefined()
@@ -202,7 +203,8 @@ describe('collectPayloadFields: metadata', () => {
       minimalRequest({ metadata: { task: 'test' } }),
       'anthropic-messages'
     )
-    // No user field set, so no metadata translation
+    // The translator forwards no metadata; `user` reaches Anthropic as metadata.user_id through
+    // pi's stream options (buildStreamOptions), not through collectPayloadFields.
     expect(fields).toBeUndefined()
   })
 })

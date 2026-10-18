@@ -1,13 +1,14 @@
 /**
- * Unit tests for extensions/zed-sync.ts
+ * The Zed settings sync in `src/sync/zed.ts`.
  *
  * Tests cover:
  * - findZedSettings: path resolution with env overrides
  * - toZedModel: ExposedModel -> Zed available_models mapping
  * - syncToZed: JSONC read/write with comment preservation
- * - readCurrentModelNames: extracting model names from parsed JSONC
+ * - the existing model names syncToZed reads from the file (`readCurrentModelNames`, through the
+ *   added/removed/unchanged counts)
  * - Dry-run mode: diff computation without writing
- * - Edge cases: missing provider block, empty models, malformed JSONC
+ * - Edge cases: missing provider block, empty models, malformed JSONC, fs failures
  */
 
 import { chmodSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -27,6 +28,12 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/tes
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds a pi model, Claude Sonnet 4 on Anthropic by default.
+ *
+ * @param overrides - fields to replace in the default model
+ * @returns the model
+ */
 function makeModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
   return {
     id: 'claude-sonnet-4-20250514',
@@ -43,6 +50,12 @@ function makeModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
   }
 }
 
+/**
+ * Builds an exposed model for `makeModel()`, public under its canonical ID.
+ *
+ * @param overrides - fields to replace in the default exposed model
+ * @returns the exposed model
+ */
 function makeExposed(overrides: Partial<ExposedModel> = {}): ExposedModel {
   return {
     publicId: 'anthropic/claude-sonnet-4-20250514',
@@ -111,14 +124,26 @@ const CLAUDE_ZED_MODEL = {
   }
 }
 
-/** `language_models` holding only the "Pi Proxy" provider block. */
+/**
+ * Builds `language_models` holding only the "Pi Proxy" provider block.
+ *
+ * @param apiUrl - the block's `api_url`
+ * @param availableModels - the block's `available_models`
+ * @returns the `language_models` value
+ */
 function piProxyModels(apiUrl: string, availableModels: readonly unknown[]): unknown {
   return {
     openai_compatible: { 'Pi Proxy': { api_url: apiUrl, available_models: availableModels } }
   }
 }
 
-/** The settings file as Zed reads it: JSONC with trailing commas. A syntax error fails the test. */
+/**
+ * Reads the settings file as Zed reads it: JSONC with trailing commas.
+ *
+ * @param path - the settings file to read
+ * @returns the parsed settings
+ * @throws AssertionError when the file has a syntax error
+ */
 function writtenSettings(path: string): unknown {
   const errors: ParseError[] = []
   const settings: unknown = parse(readFileSync(path, 'utf-8'), errors, { allowTrailingComma: true })

@@ -20,12 +20,23 @@ import { afterEach, assert, describe, expect, test, vi } from 'vite-plus/test'
 
 let lines: string[] = []
 
+/**
+ * Routes the package's logs into `lines`, emptying it first.
+ *
+ * @param level - the lowest level written
+ * @param format - the output format; JSON Lines by default
+ */
 function capture(level: 'debug' | 'info', format: LogFormat = 'json'): void {
   lines = []
   configureLogging({ level, format, write: (line) => lines.push(line) })
 }
 
-/** Each captured line parsed; fails the test when a line is not a JSON object. */
+/**
+ * Parses each captured line; fails the test when a line is not a JSON object.
+ *
+ * @returns the parsed records, in log order
+ * @throws AssertionError when a captured line is not a JSON object
+ */
 function records(): Record<string, unknown>[] {
   return lines.map((line) => {
     const record: unknown = JSON.parse(line)
@@ -157,7 +168,7 @@ describe('redaction', () => {
 })
 
 describe('pretty output', () => {
-  // Catches the terminal format writing JSON, or losing the message, when stderr is a TTY.
+  // Catches the pretty (terminal) format writing JSON, or losing the message.
   test('renders the message for a person rather than as JSON', () => {
     capture('info', 'pretty')
     proxyLogger('server').info('Listening on {port}', { port: 4141 })

@@ -21,8 +21,11 @@ import { describe, expect, test } from 'vite-plus/test'
 // ---------------------------------------------------------------------------
 
 /**
- * Runtime type guard for SSEChunk shape.
- * Validates the required fields that streamToSSE always emits.
+ * Checks the fields `streamToSSE` emits on every chunk: `id`, `object`, `created`, `model` and
+ * `choices`.
+ *
+ * @param value - a parsed JSON value from a data frame
+ * @returns whether `value` has the SSEChunk shape
  */
 function isSSEChunk(value: unknown): value is SSEChunk {
   if (!isRecord(value)) return false
@@ -40,6 +43,11 @@ const DONE_SENTINEL = '[DONE]' as const
 
 type ParsedFrame = SSEChunk | typeof DONE_SENTINEL | null
 
+/**
+ * Builds a pi `Usage` of 10 input and 20 output tokens at zero cost.
+ *
+ * @returns the usage record
+ */
 function makeUsage(): Usage {
   return {
     input: 10,
@@ -52,11 +60,16 @@ function makeUsage(): Usage {
 }
 
 /**
- * A complete partial AssistantMessage with these content blocks. streamToSSE reads the partial's
- * content and the done message's usage (the finish reason comes from the event); the identity
- * fields, stopReason and timestamp are fixed placeholders. The model differs
- * from the `test-model` the stream is opened with, so a chunk that took its `model` from the
- * upstream message instead fails the `model` assertion.
+ * Builds a complete partial AssistantMessage with these content blocks.
+ *
+ * @remarks
+ * streamToSSE reads the partial's content and the done message's usage (the finish reason comes
+ * from the event); the identity fields, stopReason and timestamp are fixed placeholders. The model
+ * differs from the `test-model` the stream is opened with, so a chunk that took its `model` from
+ * the upstream message instead fails the `model` assertion.
+ *
+ * @param content - the message's content blocks; none by default
+ * @returns the assistant message
  */
 function makePartial(content: AssistantMessage['content'] = []): AssistantMessage {
   return {
@@ -71,12 +84,25 @@ function makePartial(content: AssistantMessage['content'] = []): AssistantMessag
   }
 }
 
+/**
+ * Replays pi stream events as an async stream.
+ *
+ * @param events - the events to yield, in order
+ * @returns a generator that yields `events` one by one
+ */
 async function* mockEvents(events: AssistantMessageEvent[]): AsyncGenerator<AssistantMessageEvent> {
   for (const event of events) {
     yield event
   }
 }
 
+/**
+ * Runs `streamToSSE` over the events, as request `req-1` for model `test-model`.
+ *
+ * @param events - the pi stream events to encode
+ * @param includeUsage - whether to emit the usage chunk (`stream_options.include_usage`)
+ * @returns every SSE frame, in order, including the final `[DONE]`
+ */
 async function collectFrames(
   events: AssistantMessageEvent[],
   includeUsage = false
@@ -89,9 +115,12 @@ async function collectFrames(
 }
 
 /**
- * Parse SSE data frames into typed chunks.
- * Returns SSEChunk for valid JSON, "[DONE]" for the terminal frame,
- * or null for non-data frames.
+ * Parses SSE frames into typed chunks.
+ *
+ * @param frames - raw SSE frames from {@link collectFrames}
+ * @returns per frame: the SSEChunk, `[DONE]` for the terminal frame, or `null` for a frame that
+ *   is not a data frame or not chunk-shaped
+ * @throws SyntaxError when a data frame's payload is not JSON
  */
 function parseChunks(frames: string[]): ParsedFrame[] {
   return frames.map((frame): ParsedFrame => {
@@ -104,12 +133,22 @@ function parseChunks(frames: string[]): ParsedFrame[] {
   })
 }
 
-/** Filter parsed frames to only valid SSEChunk objects. */
+/**
+ * Keeps only the SSEChunk objects.
+ *
+ * @param frames - frames from {@link parseChunks}
+ * @returns the chunks, without `[DONE]` and `null` entries
+ */
 function chunkFrames(frames: ParsedFrame[]): SSEChunk[] {
   return frames.filter((chunk): chunk is SSEChunk => chunk !== DONE_SENTINEL && chunk !== null)
 }
 
-/** Filter to chunks that have at least one choice. */
+/**
+ * Keeps only the chunks that have at least one choice, dropping the usage chunk.
+ *
+ * @param frames - frames from {@link parseChunks}
+ * @returns the chunks with a non-empty `choices` array
+ */
 function chunksWithChoices(frames: ParsedFrame[]): SSEChunk[] {
   return chunkFrames(frames).filter((chunk) => chunk.choices.length > 0)
 }

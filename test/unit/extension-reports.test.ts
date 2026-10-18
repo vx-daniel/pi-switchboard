@@ -1,6 +1,7 @@
 /**
- * The `/proxy show`, `/proxy models` and `/proxy verify` reports (`extensions/proxy/reports.ts`), over a fixture
- * agent directory: what text each config and model set produces.
+ * The `/proxy show`, `/proxy models` and `/proxy verify` reports
+ * (`extensions/proxy/reports.ts`), over a fixture agent directory: what text each config and
+ * model set produces.
  *
  * The extension imports the package through its published subpaths, which resolve to `dist/`;
  * these tests point them at the sources, so they run before any build.
@@ -37,7 +38,17 @@ const ALL_EXPOSED_PREVIEW = 'alpha/a1, alpha/a2, alpha/a3, alpha/a4, alpha/a5 (+
 const UNIVERSAL_CONFLICT =
   "Universal mode conflict: model ID 'shared' is provided by both 'alpha' and 'beta'. Use 'collision-prefixed' or 'always-prefixed' mode, or reduce the exposed model set."
 
-/** Writes `proxy-config.json` into the agent dir and returns a state over its models. */
+/**
+ * Writes `proxy-config.json` into the agent dir and returns a state over its models.
+ *
+ * @remarks
+ * The state starts with {@link DEFAULT_CONFIG}; each report reloads the file into it.
+ *
+ * @param agentDir - the fixture agent dir that receives the config file
+ * @param config - the raw `proxy-config.json` content
+ * @param enabledModels - pi's `enabledModels` patterns; `undefined` leaves the setting unset
+ * @returns a {@link ProxyState} with a fresh model registry and in-memory pi settings
+ */
 function stateWith(
   agentDir: FixtureAgentDir,
   config: Record<string, unknown>,
@@ -222,8 +233,8 @@ describe('with models on two providers', () => {
       })
     })
 
-    // Catches an empty custom list going unreported. "Will expose 0 models" is today's text, though the
-    // proxy exposes every model then: #88 decides which is right.
+    // Catches an empty custom list going unreported. "Will expose 0 models" is today's text,
+    // though the proxy exposes every model then: #88 decides which is right.
     test('custom mode with an empty list', async () => {
       const state = stateWith(agentDir, { modelExposureMode: 'custom', customModels: [] })
       const report = await buildVerifyReport(state)
@@ -278,8 +289,8 @@ describe('with no models', () => {
     })
   })
 
-  // Catches a model-less setup passing verification. The empty-custom-list line is pinned as today's
-  // text (#88).
+  // Catches a model-less setup passing verification. The empty-custom-list line is pinned as
+  // today's text (#88).
   test('buildVerifyReport reports that no model has auth', async () => {
     const report = await buildVerifyReport(stateWith(agentDir, { modelExposureMode: 'custom' }))
     expect(report).toEqual({

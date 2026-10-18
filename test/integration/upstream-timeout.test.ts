@@ -69,8 +69,20 @@ afterAll(async () => {
   agentDir.remove()
 })
 
+/**
+ * Builds the test app with the upstream idle timeout set to {@link IDLE_TIMEOUT_MS}.
+ *
+ * @returns a fresh app
+ */
 const app = () => testApp({ ...testConfig(), upstreamTimeoutMs: IDLE_TIMEOUT_MS })
 
+/**
+ * Asks `timeout-mock/<model>` through the timeout-limited app.
+ *
+ * @param model - the mock model ID, which picks the provider's behaviour
+ * @param stream - whether to request a streamed answer
+ * @returns the proxy's response
+ */
 async function chat(model: string, stream: boolean): Promise<Response> {
   return app().request('/v1/chat/completions', {
     method: 'POST',

@@ -13,6 +13,13 @@ RuleTester.it = it
 
 const tester = new RuleTester({ languageOptions: { parserOptions: { lang: 'ts' } } })
 
+/**
+ * Looks up a naming rule by name, failing loudly if it is not registered.
+ *
+ * @param name - the rule name without the `naming/` prefix
+ * @returns the rule
+ * @throws Error when the plugin has no rule by that name
+ */
 function rule(name: string): NonNullable<typeof naming.rules>[string] {
   const found = naming.rules[name]
   if (found === undefined) throw new Error(`naming/${name} is not defined`)

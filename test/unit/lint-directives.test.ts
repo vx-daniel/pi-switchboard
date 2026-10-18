@@ -1,8 +1,9 @@
 /**
- * No inline lint or fallow directives anywhere in the repository (CONSTITUTION.md, principle II): a
- * rule that fails is fixed in the code, never switched off, and fallow's exceptions live in
- * `.fallowrc.jsonc` with their reasons (#83). A lint rule cannot enforce this, because the directive
- * it bans would switch that rule off too, so this test reads every tracked script's comments itself.
+ * No inline lint or fallow directives anywhere in the repository (CONSTITUTION.md, principle
+ * II): a rule that fails is fixed in the code, never switched off, and fallow's exceptions live
+ * in `.fallowrc.jsonc` with their reasons (#83). A lint rule cannot enforce this, because the
+ * directive it bans would switch that rule off too, so this test reads every tracked script's
+ * comments itself.
  *
  * Comments come from TypeScript's parser, so a directive inside a string or a regular expression
  * (a lint rule's test fixture, say) is not a comment and is not flagged.
@@ -24,26 +25,38 @@ const SCRIPT_FILE = /\.[cm]?[jt]sx?$/
 /**
  * A comment that switches a check off or back on: `oxlint-` or `eslint-` followed by `disable`,
  * `disable-line`, `disable-next-line` or `enable`, or fallow's `fallow-ignore-next-line` and
- * `fallow-ignore-file`. As in ESLint, only a comment that starts with one is a directive, and only
- * a `//` or `/* … *\/` comment: neither tool reads one in a doc comment, nor prose that mentions it.
+ * `fallow-ignore-file`. As in ESLint, only a comment that starts with one is a directive, and
+ * only a `//` or `/* … *\/` comment: neither tool reads one in a doc comment, nor prose that
+ * mentions it.
  */
 const DIRECTIVE = /^(?:\/\/|\/\*)\s*(?:(?:oxlint|eslint)-(?:disable|enable)|fallow-ignore)\b/
 
 /**
- * fallow's JSDoc tag for an export kept on purpose, which hides it from the unused-export check. It
- * counts where a JSDoc tag goes, opening the doc comment or one of its lines; mentioned mid-sentence,
- * it is prose.
+ * fallow's JSDoc tag for an export kept on purpose, which hides it from the unused-export check.
+ * It counts where a JSDoc tag goes, opening the doc comment or one of its lines; mentioned
+ * mid-sentence, it is prose.
  */
 const EXPECTED_UNUSED_TAG = /(?:^\/\*\*|\n\s*\*)\s*@expected-unused\b/
 
-/** Every tracked script file, relative to the repository root. */
+/**
+ * Lists every script file git tracks.
+ *
+ * @returns the paths, relative to the repository root
+ * @throws Error when `git ls-files` fails
+ */
 function trackedScripts(): string[] {
   const listing = spawnSync('git', ['ls-files', '-z'], { cwd: REPOSITORY_ROOT, encoding: 'utf8' })
   if (listing.status !== 0) throw new Error(`git ls-files failed: ${listing.stderr}`)
   return listing.stdout.split('\0').filter((path) => SCRIPT_FILE.test(path))
 }
 
-/** The text of every comment in `source`, each once, in no particular order. */
+/**
+ * Collects the text of every comment in `source`, each once, in no particular order.
+ *
+ * @param path - the file name TypeScript's parser is given for `source`
+ * @param source - the file's text
+ * @returns each comment's full text, delimiters included
+ */
 function commentsOf(path: string, source: string): string[] {
   const file = typescript.createSourceFile(path, source, typescript.ScriptTarget.Latest, false)
   const comments = new Map<number, string>()
@@ -64,7 +77,13 @@ function commentsOf(path: string, source: string): string[] {
   return [...comments.values()]
 }
 
-/** The directives in `source`: its comments that are, or carry, one, sorted. */
+/**
+ * Finds the directives in `source`: its comments that are, or carry, one.
+ *
+ * @param path - the file name TypeScript's parser is given for `source`
+ * @param source - the file's text
+ * @returns the matching comments' full text, sorted
+ */
 function directivesIn(path: string, source: string): string[] {
   return commentsOf(path, source)
     .filter((comment) => DIRECTIVE.test(comment) || EXPECTED_UNUSED_TAG.test(comment))
@@ -123,7 +142,7 @@ test('leaves strings, regular expressions, prose and doc comments alone', () => 
   expect(directivesIn('sample.ts', source)).toEqual([])
 })
 
-// Catches a disable comment anywhere in the repository.
+// Catches an inline lint or fallow directive in any tracked script.
 test('no tracked script disables or re-enables a lint rule in a comment', () => {
   const directives = trackedScripts().flatMap((path) =>
     directivesIn(path, readFileSync(join(REPOSITORY_ROOT, path), 'utf8')).map(

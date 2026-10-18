@@ -15,7 +15,10 @@ import { afterEach, assert, beforeEach, describe, expect, test, vi } from 'vite-
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
 import { listenOnLoopback } from '../fixtures/local-server'
 
-/** Every variable `loadConfig` reads: the developer's own settings must not reach a test. */
+/**
+ * Every `PI_PROXY_*` variable the CLI entry reads (`loadConfig`'s, plus `PI_PROXY_LOG_FORMAT`):
+ * the developer's own settings must not reach a test.
+ */
 const PROXY_ENV_VARIABLES = [
   'PI_PROXY_HOST',
   'PI_PROXY_PORT',
@@ -46,7 +49,12 @@ let stderr: string[] = []
 /** The shutdown signal listeners present before the entry ran: only its own are removed. */
 let signalListenersBefore = new Set<unknown>()
 
-/** Capture what is written to this stream instead of letting it reach the terminal. */
+/**
+ * Captures what is written to a stream instead of letting it reach the terminal.
+ *
+ * @param stream - the stream whose `write` is replaced (stdout or stderr)
+ * @param sink - the array each written chunk is appended to, as UTF-8 text
+ */
 function captureWrites(stream: NodeJS.WriteStream, sink: string[]): void {
   vi.spyOn(stream, 'write').mockImplementation((chunk: string | Uint8Array) => {
     sink.push(typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf8'))
@@ -54,13 +62,22 @@ function captureWrites(stream: NodeJS.WriteStream, sink: string[]): void {
   })
 }
 
-/** Write `proxy-config.json` into the fixture agent dir, where the proxy reads its config file. */
+/**
+ * Writes `proxy-config.json` into the fixture agent dir, where the proxy reads its config file.
+ *
+ * @param contents - the config object, written as JSON
+ * @throws AssertionError when no fixture agent dir is loaded
+ */
 function writeConfigFile(contents: Record<string, unknown>): void {
   assert(agentDir !== undefined, 'no fixture agent dir')
   writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify(contents))
 }
 
-/** Run the CLI entry with these arguments, as `pi-openai-proxy <args>` would. */
+/**
+ * Runs the CLI entry with these arguments, as `pi-openai-proxy <args>` would.
+ *
+ * @param args - the command-line arguments after the program name
+ */
 async function runCli(args: readonly string[]): Promise<void> {
   process.argv = [process.execPath, 'pi-openai-proxy', ...args]
   vi.resetModules()
@@ -68,7 +85,12 @@ async function runCli(args: readonly string[]): Promise<void> {
   await import('@proxy/index')
 }
 
-/** The JSON log records written to stderr so far. */
+/**
+ * Parses the JSON log records written to stderr so far.
+ *
+ * @returns every stderr line that starts with `{`, parsed, in write order
+ * @throws AssertionError when such a line is not a JSON object
+ */
 function logRecords(): Record<string, unknown>[] {
   return stderr
     .filter((line) => line.startsWith('{'))
@@ -79,7 +101,11 @@ function logRecords(): Record<string, unknown>[] {
     })
 }
 
-/** A port nothing listens on right now. */
+/**
+ * Finds a loopback port nothing listens on right now.
+ *
+ * @returns a port number that was free when its probe server closed
+ */
 async function freePort(): Promise<number> {
   const probe = createServer()
   const origin = await listenOnLoopback(probe)
@@ -88,14 +114,20 @@ async function freePort(): Promise<number> {
   return Number(new URL(origin).port)
 }
 
-/** The signal listeners the entry added, for this signal. */
+/**
+ * Lists the listeners the entry added for a signal: those not present before it ran.
+ *
+ * @typeParam Signal - the shutdown signal, `SIGTERM` or `SIGINT`
+ * @param signal - the signal whose listeners are listed
+ * @returns the added listeners, in registration order
+ */
 function addedListeners<Signal extends 'SIGTERM' | 'SIGINT'>(signal: Signal) {
   return process.listeners(signal).filter((listener) => !signalListenersBefore.has(listener))
 }
 
 /**
- * Run the entry's shutdown handlers as a signal would, with its forced-exit timer faked so it can
- * never end the test process, then remove them.
+ * Runs the entry's shutdown handlers as a signal would, with its forced-exit timer faked so it can
+ * never end the test process. The handlers stay registered; `afterEach` removes them.
  */
 function deliverShutdownSignals(): void {
   vi.useFakeTimers({ toFake: ['setTimeout'] })
@@ -105,7 +137,15 @@ function deliverShutdownSignals(): void {
   vi.useRealTimers()
 }
 
-/** Wait until the started proxy answers on this origin. */
+/**
+ * Waits until the started proxy answers on this origin.
+ *
+ * @remarks
+ * Any HTTP response counts, including the 404 that `/health` gets; only a refused connection
+ * keeps it waiting.
+ *
+ * @param origin - the proxy's origin, such as `http://127.0.0.1:4141`
+ */
 async function waitForListening(origin: string): Promise<void> {
   await vi.waitFor(async () => {
     await fetch(`${origin}/health`)
@@ -276,8 +316,8 @@ describe('starting the server', () => {
     await runCli(['--port', 'abc', '--max-body-size', '0', '--log-format', 'json'])
     await waitForListening(`http://127.0.0.1:${String(port)}`)
 
-    // String values are quoted in JSON log messages on purpose, so a value can never pose as message
-    // text (#94, closed as intended).
+    // String values are quoted in JSON log messages on purpose, so a value can never pose as
+    // message text (#94, closed as intended).
     expect(
       logRecords()
         .map((record) => record['message'])

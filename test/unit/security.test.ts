@@ -2,8 +2,8 @@
  * Security tests for image URL handling: remote URLs are blocked, oversized payloads are rejected,
  * and only supported MIME types are accepted.
  *
- * The model is a fixture provider (literal key, unreachable base URL): every request here is
- * rejected before any upstream call, so nothing leaves the machine and no login is needed.
+ * The model is served by a local mock provider (`startMockProvider`): the rejected requests are
+ * refused before any upstream call, the accepted one reaches only the mock, and no login is needed.
  */
 
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
@@ -19,7 +19,7 @@ import {
 import { isErrorLike, jsonBody, testApp } from '../helpers'
 
 const MODEL_ID = 'security-fixture/vision-model'
-/** One byte over the 20 MB limit on a decoded image. */
+/** A base64 payload of 21 MiB of text, over the 20 MiB limit on an image's base64 data. */
 const OVERSIZED_BASE64 = 'A'.repeat(21 * 1024 * 1024)
 
 let mock: MockProvider
@@ -47,6 +47,12 @@ afterAll(async () => {
   agentDir.remove()
 })
 
+/**
+ * Sends a chat completion to the fixture model with one text part and one image part.
+ *
+ * @param imageUrl - the `image_url.url` to send: a remote URL or a data URI
+ * @returns the proxy's response
+ */
 async function sendImage(imageUrl: string): Promise<Response> {
   return testApp().request('/v1/chat/completions', {
     method: 'POST',

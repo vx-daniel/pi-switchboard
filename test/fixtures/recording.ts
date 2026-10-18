@@ -8,8 +8,10 @@
  * (`test/fixtures/mock-provider.ts`), so a test drives pi's real client over real HTTP with
  * real-shaped provider output, without a login or a network.
  *
- * Plain relative imports only: `scripts/record-fixtures.ts` runs this under Node directly, where the
- * `@proxy/*` aliases do not resolve.
+ * Relative imports only, with their `.ts` extension: `scripts/record-fixtures.ts` runs this under
+ * Node directly, where the `@proxy/*` aliases do not resolve and Node does not add extensions.
+ *
+ * @packageDocumentation
  */
 
 import { once } from 'node:events'
@@ -24,6 +26,7 @@ import { listenOnLoopback } from './local-server'
 /** Where recordings live: `<api>/<scenario>.json`. */
 export const RECORDINGS_DIR = join(import.meta.dirname, 'recordings')
 
+/** The recording format version; {@link loadRecording} rejects any other. */
 const RECORDING_VERSION = 1
 /** Recordings are committed and reviewed: pretty-printed, so a re-recording diffs readably. */
 const JSON_INDENT = 2
@@ -43,6 +46,7 @@ const KEPT_REQUEST_HEADERS = new Set([
  */
 const RawChunkSchema = z.custom<string>((value) => typeof value === 'string', 'expected a string')
 
+/** The shape of a saved recording file. */
 const RecordingSchema = z.object({
   version: z.literal(RECORDING_VERSION),
   api: z.string().trim(),
@@ -63,15 +67,34 @@ const RecordingSchema = z.object({
   })
 })
 
+/** One saved recording: what pi sent, and what the provider answered, chunk by chunk. */
 export type Recording = z.infer<typeof RecordingSchema>
 
 /** What the recorder captured for one request, before it is named and saved. */
 export type CapturedExchange = Pick<Recording, 'request' | 'response'>
 
+/**
+ * Returns where a recording lives.
+ *
+ * @param api - the pi API the recording speaks, such as `anthropic-messages`
+ * @param scenario - the scenario's name
+ * @param directory - the recordings root; {@link RECORDINGS_DIR} by default
+ * @returns `<directory>/<api>/<scenario>.json`
+ */
 export function recordingPath(api: string, scenario: string, directory = RECORDINGS_DIR): string {
   return join(directory, api, `${scenario}.json`)
 }
 
+/**
+ * Reads and validates a saved recording.
+ *
+ * @param api - the pi API the recording speaks
+ * @param scenario - the scenario's name
+ * @param directory - the recordings root; {@link RECORDINGS_DIR} by default
+ * @returns the recording
+ * @throws Error when the recording does not match the recording schema; the file system's error
+ *   when it cannot be read, and a `SyntaxError` when it is not JSON
+ */
 export function loadRecording(
   api: string,
   scenario: string,
@@ -90,9 +113,17 @@ export function loadRecording(
 const CREDENTIAL_PATTERN = /sk-ant-[a-z]{3}\d{2}-|Bearer\s+\S{20,}/
 
 /**
- * Save a recording, unless it contains a credential: any of `secrets` (the values the request's
- * auth headers carried) or anything shaped like one. Refuses rather than redacts, so a leak is
- * noticed instead of silently patched.
+ * Saves a recording, unless it contains a credential: any of `secrets` (the values the request's
+ * auth headers carried) or anything shaped like one.
+ *
+ * @remarks
+ * Refuses rather than redacts, so a leak is noticed instead of silently patched.
+ *
+ * @param recording - the recording to save
+ * @param secrets - credential values that must not appear in it; empty strings are ignored
+ * @param directory - the recordings root; {@link RECORDINGS_DIR} by default
+ * @returns the path the recording was written to
+ * @throws Error when the recording contains a credential
  */
 export function saveRecording(
   recording: Recording,
@@ -112,7 +143,12 @@ export function saveRecording(
   return path
 }
 
-/** The credential values a request carried, which its recording must not contain. */
+/**
+ * Collects the credential values a request carried, which its recording must not contain.
+ *
+ * @param headers - the request headers; `authorization`, `x-api-key` and `cookie` are read
+ * @returns each such header's value, and the value again without a `Bearer ` prefix
+ */
 export function credentialsIn(headers: IncomingHttpHeaders): string[] {
   const values: string[] = []
   for (const headerName of ['authorization', 'x-api-key', 'cookie']) {
@@ -124,6 +160,12 @@ export function credentialsIn(headers: IncomingHttpHeaders): string[] {
   return values
 }
 
+/**
+ * Keeps the request headers worth recording ({@link KEPT_REQUEST_HEADERS}).
+ *
+ * @param headers - the request headers
+ * @returns the kept headers that have a single string value
+ */
 function keptHeaders(headers: IncomingHttpHeaders): Record<string, string> {
   const kept: Record<string, string> = {}
   for (const [headerName, headerValue] of Object.entries(headers)) {
@@ -134,6 +176,12 @@ function keptHeaders(headers: IncomingHttpHeaders): Record<string, string> {
   return kept
 }
 
+/**
+ * Parses a request body.
+ *
+ * @param text - the body text
+ * @returns the body as JSON, or the text itself when it is not JSON
+ */
 function parseJson(text: string): unknown {
   try {
     return JSON.parse(text)
@@ -142,17 +190,26 @@ function parseJson(text: string): unknown {
   }
 }
 
+/** A running recorder, from {@link startRecorder}. */
 export interface Recorder {
+  /** The recorder's origin, `http://127.0.0.1:<port>`. */
   readonly baseUrl: string
   /** Every exchange so far, in order, with the credentials each request carried. */
   readonly exchanges: readonly { readonly exchange: CapturedExchange; readonly secrets: string[] }[]
+  /** Drops open connections and stops the server. */
   close(): Promise<void>
 }
 
 /**
- * A pass-through server on 127.0.0.1 that forwards every request to `upstreamOrigin` (for example
- * `https://api.anthropic.com`) and keeps what came back. Point a provider's `baseUrl` at
- * `recorder.baseUrl` plus the provider's own path prefix, if it has one.
+ * Starts a pass-through server on 127.0.0.1 that forwards every request to `upstreamOrigin` and
+ * keeps what came back.
+ *
+ * @remarks
+ * Point a provider's `baseUrl` at `recorder.baseUrl` plus the provider's own path prefix, if it has
+ * one.
+ *
+ * @param upstreamOrigin - the real provider's origin, for example `https://api.anthropic.com`
+ * @returns the running recorder: its base URL, the exchanges so far, and `close()`
  */
 export async function startRecorder(upstreamOrigin: string): Promise<Recorder> {
   const exchanges: { exchange: CapturedExchange; secrets: string[] }[] = []
@@ -180,6 +237,7 @@ export async function startRecorder(upstreamOrigin: string): Promise<Recorder> {
 
 /** Headers that describe the hop to the recorder, not the request: never forwarded. */
 const HOP_HEADERS = new Set(['host', 'connection', 'content-length', 'accept-encoding'])
+/** HTTP 502, sent to pi when the recorder cannot reach the upstream. */
 const HTTP_BAD_GATEWAY = 502
 
 /** One request pi sent to the recorder. */
@@ -189,6 +247,16 @@ interface IncomingRequest {
   readonly body: string
 }
 
+/**
+ * Forwards one request upstream as a POST, streams the answer back to pi, and captures both.
+ *
+ * @param upstreamOrigin - the real provider's origin
+ * @param request - the request pi sent to the recorder
+ * @param response - the response to pi
+ * @returns the captured exchange (kept headers only) and the credentials the request carried
+ * @throws TypeError when the upstream body yields something other than bytes; `fetch` errors
+ *   when the upstream cannot be reached
+ */
 async function forward(
   upstreamOrigin: string,
   { path, headers, body }: IncomingRequest,
@@ -229,7 +297,15 @@ async function forward(
   }
 }
 
-/** Forward one request and keep the exchange; if the upstream cannot be reached, say so to pi. */
+/**
+ * Forwards one request and keeps the exchange; if the upstream cannot be reached, says so to pi
+ * with a 502.
+ *
+ * @param upstreamOrigin - the real provider's origin
+ * @param request - the request pi sent to the recorder
+ * @param response - the response to pi
+ * @param exchanges - the recorder's exchange list, appended to on success
+ */
 async function record(
   upstreamOrigin: string,
   request: IncomingRequest,
@@ -244,7 +320,13 @@ async function record(
   }
 }
 
-/** Serve a recording: its status, content type and body chunks, in the order they arrived. */
+/**
+ * Builds a mock reply that serves a recording: its status, content type and body chunks, in the
+ * order they arrived.
+ *
+ * @param recording - the recording to serve
+ * @returns the reply, for {@link startMockProvider}
+ */
 export function replay(recording: Recording): (response: ServerResponse) => void {
   return (response) => {
     response.writeHead(recording.response.status, {

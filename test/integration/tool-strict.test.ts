@@ -83,7 +83,19 @@ const STRICT_WEATHER_PARAMETERS = {
   additionalProperties: false
 }
 
-/** Send one tool to `model`, and return the first tool definition the provider received. */
+/**
+ * Sends one tool, `get_weather`, to `model` and returns the first tool definition the provider
+ * received.
+ *
+ * @remarks
+ * Also asserts that the request reached the mock provider exactly once.
+ *
+ * @param model - the public model ID to ask
+ * @param parameters - the tool's JSON Schema `parameters`
+ * @param strict - the tool's `strict` flag; `undefined` leaves the field out
+ * @returns the first entry of the upstream body's `tools`, in that API's own shape
+ * @throws Error when the upstream body has no tool definition
+ */
 async function upstreamTool(
   model: string,
   parameters: Record<string, unknown>,

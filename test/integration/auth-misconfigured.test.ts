@@ -34,17 +34,31 @@ afterEach(() => {
   agentDir.remove()
 })
 
-/** Write proxy-config.json into the fixture agent dir. */
+/**
+ * Writes proxy-config.json into the fixture agent dir.
+ *
+ * @param config - the raw file contents, serialized as JSON as given
+ */
 function writeProxyConfig(config: Record<string, unknown>): void {
   writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify(config))
 }
 
-/** proxy-config.json as it is on disk now. */
+/**
+ * Reads proxy-config.json as it is on disk now.
+ *
+ * @returns the parsed file contents
+ */
 function proxyConfigOnDisk(): unknown {
   return JSON.parse(readFileSync(join(agentDir.path, 'proxy-config.json'), 'utf-8'))
 }
 
-/** The status and body of a request to the app built from the files, as the proxy builds it. */
+/**
+ * Sends a GET to an app built from the current files, the way the proxy builds it at start-up.
+ *
+ * @param path - the request path
+ * @param bearer - the bearer token to send; `undefined` sends no `Authorization` header
+ * @returns the response status and parsed JSON body
+ */
 async function ask(path: string, bearer?: string): Promise<{ status: number; body: unknown }> {
   const headers: Record<string, string> =
     bearer === undefined ? {} : { Authorization: `Bearer ${bearer}` }

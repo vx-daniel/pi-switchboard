@@ -1,8 +1,9 @@
 /**
  * Unit tests for config/schema.ts normalization.
  *
- * Validates that normalizeConfig handles malformed JSON, missing fields,
- * type coercion, and produces valid defaults.
+ * Checks that normalizeConfig repairs rather than refuses: missing fields take their defaults,
+ * values of the wrong type fall back, numbers are rounded and clamped, list and map entries are
+ * filtered, and each set of repaired fields is warned about once, by path.
  */
 
 import { resetSync } from '@logtape/logtape'
@@ -223,7 +224,7 @@ describe('normalizeConfig: numeric limits', () => {
   // Catches a clamp dropped or loosened: a timeout of 1 s would cut off every call that thinks
   // before answering, and an unbounded one would never abort a stalled call (#15); a body limit of
   // 0 refuses every request, and an unbounded one accepts any payload into memory. A value that is
-  // not a number falls back to the default rather than to a bound.
+  // not a finite number falls back to the default rather than to a bound.
   test.each([
     ['upstreamTimeoutSec', 1, 5],
     ['upstreamTimeoutSec', 9999, 600],
@@ -247,8 +248,13 @@ describe('normalizeConfig: repairs', () => {
     lines = []
   })
 
-  // The warning is deduplicated in module state, so each test starts from a clean config first:
-  // otherwise an earlier test ending on the same invalid fields would swallow this one's warning.
+  /**
+   * Starts capturing config warnings into `lines`, from a clean deduplication state.
+   *
+   * @remarks
+   * The warning is deduplicated in module state, so this normalizes a valid config first:
+   * otherwise an earlier test ending on the same invalid fields would swallow this one's warning.
+   */
   function captureWarnings(): void {
     normalizeConfig({})
     configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
@@ -290,8 +296,8 @@ describe('normalizeConfig: repairs', () => {
     expect(normalizeConfig({ port: 4141.5 }).port).toBe(4142)
   })
 
-  // Catches one bad zed field resetting the whole block, which used to discard a valid provider
-  // name along with it.
+  // Catches one bad zed field resetting the whole block and discarding a valid provider name with
+  // it.
   test('an invalid zed field keeps its valid sibling', () => {
     expect(normalizeConfig({ zed: { providerName: 'Work', autoSync: 'yes' } }).zed).toEqual({
       providerName: 'Work',

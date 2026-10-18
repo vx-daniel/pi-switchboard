@@ -1,6 +1,14 @@
 import { jsonSchemaToTypebox } from '@proxy/openai/json-schema-to-typebox'
 import { describe, expect, test } from 'vite-plus/test'
 
+/**
+ * Reads one own property of a converted schema without trusting its type.
+ *
+ * @param schema - the converted schema, or any value
+ * @param key - the property to read
+ * @returns the property's value, or `undefined` when `schema` is not a non-array object or lacks
+ * the property
+ */
 function schemaValue(schema: unknown, key: string): unknown {
   if (schema === null || typeof schema !== 'object' || Array.isArray(schema)) {
     return undefined
@@ -328,7 +336,13 @@ describe('jsonSchemaToTypebox', () => {
   })
 
   describe('keywords beyond the structure', () => {
-    /** The converted schema as sent upstream; TypeBox's symbol keys never leave the process. */
+    /**
+     * Converts a schema at path `p` and returns it as sent upstream; TypeBox's symbol keys never
+     * leave the process.
+     *
+     * @param schema - the client's JSON Schema
+     * @returns the converted schema after a JSON round trip, or the failure result unchanged
+     */
     function convertedJson(schema: Record<string, unknown>): unknown {
       const result = jsonSchemaToTypebox(schema, 'p')
       return result.ok ? JSON.parse(JSON.stringify(result.schema)) : result

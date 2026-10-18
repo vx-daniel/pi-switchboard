@@ -8,6 +8,8 @@
  * variable removed. A test that needs models loads them with `loadFixtureAgentDir`
  * (`test/fixtures/agent-dir.ts`); `test/conformance` (the `live` project) is the only place that
  * uses a real login.
+ *
+ * @packageDocumentation
  */
 
 import { mkdtempSync, rmSync } from 'node:fs'
@@ -33,6 +35,7 @@ for (const variableName of Object.keys(process.env)) {
   if (CREDENTIAL_VARIABLE.test(variableName)) Reflect.deleteProperty(process.env, variableName)
 }
 
+/** The empty agent directory pi is pointed at; deleted after the file's tests. */
 const emptyAgentDir = mkdtempSync(join(tmpdir(), 'pi-proxy-offline-'))
 process.env.PI_CODING_AGENT_DIR = emptyAgentDir
 

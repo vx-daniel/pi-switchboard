@@ -39,6 +39,13 @@ describe('mapUsage', () => {
 })
 
 describe('buildChatCompletion', () => {
+  /**
+   * Builds an Anthropic assistant message with fixed usage that includes cache reads and writes.
+   *
+   * @param content - the message's content blocks
+   * @param stopReason - pi's stop reason for the message
+   * @returns the assistant message
+   */
   function assistantMessage(
     content: AssistantMessage['content'],
     stopReason: StopReason

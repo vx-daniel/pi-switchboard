@@ -2,9 +2,10 @@
  * A chat request whose provider credential fails to resolve: the 401 and the default-level logs
  * carry pi's summary of the failure, never the detail after it.
  *
- * pi's OAuth refresh errors run `<summary>. url=…; body=<token endpoint response>; stack=<install
- * paths>`. Refreshing a real token is not possible offline, so this uses a models.json key command
- * that resolves to nothing: pi's error then quotes the command, which is written in that shape.
+ * pi's OAuth errors run `<summary>. url=…; body=<token endpoint response>; details=…;
+ * stack=<install paths>`. Refreshing a real token is not possible offline, so this uses a
+ * models.json key command that resolves to nothing: pi's error then quotes the command, which is
+ * written in that shape.
  */
 
 import { resetSync } from '@logtape/logtape'
@@ -19,7 +20,10 @@ const LEAKED_DETAIL = 'notarealsecret-token-endpoint-response'
 const LEAKED_PATH = 'notarealsecret-install-path'
 
 let agentDir: FixtureAgentDir
-/** Every JSON log line written, with its LogTape level (`TRACE`, `DEBUG`, `INFO`, `WARN`, …) and logger. */
+/**
+ * Every JSON log line written, with its LogTape level (`TRACE`, `DEBUG`, `INFO`, `WARN`, …) and
+ * logger.
+ */
 const records: { level: string; logger: string; line: string }[] = []
 const BELOW_DEFAULT_LEVEL = new Set(['TRACE', 'DEBUG'])
 
@@ -30,7 +34,8 @@ beforeAll(async () => {
         'auth-broken': {
           baseUrl: 'http://127.0.0.1:9/v1',
           api: 'openai-completions',
-          // Runs, prints nothing, exits 0: pi treats the key as unresolved and quotes the command.
+          // Prints nothing (its last part runs a command that does not exist, so it exits 127):
+          // pi treats the key as unresolved and quotes the command in its error.
           apiKey: `!true; body=${LEAKED_DETAIL}; stack=at file:///${LEAKED_PATH}/index.js`,
           models: [{ id: 'broken-model' }]
         }

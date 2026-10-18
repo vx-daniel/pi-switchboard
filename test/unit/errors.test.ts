@@ -31,9 +31,16 @@ describe('error helpers', () => {
 })
 
 describe('mapUpstreamError', () => {
-  /** Upstream error text can quote the request, a key or an account: none of it may pass through. */
+  /** Upstream error text can quote the request, a key or an account: none may pass through. */
   const SECRET = 'notarealsecret-upstream-quoted-key'
 
+  /**
+   * Builds the fixed OpenAI-style error body the proxy answers an upstream failure with.
+   *
+   * @param message - the fixed client-facing message
+   * @param code - the error `code`, such as `rate_limit`
+   * @returns the `{ error: … }` body, with `type: 'server_error'` and `param: null`
+   */
   function upstreamBody(message: string, code: string): unknown {
     return { error: { message, type: 'server_error', param: null, code } }
   }
@@ -189,7 +196,14 @@ describe('mapFailedCall', () => {
   /** Token counts and request text the provider's overflow message carries: never in the answer. */
   const QUOTED = 'notarealsecret-quoted-prompt'
 
-  /** pi's final message for a call that failed with this error text. */
+  /**
+   * Builds pi's final message for a call that failed with this error text.
+   *
+   * @param errorMessage - the error text pi recorded for the failed call
+   * @param provider - the provider name on the message; `mock` when omitted
+   * @returns an `openai-completions` assistant message with `stopReason: 'error'`, no content and
+   *   zero usage
+   */
   function failedCall(errorMessage: string, provider = 'mock'): AssistantMessage {
     return {
       role: 'assistant',
@@ -225,7 +239,8 @@ describe('mapFailedCall', () => {
   }
 
   // Catches an overflow answered as a generic 502, which agent clients retry unchanged instead of
-  // compacting the history (#40), for the providers the mock provider cannot speak for.
+  // compacting the history (#40), for the providers and statuses the mock-provider tests in
+  // test/integration/upstream-status.test.ts do not cover.
   test.each([
     [
       'Google, error body',

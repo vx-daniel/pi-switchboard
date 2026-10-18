@@ -13,7 +13,13 @@ RuleTester.it = it
 
 const tester = new RuleTester({ languageOptions: { parserOptions: { lang: 'ts' } } })
 
-/** Looks up a repo rule by name, failing loudly if it is not registered. */
+/**
+ * Looks up a repo rule by name, failing loudly if it is not registered.
+ *
+ * @param name - the rule name without the `repo/` prefix
+ * @returns the rule
+ * @throws Error when the plugin has no rule by that name
+ */
 function rule(name: string): NonNullable<typeof repo.rules>[string] {
   const found = repo.rules[name]
   if (found === undefined) throw new Error(`repo/${name} is not defined`)

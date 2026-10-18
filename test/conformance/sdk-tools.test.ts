@@ -26,8 +26,13 @@ const weatherTool: OpenAI.ChatCompletionTool = {
   }
 }
 
+/**
+ * Picks the model for the tool-call tests: the first available mid-tier model, else the first
+ * fast one.
+ *
+ * @returns the canonical model ID, or `undefined` when no mid or fast test model is available
+ */
 function getToolModel(): string | undefined {
-  // Prefer mid-tier for tool calls, fall back to fast
   const mid = getTestModels('mid')
   if (mid.length > 0) return mid[0]?.id
   const fast = getTestModels('fast')

@@ -19,6 +19,12 @@ import { describe, expect, test } from 'vite-plus/test'
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds a pi `Usage` of 10 input and 20 output tokens at zero cost.
+ *
+ * @param overrides - fields to replace in the default usage
+ * @returns the usage record
+ */
 function makeUsage(overrides: Partial<Usage> = {}): Usage {
   return {
     input: 10,
@@ -32,10 +38,18 @@ function makeUsage(overrides: Partial<Usage> = {}): Usage {
 }
 
 /**
- * A complete AssistantMessage with these content blocks. buildChatCompletion reads content,
- * stopReason and usage; the identity fields and timestamp are fixed placeholders. The provider and
- * model differ from every canonical ID the tests pass, so a response that took its `model` from the
- * upstream message instead of the canonical ID fails the `model` assertions.
+ * Builds a complete AssistantMessage with these content blocks.
+ *
+ * @remarks
+ * buildChatCompletion reads content, stopReason and usage; the identity fields and timestamp are
+ * fixed placeholders. The provider and model differ from every canonical ID the tests pass, so a
+ * response that took its `model` from the upstream message instead of the canonical ID fails the
+ * `model` assertions.
+ *
+ * @param content - the message's content blocks
+ * @param stopReason - pi's stop reason for the message
+ * @param overrides - fields to replace in the built message
+ * @returns the assistant message
  */
 function makeMessage(
   content: AssistantMessage['content'],
@@ -55,6 +69,13 @@ function makeMessage(
   }
 }
 
+/**
+ * Builds an assistant message of one text block that stopped normally.
+ *
+ * @param text - the text block's content
+ * @param overrides - fields to replace in the built message, such as `stopReason` or `usage`
+ * @returns the assistant message
+ */
 function makeTextMessage(
   text: string,
   overrides: Partial<AssistantMessage> = {}
@@ -63,6 +84,13 @@ function makeTextMessage(
   return makeMessage([content], 'stop', overrides)
 }
 
+/**
+ * Builds an assistant message of tool calls only, with stop reason `toolUse`.
+ *
+ * @param calls - the tool calls, in order: ID, tool name, and parsed arguments
+ * @param overrides - fields to replace in the built message
+ * @returns the assistant message
+ */
 function makeToolCallMessage(
   calls: { id: string; name: string; args: JsonObject }[],
   overrides: Partial<AssistantMessage> = {}
