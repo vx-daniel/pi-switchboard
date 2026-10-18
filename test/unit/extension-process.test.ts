@@ -329,6 +329,25 @@ describe('stopProxy', () => {
     expect(statuses).toEqual([{ key: STATUS_KEY, text: undefined }])
   })
 
+  // Catches `/proxy stop` reporting a session proxy stopped when no signal was delivered because it
+  // had already exited (#111).
+  test('session proxy that already exited: says so', async () => {
+    const child = await ownChild()
+    child.kill('SIGKILL')
+    await once(child, 'exit')
+    const state = stateOn(await closedPort())
+    state.sessionProcess = child
+    const { context, notifications, statuses } = fakeCommandContext({})
+
+    await stopProxy(state, context)
+
+    expect({ sessionProcess: state.sessionProcess, notifications, statuses }).toEqual({
+      sessionProcess: undefined,
+      notifications: [{ message: 'Session proxy had already exited', level: 'info' }],
+      statuses: [{ key: STATUS_KEY, text: undefined }]
+    })
+  })
+
   // Catches `/proxy stop` leaving a detached proxy running or its PID file behind.
   test('detached proxy from the PID file: SIGTERMs it and removes the file', async () => {
     const child = await ownChild()
@@ -436,5 +455,24 @@ describe('killStalePid', () => {
         level: 'warning'
       }
     ])
+  })
+
+  // Catches the user told a stale process is being killed when it exited between reading the PID
+  // file and the signal (#111): there was nothing to kill, so nothing to say; the file still goes.
+  test('process gone by the time it is signalled: file removed, nothing claimed', async () => {
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    // Alive when readPid checks (signal 0), gone when SIGTERM is sent.
+    vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
+      if (signal === 0) return true
+      throw Object.assign(new Error('kill ESRCH'), { code: 'ESRCH' })
+    })
+    const { context, notifications } = fakeCommandContext({})
+
+    await killStalePid(context)
+
+    expect({ fileKept: existsSync(pidPath()), notifications }).toEqual({
+      fileKept: false,
+      notifications: []
+    })
   })
 })

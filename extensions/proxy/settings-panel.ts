@@ -509,6 +509,7 @@ export async function openSettingsPanel(
             settingsList.updateValue('customModels', customModelsDisplay(state.config))
           }
 
+          // Not awaited, so the panel redraws at once; it logs its own failures and never rejects.
           void maybeAutoSyncZed(state, context)
           tui.requestRender()
         },

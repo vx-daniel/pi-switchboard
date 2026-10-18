@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from '
 import { dirname, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
+import { type ExtensionContext, getAgentDir } from '@earendil-works/pi-coding-agent'
 import { configToEnv, loadConfigFromFile } from '@vx-daniel/pi-openai-proxy/config'
 import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
 import * as z from 'zod'
@@ -73,14 +73,16 @@ function proxyCommand(bin: string): { command: string; args: string[] } {
 // --- PID file ---
 
 /**
- * Returns the PID file path: `proxy.pid` in `PI_CODING_AGENT_DIR`, or in `~/.pi/agent`.
+ * Returns the PID file path: `proxy.pid` in pi's agent dir, beside the config file.
+ *
+ * @remarks
+ * The directory is pi's {@link getAgentDir}, as for the config file. Reading `HOME` directly made a
+ * relative `./~/.pi/agent` when it was unset (#111).
  *
  * @returns the absolute PID file path
  */
 function getPidPath(): string {
-  const piDir =
-    process.env['PI_CODING_AGENT_DIR'] ?? resolve(process.env['HOME'] ?? '~', '.pi', 'agent')
-  return resolve(piDir, 'proxy.pid')
+  return resolve(getAgentDir(), 'proxy.pid')
 }
 
 /**
@@ -400,14 +402,16 @@ function terminate(pid: number): SignalOutcome {
  * `startProxy` calls this only when no proxy answers, so a process the file names is stale: it is
  * sent SIGTERM, and the file goes. Another user's process cannot be signalled (a recycled PID, or
  * a proxy this user cannot stop); the file is still removed so a start is never blocked, and the
- * user is told it was not killed (#93).
+ * user is told it was not killed (#93). A process that exits between reading the file and the
+ * signal needs no message: there was nothing left to kill (#111).
  *
  * @param context - the extension context, used for the warning
  */
 export async function killStalePid(context: ExtensionContext): Promise<void> {
   const existingPid = readPid()
   if (existingPid === undefined) return
-  if (terminate(existingPid) === 'foreign') {
+  const outcome = terminate(existingPid)
+  if (outcome === 'foreign') {
     processLogger.warn(
       'PID file names process {pid} of another user, which is not answering; replacing the file',
       {
@@ -418,9 +422,13 @@ export async function killStalePid(context: ExtensionContext): Promise<void> {
       `PID file named process ${String(existingPid)}, which belongs to another user and is not answering -- starting a new proxy`,
       'warning'
     )
-  } else {
+  } else if (outcome === 'signalled') {
     processLogger.warn('Killed stale proxy process {pid} before starting', { pid: existingPid })
     context.ui.notify(`Stale proxy process ${String(existingPid)} -- killing`, 'warning')
+  } else {
+    processLogger.debug('Process {pid} in the PID file exited before it could be stopped', {
+      pid: existingPid
+    })
   }
   removePid()
   await sleep(PROCESS_SETTLE_DELAY_MS)
@@ -530,7 +538,8 @@ export async function stopProxy(state: ProxyState, context: ExtensionContext): P
       sent
     })
     state.sessionProcess = undefined
-    context.ui.notify('Session proxy stopped', 'info')
+    // No signal delivered means the process had already exited (#111).
+    context.ui.notify(sent ? 'Session proxy stopped' : 'Session proxy had already exited', 'info')
     context.ui.setStatus('proxy', undefined)
     return
   }
