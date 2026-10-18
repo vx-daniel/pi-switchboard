@@ -28,8 +28,8 @@ export default {
       '@semantic-release/git',
       {
         assets: ['package.json', 'pnpm-lock.yaml', 'CHANGELOG.md'],
-        // oxlint-disable-next-line no-template-curly-in-string -- semantic-release lodash template, not a JS template literal
-        message: 'chore(release): ${nextRelease.version} [skip ci]\n\n${nextRelease.notes}'
+        // A lodash template, filled in by semantic-release: `<%= %>` interpolates.
+        message: 'chore(release): <%= nextRelease.version %> [skip ci]\n\n<%= nextRelease.notes %>'
       }
     ]
   ]

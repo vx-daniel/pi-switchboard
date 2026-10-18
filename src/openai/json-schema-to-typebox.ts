@@ -29,9 +29,9 @@
  * - any other keyword, or a supported keyword with a value of the wrong kind
  */
 
+import { type TSchema, Type } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import { isRecord } from '@proxy/utils/guards'
-import { type TSchema, Type } from 'typebox'
 
 export interface SchemaConversionSuccess {
   readonly ok: true

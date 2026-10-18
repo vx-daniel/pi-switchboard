@@ -39,8 +39,7 @@ function walkFlagsOfWorkflow(): string[] {
   if (logOpts === undefined) {
     throw new Error(`${WORKFLOW}: no --log-opts to read the walked range from`)
   }
-  // oxlint-disable-next-line no-template-curly-in-string -- the workflow's shell variable, not a JS template
-  expect(logOpts).toContain('${RANGE}')
+  expect(logOpts).toMatch(/\$\{RANGE\}/)
   expect(workflow).toContain('RANGE=$(.github/scripts/secret-scan-range.sh)')
   return logOpts.split(/\s+/).filter((flag) => flag.startsWith('-'))
 }

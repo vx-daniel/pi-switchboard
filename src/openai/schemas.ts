@@ -162,6 +162,10 @@ const MAX_STOP_SEQUENCES = 4
 const MIN_PENALTY = -2
 const MAX_PENALTY = 2
 
+/** OpenAI's `reasoning_effort` values, lowest first. */
+export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
+export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
+
 // --- Top-level request ---
 
 export const chatCompletionRequestSchema = z
@@ -181,7 +185,7 @@ export const chatCompletionRequestSchema = z
     tools: z.array(functionToolSchema).optional(),
     tool_choice: toolChoiceSchema.optional(),
     parallel_tool_calls: z.boolean().optional(),
-    reasoning_effort: z.enum(['none', 'minimal', 'low', 'medium', 'high', 'xhigh']).optional(),
+    reasoning_effort: z.enum(REASONING_EFFORTS).optional(),
     top_p: z.number().min(0).max(1).optional(),
     frequency_penalty: z.number().min(MIN_PENALTY).max(MAX_PENALTY).optional(),
     presence_penalty: z.number().min(MIN_PENALTY).max(MAX_PENALTY).optional(),

@@ -35,6 +35,12 @@ const KEPT_REQUEST_HEADERS = new Set([
   'x-app'
 ])
 
+/**
+ * One body chunk, verbatim. Not `z.string().trim()`: SSE framing is whitespace, and trimming would
+ * merge events.
+ */
+const RawChunkSchema = z.custom<string>((value) => typeof value === 'string', 'expected a string')
+
 const RecordingSchema = z.object({
   version: z.literal(RECORDING_VERSION),
   api: z.string().trim(),
@@ -51,8 +57,7 @@ const RecordingSchema = z.object({
     status: z.int(),
     contentType: z.string().trim(),
     /** The body as the provider sent it, split where it arrived, so replay keeps the boundaries. */
-    // oxlint-disable-next-line zod/prefer-string-schema-with-trim -- SSE framing is whitespace: trimming would merge events
-    chunks: z.array(z.string())
+    chunks: z.array(RawChunkSchema)
   })
 })
 

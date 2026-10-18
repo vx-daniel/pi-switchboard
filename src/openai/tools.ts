@@ -7,11 +7,15 @@
  * - Convert tool_choice to pi-compatible format
  */
 
-import type { ConstrainedSamplingConfig, Tool } from '@earendil-works/pi-ai'
+import {
+  type ConstrainedSamplingConfig,
+  type Tool,
+  type TSchema,
+  Type
+} from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import { jsonSchemaToTypebox } from '@proxy/openai/json-schema-to-typebox'
 import type { OpenAIFunctionTool } from '@proxy/openai/schemas'
-import { type TSchema, Type } from 'typebox'
 
 const toolsLogger = proxyLogger('openai', 'tools')
 

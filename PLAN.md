@@ -301,7 +301,7 @@ Future-compatible design:
 - `tool_choice`
 - assistant `tool_calls`
 - `tool` role messages
-- `reasoning_effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`)
+- `reasoning_effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`): an effort the model does not support is clamped with pi's `clampThinkingLevel` (nearest supported level above, else below) and logged at debug, not rejected (#43). A client that sends one effort to every model must keep working when the model changes; `GET /v1/pi/models` lists each model's supported efforts
 - `response_format` (`text`, `json_object`, `json_schema`)
 - `top_p`
 - `frequency_penalty`
@@ -717,7 +717,7 @@ Compatibility rule:
 
 - keep the stable response strictly to the standard OpenAI model object fields
 - do not attach capability metadata such as context window, max tokens, reasoning support, or modality support to the standard `/v1/models` path
-- if richer metadata is exposed later, use a separate non-standard endpoint rather than `x_pi` on the standard model object
+- if richer metadata is exposed, use a separate non-standard endpoint rather than `x_pi` on the standard model object: `GET /v1/pi/models` (below)
 
 Availability rule:
 
@@ -739,6 +739,21 @@ Resolution rule:
 - resolve within the currently exposed model set only
 - accept exact public IDs first
 - accept canonical IDs only as backward-compatible aliases for models that remain exposed
+
+### `GET /v1/pi/models`
+
+Not part of OpenAI's API: what pi knows about each exposed model that the standard model object has no field for. Same exposure filtering and public IDs as `GET /v1/models`, behind proxy auth like every `/v1/*` route.
+
+```json
+{
+  "object": "list",
+  "data": [{ "id": "claude-sonnet-4-5", "reasoning_efforts": ["none", "minimal", "low", "medium", "high"] }]
+}
+```
+
+- `reasoning_efforts`: the `reasoning_effort` values the model runs at as asked, lowest first, from pi's `getSupportedThinkingLevels` (`off` is `none`; pi's `max` has no OpenAI effort and is not listed). `["none"]` for a model without reasoning
+- new capability fields go here, never on `/v1/models`
+- non-standard routes live under `/v1/pi/`, as `/v1/pi/agent/completions` would
 
 ## Error contract
 

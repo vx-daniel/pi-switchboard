@@ -19,7 +19,7 @@ import {
   type ModelExposureResult,
   resolveExposedModel
 } from '@proxy/openai/model-exposure'
-import { buildModelList, toOpenAIModel } from '@proxy/openai/models'
+import { buildModelList, buildPiModelList, toOpenAIModel } from '@proxy/openai/models'
 import { buildChatCompletion } from '@proxy/openai/responses'
 import { streamToSSE } from '@proxy/openai/sse'
 import { convertTools } from '@proxy/openai/tools'
@@ -505,6 +505,16 @@ export function createRoutes(
     const exposure = await getExposure(configReader)
     chatLogger.debug('Listing {modelCount} models', { modelCount: exposure.models.length })
     return context.json(buildModelList(exposure.models))
+  })
+
+  // --- GET /v1/pi/models ---
+  // Not OpenAI's: pi's capabilities for each exposed model, which PLAN keeps off /v1/models.
+  routes.get('/v1/pi/models', async (context) => {
+    const exposure = await getExposure(configReader)
+    chatLogger.debug('Listing capabilities of {modelCount} models', {
+      modelCount: exposure.models.length
+    })
+    return context.json(buildPiModelList(exposure.models))
   })
 
   // --- GET /v1/models/:model ---

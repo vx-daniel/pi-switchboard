@@ -35,6 +35,7 @@ Treat these as stable unless the user explicitly changes direction:
   - `GET /v1/models/{model}`
   - `POST /v1/chat/completions`
 - Operational endpoints (`GET /healthz`, `/healthz/models`, `/healthz/creds`) sit outside that surface; see [`PLAN.md`](PLAN.md). Only `/healthz` skips proxy auth, and none may return a credential.
+- Non-OpenAI capability data goes on `GET /v1/pi/models`, never on the standard model objects; non-standard routes live under `/v1/pi/`. See [`PLAN.md`](PLAN.md).
 - Canonical internal model IDs use `provider/model-id`.
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.
@@ -65,7 +66,7 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 
 When you change code, run the smallest relevant checks first, then expand as needed.
 
-Lint rules are the Viaanix shared set, copied into `vite.config.ts`. Lint passes only with zero warnings. Fix the code, not the rule; if a line must break a rule, use `// oxlint-disable-next-line <rule> -- <reason>`.
+Lint rules are the Viaanix shared set, copied into `vite.config.ts`. Lint passes only with zero warnings. Fix the code, not the rule: inline lint directives (`oxlint-disable…`, `eslint-disable…`, `…-enable`) are not allowed anywhere, and `test/unit/lint-directives.test.ts` fails the gate on any. If a rule's premise does not fit a line, express the code differently (a named constant, a different API) and say why in an ordinary comment.
 
 Common commands:
 
