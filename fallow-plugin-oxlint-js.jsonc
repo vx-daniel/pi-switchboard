@@ -1,0 +1,15 @@
+// fallow plugin for Oxlint's JS plugins (#83). `vite.config.ts` names them under `lint.jsPlugins`, by package or by
+// path, and Oxlint loads them itself, so nothing imports them. Without this, fallow reports the `lint/` files as
+// unused or, as entry points, as production code importing the dev dependency `vite-plus`, and the plugin packages
+// as unused dev dependencies.
+{
+  "name": "oxlint-js-plugins",
+  "enablers": ["vite-plus"],
+  // Tooling, not shipped code: the default `support` role.
+  "entryPoints": ["lint/*.ts"],
+  "toolingDependencies": [
+    "eslint-plugin-zod",
+    "@limegrass/eslint-plugin-import-alias",
+    "@logtape/lint"
+  ]
+}

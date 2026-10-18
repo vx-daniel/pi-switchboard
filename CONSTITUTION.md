@@ -1,16 +1,24 @@
 <!--
 Sync Impact Report
-Version change: 1.1.0 → 1.1.1 (PATCH)
-Rationale: the constitution moves from the unversioned `.local/constitution.md` to the repository
-root, so the document that supersedes the others is versioned and reviewed like them. No principle
-changes; governance now says where the file lives and that AGENTS.md links to it.
+Version change: 1.1.1 → 1.1.2 (PATCH)
+Rationale: fallow joins the gate (#83). The constitution named the gate's steps and the inline
+directives it bans, and both lists grew, so they are brought in step with the code. No principle
+changes.
 Modified sections:
-- Governance: location, and amendments land in a pull request with AGENTS.md kept in step
+- II. Validate at Boundaries: the directive ban names fallow's `fallow-ignore…` and `@expected-unused`
+- Development Workflow and Quality Gates: fallow in the stack; the gate runs the tests with coverage,
+  then fallow, then the build
 Templates requiring updates:
-- ✅ AGENTS.md: links CONSTITUTION.md in "Start here", "Docs synchronization" and "When to stop and ask"
+- ✅ AGENTS.md: the directive ban, the fallow paragraph, the gate's steps
+- ✅ README.md, PLAN.md: the gate's steps and tooling
 Follow-up TODOs:
 - A non-string `authToken` in the config file disables proxy auth (with a warning). That fails open
   against principle III; deciding whether it must refuse to start is open.
+- #80 and #81: parameters dropped rather than rejected (Codex `temperature`; passthrough fields a
+  provider cannot honour) conflict with principle I; amend or reject is open.
+
+1.1.1 (2026-10-18): moved from the unversioned `.local/constitution.md` to the repository root; governance
+says where it lives and that AGENTS.md links to it.
 
 1.1.0 (2026-10-18): rewrote the constitution for the current repository (Node + Vite+, no Bun,
 lefthook or spec-kit memory); defined operational and /v1/pi/ routes, the operator-config repair
@@ -41,7 +49,7 @@ All untrusted input MUST be validated at the edge before use, with Zod schemas p
   - an invalid environment variable is ignored with a warning;
   - an invalid field in the config file is repaired (a number clamped to its schema's bounds, a list or map keeping its valid entries, anything else its default), and every repaired field is named in a warning, by path only.
 
-Type safety is part of the contract: no `any`, no `@ts-ignore`, no unsafe `as` casts, and no inline lint directives (`oxlint-disable…`, `eslint-disable…`), which `test/unit/lint-directives.test.ts` enforces. Narrow with repository type guards or schemas. When a lint rule's premise does not fit a line, express the code differently and say why in an ordinary comment.
+Type safety is part of the contract: no `any`, no `@ts-ignore`, no unsafe `as` casts, and no inline directives (`oxlint-disable…`, `eslint-disable…`, fallow's `fallow-ignore…` and its `@expected-unused` tag), which `test/unit/lint-directives.test.ts` enforces. Narrow with repository type guards or schemas. When a lint rule's premise does not fit a line, express the code differently and say why in an ordinary comment; a deliberate fallow exception goes in `.fallowrc.jsonc` with its reason.
 
 Rationale: the proxy translates between multiple schemas and provider APIs, so boundary validation is the primary defense against accidental incompatibility and latent runtime bugs. Operator configuration is trusted but typo-prone; repairing it loudly keeps the service up without hiding the mistake.
 
@@ -78,9 +86,9 @@ Rationale: the proxy's public contract is documentation-heavy. If behavior chang
 
 ## Development Workflow and Quality Gates
 
-- Stack: Node (≥ 24) runtime; the Vite+ toolchain (`vp`: Oxfmt, Oxlint with tsgolint, Vitest, tsdown); pnpm for packages and scripts; TypeScript, Hono, Zod v4, and TypeBox. TypeBox is used only where pi's API requires it, imported through `@earendil-works/pi-ai`'s re-export so the proxy never ships a second copy.
+- Stack: Node (≥ 24) runtime; the Vite+ toolchain (`vp`: Oxfmt, Oxlint with tsgolint, Vitest, tsdown); fallow for dead code, duplication and complexity; pnpm for packages and scripts; TypeScript, Hono, Zod v4, and TypeBox. TypeBox is used only where pi's API requires it, imported through `@earendil-works/pi-ai`'s re-export so the proxy never ships a second copy.
 - Imports: the `@proxy/*` alias for `src/*` (no relative imports across the source tree), `node:` protocol for Node built-ins, `import * as z from "zod"`, and `vite-plus/test` in tests.
-- `pnpm run check:all` (`scripts/gate.ts`: format, lint with the type check, offline tests, build) is the single definition of green. The pre-commit hook, CI, and the release workflow all run it; a new check is added there, not in a hook or a workflow.
+- `pnpm run check:all` (`scripts/gate.ts`: format, lint with the type check, offline tests with coverage, fallow, build) is the single definition of green. The pre-commit hook, CI, and the release workflow all run it; a new check is added there, not in a hook or a workflow.
 - Hooks in `.vite-hooks/` MUST be preserved: `commit-msg` (commitlint), `pre-commit` (the gate), `pre-push` (lockfile sync). Lint passes only with zero warnings. Do not weaken lint, type, or test gates unless the maintainer explicitly asks.
 - Before completion, run the smallest verification that exercises the change, then the gate. Live provider tests (`pnpm run test:live`) spend quota and run on demand only.
 - Update durable docs and notes in the same change when a change affects user-visible behavior, architecture, or operator workflow.
@@ -108,4 +116,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 1.1.1 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-18
+**Version**: 1.1.2 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-18

@@ -1,0 +1,236 @@
+// fallow (https://docs.fallow.tools): dead code, duplication and complexity, from the module graph (#83).
+// Adopted with zero findings, and the gate (`scripts/gate.ts`) fails on any new one. Exceptions live here, each
+// with its reason; inline `fallow-ignore` comments are banned like lint directives (CONSTITUTION.md, principle II).
+{
+  // The schema of the installed, pinned version, for editor checks; no remote file.
+  "$schema": "./node_modules/fallow/schema.json",
+
+  // Files nothing imports, which fallow would otherwise report unused. The lint plugins (`lint/*.ts`) and the
+  // packages Oxlint loads by name are declared in `fallow-plugin-oxlint-js.jsonc`, as tooling.
+  "entry": [
+    // pi loads the extension through the package manifest (`"pi": { "extensions": ["./extensions"] }`).
+    "extensions/proxy/index.ts",
+    // The package's published entry points (`pack.entry` in `vite.config.ts`). The extension imports them through
+    // the package's own subpaths (`@vx-daniel/pi-openai-proxy/config`), which resolve to `dist/`, not to these.
+    "src/index.ts",
+    "src/config/schema.ts",
+    "src/openai/model-exposure.ts",
+    "src/logging/index.ts",
+    "src/sync/zed.ts"
+  ],
+
+  "rules": {
+    // No architecture zones or rule packs are defined, so these detectors have nothing to check.
+    // `off` says that on purpose; left on, fallow reports that they did not run.
+    "boundary-violation": "off",
+    "policy-violation": "off",
+    // The catalog's `vite` entry is used by `overrides: { vite@*: 'catalog:' }` in `pnpm-workspace.yaml`, which
+    // fallow 3.34.1 does not count as a reference; `vite-plus` is used by `package.json`. Those are the only two.
+    "unused-catalog-entries": "off"
+  },
+
+  "health": {
+    // Tests repeat setup on purpose, and coverage measures only the source trees (`test.coverage.include` in
+    // `vite.config.ts`), so their CRAP scores would only be estimates.
+    "ignore": ["test/**"],
+
+    // CRAP weighs complexity by coverage: the gate runs fallow after the tests, with their coverage
+    // (`--coverage coverage/coverage-final.json`). The ceilings below were measured with fallow 3.34.1 at adoption
+    // (2026-10-18) so that no function may grow: a cognitive ceiling is the measured score (a score equal to it
+    // passes), a CRAP ceiling the next whole number above it (a score equal to it fails). The other limits still
+    // apply unchanged.
+    "thresholdOverrides": [
+      // Over cognitive 15 at adoption; ceilings until #85 brings them under it.
+      // Measured cognitive 16.
+      {
+        "files": ["src/openai/json-schema-to-typebox.ts"],
+        "functions": ["collectKeywords"],
+        "maxCognitive": 16,
+        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
+      },
+      // Measured cognitive 17.
+      {
+        "files": ["src/openai/json-schema-to-typebox.ts"],
+        "functions": ["convertObject"],
+        "maxCognitive": 17,
+        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
+      },
+      // Measured cognitive 23.
+      {
+        "files": ["src/openai/messages.ts"],
+        "functions": ["convertMessages"],
+        "maxCognitive": 23,
+        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
+      },
+      // Measured cognitive 18.
+      {
+        "files": ["src/openai/messages.ts"],
+        "functions": ["convertUserMessage"],
+        "maxCognitive": 18,
+        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
+      },
+      // Measured cognitive 21.
+      {
+        "files": ["src/openai/model-exposure.ts"],
+        "functions": ["findConflictGroups"],
+        "maxCognitive": 21,
+        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
+      },
+      // Measured cognitive 20.
+      {
+        "files": ["src/pi/complete.ts"],
+        "functions": ["buildStreamOptions"],
+        "maxCognitive": 20,
+        "reason": "Over cognitive 15 at adoption; refactor tracked in #85."
+      },
+      // A port of pi kept line-for-line: permanent.
+      // Measured cognitive 26.
+      {
+        "files": ["src/pi/model-scope.ts"],
+        "functions": ["resolveModelScope"],
+        "maxCognitive": 26,
+        "reason": "Line-for-line port of pi's resolveModelScopeFromModels (#46), parity-tested against pi; splitting it would drift from pi."
+      },
+      // Extension functions over cognitive 15 (#85) that no test drives, so CRAP is measured at 0% coverage.
+      // Measured cognitive 17, CRAP 240.0.
+      {
+        "files": ["extensions/proxy/reports.ts"],
+        "functions": ["showConfig"],
+        "maxCognitive": 17,
+        "maxCrap": 241,
+        "reason": "Over cognitive 15 at adoption (#85), and runs in pi's TUI, which no test drives."
+      },
+      // Measured cognitive 16, CRAP 132.0.
+      {
+        "files": ["extensions/proxy/reports.ts"],
+        "functions": ["verifyExposure"],
+        "maxCognitive": 16,
+        "maxCrap": 133,
+        "reason": "Over cognitive 15 at adoption (#85), and runs in pi's TUI, which no test drives."
+      },
+      // The pi extension runs inside pi's TUI, which no test drives: CRAP at 0% coverage.
+      // Measured CRAP 56.0.
+      {
+        "files": ["extensions/proxy/index.ts"],
+        "functions": ["handler"],
+        "maxCrap": 57,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 42.0.
+      {
+        "files": ["extensions/proxy/model-selector.ts"],
+        "functions": ["getSettingsListItems"],
+        "maxCrap": 43,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 42.0.
+      {
+        "files": ["extensions/proxy/model-selector.ts"],
+        "functions": ["jumpProvider"],
+        "maxCrap": 43,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 30.0.
+      {
+        "files": ["extensions/proxy/process.ts"],
+        "functions": ["probe"],
+        "maxCrap": 31,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 42.0.
+      {
+        "files": ["extensions/proxy/process.ts"],
+        "functions": ["readPid"],
+        "maxCrap": 43,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 30.0.
+      {
+        "files": ["extensions/proxy/process.ts"],
+        "functions": ["stopProxy"],
+        "maxCrap": 31,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 42.0.
+      {
+        "files": ["extensions/proxy/reports.ts"],
+        "functions": ["showModels"],
+        "maxCrap": 43,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 72.0.
+      {
+        "files": ["extensions/proxy/settings-panel.ts"],
+        "functions": ["applySetting"],
+        "maxCrap": 73,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 42.0.
+      {
+        "files": ["extensions/proxy/settings-panel.ts"],
+        "functions": ["refreshDescriptions"],
+        "maxCrap": 43,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // Measured CRAP 42.0.
+      {
+        "files": ["extensions/proxy/zed-sync.ts"],
+        "functions": ["runZedSync"],
+        "maxCrap": 43,
+        "reason": "Runs in pi's TUI (the extension), which no test drives."
+      },
+      // The CLI entry runs as the process; no test starts it.
+      // Measured CRAP 90.0.
+      {
+        "files": ["src/index.ts"],
+        "functions": ["buildCliOverrides"],
+        "maxCrap": 91,
+        "reason": "CLI entry: runs as the process, which no test starts; tests build the app with createApp."
+      },
+      // Measured CRAP 30.0.
+      {
+        "files": ["src/index.ts"],
+        "functions": ["invalidLoggingFlag"],
+        "maxCrap": 31,
+        "reason": "CLI entry: runs as the process, which no test starts; tests build the app with createApp."
+      },
+      // Measured CRAP 30.0.
+      {
+        "files": ["src/index.ts"],
+        "functions": ["loadConfigWithLogging"],
+        "maxCrap": 31,
+        "reason": "CLI entry: runs as the process, which no test starts; tests build the app with createApp."
+      },
+      // Measured CRAP 42.0.
+      {
+        "files": ["src/index.ts"],
+        "functions": ["run"],
+        "maxCrap": 43,
+        "reason": "CLI entry: runs as the process, which no test starts; tests build the app with createApp."
+      },
+      // The live recorder runs on demand against a real login.
+      // Measured CRAP 30.0.
+      {
+        "files": ["scripts/record-fixtures.ts"],
+        "functions": ["main"],
+        "maxCrap": 31,
+        "reason": "Live recording script, run on demand against a real login; never under test."
+      },
+      // Measured CRAP 42.0.
+      {
+        "files": ["scripts/record-fixtures.ts"],
+        "functions": ["recordScenario"],
+        "maxCrap": 43,
+        "reason": "Live recording script, run on demand against a real login; never under test."
+      },
+      // Oxlint runs its plugins; Vitest never does.
+      // Measured CRAP 90.0.
+      {
+        "files": ["lint/repo-rules.ts"],
+        "functions": ["VariableDeclaration"],
+        "maxCrap": 91,
+        "reason": "Oxlint plugin visitor: Oxlint runs it, not Vitest, so coverage never measures it."
+      }
+    ]
+  }
+}
