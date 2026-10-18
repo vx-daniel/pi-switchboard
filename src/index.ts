@@ -1,8 +1,11 @@
 /**
- * pi-openai-proxy entry point.
+ * pi-openai-proxy entry point: the citty CLI (args, help, version) that configures logging, loads
+ * the config and starts the HTTP server.
  *
- * Proper CLI with citty: args, help, version.
+ * @remarks
  * Config priority: CLI args > env vars > JSON config file > defaults.
+ *
+ * @packageDocumentation
  */
 
 import { serve } from '@hono/node-server'
@@ -20,25 +23,45 @@ import { getAvailableModels, initRegistry } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { defineCommand, runMain } from 'citty'
 
+/** Logger for process lifecycle (`server` category). */
 const lifecycleLogger = proxyLogger('server')
 
+/** Indentation of the `--config` JSON output. */
 const JSON_INDENT = 2
+/** What `--config` shows for a non-empty `authToken`. */
 const MASKED_TOKEN = '***'
 /** What `--config` shows for an `authToken` in the file that is not a string (#82). */
 const INVALID_TOKEN_SHOWN = '<invalid: not a string>'
 
-/** The auth token as `--config` shows it: masked, empty when off, or marked invalid. */
+/**
+ * Returns the auth token as `--config` shows it.
+ *
+ * @param fileToken - The config file's normalized `authToken`.
+ * @returns `<invalid: not a string>` when the file's `authToken` is not a string, `***` for a
+ *   non-empty token, '' when auth is off.
+ */
 function shownAuthToken(fileToken: string): string {
   if (configFileAuthTokenInvalid()) return INVALID_TOKEN_SHOWN
   return fileToken.length > 0 ? MASKED_TOKEN : ''
 }
 
-/** Whether a bind address only accepts connections from this machine. */
+/**
+ * Checks whether a bind address only accepts connections from this machine.
+ *
+ * @param host - The bind address.
+ * @returns Whether `host` is `localhost`, `::1` or in `127.0.0.0/8`.
+ */
 function isLoopbackHost(host: string): boolean {
   return host === 'localhost' || host === '::1' || host.startsWith('127.')
 }
 
-/** Parse a CLI integer argument; returns undefined unless it is a positive finite integer. */
+/**
+ * Parses a CLI integer argument, warning when it is given but not a positive integer.
+ *
+ * @param name - The flag's name without `--`, for the warning.
+ * @param value - The flag's value, or `undefined` when it is absent.
+ * @returns The parsed integer, or `undefined` when absent or invalid.
+ */
 function parsePositiveIntArg(name: string, value: string | undefined): number | undefined {
   if (value === undefined) return undefined
   const parsed = Number.parseInt(value, 10)
@@ -47,6 +70,7 @@ function parsePositiveIntArg(name: string, value: string | undefined): number | 
   return undefined
 }
 
+/** The CLI flags as citty parses them, before validation. */
 interface CliArgs {
   'host'?: string | undefined
   'port'?: string | undefined
@@ -58,7 +82,12 @@ interface CliArgs {
   'log-format'?: string | undefined
 }
 
-/** Why a logging flag is unusable, or undefined. A typo fails the start, never a stack trace. */
+/**
+ * Checks the logging flags, so a typo fails the start with a message, never a stack trace.
+ *
+ * @param args - The parsed CLI flags.
+ * @returns The error message for the first unusable logging flag, or `undefined`.
+ */
 function invalidLoggingFlag(args: CliArgs): string | undefined {
   const level = args['log-level']
   if (level !== undefined && !isLogLevel(level)) {
@@ -71,7 +100,12 @@ function invalidLoggingFlag(args: CliArgs): string | undefined {
   return undefined
 }
 
-/** Build CLI overrides from parsed args. */
+/**
+ * Builds CLI overrides from parsed args; invalid numbers are warned about and left out.
+ *
+ * @param args - The parsed CLI flags.
+ * @returns The overrides for {@link loadConfig}.
+ */
 function buildCliOverrides(args: CliArgs): CliOverrides {
   const cli: CliOverrides = {}
   if (args.host !== undefined) {
@@ -95,9 +129,14 @@ function buildCliOverrides(args: CliArgs): CliOverrides {
 }
 
 /**
- * Configure logging, then load the config. Config loading logs too, so logging is configured first
- * with the level the CLI or env asks for, then again with the fully resolved level (which may come
- * from the config file). Undefined, with exit code 1, when a logging flag is unusable.
+ * Configures logging, then loads the config.
+ *
+ * @remarks
+ * Config loading logs too, so logging is configured first with the level the CLI or env asks for,
+ * then again with the fully resolved level (which may come from the config file).
+ *
+ * @param args - The parsed CLI flags.
+ * @returns The config, or `undefined` (with exit code 1) when a logging flag is unusable.
  */
 function loadConfigWithLogging(args: CliArgs): ServerConfig | undefined {
   const invalidFlag = invalidLoggingFlag(args)
@@ -127,6 +166,7 @@ function loadConfigWithLogging(args: CliArgs): ServerConfig | undefined {
   return config
 }
 
+/** The `pi-openai-proxy` command: its flags, and `run`, which starts the server. */
 const main = defineCommand({
   meta: {
     name: 'pi-openai-proxy',
@@ -172,8 +212,9 @@ const main = defineCommand({
     }
   },
   run: async ({ args }) => {
-    // --config: show effective config and exit. Command output, not a log line, so it goes to stdout,
-    // where it is easily piped or captured: the auth token is masked.
+    // --config: show the config file's values (not CLI or env overrides) and exit. Command
+    // output, not a log line, so it goes to stdout, where it is easily piped or captured: the
+    // token is masked.
     if (args.config === true) {
       const file = loadConfigFromFile()
       const shown = { ...file, authToken: shownAuthToken(file.authToken) }
@@ -237,6 +278,11 @@ const main = defineCommand({
     // --- Graceful shutdown ---
     let shutdownInitiated = false
 
+    /**
+     * Closes the server on the first shutdown signal, and forces exit after a 10 s timeout.
+     *
+     * @param signal - The signal's name, for the log line.
+     */
     function handleShutdown(signal: string): void {
       if (shutdownInitiated) return
       shutdownInitiated = true
