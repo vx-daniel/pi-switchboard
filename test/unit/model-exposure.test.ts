@@ -291,6 +291,36 @@ describe('connected conflict groups', () => {
     // D has no collisions -- raw ID
     expect(publicIds).toContain('unique-d')
   })
+
+  // Catches a union-find regression that drops a provider when three or more share one ID,
+  // fails to merge a chained group, or normalizes IDs that differ only in case.
+  test('multi-way and chained conflicts join one group; case-distinct IDs never collide', () => {
+    const models = [
+      makeModel('provA', 'shared-abc'),
+      makeModel('provB', 'shared-abc'),
+      makeModel('provC', 'shared-abc'), // A-B-C collide on one ID
+      makeModel('provD', 'shared-cd'),
+      makeModel('provC', 'shared-cd'), // D joins through C
+      makeModel('provE', 'shared-de'),
+      makeModel('provD', 'shared-de'), // E joins through D
+      makeModel('provF', 'Shared-ABC') // differs only by case: no collision
+    ]
+
+    const result = expose(models, defaultConfig())
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+
+    expect(result.models.map((model) => model.publicId)).toEqual([
+      'provA/shared-abc',
+      'provB/shared-abc',
+      'provC/shared-abc',
+      'provD/shared-cd',
+      'provC/shared-cd',
+      'provE/shared-de',
+      'provD/shared-de',
+      'Shared-ABC'
+    ])
+  })
 })
 
 // ---------------------------------------------------------------------------

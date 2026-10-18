@@ -10,7 +10,8 @@ import {
   patchGooglePayload,
   translateToolChoiceForAnthropic
 } from '@proxy/pi/complete'
-import { describe, expect, test } from 'vite-plus/test'
+import { isRecord } from '@proxy/utils/guards'
+import { assert, describe, expect, test } from 'vite-plus/test'
 
 import { minimalRequest } from './payload-passthrough-helpers'
 
@@ -159,87 +160,87 @@ describe('patchGooglePayload', () => {
     }
   }
 
+  /** The record at `path` inside `value`; fails the test when a step is missing or not a record. */
+  function recordAt(value: Record<string, unknown>, ...path: string[]): Record<string, unknown> {
+    let current = value
+    const walked: string[] = []
+    for (const key of path) {
+      walked.push(key)
+      const next = current[key]
+      assert(isRecord(next), `${walked.join('.')} is not a record`)
+      current = next
+    }
+    return current
+  }
+
   test('patches topP into generationConfig', () => {
     const payload = googlePayload()
     const patched = patchGooglePayload(payload, minimalRequest({ top_p: 0.9 }))
     expect(patched).toBe(true)
-    const config = payload['config'] as Record<string, unknown>
-    const gen = config['generationConfig'] as Record<string, unknown>
+    const gen = recordAt(payload, 'config', 'generationConfig')
     expect(gen['topP']).toBe(0.9)
   })
 
   test('patches stopSequences from string stop', () => {
     const payload = googlePayload()
     patchGooglePayload(payload, minimalRequest({ stop: 'END' }))
-    const config = payload['config'] as Record<string, unknown>
-    const gen = config['generationConfig'] as Record<string, unknown>
+    const gen = recordAt(payload, 'config', 'generationConfig')
     expect(gen['stopSequences']).toEqual(['END'])
   })
 
   test('patches stopSequences from array stop', () => {
     const payload = googlePayload()
     patchGooglePayload(payload, minimalRequest({ stop: ['END', 'STOP'] }))
-    const config = payload['config'] as Record<string, unknown>
-    const gen = config['generationConfig'] as Record<string, unknown>
+    const gen = recordAt(payload, 'config', 'generationConfig')
     expect(gen['stopSequences']).toEqual(['END', 'STOP'])
   })
 
   test('patches seed', () => {
     const payload = googlePayload()
     patchGooglePayload(payload, minimalRequest({ seed: 42 }))
-    const config = payload['config'] as Record<string, unknown>
-    const gen = config['generationConfig'] as Record<string, unknown>
+    const gen = recordAt(payload, 'config', 'generationConfig')
     expect(gen['seed']).toBe(42)
   })
 
   test('patches frequencyPenalty', () => {
     const payload = googlePayload()
     patchGooglePayload(payload, minimalRequest({ frequency_penalty: 0.5 }))
-    const config = payload['config'] as Record<string, unknown>
-    const gen = config['generationConfig'] as Record<string, unknown>
+    const gen = recordAt(payload, 'config', 'generationConfig')
     expect(gen['frequencyPenalty']).toBe(0.5)
   })
 
   test('patches presencePenalty', () => {
     const payload = googlePayload()
     patchGooglePayload(payload, minimalRequest({ presence_penalty: -0.5 }))
-    const config = payload['config'] as Record<string, unknown>
-    const gen = config['generationConfig'] as Record<string, unknown>
+    const gen = recordAt(payload, 'config', 'generationConfig')
     expect(gen['presencePenalty']).toBe(-0.5)
   })
 
   test('patches tool_choice to toolConfig mode AUTO', () => {
     const payload = googlePayload()
     patchGooglePayload(payload, minimalRequest({ tool_choice: 'auto' }))
-    const config = payload['config'] as Record<string, unknown>
-    const tc = config['toolConfig'] as Record<string, unknown>
-    const fc = tc['functionCallingConfig'] as Record<string, unknown>
+    const fc = recordAt(payload, 'config', 'toolConfig', 'functionCallingConfig')
     expect(fc['mode']).toBe('AUTO')
   })
 
   test('patches tool_choice none to NONE', () => {
     const payload = googlePayload()
     patchGooglePayload(payload, minimalRequest({ tool_choice: 'none' }))
-    const config = payload['config'] as Record<string, unknown>
-    const tc = config['toolConfig'] as Record<string, unknown>
-    const fc = tc['functionCallingConfig'] as Record<string, unknown>
+    const fc = recordAt(payload, 'config', 'toolConfig', 'functionCallingConfig')
     expect(fc['mode']).toBe('NONE')
   })
 
   test('patches tool_choice required to ANY', () => {
     const payload = googlePayload()
     patchGooglePayload(payload, minimalRequest({ tool_choice: 'required' }))
-    const config = payload['config'] as Record<string, unknown>
-    const tc = config['toolConfig'] as Record<string, unknown>
-    const fc = tc['functionCallingConfig'] as Record<string, unknown>
+    const fc = recordAt(payload, 'config', 'toolConfig', 'functionCallingConfig')
     expect(fc['mode']).toBe('ANY')
   })
 
   test('preserves existing generationConfig fields', () => {
     const payload = googlePayload({ temperature: 0.7 })
     patchGooglePayload(payload, minimalRequest({ top_p: 0.9 }))
-    const config = payload['config'] as Record<string, unknown>
-    const gen = config['generationConfig'] as Record<string, unknown>
+    const gen = recordAt(payload, 'config', 'generationConfig')
     expect(gen['temperature']).toBe(0.7)
     expect(gen['topP']).toBe(0.9)
   })

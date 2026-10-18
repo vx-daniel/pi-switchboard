@@ -60,9 +60,7 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
 
   const toolCallNames = collectToolCallNames(messages)
 
-  for (let messageIndex = 0; messageIndex < messages.length; messageIndex++) {
-    const message = messages[messageIndex]
-    if (message === undefined) continue
+  for (const [messageIndex, message] of messages.entries()) {
     roleCounts[message.role]++
 
     if (message.role === 'system' || message.role === 'developer') {
@@ -72,24 +70,12 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
         piMessages.push({ role: 'system', content: message.content, timestamp: Date.now() })
         laterSystemCount++
       }
-    } else if (message.role === 'user') {
-      const userMsg = convertUserMessage(message.content, messageIndex)
-      if (!userMsg.ok) return userMsg
-      piMessages.push(userMsg.message)
-    } else if (message.role === 'assistant') {
-      const assistantMsg = convertAssistantMessage(message.content ?? null, message.tool_calls)
-      piMessages.push(assistantMsg)
-    } else {
-      const toolName = toolCallNames.get(message.tool_call_id)
-      if (toolName === undefined) {
-        messagesLogger.debug(
-          'Tool message {messageIndex} answers unknown tool call {toolCallId}; sending an empty tool name',
-          { messageIndex, toolCallId: message.tool_call_id }
-        )
-      }
-      const toolMsg = convertToolMessage(message.content, message.tool_call_id, toolName ?? '')
-      piMessages.push(toolMsg)
+      continue
     }
+
+    const converted = convertConversationMessage(message, messageIndex, toolCallNames)
+    if (!converted.ok) return converted
+    piMessages.push(converted.message)
   }
 
   const context: Context = {
@@ -136,7 +122,47 @@ function collectToolCallNames(messages: OpenAIMessage[]): Map<string, string> {
 
 type UserConversionResult = { readonly ok: true; readonly message: UserMessage } | ConversionError
 
+type MessageConversionResult = { readonly ok: true; readonly message: Message } | ConversionError
+
+/** An OpenAI message that is a conversation turn rather than a system or developer instruction. */
+type ConversationMessage = Exclude<OpenAIMessage, { role: 'system' | 'developer' }>
+
+/**
+ * Convert one user, assistant or tool message into its pi message.
+ * Returns the pi message, or the conversion error for a user message with a rejected part.
+ */
+function convertConversationMessage(
+  message: ConversationMessage,
+  messageIndex: number,
+  toolCallNames: ReadonlyMap<string, string>
+): MessageConversionResult {
+  if (message.role === 'user') return convertUserMessage(message.content, messageIndex)
+  if (message.role === 'assistant') {
+    return {
+      ok: true,
+      message: convertAssistantMessage(message.content ?? null, message.tool_calls)
+    }
+  }
+  const toolName = toolCallNames.get(message.tool_call_id)
+  if (toolName === undefined) {
+    messagesLogger.debug(
+      'Tool message {messageIndex} answers unknown tool call {toolCallId}; sending an empty tool name',
+      { messageIndex, toolCallId: message.tool_call_id }
+    )
+  }
+  return {
+    ok: true,
+    message: convertToolMessage(message.content, message.tool_call_id, toolName ?? '')
+  }
+}
+
 type UserContent = string | { type: string; text?: string; image_url?: { url: string } }[]
+
+type UserContentPart = Exclude<UserContent, string>[number]
+
+type PartConversionResult =
+  | { readonly ok: true; readonly part: TextContent | ImageContent }
+  | ConversionError
 
 function convertUserMessage(content: UserContent, index: number): UserConversionResult {
   if (typeof content === 'string') {
@@ -152,73 +178,20 @@ function convertUserMessage(content: UserContent, index: number): UserConversion
 
   // Multi-part content
   const parts: (TextContent | ImageContent)[] = []
-  let imageCount = 0
 
-  for (let partIndex = 0; partIndex < content.length; partIndex++) {
-    const part = content[partIndex]
-    if (part === undefined) continue
-
-    if (part.type === 'text') {
-      parts.push({ type: 'text', text: part.text ?? '' })
-    } else if (part.type === 'image_url') {
-      const url = part.image_url?.url ?? ''
-      // Only base64 data URIs are supported (remote URLs disabled by default)
-      if (url.startsWith('data:')) {
-        const result = parseAndValidateDataUri(url)
-        if (!result.ok) {
-          messagesLogger.warn(
-            'Rejected image at messages[{messageIndex}].content[{partIndex}]: {reason}',
-            { messageIndex: index, partIndex, reason: result.message, uriChars: url.length }
-          )
-          return {
-            ok: false,
-            message: `${result.message} at messages[${String(index)}].content[${String(partIndex)}]`,
-            param: `messages[${String(index)}].content[${String(partIndex)}].image_url.url`
-          }
-        }
-        imageCount++
-        messagesLogger.debug(
-          'Image part at messages[{messageIndex}].content[{partIndex}]: {mimeType}, {base64Chars} base64 chars',
-          {
-            messageIndex: index,
-            partIndex,
-            mimeType: result.parsed.mimeType,
-            base64Chars: result.parsed.data.length
-          }
-        )
-        parts.push({
-          type: 'image',
-          data: result.parsed.data,
-          mimeType: result.parsed.mimeType
-        })
-      } else {
-        // Remote URLs disabled by default
-        messagesLogger.warn(
-          'Blocked remote image from {host} at messages[{messageIndex}].content[{partIndex}]',
-          { host: imageUrlHost(url), messageIndex: index, partIndex }
-        )
-        return {
-          ok: false,
-          message: 'Remote image URLs are not supported. Use base64 data URIs instead.',
-          param: `messages[${String(index)}].content[${String(partIndex)}].image_url.url`
-        }
-      }
-    } else {
-      messagesLogger.warn(
-        'Rejected unsupported content part type {partType} at messages[{messageIndex}].content[{partIndex}]',
-        { partType: part.type, messageIndex: index, partIndex }
-      )
-      return {
-        ok: false,
-        message: `Unsupported content part type: '${part.type}'`,
-        param: `messages[${String(index)}].content[${String(partIndex)}].type`
-      }
-    }
+  for (const [partIndex, part] of content.entries()) {
+    const converted = convertContentPart(part, index, partIndex)
+    if (!converted.ok) return converted
+    parts.push(converted.part)
   }
 
   messagesLogger.trace(
     'User message {messageIndex} has {partCount} content parts, {imageCount} images',
-    { messageIndex: index, partCount: parts.length, imageCount }
+    {
+      messageIndex: index,
+      partCount: parts.length,
+      imageCount: parts.filter((contentPart) => contentPart.type === 'image').length
+    }
   )
 
   return {
@@ -228,6 +201,81 @@ function convertUserMessage(content: UserContent, index: number): UserConversion
       content: parts,
       timestamp: Date.now()
     }
+  }
+}
+
+/**
+ * Convert one part of a multi-part user message into a pi text or image part.
+ * Returns the pi part, or the error for an unsupported part type or a rejected image.
+ */
+function convertContentPart(
+  part: UserContentPart,
+  messageIndex: number,
+  partIndex: number
+): PartConversionResult {
+  if (part.type === 'text') return { ok: true, part: { type: 'text', text: part.text ?? '' } }
+  if (part.type === 'image_url') {
+    return convertImagePart(part.image_url?.url ?? '', messageIndex, partIndex)
+  }
+  messagesLogger.warn(
+    'Rejected unsupported content part type {partType} at messages[{messageIndex}].content[{partIndex}]',
+    { partType: part.type, messageIndex, partIndex }
+  )
+  return {
+    ok: false,
+    message: `Unsupported content part type: '${part.type}'`,
+    param: `messages[${String(messageIndex)}].content[${String(partIndex)}].type`
+  }
+}
+
+/**
+ * Convert an image part's URL into a pi image part.
+ * Only base64 data URIs are supported (remote URLs disabled by default); returns the error for a
+ * remote URL or an invalid data URI.
+ */
+function convertImagePart(
+  url: string,
+  messageIndex: number,
+  partIndex: number
+): PartConversionResult {
+  const param = `messages[${String(messageIndex)}].content[${String(partIndex)}].image_url.url`
+  if (!url.startsWith('data:')) {
+    messagesLogger.warn(
+      'Blocked remote image from {host} at messages[{messageIndex}].content[{partIndex}]',
+      { host: imageUrlHost(url), messageIndex, partIndex }
+    )
+    return {
+      ok: false,
+      message: 'Remote image URLs are not supported. Use base64 data URIs instead.',
+      param
+    }
+  }
+
+  const result = parseAndValidateDataUri(url)
+  if (!result.ok) {
+    messagesLogger.warn(
+      'Rejected image at messages[{messageIndex}].content[{partIndex}]: {reason}',
+      { messageIndex, partIndex, reason: result.message, uriChars: url.length }
+    )
+    return {
+      ok: false,
+      message: `${result.message} at messages[${String(messageIndex)}].content[${String(partIndex)}]`,
+      param
+    }
+  }
+
+  messagesLogger.debug(
+    'Image part at messages[{messageIndex}].content[{partIndex}]: {mimeType}, {base64Chars} base64 chars',
+    {
+      messageIndex,
+      partIndex,
+      mimeType: result.parsed.mimeType,
+      base64Chars: result.parsed.data.length
+    }
+  )
+  return {
+    ok: true,
+    part: { type: 'image', data: result.parsed.data, mimeType: result.parsed.mimeType }
   }
 }
 
@@ -334,17 +382,17 @@ const MAX_BASE64_PAYLOAD_MEGABYTES = 20
  */
 const MAX_BASE64_PAYLOAD_SIZE = MAX_BASE64_PAYLOAD_MEGABYTES * BYTES_PER_MEGABYTE
 
-export interface ParsedDataUri {
+interface ParsedDataUri {
   readonly data: string
   readonly mimeType: string
 }
 
-export interface DataUriError {
+interface DataUriError {
   readonly ok: false
   readonly message: string
 }
 
-export interface DataUriSuccess {
+interface DataUriSuccess {
   readonly ok: true
   readonly parsed: ParsedDataUri
 }

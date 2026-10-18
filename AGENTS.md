@@ -67,14 +67,16 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 
 When you change code, run the smallest relevant checks first, then expand as needed.
 
-Lint rules are the Viaanix shared set, copied into `vite.config.ts`. Lint passes only with zero warnings. Fix the code, not the rule: inline lint directives (`oxlint-disable…`, `eslint-disable…`, `…-enable`) are not allowed anywhere, and `test/unit/lint-directives.test.ts` fails the gate on any. If a rule's premise does not fit a line, express the code differently (a named constant, a different API) and say why in an ordinary comment.
+Lint rules are the Viaanix shared set, copied into `vite.config.ts`. Lint passes only with zero warnings. Fix the code, not the rule: inline directives (`oxlint-disable…`, `eslint-disable…`, `…-enable`, fallow's `fallow-ignore…` and its `@expected-unused` tag) are not allowed anywhere, and `test/unit/lint-directives.test.ts` fails the gate on any. If a rule's premise does not fit a line, express the code differently (a named constant, a different API) and say why in an ordinary comment.
+
+fallow (`.fallowrc.jsonc`) checks dead code, duplication and complexity, with CRAP scored against the test gate's coverage; any finding fails the gate. A deliberate exception (an entry point fallow cannot see, a complexity ceiling) goes in `.fallowrc.jsonc` with its reason. Before deleting something fallow calls unused, trace it: `pnpm exec fallow dead-code --trace <file>:<export>`.
 
 Common commands:
 
 ```bash
-pnpm run check:all  # the gate: format → lint + type check → tests → build (scripts/gate.ts)
+pnpm run check:all  # the gate: format → lint + type check → tests with coverage → fallow → build (scripts/gate.ts)
 vp check --fix      # apply formatting and lint fixes
-vp test             # offline tests: unit + integration, no real login (same as test:ci)
+vp test             # offline tests: unit + integration, no real login (test:ci runs them with coverage, for fallow)
 pnpm run test:live  # live provider conformance tests: real login, spends quota; on demand only
 pnpm run test:live:record  # re-record replay fixtures (PI_PROXY_RECORD_AGENT_DIR = a login made for recording)
 vp pack             # build

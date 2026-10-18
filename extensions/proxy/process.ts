@@ -63,6 +63,11 @@ function getPidPath(): string {
   return resolve(piDir, 'proxy.pid')
 }
 
+/** Whether `error` is the EPERM `process.kill(pid, 0)` throws for a live process of another user. */
+function isPermissionDenied(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'EPERM'
+}
+
 function readPid(): number | undefined {
   const pidPath = getPidPath()
   if (!existsSync(pidPath)) {
@@ -80,7 +85,19 @@ function readPid(): number | undefined {
       process.kill(pid, 0)
       processLogger.debug('PID file {pidPath} names live process {pid}', { pidPath, pid })
       return pid
-    } catch {
+    } catch (error: unknown) {
+      // EPERM: the process exists but belongs to another user (a proxy started with sudo, say). Only
+      // a missing process (ESRCH) makes the file stale (#93).
+      if (isPermissionDenied(error)) {
+        processLogger.debug(
+          'PID file {pidPath} names process {pid}, which this user cannot signal',
+          {
+            pidPath,
+            pid
+          }
+        )
+        return pid
+      }
       processLogger.info('Removing stale PID file {pidPath}: process {pid} is not running', {
         pidPath,
         pid
@@ -274,15 +291,44 @@ function startSessionTied(
   })
 }
 
-async function killStalePid(context: ExtensionContext): Promise<void> {
+/** How sending SIGTERM to a process went: delivered, already gone, or it belongs to another user. */
+type SignalOutcome = 'signalled' | 'gone' | 'foreign'
+
+/** Send SIGTERM to `pid` and say how it went; EPERM means another user's process (#93). */
+function terminate(pid: number): SignalOutcome {
+  try {
+    process.kill(pid, 'SIGTERM')
+    return 'signalled'
+  } catch (error: unknown) {
+    if (isPermissionDenied(error)) return 'foreign'
+    processLogger.debug('Process {pid} already exited', { pid, error })
+    return 'gone'
+  }
+}
+
+/**
+ * Clear a PID file left behind before starting. `startProxy` calls this only when no proxy answers,
+ * so a process the file names is stale: it is signalled, and the file goes. Another user's process
+ * cannot be signalled (a recycled PID, or a proxy this user cannot stop); the file is still replaced
+ * so a start is never blocked, and the user is told it was not killed (#93).
+ */
+export async function killStalePid(context: ExtensionContext): Promise<void> {
   const existingPid = readPid()
   if (existingPid === undefined) return
-  processLogger.warn('Killing stale proxy process {pid} before starting', { pid: existingPid })
-  context.ui.notify(`Stale proxy process ${String(existingPid)} -- killing`, 'warning')
-  try {
-    process.kill(existingPid, 'SIGTERM')
-  } catch (error: unknown) {
-    processLogger.debug('Stale proxy process {pid} already exited', { pid: existingPid, error })
+  if (terminate(existingPid) === 'foreign') {
+    processLogger.warn(
+      'PID file names process {pid} of another user, which is not answering; replacing the file',
+      {
+        pid: existingPid
+      }
+    )
+    context.ui.notify(
+      `PID file named process ${String(existingPid)}, which belongs to another user and is not answering -- starting a new proxy`,
+      'warning'
+    )
+  } else {
+    processLogger.warn('Killed stale proxy process {pid} before starting', { pid: existingPid })
+    context.ui.notify(`Stale proxy process ${String(existingPid)} -- killing`, 'warning')
   }
   removePid()
   await sleep(PROCESS_SETTLE_DELAY_MS)
@@ -372,21 +418,34 @@ export async function stopProxy(state: ProxyState, context: ExtensionContext): P
   }
 
   const pid = readPid()
-  if (pid !== undefined) {
-    try {
-      process.kill(pid, 'SIGTERM')
-      removePid()
-      processLogger.info('Stopped proxy {pid}', { pid })
-      context.ui.notify(`Proxy stopped (pid ${String(pid)})`, 'info')
-      context.ui.setStatus('proxy', undefined)
-      return
-    } catch (error: unknown) {
-      processLogger.warn('Could not signal proxy {pid}; removing its PID file', { pid, error })
-      removePid()
-    }
+  const outcome = pid === undefined ? undefined : terminate(pid)
+  if (pid !== undefined && outcome === 'signalled') {
+    removePid()
+    processLogger.info('Stopped proxy {pid}', { pid })
+    context.ui.notify(`Proxy stopped (pid ${String(pid)})`, 'info')
+    context.ui.setStatus('proxy', undefined)
+    return
   }
 
   const status = await probe(state)
+  // Another user's process that answers as the proxy: keep its PID file, it is still running (#93).
+  // One that does not answer is a recycled PID, or not this proxy: stale, like a missing process.
+  if (pid !== undefined && outcome === 'foreign' && status.reachable) {
+    processLogger.info('Proxy {pid} at {url} runs as another user; leaving it and its PID file', {
+      pid,
+      url: proxyUrl(state.config)
+    })
+    context.ui.notify(
+      `Proxy at ${proxyUrl(state.config)} runs as another user (pid ${String(pid)}) -- stop it as that user`,
+      'warning'
+    )
+    return
+  }
+  if (pid !== undefined) {
+    processLogger.warn('Could not signal proxy {pid}; removing its PID file', { pid, outcome })
+    removePid()
+  }
+
   if (status.reachable) {
     processLogger.info('Proxy at {url} was not started by this extension; leaving it running', {
       url: proxyUrl(state.config)

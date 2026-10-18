@@ -5,7 +5,8 @@
  * responses parse correctly. Skips when no credentials are available.
  */
 
-import { describe, expect, test } from 'vite-plus/test'
+import { isRecord } from '@proxy/utils/guards'
+import { assert, describe, expect, test } from 'vite-plus/test'
 
 import { createTestClient, getCheapestModel, hasCredentials, setup } from './helpers'
 
@@ -24,7 +25,8 @@ describe('SDK models conformance', () => {
 
     expect(models.length).toBeGreaterThan(0)
 
-    const first = models[0] as Record<string, unknown>
+    const first = models[0]
+    assert(isRecord(first), 'the first model is not an object')
     expect(first['id']).toBeTypeOf('string')
     expect(first['object']).toBe('model')
     expect(first['created']).toBeTypeOf('number')

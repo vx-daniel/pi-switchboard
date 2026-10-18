@@ -110,7 +110,7 @@ async function openSettingsPanelIfInteractive(
   await openSettingsPanel(state, context)
 }
 
-export default function proxyExtension(pi: ExtensionAPI): void {
+export default function proxyExtension(pi: Pick<ExtensionAPI, 'on' | 'registerCommand'>): void {
   // Opt-in logging: the extension writes nothing unless PI_PROXY_EXTENSION_LOG_FILE names a file,
   // because console output would corrupt pi's terminal UI.
   const logFile = process.env.PI_PROXY_EXTENSION_LOG_FILE

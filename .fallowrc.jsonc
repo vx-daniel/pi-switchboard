@@ -1,0 +1,54 @@
+// fallow (https://docs.fallow.tools): dead code, duplication and complexity, from the module graph (#83).
+// Adopted with zero findings, and the gate (`scripts/gate.ts`) fails on any new one. Exceptions live here, each
+// with its reason; inline `fallow-ignore` comments are banned like lint directives (CONSTITUTION.md, principle II).
+{
+  // The schema of the installed, pinned version, for editor checks; no remote file.
+  "$schema": "./node_modules/fallow/schema.json",
+
+  // Files nothing imports, which fallow would otherwise report unused. The lint plugins (`lint/*.ts`) and the
+  // packages Oxlint loads by name are declared in `fallow-plugin-oxlint-js.jsonc`, as tooling.
+  "entry": [
+    // pi loads the extension through the package manifest (`"pi": { "extensions": ["./extensions"] }`).
+    "extensions/proxy/index.ts",
+    // The package's published entry points (`pack.entry` in `vite.config.ts`). The extension imports them through
+    // the package's own subpaths (`@vx-daniel/pi-openai-proxy/config`), which resolve to `dist/`, not to these.
+    "src/index.ts",
+    "src/config/schema.ts",
+    "src/openai/model-exposure.ts",
+    "src/logging/index.ts",
+    "src/sync/zed.ts"
+  ],
+
+  "rules": {
+    // No architecture zones or rule packs are defined, so these detectors have nothing to check.
+    // `off` says that on purpose; left on, fallow reports that they did not run.
+    "boundary-violation": "off",
+    "policy-violation": "off",
+    // The catalog's `vite` entry is used by `overrides: { vite@*: 'catalog:' }` in `pnpm-workspace.yaml`, which
+    // fallow 3.34.1 does not count as a reference; the other entries (`vite-plus`, `@vitest/coverage-v8`) are used
+    // by `package.json`.
+    "unused-catalog-entries": "off"
+  },
+
+  "health": {
+    // Tests repeat setup on purpose, and coverage measures only the source trees (`test.coverage.include` in
+    // `vite.config.ts`), so their CRAP scores would only be estimates.
+    "ignore": ["test/**"],
+
+    // CRAP weighs complexity by coverage: the gate runs fallow after the tests, with their coverage
+    // (`--coverage coverage/coverage-final.json`). Every function is under the limits but one, kept below with its
+    // reason. A ceiling is the score fallow 3.34.1 measured, so the function may not grow: a cognitive ceiling is
+    // the measured score (a score equal to it passes), a CRAP ceiling the next whole number above it (a score equal
+    // to it fails). The other limits still apply unchanged.
+    "thresholdOverrides": [
+      // A port of pi kept line-for-line: permanent.
+      // Measured cognitive 26.
+      {
+        "files": ["src/pi/model-scope.ts"],
+        "functions": ["resolveModelScope"],
+        "maxCognitive": 26,
+        "reason": "Line-for-line port of pi's resolveModelScopeFromModels (#46), parity-tested against pi; splitting it would drift from pi."
+      }
+    ]
+  }
+}

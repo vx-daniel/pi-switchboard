@@ -310,3 +310,89 @@ describe('convertMessages: images', () => {
     }
   })
 })
+
+describe('convertMessages: rejection contract', () => {
+  // Catches a rejected image reported at the wrong message or part, or under a different `param`:
+  // clients use both to point at the offending input.
+  test.each([
+    [
+      'a remote image URL',
+      'https://example.com/image.png',
+      'Remote image URLs are not supported. Use base64 data URIs instead.'
+    ],
+    [
+      'a malformed data URI',
+      'data:notbase64content',
+      'Invalid base64 data URI format at messages[1].content[1]'
+    ]
+  ])('%s is rejected with its message and part path', (_case, url, message) => {
+    const result = convertMessages([
+      { role: 'system', content: 'Be brief.' },
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is this?' },
+          { type: 'image_url', image_url: { url } }
+        ]
+      }
+    ])
+
+    expect(result).toEqual({
+      ok: false,
+      message,
+      param: 'messages[1].content[1].image_url.url'
+    })
+  })
+
+  // Catches an unknown content part type slipping through as an empty message instead of being
+  // refused with the part's `type` as the `param`.
+  test('an unsupported content part type is rejected at its type field', () => {
+    const audioPart: { type: 'text'; text: string } = { type: 'text', text: 'placeholder' }
+    Object.assign(audioPart, { type: 'input_audio' })
+
+    const result = convertMessages([{ role: 'user', content: [audioPart] }])
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Unsupported content part type: 'input_audio'",
+      param: 'messages[0].content[0].type'
+    })
+  })
+
+  // Catches a failed later user message being ignored: conversion stops at the first error.
+  test('a rejected part in a later message fails the whole conversion', () => {
+    const result = convertMessages([
+      { role: 'user', content: 'Hi' },
+      { role: 'assistant', content: 'Hello' },
+      { role: 'user', content: [{ type: 'image_url', image_url: { url: 'http://x/y.png' } }] }
+    ])
+
+    expect(result).toEqual({
+      ok: false,
+      message: 'Remote image URLs are not supported. Use base64 data URIs instead.',
+      param: 'messages[2].content[0].image_url.url'
+    })
+  })
+
+  // Catches multi-part user content reordered or reshaped on conversion.
+  test('text and image parts keep their order and shape', () => {
+    const [user] = convertedMessages([
+      {
+        role: 'user',
+        content: [
+          { type: 'image_url', image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' } },
+          { type: 'text', text: 'What is this?' }
+        ]
+      }
+    ])
+
+    expect(user).toEqual({
+      role: 'user',
+      content: [
+        { type: 'image', data: 'iVBORw0KGgo=', mimeType: 'image/png' },
+        { type: 'text', text: 'What is this?' }
+      ],
+      timestamp: expect.any(Number) as number
+    })
+  })
+})

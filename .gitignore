@@ -14,3 +14,7 @@ dist-bin/
 .local/
 # j5 workflow output (local review and audit reports)
 .j5/
+# fallow analysis cache
+.fallow/
+# test coverage, written by the gate for fallow (#83)
+coverage/

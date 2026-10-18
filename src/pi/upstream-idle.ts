@@ -62,7 +62,7 @@ export function startUpstreamIdleTimeout(idleMs: number): UpstreamIdleTimeout {
 }
 
 /** What a caller sees when the idle timeout ended the call; "timeout" maps it to HTTP 504. */
-export function idleTimeoutMessage(idleMs: number): string {
+function idleTimeoutMessage(idleMs: number): string {
   const duration =
     idleMs < MS_PER_SECOND
       ? `${String(idleMs)} ms`

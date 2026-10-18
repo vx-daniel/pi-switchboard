@@ -12,7 +12,7 @@ import {
 } from '@vx-daniel/pi-openai-proxy/config'
 import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
 
-import { getAvailableModels, type ProxyState } from './state'
+import { getSessionAvailableModels, type ProxyState } from './state'
 
 /** Rows the list needs beyond one per model. */
 const MODEL_SELECTOR_EXTRA_ROWS = 2
@@ -58,7 +58,7 @@ function prevProviderTarget(
 ): number {
   if (provIdx <= 0) return 0
   const prev = providerOrder[provIdx - 1] ?? ''
-  const found = display.findLastIndex((item) => item.id.startsWith(`${prev}/`))
+  const found = display.findIndex((item) => item.id.startsWith(`${prev}/`))
   return found === -1 ? 0 : found
 }
 
@@ -105,7 +105,7 @@ export function buildModelSelectorSubmenu(
   state: ProxyState,
   done: (selectedValue?: string) => void
 ): Component {
-  const models = getAvailableModels(state)
+  const models = getSessionAvailableModels(state)
   const selected = new Set(state.config.customModels)
 
   // Build provider order from sorted model list

@@ -8,10 +8,12 @@
 import { resetSync } from '@logtape/logtape'
 import { configureLogging } from '@proxy/logging'
 import type { ProxyEnv } from '@proxy/server/types'
+import { isRecord } from '@proxy/utils/guards'
 import type { Hono } from 'hono'
 import {
   afterAll,
   afterEach,
+  assert,
   beforeAll,
   beforeEach,
   describe,
@@ -59,9 +61,25 @@ interface LogRecordJson {
   properties: Record<string, unknown>
 }
 
+/** A JSON Lines log record with the fields these tests read, as written (nothing trimmed). */
+function isLogRecord(value: unknown): value is LogRecordJson {
+  return (
+    isRecord(value) &&
+    typeof value['logger'] === 'string' &&
+    typeof value['level'] === 'string' &&
+    typeof value['message'] === 'string' &&
+    isRecord(value['properties'])
+  )
+}
+
+/** The captured records of `logger`; fails the test when any line is not a log record. */
 function logged(logger: string): LogRecordJson[] {
   return lines
-    .map((line) => JSON.parse(line) as LogRecordJson)
+    .map((line): LogRecordJson => {
+      const record: unknown = JSON.parse(line)
+      assert(isLogRecord(record), 'a log line is not a JSON Lines log record')
+      return record
+    })
     .filter((record) => record.logger === logger)
 }
 

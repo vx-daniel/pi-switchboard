@@ -399,7 +399,7 @@ The toolchain is [Vite+](https://viteplus.dev) (`vp`); all config lives in `vite
 ```bash
 vp install            # Install dependencies (pnpm); also installs the Git hooks
 vp run dev            # Rebuild on change and restart the proxy on port 4142 (PI_PROXY_DEV_PORT to change)
-pnpm run check:all    # The gate: format, lint + type check, tests, build
+pnpm run check:all    # The gate: format, lint + type check, tests with coverage, fallow, build
 vp check --fix        # Format and apply lint fixes
 vp test               # Offline tests (unit + integration): no real login, no network beyond 127.0.0.1
 pnpm run test:live    # Live conformance tests against real providers: uses your pi login and quota
@@ -417,7 +417,8 @@ Offline tests run with pi pointed at an empty agent directory and credential env
 
 ### Tooling
 
-- **Vite+** — one toolchain: Oxfmt (format), Oxlint with tsgolint (type-aware lint and type check), Vitest (tests), tsdown (`vp pack`), and Git hooks (`.vite-hooks/`)
+- **Vite+** — one toolchain: Oxfmt (format), Oxlint with tsgolint (type-aware lint and type check), Vitest (tests, with v8 coverage in the gate), tsdown (`vp pack`), and Git hooks (`.vite-hooks/`)
+- **fallow** — dead code, duplication and complexity from the module graph (`.fallowrc.jsonc`); the gate fails on any finding
 - **pnpm** — package manager, driven by `vp`
 - **Node.js** — runtime (`@hono/node-server`)
 - **commitlint** — conventional commits (`commit-msg` hook)

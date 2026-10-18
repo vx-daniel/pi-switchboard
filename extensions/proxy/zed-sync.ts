@@ -8,7 +8,7 @@ import { computeModelExposure } from '@vx-daniel/pi-openai-proxy/exposure'
 import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
 import { syncToZed, type ZedSyncOptions } from '@vx-daniel/pi-openai-proxy/sync/zed'
 
-import { buildExposureConfig, getAvailableModels, type ProxyState } from './state'
+import { buildExposureConfig, getSessionAvailableModels, type ProxyState } from './state'
 
 const zedSyncLogger = proxyLogger('extension', 'zed-sync')
 
@@ -19,7 +19,7 @@ async function runZedSync(
   state: ProxyState,
   dryRun: boolean
 ): Promise<{ ok: boolean; message: string }> {
-  const available = getAvailableModels(state)
+  const available = getSessionAvailableModels(state)
   const outcome = computeModelExposure(available, await buildExposureConfig(state))
   if (!outcome.ok) {
     return { ok: false, message: `Model exposure error: ${outcome.message}` }
@@ -47,8 +47,8 @@ async function runZedSync(
     return { ok: false, message: result.error ?? 'Zed sync failed' }
   }
 
-  const prefix = dryRun ? '[dry-run] ' : ''
-  return { ok: true, message: `${prefix}${result.summary} (${result.configPath})` }
+  // A dry run's summary already says so: `syncToZed` starts it with "[dry-run]" (#92).
+  return { ok: true, message: `${result.summary} (${result.configPath})` }
 }
 
 export async function handleZedSync(
