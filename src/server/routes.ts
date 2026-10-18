@@ -283,15 +283,22 @@ interface CompletionJob {
   readonly options: CompletionOptions
 }
 
-/** The first result of an event iterator, then the rest of it, as one async iterable. */
+/**
+ * The first result of an event iterator, then the rest of it, as one async iterable. Ending it early
+ * (the client left mid-stream) ends the rest too.
+ */
 async function* startingWith<T>(
   first: IteratorResult<T>,
   rest: AsyncIterator<T>
 ): AsyncGenerator<T> {
-  if (first.done === true) return
-  yield first.value
-  for (let next = await rest.next(); next.done !== true; next = await rest.next()) {
-    yield next.value
+  try {
+    if (first.done === true) return
+    yield first.value
+    for (let next = await rest.next(); next.done !== true; next = await rest.next()) {
+      yield next.value
+    }
+  } finally {
+    await rest.return?.()
   }
 }
 
@@ -309,6 +316,14 @@ async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promis
     request.stream_options !== undefined &&
     request.stream_options.include_usage === true
   const start = performance.now()
+  // The client's own departure aborts the call, which then fails: not an upstream failure, and
+  // nobody is waiting for the answer.
+  const answerClientLeft = (): Response => {
+    chatLogger.debug('Client left before the stream started, after {durationMs} ms', {
+      durationMs: Math.round(performance.now() - start)
+    })
+    return honoContext.body(null)
+  }
 
   let events: AsyncIterator<AssistantMessageEvent>
   let first: IteratorResult<AssistantMessageEvent>
@@ -316,6 +331,7 @@ async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promis
     events = (await piStream(model, context, request, options))[Symbol.asyncIterator]()
     first = await events.next()
   } catch (err: unknown) {
+    if (options.signal?.aborted === true) return answerClientLeft()
     const mapped = reportUpstreamFailure(
       mapUpstreamError(err),
       err instanceof Error ? err.message : undefined
@@ -323,12 +339,7 @@ async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promis
     return honoContext.json(mapped.body, mapped.status)
   }
   if (first.done !== true && first.value.type === 'error') {
-    if (options.signal?.aborted === true) {
-      chatLogger.debug('Client left before the stream started, after {durationMs} ms', {
-        durationMs: Math.round(performance.now() - start)
-      })
-      return honoContext.body(null)
-    }
+    if (options.signal?.aborted === true) return answerClientLeft()
     const failed = first.value.error
     const mapped = reportUpstreamFailure(mapFailedCall(failed), failed.errorMessage)
     chatLogger.debug('Upstream failed before the stream started; answering {status}', {

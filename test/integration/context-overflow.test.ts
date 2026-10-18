@@ -116,12 +116,13 @@ describe('a client that leaves before the stream starts', () => {
 
     expect(response.headers.get('content-type')).not.toBe('text/event-stream')
     await vi.waitFor(() => {
-      expect(records).toContainEqual(
-        expect.objectContaining({
-          level: 'DEBUG',
-          message: expect.stringContaining('Client left before the stream started') as string
-        })
-      )
+      expect(
+        records.some(
+          (record) =>
+            record.level === 'DEBUG' &&
+            record.message.startsWith('Client left before the stream started')
+        )
+      ).toBe(true)
     })
     expect(records.filter((record) => record.level === 'ERROR')).toEqual([])
   })

@@ -297,6 +297,8 @@ The proxy implements a subset of the [OpenAI Chat Completions API](https://platf
 
 Upstream failures before a response starts get an HTTP status, streamed or not, as OpenAI answers them: `400` `context_length_exceeded` when the conversation is longer than the model's context window (agent clients compact on it), `429` `rate_limit`, `502`, `503`, `504` `timeout`, each with a fixed message that never quotes the provider. A stream that already started ends with an error event carrying the same body. See [Error mapping](PLAN.md#error-mapping).
 
+So a streaming response sends nothing, headers included, until the provider has accepted the request: as with OpenAI itself, the first byte takes the provider's own response time. A client or reverse proxy in front of the proxy needs a header timeout longer than that; the proxy's upstream timeout (`PI_PROXY_UPSTREAM_TIMEOUT_MS`, 120 s) caps the wait.
+
 There is no OpenAPI/Swagger spec for the proxy itself. Use the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat/create) as the primary documentation, noting the supported subset listed in this README.
 
 ## Pi Integration
