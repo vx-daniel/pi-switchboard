@@ -50,7 +50,7 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 
 - **TypeScript**: ultra-strict (`noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, `noPropertyAccessFromIndexSignature`)
 - **Oxfmt** (`vp fmt`): the Viaanix style copied from `oxc-config-viaanix` v4.0.0 (single quotes, no semicolons, no trailing commas, 2-space indent, 100 columns, sorted imports); Markdown and the lockfile are left as written. Lint skips hidden folders, `dist/`, and `docs/` (Viaanix `ignorePatterns`)
-- **Oxlint** (`vp lint`): the Viaanix shared rules (copied and flattened from `Viaanix/oxc-config-viaanix` v4.0.0 strict: base, TypeScript, type-aware, strict layers), type checking, `maxWarnings: 0`, and `reportUnusedDisableDirectives: deny`; plus repo additions: `no-unsafe-type-assertion`, `no-unnecessary-condition`, stricter `no-unused-vars`, zod plugin, import-alias plugin, and repo rules in `lint/repo-rules.ts` (`no-enum`, `no-delete`, `no-implicit-any-let`). `no-console` is off only for `src/server/logging.ts` and `src/index.ts`
+- **Oxlint** (`vp lint`): the Viaanix shared rules (copied and flattened from `Viaanix/oxc-config-viaanix` v4.0.0 strict: base, TypeScript, type-aware, strict layers), type checking, `maxWarnings: 0`, and `reportUnusedDisableDirectives: deny`; plus repo additions: `no-unsafe-type-assertion`, `no-unnecessary-condition`, stricter `no-unused-vars`, zod plugin, import-alias plugin, and repo rules in `lint/repo-rules.ts` (`no-enum`, `no-delete`, `no-implicit-any-let`). `no-console` is `warn` everywhere, with no file exceptions; with `maxWarnings: 0` any `console` call fails lint
 - **`vp check`**: format, lint, and type check in one pass
 - **Vitest** (`vp test`): tests import from `vite-plus/test`
 - **tsdown** (`vp pack`): ESM build with `.d.ts`
@@ -79,7 +79,7 @@ Outside the OpenAI-compatible surface, not shaped like OpenAI responses (`src/se
 
 - `GET /healthz`: liveness, no proxy auth, `{ "status": "ok" }` only, no upstream calls.
 - `GET /healthz/models`: available and exposed model counts, exposure modes, `models.json` load
-  error; `503` when nothing is exposed. A parse error is reduced to where the file is not valid
+  error; `503` when nothing is exposed or the exposure config is invalid. A parse error is reduced to where the file is not valid
   JSON (`describeModelsJsonError`): JSON.parse messages quote the text around the fault, often a
   key. The same reduced text is what the startup warning logs.
 - `GET /healthz/creds`: per provider with a credential, its type, source and available model
@@ -152,7 +152,7 @@ Do not silently downgrade to a prefixed mode.
 #### `always-prefixed`
 
 Expose `<public-prefix>/<model-id>` for every model.
-This is the closest behavior to the current implementation.
+This is closest to the behavior before Phase 3A, which exposed canonical `provider/model-id` IDs.
 
 ### Public prefix labels
 
@@ -175,7 +175,8 @@ Supported exposure modes:
 - `all` — expose all available models
 - `scoped` (default) — expose the models pi's global `enabledModels` setting selects; with none
   set, every available model
-- `custom` — expose only an allowlist of canonical model IDs, matched exactly
+- `custom` — expose only an allowlist of canonical model IDs, matched exactly; an empty list
+  currently exposes every available model ([#88](https://github.com/vx-daniel/pi-openai-proxy/issues/88))
 
 Persist custom-model selections as canonical IDs, not public IDs.
 That keeps configuration stable when public ID mode or prefix labels change.
@@ -311,7 +312,7 @@ Reason:
 - `parallel_tool_calls`
 - `metadata`
 - `prediction`
-- image content parts (base64 data URIs only)
+- image content parts (base64 data URIs only; remote URLs are always rejected, see "Image URL fetching")
 
 Compatibility preference:
 
@@ -327,19 +328,23 @@ Compatibility preference:
 - `logit_bias`
 - `functions` (deprecated)
 - `function_call` (deprecated)
-- audio output/modality
-- input audio content parts
-- file content parts
-- unsupported multimodal content parts
-- unsupported tool schema shapes
-- any parameter not explicitly supported or allowlisted for passthrough
+- audio output/modality (`audio`, `modalities`: unknown fields, `422`)
+- input audio content parts (`400`)
+- file content parts (`400`)
+- unsupported multimodal content parts (`400`)
+- unsupported tool schema shapes (`422`)
+- any parameter not explicitly supported or allowlisted for passthrough (`422`)
 
 ### Unknown field policy
 
 Default behavior:
 
-- reject with `422`
-- return an OpenAI-style error body naming the offending field where possible
+- reject with `422`, naming every unknown field in the message (`Unknown parameter(s): …`) and
+  the first in `param`
+
+The fields in "Rejected" above (`n`, `logprobs`, `top_logprobs`, `logit_bias`, `functions`,
+`function_call`) get `422` too, with `'<field>' is not supported in this version of the proxy`.
+A known field with an invalid value or shape (an unsupported content part included) gets `400`.
 
 ## Message mapping policy
 
@@ -365,7 +370,8 @@ Supported:
 
 Rejected:
 
-- remote image URLs (disabled by default, requires SSRF protections)
+- remote image URLs: always rejected with `400`, whatever `remoteImages` says (the setting has no
+  effect; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
 - input audio
 - file parts
 - unsupported structured content variants
@@ -442,12 +448,12 @@ mechanism used for `top_p`, `seed`, `response_format`, and other provider-specif
 All OpenAI `tool_choice` values are supported: `"none"`, `"auto"`, `"required"`, and
 named function choice `{ type: "function", function: { name: "..." } }`.
 
-Passthrough fields (including `tool_choice`) are only injected via `onPayload` for
+Passthrough fields (including `tool_choice`) are injected verbatim via `onPayload` only for
 OpenAI-compatible APIs (`openai-completions`, `openai-responses`, `azure-openai-responses`,
-`mistral-conversations`). Non-compatible APIs (Anthropic, Google, Bedrock, Codex) reject
-unknown payload fields, so the proxy skips injection entirely for those APIs. The fields
-are still accepted by the proxy schema — they just have no effect on non-compatible
-providers.
+`mistral-conversations`). Anthropic, Google and Codex get the subset they support, translated to
+their own payload shapes (see "API-aware payload translation"); Bedrock and any other API get
+none. The fields are still accepted by the proxy schema; where they are not translated they have
+no effect.
 
 ### `strict` on function tools — strict where supported (#44)
 
@@ -500,9 +506,9 @@ call control. Analysis showed this rejection broke real clients:
 - **Open WebUI** and **Aider** do not send the field
 
 The proxy's SSE streaming code already handles multiple tool calls per response via
-`contentIndex` tracking, so the response side was always capable. Like all passthrough
-fields, `parallel_tool_calls` is only injected for OpenAI-compatible APIs. Non-compatible
-providers are unaffected — their default parallel behavior applies.
+`contentIndex` tracking, so the response side was always capable. `parallel_tool_calls` is
+injected verbatim for OpenAI-compatible APIs, translated to `disable_parallel_tool_use` for
+Anthropic (only when `false`), and overrides pi's default for Codex; Google and Bedrock ignore it.
 
 ### `metadata` and `prediction` — resolved
 
@@ -513,8 +519,7 @@ Open WebUI sends it with task info on every request.
 shape and forwarded via `onPayload`. Continue sends it for models that support predicted
 output (speculative decoding).
 
-Both fields are only injected for OpenAI-compatible APIs. Non-compatible providers
-are unaffected.
+Both fields are only injected for OpenAI-compatible APIs. Other providers are unaffected.
 
 ### Resilience architecture — intentional design
 
@@ -591,7 +596,9 @@ Fields translated to Anthropic's wire format:
 
 #### Google (`google-generative-ai`, `google-gemini-cli`, `google-vertex`)
 
-Fields translated into Google's nested `config.generationConfig` structure (camelCase):
+Fields translated into Google's nested `config.generationConfig` structure (camelCase). The
+sampling fields below are likely dropped before they reach Google
+([#110](https://github.com/vx-daniel/pi-openai-proxy/issues/110)):
 
 | OpenAI field | Google translation |
 |---|---|
@@ -602,7 +609,7 @@ Fields translated into Google's nested `config.generationConfig` structure (came
 | `presence_penalty` | `config.generationConfig.presencePenalty` |
 | `tool_choice: "auto"` | `config.toolConfig.functionCallingConfig.mode: "AUTO"` |
 | `tool_choice: "none"` | `config.toolConfig.functionCallingConfig.mode: "NONE"` |
-| `tool_choice: "required"` | `config.toolConfig.functionCallingConfig.mode: "ANY"` |
+| `tool_choice: "required"` or `{ function: { name } }` | `config.toolConfig.functionCallingConfig.mode: "ANY"` |
 | `user` | Skipped (not supported) |
 | `parallel_tool_calls` | Skipped (not supported) |
 | `response_format` | Skipped (Google uses `responseMimeType` / `responseSchema`) |
@@ -656,6 +663,8 @@ Finish reason mapping:
 - pi `stop` -> `stop`
 - pi `length` -> `length`
 - pi `toolUse` -> `tool_calls`
+- pi `error`, `aborted` (and pi's `pending`, `deferred`) -> `stop`, since a finish reason is
+  required and OpenAI has no better fit
 
 Do not synthesize OpenAI finish reasons that pi cannot actually distinguish, such as `content_filter`.
 
@@ -773,14 +782,16 @@ Use an OpenAI-style shape:
 
 ### Error mapping
 
-- `400` invalid request shape, ambiguous shorthand model, invalid headers; or the conversation is
-  longer than the model's context window (`invalid_request_error`, `param: "messages"`,
-  `context_length_exceeded`, as OpenAI answers it)
+- `400` invalid JSON, invalid request shape or value, unsupported or invalid content part
+  (remote image URL, audio, file, bad data URI); or the conversation is longer than the model's
+  context window (`invalid_request_error`, `param: "messages"`, `context_length_exceeded`, as
+  OpenAI answers it)
 - `401` proxy auth failure or no upstream credential for target provider
-- `404` model not found
-- `422` unsupported parameter, unsupported content part, unsupported tool schema
+- `404` model not found (`model_not_found`), or an unsupported endpoint
+- `413` request body larger than `maxBodySize`
+- `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
 - `429` upstream rate limit (`rate_limit`)
-- `500` internal proxy failure
+- `500` internal proxy failure, including an invalid model exposure config
 - `502` upstream auth failure (`upstream_auth_error`), or any other upstream failure
   (`upstream_error`)
 - `503` provider unavailable (`provider_unavailable`, upstream 503) or overloaded
@@ -827,7 +838,11 @@ Error rules:
 
 ### Image URL fetching
 
-If remote image URLs are supported:
+Today remote image URLs are always rejected with `400`: only base64 data URIs are accepted. The
+`remoteImages` setting (`PI_PROXY_REMOTE_IMAGES`, `--remote-images`) is read but has no effect
+([#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109)). No fetching is built.
+
+If remote image URLs are supported later:
 
 - allow only `http` and `https`
 - block localhost and private IP ranges
@@ -838,7 +853,8 @@ If remote image URLs are supported:
 
 ### Agentic mode
 
-Agentic mode is experimental.
+Agentic mode is experimental and not built. `PI_PROXY_AGENTIC=true` sets a flag that only the
+startup log reads.
 
 Security defaults for any future agentic mode:
 
@@ -863,9 +879,10 @@ src/
 │   └── index.ts          -- LogTape setup, categories, level guide, redaction (exported via ./logging)
 ├── server/
 │   ├── app.ts            -- Hono app assembly (middleware + routes)
-│   ├── routes.ts         -- GET /v1/models, GET /v1/models/:model, POST /v1/chat/completions
+│   ├── routes.ts         -- GET /v1/models, GET /v1/models/:model, GET /v1/pi/models, POST /v1/chat/completions
+│   ├── health.ts         -- GET /healthz, /healthz/models, /healthz/creds
 │   ├── middleware.ts     -- request-id, proxy-auth, body size limit, disconnect detection
-│   ├── errors.ts         -- OpenAI-style error helpers
+│   ├── errors.ts         -- OpenAI-style error helpers, upstream error mapping
 │   ├── request-id.ts     -- piproxy-{random} generation
 │   ├── http-status.ts    -- named HTTP status codes
 │   └── types.ts          -- Hono ProxyEnv type
@@ -875,24 +892,29 @@ src/
 │   ├── messages.ts             -- OpenAI messages -> pi Context
 │   ├── model-exposure.ts       -- exposure engine: filtering, public IDs, resolution (exported via ./exposure)
 │   ├── models.ts               -- ExposedModel -> OpenAI model object
+│   ├── reasoning-effort.ts     -- reasoning_effort -> pi thinking level
 │   ├── responses.ts            -- pi AssistantMessage -> OpenAI ChatCompletion
 │   ├── sse.ts                  -- pi events -> SSE ChatCompletionChunk frames
 │   ├── tools.ts                -- OpenAI function tools -> pi Tool[]
 │   └── json-schema-to-typebox.ts -- JSON Schema -> TypeBox conversion
-└── pi/
-    ├── registry.ts       -- ModelRuntime + SettingsManager init
-    ├── complete.ts       -- ModelRuntime streamSimple bridge
-    └── upstream-idle.ts  -- upstream idle timeout, relayed over pi's event stream
-```
+├── pi/
+│   ├── registry.ts       -- ModelRuntime + SettingsManager init
+│   ├── complete.ts       -- ModelRuntime streamSimple bridge
+│   ├── model-scope.ts    -- port of pi's enabledModels pattern resolver
+│   └── upstream-idle.ts  -- upstream idle timeout, relayed over pi's event stream
+├── sync/
+│   └── zed.ts            -- Zed settings.json model sync
+└── utils/
+    └── guards.ts         -- isRecord() and other type guards
 
 ### Dead code
 
-`src/pi/resolve-model.ts` was superseded by `src/openai/model-exposure.ts` in Phase 3A.
-No production code imports it. Remove it along with its test file.
+`src/pi/resolve-model.ts`, superseded by `src/openai/model-exposure.ts` in Phase 3A, has been
+removed.
 
 ### Scaling notes
 
-`routes.ts` is the sole composition root (267 lines, 15 imports). The chat completions handler is ~170 lines covering body parse, validate, resolve model, convert messages, convert tools, check API key, and stream/non-stream branching. This is manageable for the current three-endpoint surface but should be decomposed if new endpoints or complex middleware (agentic mode) are added.
+`routes.ts` is the sole composition root (572 lines, 18 imports). The chat completions work is split across helpers (`parseChatRequest`, `buildPiContext`, `checkRequestAuth`, `streamChat`, `completeChat`) driven by `handleChatCompletion`. This is manageable for the current four-endpoint surface but should be decomposed further if new endpoints or complex middleware (agentic mode) are added.
 
 The pi extension lives in `extensions/proxy/`, isolated from the core proxy. pi loads `index.ts` (the `/proxy` command family and lifecycle hooks) as the single extension; the sibling modules split the rest: `state.ts` (shared config/registry state), `process.ts` (PID file, probe, start/stop/status), `reports.ts` (show/models/verify), `zed-sync.ts`, `settings-panel.ts`, and `model-selector.ts`. Add new extension modules there rather than as top-level files in `extensions/`, which pi would load as separate extensions.
 
@@ -1021,6 +1043,9 @@ Release gate:
 
 ### Phase 3B — SDK conformance and robustness testing
 
+Status: the pre-work and every deliverable file below exist. The SDK tests run the `openai` SDK
+against the in-process Hono app, without `_strict_response_validation`.
+
 Validate that the proxy produces responses the official OpenAI SDK can parse without errors. This is the single highest-value test investment because it catches the exact field-level bugs that break real clients (Open WebUI, Continue, Aider).
 
 There is no standard conformance test suite for OpenAI-compatible APIs. Every project (LiteLLM, vLLM, Ollama) rolls its own. The approach here uses the official `openai` Node SDK (v6+) as a client with strict response validation enabled.
@@ -1122,14 +1147,15 @@ Minimum production observability:
 
 - generated proxy request ID, carried by every log line a request causes (`withContext`)
 - accepted `X-Client-Request-Id`
-- upstream request ID capture where available
+- upstream request ID capture where available (not built: the proxy logs and returns only its own
+  request ID, as `x-request-id`)
 - one `server.http` line per request and per response (status, duration)
 - a `server.chat` "Chat request for … resolved to …" line, written once the model has resolved,
   with the requested model, the resolved canonical `provider/id`, the provider and the stream mode
   (ids and flags only: never message content or credentials; not written when the model is not
   found)
 - disconnect and abort logging
-- usage logging when available
+- usage logging when available (today only the non-streaming total, at `debug`)
 
 ## Test strategy
 
@@ -1152,7 +1178,7 @@ Validate the exact response shapes that the OpenAI SDK expects. These are the hi
 
 ### Conformance tests — SDK round-trip (require credentials)
 
-Use the official `openai` Node SDK as client with `_strict_response_validation: true`. This is the same approach vLLM uses (Python SDK against their server).
+Use the official `openai` Node SDK as client, routed into the in-process Hono app by a custom `fetch` (`test/conformance/helpers.ts`), so the SDK's own response parsing runs against the proxy's shapes. `_strict_response_validation` is not set. vLLM takes a similar approach (Python SDK against their server).
 
 - `client.models.list()` and `client.models.retrieve()`
 - non-streaming text completion
@@ -1164,9 +1190,9 @@ Skip gracefully when no credentials are available (CI without auth).
 
 ### Security tests (no credentials)
 
-- blocked localhost image URL
-- blocked private-range image URL
-- oversized image response
+- every remote image URL (localhost, private range, public) rejected with `400` before any
+  upstream call (`test/unit/security.test.ts`)
+- oversized base64 payload, unsupported image MIME type, malformed data URI rejected
 
 ### Integration tests
 
@@ -1208,4 +1234,4 @@ The implementation is production-ready for the stable proxy only if all of the f
 - supported tool schemas roundtrip correctly
 - no dead code in production `src/` tree
 - stable features pass unit, conformance, integration, and security tests
-- zero oxlint errors, zero biome errors, typecheck clean
+- zero oxlint errors and warnings, typecheck clean (`pnpm run check:all`)

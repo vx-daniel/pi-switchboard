@@ -17,7 +17,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Authentication and headers
 
 - [x] Reserve `Authorization` for proxy authentication compatibility
-- [x] Choose the upstream override header name: `X-Pi-Upstream-Api-Key` (reserved, not yet implemented)
+- [x] Choose the upstream override header name: `X-Pi-Upstream-Api-Key` (implemented)
 - [x] Decide whether proxy auth exists in v1 or stays disabled by default
 - [x] Decide whether to accept and return `X-Client-Request-Id` / `X-Request-Id`
 
@@ -39,8 +39,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 ### Security policy
 
-- [x] Decide whether remote image URLs are enabled in the stable proxy
-- [x] If enabled, document SSRF protections and size limits
+- [x] Decide whether remote image URLs are enabled in the stable proxy (no: always rejected; the remote-images setting has no effect, [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [x] If enabled, document SSRF protections and size limits (not applicable: fetching is not implemented)
 - [x] Document bind-host defaults
 - [x] Document any future remote exposure guidance
 - [x] Mark agentic mode experimental and disabled by default
@@ -51,8 +51,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 - [x] Initialize `package.json`
 - [x] Configure `tsconfig.json` for strict TypeScript
-- [x] Configure Biome
-- [x] Configure oxlint
+- [x] Configure Biome (since replaced by Vite+, see Fork maintenance)
+- [x] Configure oxlint (now run through Vite+)
 - [x] Choose the npm build tool and align docs and config
 - [x] Add Hono
 - [x] Add `@earendil-works/pi-coding-agent`
@@ -70,8 +70,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 ### Core pi integration
 
-- [x] Create `AuthStorage` integration
-- [x] Create `ModelRegistry` integration
+- [x] Create `AuthStorage` integration (replaced by `ModelRuntime` in the Pi 1.x migration)
+- [x] Create `ModelRegistry` integration (replaced by `ModelRuntime` in the Pi 1.x migration)
 - [x] Surface model-registry load errors clearly at startup and in logs
 - [x] Implement model lookup by canonical ID
 - [x] Implement shorthand lookup with ambiguity detection
@@ -105,7 +105,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 ### Non-streaming completions
 
-- [x] Route non-streaming requests to `completeSimple()`
+- [x] Route non-streaming requests to `completeSimple()` (now `streamSimple()`, reading the stream's final message, as `completeSimple()` does)
 - [x] Build OpenAI-style non-streaming response objects
 - [x] Map finish reasons conservatively
 - [x] Map usage fields from pi `Usage`
@@ -153,7 +153,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] Convert OpenAI `tools` into pi tool definitions
 - [x] Convert assistant `tool_calls` history into pi tool-call content
 - [x] Convert `tool` role results back into pi tool-result messages
-- [x] Support `tool_choice` where compatible (passthrough via schema acceptance)
+- [x] Support `tool_choice` where compatible (forwarded per provider via `onPayload`, see Phase 3C)
 
 ### Streaming tool calls
 
@@ -181,8 +181,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Images
 
 - [x] Support base64 image data in user message parts
-- [x] Decide whether remote image URL fetching is enabled
-- [x] If enabled, implement SSRF protections, timeout, redirect, and size limits
+- [x] Decide whether remote image URL fetching is enabled (no; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [ ] If enabled, implement SSRF protections, timeout, redirect, and size limits (not implemented: remote URLs are always rejected)
 - [x] Validate image MIME types and payload sizes
 
 ### Phase 2 tests
@@ -261,10 +261,10 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] Refactor `/proxy` extension config handling around a controller pattern
 - [x] Add public ID mode and exposure mode to the main settings panel
 - [x] Add `/proxy verify`
-- [x] Add provider selector UI for `scoped` mode
+- [x] Add provider selector UI for `scoped` mode (removed in 97db649: `scoped` now follows pi's `enabledModels`, set with `/scoped-models`)
 - [x] Add searchable model selector UI for `custom` mode
-- [x] Add prefix override editing flow
-- [x] Add effective public-ID preview to `/proxy show` and the settings UI
+- [x] Add prefix override editing flow (removed from the panel in 97db649; `providerPrefixes` is set in `proxy-config.json`)
+- [x] Add effective public-ID preview to `/proxy show` and the settings UI (`/proxy show` lists the exposed public IDs; the settings panel no longer shows a preview)
 
 ### Tests and docs
 
