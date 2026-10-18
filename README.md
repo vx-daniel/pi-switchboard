@@ -140,7 +140,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `parallel_tool_calls` | Forwarded to OpenAI/Codex; translated to `disable_parallel_tool_use` for Anthropic |
 | `reasoning_effort` | Maps to pi's thinking level. `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`). An effort the model does not support is clamped with pi's `clampThinkingLevel`: the nearest supported level above it, else the nearest below. So `none` on a model whose reasoning cannot be turned off is its lowest level (not the provider's default), `xhigh` on a model with `max` but no `xhigh` is `max`, and any effort on a model without reasoning is off. A clamp is logged at `debug`; `GET /v1/pi/models` lists the efforts each model supports. For a custom `models.json` model with `reasoning: true`, `none` sends whatever its `thinkingLevelMap.off` says: nothing if unset, so set `off: "none"` (or `off: null` if reasoning cannot be turned off) when the endpoint reasons by default |
 | `response_format` | `text`, `json_object`, and `json_schema` (OpenAI-compatible APIs only) |
-| `top_p` | Supported by OpenAI, Anthropic (native), and Google (translated to `topP`) |
+| `top_p` | Supported by OpenAI, Anthropic (native), and Google (translated to `topP`; the Google sampling fields may be dropped, see [#110](https://github.com/vx-daniel/pi-openai-proxy/issues/110)) |
 | `frequency_penalty` | OpenAI and Google only (translated to `frequencyPenalty`) |
 | `presence_penalty` | OpenAI and Google only (translated to `presencePenalty`) |
 | `seed` | OpenAI and Google only (translated to nested `generationConfig.seed`) |
@@ -148,7 +148,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `metadata` | OpenAI passthrough; arbitrary keys silently skipped for other providers |
 | `prediction` | OpenAI passthrough only (speculative decoding) |
 
-**Not supported:** `n > 1`, `logprobs`, `logit_bias`, remote image URLs (disabled by default).
+**Not supported:** `n` (any value), `logprobs`, `top_logprobs`, `logit_bias`, and the deprecated `functions` / `function_call`, each rejected with `422`; remote image URLs, always rejected (the remote-images setting currently has no effect, see [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109)).
 
 ### Provider-aware field translation
 
@@ -157,7 +157,7 @@ Fields are translated to each provider's native format, not blindly forwarded:
 - **OpenAI / Mistral**: All fields passed directly (same wire format)
 - **Codex (Responses API)**: Only `tool_choice` and `parallel_tool_calls` (other fields rejected by API); `temperature` is dropped, as the Codex backend rejects it
 - **Anthropic**: `tool_choice` → `{ type }` format, `stop` → `stop_sequences`, `user` → `metadata.user_id`, `parallel_tool_calls: false` → `disable_parallel_tool_use`
-- **Google**: Nested into `generationConfig` with camelCase names (`topP`, `stopSequences`, `seed`, etc.)
+- **Google**: Nested into `generationConfig` with camelCase names (`topP`, `stopSequences`, `seed`, etc.); these may currently be dropped ([#110](https://github.com/vx-daniel/pi-openai-proxy/issues/110))
 
 Fields that have no equivalent in a target provider are silently skipped — the request succeeds and the provider's default applies.
 
@@ -214,18 +214,18 @@ From pi's `settings.json` the proxy reads only `enabledModels`, for `scoped` exp
 
 ### What the proxy adds
 
-Proxy-specific settings are configured via environment variables or the `/proxy config` panel (when installed as a pi package):
+Proxy-specific settings are configured via CLI flags, environment variables, the JSON config file (`~/.pi/agent/proxy-config.json`), or the `/proxy config` panel (when installed as a pi package). Priority: flag > env var > config file > default:
 
 | Setting | Env variable | Default | Description |
 |---|---|---|---|
-| Bind address | `PI_PROXY_HOST` | `127.0.0.1` | Network interface (`127.0.0.1` = local only, `0.0.0.0` = all) |
-| Port | `PI_PROXY_PORT` | `4141` | HTTP listen port |
-| Auth token | `PI_PROXY_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication |
-| Remote images | `PI_PROXY_REMOTE_IMAGES` | `false` | Allow remote image URL fetching |
-| Max body size | `PI_PROXY_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes |
+| Bind address | `PI_PROXY_HOST` | `127.0.0.1` | Network interface (`127.0.0.1` = local only, `0.0.0.0` = all) (`--host`, `host` in the config file) |
+| Port | `PI_PROXY_PORT` | `4141` | HTTP listen port (`--port`, `port`) |
+| Auth token | `PI_PROXY_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication (`--auth-token`, `authToken`) |
+| Remote images | `PI_PROXY_REMOTE_IMAGES` | `false` | Meant to allow remote image URLs; currently has no effect, remote URLs are always rejected ([#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109)) (`--remote-images`, `remoteImages`) |
+| Max body size | `PI_PROXY_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
 | Upstream timeout | `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds (`upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
 | Log level | `PI_PROXY_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
-| Log format | `PI_PROXY_LOG_FORMAT` | pretty on a terminal, `json` otherwise | `pretty` or `json` (also `--log-format`) |
+| Log format | `PI_PROXY_LOG_FORMAT` | pretty on a terminal, `json` otherwise | `pretty` or `json` (also `--log-format`; no config-file key) |
 
 ### Logging
 
@@ -253,7 +253,7 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 |---|---|---|
 | `publicModelIdMode` | `collision-prefixed` | Public ID format: `collision-prefixed`, `universal`, `always-prefixed` |
 | `modelExposureMode` | `scoped` | Which models to expose: `all`, `scoped`, `custom` |
-| `customModels` | `[]` | Canonical model IDs for `custom` mode |
+| `customModels` | `[]` | Canonical model IDs for `custom` mode. An empty list currently exposes every model ([#88](https://github.com/vx-daniel/pi-openai-proxy/issues/88)) |
 | `providerPrefixes` | `{}` | Provider key -> custom prefix label overrides |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.
@@ -313,7 +313,7 @@ There is no OpenAPI/Swagger spec for the proxy itself. Use the [OpenAI API refer
 
 ## Pi Integration
 
-Install as a pi package to get the `/proxy` command family and `--proxy` flag:
+Install as a pi package to get the `/proxy` command family:
 
 ```bash
 pi install npm:@vx-daniel/pi-openai-proxy
@@ -324,8 +324,12 @@ pi install npm:@vx-daniel/pi-openai-proxy
 ```
 /proxy               Open the settings panel
 /proxy start         Start the proxy server
-/proxy stop          Stop the proxy server (session-managed only)
+/proxy stop          Stop the proxy started by /proxy (session or detached); one started elsewhere is left running
+/proxy restart       Stop, then start the proxy
 /proxy status        Show proxy status
+/proxy verify        Check the exposure config against pi's models
+/proxy models        List the exposed models
+/proxy zed-sync      Sync exposed models to Zed's settings.json (--dry-run to preview)
 /proxy config        Open the settings panel
 /proxy show          Summarize current configuration
 /proxy path          Show config file location
@@ -335,7 +339,7 @@ pi install npm:@vx-daniel/pi-openai-proxy
 
 ### Settings panel
 
-`/proxy` (or `/proxy config`) opens an interactive settings panel where you can configure the bind address, port, auth token, remote images, body size limit, and upstream timeout. Changes are saved to `~/.pi/agent/proxy-config.json` immediately. Restart the proxy to apply changes.
+`/proxy` (or `/proxy config`) opens an interactive settings panel where you can configure proxy auth, lifetime (detached or session), bind address, port, remote images, body size limit, upstream timeout, log level, model ID format, exposure mode, the `custom` model selection, and Zed sync. Changes are saved to `~/.pi/agent/proxy-config.json` immediately. Restart the proxy to apply changes.
 
 ### Standalone (background) mode
 
@@ -388,8 +392,8 @@ Requires Pi 1.x (`^1.3.0`). Pi 1.0 is the first release whose Anthropic client i
 ## Security defaults
 
 - Binds to `127.0.0.1` (localhost only) by default
-- Remote image URLs disabled by default
-- Request body size limited to 50 MB
+- Remote image URLs always rejected
+- Request body size limited to 50 MB by default
 - Upstream calls aborted after 120 seconds without any data from the provider
 - Secrets are never included in error responses
 - Client disconnects abort upstream work immediately
@@ -420,7 +424,7 @@ Offline tests run with pi pointed at an empty agent directory and credential env
 - **pnpm** — package manager, driven by `vp`
 - **Node.js** — runtime (`@hono/node-server`)
 - **commitlint** — conventional commits (`commit-msg` hook)
-- **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main`), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`)
+- **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`)
 - **semantic-release** — automated versioning and npm publish
 
 ## License

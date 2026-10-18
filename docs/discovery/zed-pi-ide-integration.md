@@ -1,5 +1,8 @@
 # Zed + Pi IDE Integration Discovery
 
+> Status: one-off research from 2026-03-25; not carried out. Nothing in this repo implements IDE
+> context integration.
+
 Discovery date: 2026-03-25
 
 ## Goal
@@ -254,10 +257,10 @@ Use `@pborck/pi-de` + a minimal Zed extension that writes `~/.pi/ide-selection.j
 
 ## Sources consulted
 
-- Firecrawl searches saved in `.firecrawl/zed-*.json`, `.firecrawl/claude-*.json`, `.firecrawl/pi-*.json`, `.firecrawl/acp-*.json`
+- Firecrawl searches saved in `.firecrawl/zed-*.json`, `.firecrawl/claude-*.json`, `.firecrawl/pi-*.json`, `.firecrawl/acp-*.json` (local files, not in the repo)
 - DeepWiki queries: `zed-industries/zed` (task system, MCP, terminal, agent panel), `badlogic/pi-mono` (extension API, RPC mode, IDE integration), `svkozak/pi-acp` (architecture)
 - npm search results for `pi-package` with IDE/editor keywords
-- Claude Code IDE Protocol spec: https://github.com/coder/claudecode.nvim/blob/main/PROTOCOL.md (full copy at `/tmp/claudecode-protocol.md`)
+- Claude Code IDE Protocol spec: https://github.com/coder/claudecode.nvim/blob/main/PROTOCOL.md (a full copy was kept at `/tmp/claudecode-protocol.md`, not in the repo)
 - Pi extension docs: `@earendil-works/pi-coding-agent/docs/extensions.md`
 - Archived Zed extension: https://github.com/isomoes/claude-code-zed
 - Zed discussions: https://github.com/zed-industries/zed/discussions/25498
