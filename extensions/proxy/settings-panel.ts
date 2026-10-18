@@ -222,7 +222,7 @@ function buildSettingItems(state: ProxyState): SettingItem[] {
 /**
  * Update descriptions on items that change dynamically based on the current value.
  */
-function refreshDescriptions(items: SettingItem[], config: ProxyConfig): void {
+export function refreshDescriptions(items: SettingItem[], config: ProxyConfig): void {
   for (const settingItem of items) {
     switch (settingItem.id) {
       case 'publicModelIdMode':
@@ -301,7 +301,7 @@ function isConfigUpdaterId(id: string): id is keyof typeof CONFIG_UPDATERS {
  * Apply a setting change, persist it, and reload the config.
  * Returns the newly generated auth token when enabling auth created one.
  */
-function applySetting(state: ProxyState, id: string, value: string): string | undefined {
+export function applySetting(state: ProxyState, id: string, value: string): string | undefined {
   let generatedToken: string | undefined
   if (id === 'authToken') {
     if (value === 'disabled') {
