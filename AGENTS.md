@@ -62,6 +62,11 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 - Respect strict TS settings, especially `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `noPropertyAccessFromIndexSignature`.
 - `process.env` is typed via `src/env.d.ts`; prefer dot notation.
 - Log with LogTape, never `console`: `proxyLogger(...)` from `@proxy/logging` (extension: `@vx-daniel/pi-openai-proxy/logging`), using a category and level from the header of `src/logging/index.ts`. Message templates take `{placeholders}`, not template literals. Never log message content, tool arguments, image data, or credentials.
+- Doc comments are TSDoc (#101):
+  - Every function needs a summary, `@param name - …` per parameter, `@typeParam` per type parameter, and `@returns` unless it returns nothing. Types, interfaces, classes and top-level constants need a summary. A file comment ends with `@packageDocumentation`.
+  - No `{type}` in tags; TSDoc tags only (no `@return`, no `@yields`; a generator documents its values in `@returns`).
+  - In `*.test.ts`, only helper functions are in scope, and tests keep their `// Catches …` comments.
+  - `test/unit/tsdoc.test.ts` and oxlint's jsdoc rules enforce this; the test's header defines the exact scope.
 
 ## Verification workflow
 

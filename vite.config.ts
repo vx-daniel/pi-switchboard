@@ -34,7 +34,7 @@ export default defineConfig({
       reportUnusedDisableDirectives: 'deny',
       maxWarnings: 0
     },
-    plugins: ['import', 'node', 'promise', 'unicorn', 'typescript', 'oxc'],
+    plugins: ['import', 'node', 'promise', 'unicorn', 'typescript', 'oxc', 'jsdoc'],
     categories: { correctness: 'error', suspicious: 'warn' },
     env: { builtin: true, node: true, es2024: true },
     jsPlugins: [
@@ -243,6 +243,42 @@ export default defineConfig({
       '@logtape/no-unawaited-log': 'error',
       '@logtape/require-meta-sink': 'error',
       'import/namespace': 'error',
+
+      // TSDoc (#101). test/unit/tsdoc.test.ts requires the comments and owns `@returns`:
+      // jsdoc/require-returns cannot see types, so it would demand `@returns` for an arrow that
+      // returns a void call, and it stays off. These check the tags of every doc comment.
+      'jsdoc/check-tag-names': [
+        'error',
+        {
+          typed: true,
+          definedTags: [
+            'alpha',
+            'beta',
+            'decorator',
+            'defaultValue',
+            'eventProperty',
+            'experimental',
+            'inheritDoc',
+            'label',
+            'packageDocumentation',
+            'privateRemarks',
+            'remarks',
+            'sealed',
+            'typeParam',
+            'virtual'
+          ]
+        }
+      ],
+      'jsdoc/require-param': ['error', { checkDestructured: false }],
+      'jsdoc/require-param-name': 'error',
+      'jsdoc/require-param-description': 'error',
+      'jsdoc/require-returns-description': 'error',
+      'jsdoc/require-throws-description': 'error',
+      'jsdoc/empty-tags': 'error',
+      'jsdoc/no-defaults': 'error',
+      'jsdoc/no-blank-blocks': 'error',
+      // TSDoc has no `@yields`: a generator documents what it yields in `@returns`.
+      'jsdoc/require-yields': 'off',
 
       // Zod
       'zod/array-style': 'error',
