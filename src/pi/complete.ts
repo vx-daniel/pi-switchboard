@@ -401,7 +401,10 @@ function passthroughStrategy(api: string): 'openai' | 'codex' | 'anthropic' | 'g
 export interface CompletionOptions {
   /** Per-request upstream API key override via X-Pi-Upstream-Api-Key header. */
   readonly upstreamApiKey?: string | undefined
-  /** Abort signal for cancellation. */
+  /**
+   * The client's disconnect, and nothing else: the route tells a client that left from an upstream
+   * failure by it. The upstream idle timeout is combined with it only for pi (combineSignals).
+   */
   readonly signal?: AbortSignal | undefined
   /**
    * The longest the provider may go without sending anything, in milliseconds. Restarts on every

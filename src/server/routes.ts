@@ -133,6 +133,14 @@ function reportUpstreamFailure(
   return mapped
 }
 
+/** reportUpstreamFailure for a thrown value: mapped from its message, which is also the detail. */
+function reportThrownFailure(err: unknown): MappedUpstreamError {
+  return reportUpstreamFailure(
+    mapUpstreamError(err),
+    err instanceof Error ? err.message : undefined
+  )
+}
+
 /** Parse the JSON body and validate it as a chat completion request. */
 async function parseChatRequest(context: ProxyContext): Promise<Step<ChatRequest>> {
   let body: unknown
@@ -332,10 +340,7 @@ async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promis
     first = await events.next()
   } catch (err: unknown) {
     if (options.signal?.aborted === true) return answerClientLeft()
-    const mapped = reportUpstreamFailure(
-      mapUpstreamError(err),
-      err instanceof Error ? err.message : undefined
-    )
+    const mapped = reportThrownFailure(err)
     return honoContext.json(mapped.body, mapped.status)
   }
   if (first.done !== true && first.value.type === 'error') {
@@ -374,10 +379,7 @@ async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promis
         aborted: stream.aborted
       })
     } catch (err: unknown) {
-      const mapped = reportUpstreamFailure(
-        mapUpstreamError(err),
-        err instanceof Error ? err.message : undefined
-      )
+      const mapped = reportThrownFailure(err)
       chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
         frameCount,
         durationMs: Math.round(performance.now() - start)
@@ -407,10 +409,7 @@ async function completeChat(honoContext: ProxyContext, job: CompletionJob): Prom
 
     return honoContext.json(buildChatCompletion(requestId, canonicalModelId, message))
   } catch (err: unknown) {
-    const mapped = reportUpstreamFailure(
-      mapUpstreamError(err),
-      err instanceof Error ? err.message : undefined
-    )
+    const mapped = reportThrownFailure(err)
     return honoContext.json(mapped.body, mapped.status)
   }
 }
@@ -464,6 +463,8 @@ async function handleChatCompletion(
     request,
     options: {
       upstreamApiKey,
+      // The client's disconnect only. streamChat reads it to tell a client that left from an
+      // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
       signal: context.get('abortController').signal,
       upstreamTimeoutMs: config.upstreamTimeoutMs
     }
