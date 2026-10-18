@@ -1,5 +1,8 @@
 /**
- * Hono middleware: request ID injection, proxy auth, body size limits, request logging.
+ * Hono middleware: request IDs and request logging, client disconnect detection, proxy auth, body
+ * size limits.
+ *
+ * @packageDocumentation
  */
 
 import { withContext } from '@logtape/logtape'
@@ -15,16 +18,27 @@ import { generateRequestId } from '@proxy/server/request-id'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { MiddlewareHandler } from 'hono'
 
+/** Logger for request and response lines. */
 const httpLogger = proxyLogger('server', 'http')
+/** Logger for proxy auth decisions. */
 const authLogger = proxyLogger('server', 'auth')
 
+/** The scheme prefix of an `Authorization` header that carries a bearer token. */
 const BEARER_PREFIX = 'Bearer '
+/** The liveness path; it and the paths below it are logged as polling. */
 const HEALTH_PATH = '/healthz'
 
 /**
- * Inject the request ID and upstream API key into every request, and log the request and its
- * response. Everything downstream runs inside `withContext({ requestId, clientRequestId })`, so
- * every log line a request causes carries its IDs without passing them around.
+ * Creates the middleware that sets the request's IDs and upstream API key, and logs the request
+ * and its response.
+ *
+ * @remarks
+ * Sets `requestId` (new), `clientRequestId` (`X-Client-Request-Id`) and `upstreamApiKey`
+ * (`X-Pi-Upstream-Api-Key`), and echoes `X-Request-Id` and `X-Client-Request-Id` on the response.
+ * Everything downstream runs inside `withContext({ requestId, clientRequestId })`, so every log
+ * line a request causes carries its IDs without passing them around.
+ *
+ * @returns the middleware
  */
 export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
   return async (context, next) => {
@@ -46,8 +60,8 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
     const { method, path } = context.req
     // Health endpoints are what container healthchecks and monitors poll, often every few seconds:
     // their lines go to debug, except an answer that is not 2xx, which stays at info. At info, a
-    // failed check therefore shows only its "answered" line: the request line was decided before the
-    // status was known, and the answer line carries the same method, path and request id.
+    // failed check therefore shows only its "answered" line: the request line was decided before
+    // the status was known, and the answer line carries the same method, path and request id.
     const polling = path === HEALTH_PATH || path.startsWith(`${HEALTH_PATH}/`)
     await withContext({ requestId, clientRequestId }, async () => {
       const received = {
@@ -75,15 +89,22 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
 }
 
 /**
- * What a request gets while `authToken` in proxy-config.json is not a string (#82). Fixed: it never
- * contains the value.
+ * The 401 message a request gets while `authToken` in proxy-config.json is not a string (#82).
+ * Fixed: it never contains the value.
  */
 export const MISCONFIGURED_AUTH_MESSAGE =
   'Proxy auth is misconfigured: authToken in proxy-config.json is not a string. Fix it, or set a token with --auth-token or PI_PROXY_AUTH_TOKEN.'
 
 /**
- * Proxy auth (`config.proxyAuth`): lets everything through when off, refuses everything when the
- * configured token is invalid (#82), and otherwise needs `Authorization: Bearer <token>`.
+ * Creates the proxy auth middleware for `config.proxyAuth`.
+ *
+ * @remarks
+ * `off` lets everything through; `invalid` refuses everything with 401
+ * {@link MISCONFIGURED_AUTH_MESSAGE} (#82); `token` needs `Authorization: Bearer <token>` and
+ * answers 401 for a missing header or a wrong token.
+ *
+ * @param config - the server config; only `proxyAuth` is read, once, when the middleware is made
+ * @returns the middleware
  */
 export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<ProxyEnv> {
   const proxyAuth = config.proxyAuth
@@ -137,15 +158,20 @@ export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<Pro
 }
 
 /**
- * Client disconnect detection middleware.
- * Creates an AbortController for upstream cancellation.
+ * Creates the middleware that turns a client disconnect into an abort.
+ *
+ * @remarks
+ * Sets `abortController`, which aborts (and logs the disconnect) when the request's own signal
+ * does. The chat route passes its signal to pi, so the upstream call is cancelled, and reads it to
+ * tell a client that left from an upstream failure.
+ *
+ * @returns the middleware
  */
 export function disconnectMiddleware(): MiddlewareHandler<ProxyEnv> {
   return async (context, next) => {
     const controller = new AbortController()
     context.set('abortController', controller)
 
-    // Listen for client disconnect via the request signal
     const reqSignal = context.req.raw.signal
     const onAbort = (): void => {
       // An abort listener runs outside the request's async context, so the IDs are passed here.
@@ -168,9 +194,14 @@ export function disconnectMiddleware(): MiddlewareHandler<ProxyEnv> {
 }
 
 /**
- * Request body size limit middleware.
- * Rejects requests with Content-Length exceeding the configured maximum.
- * Only applies to POST/PUT/PATCH methods.
+ * Creates the middleware that rejects an oversized request body with 413.
+ *
+ * @remarks
+ * Only POST, PUT and PATCH requests are checked, and only by their `Content-Length` header: a
+ * request without one is let through.
+ *
+ * @param config - the server config; `maxBodySize` is the limit in bytes
+ * @returns the middleware
  */
 export function bodySizeLimitMiddleware(config: ServerConfig): MiddlewareHandler<ProxyEnv> {
   return async (context, next) => {

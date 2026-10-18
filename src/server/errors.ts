@@ -1,24 +1,29 @@
 /**
- * OpenAI-compatible error response helpers.
+ * OpenAI-compatible error bodies, and the mapping from an upstream failure to the status and body
+ * the client gets.
  *
- * Phase 0 contract: Error shape is:
- * { error: { message, type, param, code } }
+ * @remarks
+ * Every error body has OpenAI's shape: `{ error: { message, type, param, code } }`.
  *
- * Status code mapping:
- * - 400: invalid request, ambiguous shorthand
- * - 401: proxy auth failure, missing upstream credential
- * - 404: model not found
- * - 422: unsupported parameter, unsupported content
+ * Statuses the proxy answers with:
+ * - 400: invalid JSON or request field, failed message conversion, context overflow
+ * - 401: proxy auth failure, no upstream credential for the model
+ * - 404: model not found, unsupported endpoint
+ * - 413: request body over the size limit
+ * - 422: unsupported or unknown request field, unsupported tool
  * - 429: upstream rate limit
- * - 500: internal proxy failure
- * - 502: malformed upstream response
- * - 503: provider unavailable
- * - 504: upstream timeout
+ * - 500: invalid model exposure config (thrown to Hono)
+ * - 502: upstream authentication failure (401, 403), any other upstream error
+ * - 503: upstream unavailable (503) or overloaded (529), failed health check
+ * - 504: upstream timeout (408, 504, idle timeout)
+ *
+ * @packageDocumentation
  */
 
 import { type AssistantMessage, isContextOverflow } from '@earendil-works/pi-ai'
 import { isRecord } from '@proxy/utils/guards'
 
+/** OpenAI's error response body. */
 export interface OpenAIError {
   readonly error: {
     readonly message: string
@@ -28,6 +33,15 @@ export interface OpenAIError {
   }
 }
 
+/**
+ * Builds an OpenAI error body.
+ *
+ * @param message - the human-readable message
+ * @param type - OpenAI's error type, such as `invalid_request_error`
+ * @param param - the request field at fault, or `null`
+ * @param code - OpenAI's machine-readable code, or `null`
+ * @returns the error body
+ */
 function makeError(
   message: string,
   type: string,
@@ -39,10 +53,23 @@ function makeError(
   }
 }
 
+/**
+ * Builds an `invalid_request_error` body with no code.
+ *
+ * @param message - the message the client sees
+ * @param param - the request field at fault; `undefined` gives `param: null`
+ * @returns the error body
+ */
 export function invalidRequest(message: string, param?: string): OpenAIError {
   return makeError(message, 'invalid_request_error', param ?? null, null)
 }
 
+/**
+ * Builds OpenAI's `model_not_found` body for the `model` field.
+ *
+ * @param modelId - the model ID the client asked for, quoted in the message
+ * @returns the error body
+ */
 export function modelNotFound(modelId: string): OpenAIError {
   return makeError(
     `The model '${modelId}' does not exist`,
@@ -52,6 +79,14 @@ export function modelNotFound(modelId: string): OpenAIError {
   )
 }
 
+/**
+ * Builds an `unsupported_parameter` body.
+ *
+ * @param param - the unsupported request field
+ * @param message - the message the client sees; `undefined` gives
+ *   `Unsupported parameter: '<param>'`
+ * @returns the error body
+ */
 export function unsupportedParameter(param: string, message?: string): OpenAIError {
   return makeError(
     message ?? `Unsupported parameter: '${param}'`,
@@ -61,10 +96,23 @@ export function unsupportedParameter(param: string, message?: string): OpenAIErr
   )
 }
 
+/**
+ * Builds an `authentication_error` body.
+ *
+ * @param message - the message the client sees
+ * @returns the error body
+ */
 export function authenticationError(message: string): OpenAIError {
   return makeError(message, 'authentication_error', null, null)
 }
 
+/**
+ * Builds a `server_error` body for an upstream failure.
+ *
+ * @param message - the fixed message the client sees; never the upstream message
+ * @param code - OpenAI-style code; `undefined` gives `upstream_error`
+ * @returns the error body
+ */
 function upstreamError(message: string, code?: string): OpenAIError {
   return makeError(message, 'server_error', null, code ?? 'upstream_error')
 }
@@ -78,26 +126,32 @@ export interface MappedUpstreamError {
   readonly body: OpenAIError
 }
 
+/** Upstream rate limit: 429 `rate_limit`. */
 const RATE_LIMITED: MappedUpstreamError = {
   status: 429,
   body: upstreamError('Upstream rate limit exceeded', 'rate_limit')
 }
+/** Upstream timeout: 504 `timeout`. */
 const TIMED_OUT: MappedUpstreamError = {
   status: 504,
   body: upstreamError('Upstream request timed out', 'timeout')
 }
+/** Upstream refused the proxy's credential: 502 `upstream_auth_error`. */
 const AUTH_FAILED: MappedUpstreamError = {
   status: 502,
   body: upstreamError('Upstream authentication failed', 'upstream_auth_error')
 }
+/** Upstream unavailable: 503 `provider_unavailable`. */
 const UNAVAILABLE: MappedUpstreamError = {
   status: 503,
   body: upstreamError('Upstream provider is unavailable', 'provider_unavailable')
 }
+/** Upstream overloaded: 503 `provider_overloaded`. */
 const OVERLOADED: MappedUpstreamError = {
   status: 503,
   body: upstreamError('Upstream provider is overloaded', 'provider_overloaded')
 }
+/** Any other upstream failure: 502 `upstream_error`. */
 const PROVIDER_FAILED: MappedUpstreamError = {
   status: 502,
   body: upstreamError('Upstream provider error')
@@ -117,18 +171,27 @@ const CONTEXT_OVERFLOW: MappedUpstreamError = {
   )
 }
 
+/** HTTP 400 Bad Request. */
 const HTTP_BAD_REQUEST = 400
+/** HTTP 401 Unauthorized. */
 const HTTP_UNAUTHORIZED = 401
+/** HTTP 403 Forbidden. */
 const HTTP_FORBIDDEN = 403
+/** HTTP 408 Request Timeout. */
 const HTTP_REQUEST_TIMEOUT = 408
+/** HTTP 413 Payload Too Large. */
 const HTTP_PAYLOAD_TOO_LARGE = 413
+/** HTTP 429 Too Many Requests. */
 const HTTP_TOO_MANY_REQUESTS = 429
+/** HTTP 503 Service Unavailable. */
 const HTTP_SERVICE_UNAVAILABLE = 503
+/** HTTP 504 Gateway Timeout. */
 const HTTP_GATEWAY_TIMEOUT = 504
 /** Anthropic's "overloaded". */
 const HTTP_OVERLOADED = 529
-/** Error statuses span 400–599. */
+/** The first error status: error statuses span 400–599. */
 const FIRST_ERROR_STATUS = 400
+/** The first status past the error range. */
 const PAST_LAST_ERROR_STATUS = 600
 
 /** Upstream HTTP statuses with their own answer; any other 4xx or 5xx is PROVIDER_FAILED. */
@@ -157,7 +220,12 @@ const STATUS_POSITIONS: readonly RegExp[] = [
   /^got status: ([45]\d\d)\b/
 ]
 
-/** The status as Google's SDK reports it: the error body itself, `{"error":{"code":429,…}}`. */
+/**
+ * Reads the status as Google's SDK reports it: the error body itself, `{"error":{"code":429,…}}`.
+ *
+ * @param message - the upstream error message
+ * @returns the 4xx or 5xx `error.code` when the message is such a JSON body, else `undefined`
+ */
 function googleBodyStatus(message: string): number | undefined {
   if (!message.startsWith('{')) return undefined
   let parsed: unknown
@@ -174,8 +242,14 @@ function googleBodyStatus(message: string): number | undefined {
 }
 
 /**
- * The provider's HTTP status, read only from the positions pi's messages put it in, never from a
- * number elsewhere in the text (a token count, an ID, a quoted request).
+ * Reads the provider's HTTP status from an upstream error message.
+ *
+ * @remarks
+ * Only the positions pi's messages put it in count ({@link STATUS_POSITIONS}, then Google's JSON
+ * body), never a number elsewhere in the text (a token count, an ID, a quoted request).
+ *
+ * @param message - the upstream error message
+ * @returns the status, or `undefined` when the message reports none
  */
 function upstreamStatusIn(message: string): number | undefined {
   for (const position of STATUS_POSITIONS) {
@@ -198,9 +272,15 @@ const BY_WORDING: readonly (readonly [RegExp, MappedUpstreamError])[] = [
 ]
 
 /**
- * Map an upstream failure to the status and fixed body the client gets. The provider's HTTP status
- * decides when pi's message reports one; its wording is consulted only when it does not. The body
- * never quotes the upstream message, which can carry the request, a key or an account.
+ * Maps an upstream failure to the status and fixed body the client gets.
+ *
+ * @remarks
+ * The provider's HTTP status decides when pi's message reports one; its wording is consulted only
+ * when it does not. The body never quotes the upstream message, which can carry the request, a key
+ * or an account.
+ *
+ * @param err - the thrown value; only an `Error`'s message is read
+ * @returns the mapped failure; {@link PROVIDER_FAILED} when nothing identifies it
  */
 export function mapUpstreamError(err: unknown): MappedUpstreamError {
   const message = err instanceof Error ? err.message : ''
@@ -218,10 +298,16 @@ export function mapUpstreamError(err: unknown): MappedUpstreamError {
 const OVERFLOW_STATUSES: ReadonlySet<number> = new Set([HTTP_BAD_REQUEST, HTTP_PAYLOAD_TOO_LARGE])
 
 /**
- * Map a failed pi call, given its final message. A context overflow, as pi recognizes it across
- * providers (`isContextOverflow`), is OpenAI's 400 `context_length_exceeded`; anything else maps
- * as mapUpstreamError does. A reported status other than 400 or 413 rules overflow out: a 429 that
- * says "too many tokens" is a rate limit.
+ * Maps a failed pi call to the status and fixed body the client gets.
+ *
+ * @remarks
+ * A context overflow, as pi recognizes it across providers (`isContextOverflow`), is OpenAI's 400
+ * `context_length_exceeded`; anything else maps as {@link mapUpstreamError} does. A reported
+ * status other than 400 or 413 rules overflow out: a 429 that says "too many tokens" is a rate
+ * limit.
+ *
+ * @param message - the call's final assistant message, with `stopReason` `error` or `aborted`
+ * @returns the mapped failure
  */
 export function mapFailedCall(message: AssistantMessage): MappedUpstreamError {
   const errorText = message.errorMessage ?? ''

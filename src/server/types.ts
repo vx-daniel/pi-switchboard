@@ -1,6 +1,9 @@
 /**
- * Hono environment type for the proxy.
- * Defines typed context variables available via c.get() / c.set().
+ * Hono environment type for the proxy: the typed context variables `c.get()` and `c.set()` use.
+ *
+ * @remarks
+ * `requestIdMiddleware` sets `requestId`, `clientRequestId` and `upstreamApiKey`;
+ * `disconnectMiddleware` sets `abortController` (both in `server/middleware.ts`).
  */
 
 export interface ProxyEnv {

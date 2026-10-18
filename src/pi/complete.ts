@@ -1,9 +1,12 @@
 /**
  * Pi completion integration: non-streaming and streaming.
  *
- * Bridges validated OpenAI requests to pi's streamSimple(). A non-streaming request reads the
- * stream's final message, as pi's own completeSimple() does, so both modes share the upstream
+ * @remarks
+ * Bridges validated OpenAI requests to pi's `streamSimple()`. A non-streaming request reads the
+ * stream's final message, as pi's own `completeSimple()` does, so both modes share the upstream
  * idle timeout (`src/pi/upstream-idle.ts`).
+ *
+ * @packageDocumentation
  */
 
 import {
@@ -22,14 +25,15 @@ import { getRuntime } from '@proxy/pi/registry'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
 import { isRecord } from '@proxy/utils/guards'
 
+/** Logger for upstream calls. */
 const completeLogger = proxyLogger('pi', 'complete')
 
-/** Codex models a temperature has been dropped for, in this process: each is logged at info once. */
+/** Codex models a temperature has been dropped for in this process; each is logged at info once. */
 const modelsWithDroppedTemperature = new Set<string>()
 
 /**
- * APIs that accept the full set of OpenAI passthrough fields (stop, seed, top_p,
- * tool_choice, frequency_penalty, etc.) as top-level payload properties.
+ * APIs that get every OpenAI passthrough field ({@link OPENAI_PASSTHROUGH_FIELDS}) verbatim, as
+ * top-level payload properties.
  */
 const OPENAI_FULL_PASSTHROUGH_APIS = new Set([
   'openai-completions',
@@ -39,16 +43,25 @@ const OPENAI_FULL_PASSTHROUGH_APIS = new Set([
 ])
 
 /**
- * The Codex Responses API accepts only tool_choice and parallel_tool_calls.
- * Other standard fields (top_p, seed, stop, user, frequency_penalty, etc.)
- * are rejected with "Unsupported parameter". pi 1.3.0 sends
+ * APIs that get only `tool_choice` and `parallel_tool_calls`.
+ *
+ * @remarks
+ * The Codex Responses API rejects other standard fields (top_p, seed, stop, user,
+ * frequency_penalty, etc.) with "Unsupported parameter". pi 1.3.0 sends
  * `tool_choice: options.toolChoice ?? "auto"` and hardcodes `parallel_tool_calls: true`;
  * onPayload overrides both when the client sends explicit values.
  */
 const CODEX_APIS = new Set(['openai-codex-responses'])
 
+/** APIs whose passthrough fields are translated to Anthropic's names and shapes. */
 const ANTHROPIC_APIS = new Set(['anthropic-messages'])
 
+/**
+ * APIs whose passthrough fields are patched into Google's nested payload.
+ *
+ * @remarks
+ * pi 1.3.0 has no `google-gemini-cli` API; that entry matches no model.
+ */
 const GOOGLE_APIS = new Set(['google-generative-ai', 'google-gemini-cli', 'google-vertex'])
 
 // ---------------------------------------------------------------------------
@@ -71,10 +84,14 @@ const OPENAI_PASSTHROUGH_FIELDS = [
 ] as const satisfies readonly (keyof ChatCompletionRequest)[]
 
 /**
- * Collect OpenAI-format fields for OpenAI-compatible APIs.
- * Fields are injected as flat top-level properties on the payload.
+ * Collects the OpenAI passthrough fields the request sets, for flat injection into the payload.
  *
- * @internal Exported for unit testing only.
+ * @remarks
+ * Exported for unit tests.
+ *
+ * @param request - the validated chat request
+ * @returns the set fields under their OpenAI names, or `undefined` when none is set
+ * @internal
  */
 export function collectOpenAIPayloadFields(
   request: ChatCompletionRequest
@@ -98,14 +115,19 @@ export function collectOpenAIPayloadFields(
 // ---------------------------------------------------------------------------
 
 /**
- * Translate OpenAI tool_choice to Anthropic tool_choice format.
+ * Translates OpenAI `tool_choice` to Anthropic's `tool_choice` format.
  *
- * OpenAI "auto" -> { type: "auto" }
- * OpenAI "none" -> { type: "none" } (Anthropic skips tool calling)
- * OpenAI "required" -> { type: "any" } (force tool use)
- * OpenAI { type: "function", function: { name } } -> { type: "tool", name }
+ * @remarks
+ * - `"auto"` → `{ type: "auto" }`
+ * - `"none"` → `{ type: "none" }` (Anthropic skips tool calling)
+ * - `"required"` → `{ type: "any" }` (forces tool use)
+ * - `{ type: "function", function: { name } }` → `{ type: "tool", name }`
  *
- * @internal Exported for unit testing only.
+ * Exported for unit tests.
+ *
+ * @param toolChoice - the request's `tool_choice`, or `undefined` when not sent
+ * @returns a new Anthropic `tool_choice` object, or `undefined` when `toolChoice` is
+ * @internal
  */
 export function translateToolChoiceForAnthropic(
   toolChoice: ChatCompletionRequest['tool_choice']
@@ -127,20 +149,26 @@ export function translateToolChoiceForAnthropic(
 }
 
 /**
- * Collect Anthropic-format fields translated from the OpenAI request.
+ * Collects Anthropic-format fields translated from the OpenAI request.
  *
- * Supported translations:
- * - top_p -> top_p (same name, natively supported)
- * - stop -> stop_sequences (different field name)
- * - tool_choice -> Anthropic tool_choice format (object with type)
- * - parallel_tool_calls: false -> disable_parallel_tool_use on tool_choice
+ * @remarks
+ * Translations:
+ * - `top_p` → `top_p` (same name)
+ * - `stop` → `stop_sequences` (always an array)
+ * - `tool_choice` → Anthropic's `tool_choice` ({@link translateToolChoiceForAnthropic})
+ * - `parallel_tool_calls: false` → `disable_parallel_tool_use: true` on `tool_choice` (with
+ *   `{ type: "auto" }` when the request sets no `tool_choice`)
  *
  * `user` is not here: it goes to pi as `metadata.user_id`, set in `buildStreamOptions`.
  *
- * Not supported (silently skipped — these concepts don't exist in Anthropic):
- * - seed, frequency_penalty, presence_penalty, response_format, prediction, metadata (arbitrary keys)
+ * Skipped silently, as Anthropic has no equivalent: seed, frequency_penalty, presence_penalty,
+ * response_format, prediction, metadata (arbitrary keys).
  *
- * @internal Exported for unit testing only.
+ * Exported for unit tests.
+ *
+ * @param request - the validated chat request
+ * @returns the translated fields, or `undefined` when none applies
+ * @internal
  */
 export function collectAnthropicPayloadFields(
   request: ChatCompletionRequest
@@ -183,13 +211,14 @@ export function collectAnthropicPayloadFields(
 // ---------------------------------------------------------------------------
 
 /**
- * Translate OpenAI tool_choice to Google FunctionCallingConfigMode string.
+ * Translates OpenAI `tool_choice` to a Google `FunctionCallingConfigMode` string.
  *
- * OpenAI "auto" -> "AUTO"
- * OpenAI "none" -> "NONE"
- * OpenAI "required" -> "ANY"
- * Named function choice -> "ANY" (Google doesn't support per-function forcing
- * in the same way, but ANY forces tool use)
+ * @remarks
+ * `"auto"` → `"AUTO"`, `"none"` → `"NONE"`, `"required"` → `"ANY"`. A named function also gives
+ * `"ANY"`: the name is not passed on, so the model must call a tool but may pick any.
+ *
+ * @param toolChoice - the request's `tool_choice`, or `undefined` when not sent
+ * @returns the mode, or `undefined` when `toolChoice` is
  */
 function translateToolChoiceForGoogle(
   toolChoice: ChatCompletionRequest['tool_choice']
@@ -208,29 +237,30 @@ function translateToolChoiceForGoogle(
 }
 
 /**
- * Patch Google's nested payload structure with translated fields.
+ * Patches the translated passthrough fields into Google's nested payload, in place.
  *
- * Google's payload shape: { model, contents, config: { generationConfig, toolConfig, ... } }
- * Fields go into config.generationConfig (camelCase) or config.toolConfig.
+ * @remarks
+ * pi 1.3.0 builds `{ model, contents, config }`, with its own generation fields (temperature,
+ * maxOutputTokens) flat on `config` and `toolConfig` beside them (pi-ai
+ * dist/api/google-generative-ai.js and google-vertex.js, `buildParams`). This function writes:
+ * - top_p, stop, seed, frequency_penalty, presence_penalty → `config.generationConfig`
+ *   (`topP`, `stopSequences`, `seed`, `frequencyPenalty`, `presencePenalty`)
+ * - tool_choice → `config.toolConfig.functionCallingConfig.mode`
  *
- * Supported translations:
- * - top_p -> config.generationConfig.topP (camelCase, nested)
- * - stop -> config.generationConfig.stopSequences (array, nested)
- * - seed -> config.generationConfig.seed (nested)
- * - frequency_penalty -> config.generationConfig.frequencyPenalty (nested)
- * - presence_penalty -> config.generationConfig.presencePenalty (nested)
- * - tool_choice -> config.toolConfig.functionCallingConfig.mode (nested)
+ * Skipped silently: response_format, metadata, prediction, parallel_tool_calls, user.
  *
- * Not supported (silently skipped):
- * - response_format, metadata, prediction, parallel_tool_calls, user
+ * Exported for unit tests.
  *
- * @internal Exported for unit testing only.
+ * @param payload - the payload pi built; changed in place
+ * @param request - the validated chat request
+ * @returns whether anything was patched; `false` when the payload has no `config` object
+ * @internal
  */
 export function patchGooglePayload(
   payload: Record<string, unknown>,
   request: ChatCompletionRequest
 ): boolean {
-  // Access or create config.generationConfig
+  // Without a `config` object there is nothing to patch
   const config = isRecord(payload['config']) ? payload['config'] : undefined
   if (config === undefined) {
     return false
@@ -262,7 +292,11 @@ export function patchGooglePayload(
 }
 
 /**
- * Collect Google generationConfig fields (camelCase) translated from the request.
+ * Collects the Google generation fields (camelCase) translated from the request.
+ *
+ * @param request - the validated chat request
+ * @returns `topP`, `stopSequences`, `seed`, `frequencyPenalty` and `presencePenalty`, where set;
+ *   empty when none is
  */
 function collectGoogleGenerationFields(request: ChatCompletionRequest): Record<string, unknown> {
   const fields: Record<string, unknown> = {}
@@ -289,13 +323,18 @@ function collectGoogleGenerationFields(request: ChatCompletionRequest): Record<s
 // ---------------------------------------------------------------------------
 
 /**
- * Collect the restricted set of fields the Codex Responses API accepts.
+ * Collects the restricted set of fields the Codex Responses API accepts.
  *
+ * @remarks
  * Only tool_choice and parallel_tool_calls are supported. pi sends tool_choice "auto" unless told
  * otherwise and hardcodes parallel_tool_calls: true; these overrides let clients control tool
  * behavior explicitly (`required`, a named tool, `parallel_tool_calls: false`).
  *
- * @internal Exported for unit testing only.
+ * Exported for unit tests.
+ *
+ * @param request - the validated chat request
+ * @returns `tool_choice` and `parallel_tool_calls` where set, or `undefined` when neither is
+ * @internal
  */
 export function collectCodexPayloadFields(
   request: ChatCompletionRequest
@@ -320,19 +359,22 @@ export function collectCodexPayloadFields(
 // ---------------------------------------------------------------------------
 
 /**
- * Collect API-specific payload fields from an OpenAI request.
+ * Collects the flat payload fields for the target API from an OpenAI request.
  *
- * Dispatches to the appropriate translator based on the target API:
- * - OpenAI full passthrough: all standard fields (same names)
- * - Codex: restricted to tool_choice + parallel_tool_calls only
+ * @remarks
+ * Dispatches on the API:
+ * - OpenAI full passthrough: every standard field, same names
+ * - Codex: tool_choice and parallel_tool_calls only
  * - Anthropic: translated field names and formats
- * - Google: nested generationConfig patching (handled separately in onPayload)
- * - Others (Bedrock): no passthrough
+ * - Google: none here; the nested payload is patched in onPayload by {@link patchGooglePayload}
+ * - Others (Bedrock, …): no passthrough
  *
- * For Google APIs, returns undefined (patching is done directly in onPayload
- * via patchGooglePayload because the payload structure is nested).
+ * Exported for unit tests.
  *
- * @internal Exported for unit testing only.
+ * @param request - the validated chat request
+ * @param api - the model's pi API, such as `openai-completions`
+ * @returns the fields to assign onto the payload, or `undefined` when there are none
+ * @internal
  */
 export function collectPayloadFields(
   request: ChatCompletionRequest,
@@ -353,13 +395,22 @@ export function collectPayloadFields(
 }
 
 /**
- * Whether the given API requires Google-style nested payload patching.
+ * Reports whether an API needs Google-style nested payload patching.
+ *
+ * @param api - the model's pi API
+ * @returns whether `api` is in {@link GOOGLE_APIS}
  */
 function isGoogleApi(api: string): boolean {
   return GOOGLE_APIS.has(api)
 }
 
-/** Which payload passthrough strategy an API gets, for logging. Mirrors `collectPayloadFields`. */
+/**
+ * Names the payload passthrough strategy an API gets, for logging. Mirrors
+ * {@link collectPayloadFields}.
+ *
+ * @param api - the model's pi API
+ * @returns the strategy name; `none` for an API with no passthrough
+ */
 function passthroughStrategy(api: string): 'openai' | 'codex' | 'anthropic' | 'google' | 'none' {
   if (OPENAI_FULL_PASSTHROUGH_APIS.has(api)) return 'openai'
   if (CODEX_APIS.has(api)) return 'codex'
@@ -368,9 +419,7 @@ function passthroughStrategy(api: string): 'openai' | 'codex' | 'anthropic' | 'g
   return 'none'
 }
 
-/**
- * Options for building pi stream options, beyond the parsed request itself.
- */
+/** Per-request options for an upstream call, beyond the parsed request itself. */
 export interface CompletionOptions {
   /** Per-request upstream API key override via X-Pi-Upstream-Api-Key header. */
   readonly upstreamApiKey?: string | undefined
@@ -387,8 +436,12 @@ export interface CompletionOptions {
 }
 
 /**
- * Combine a client disconnect signal with the upstream idle timeout into a single signal.
- * Returns the combined signal, or undefined if neither is provided.
+ * Combines the client disconnect signal with the upstream idle timeout's signal.
+ *
+ * @param clientSignal - the client's disconnect signal, or `undefined`
+ * @param idleSignal - the idle timeout's signal, or `undefined` when there is no timeout
+ * @returns a signal that aborts when either does, the one given when only one is, or `undefined`
+ *   when neither is
  */
 function combineSignals(
   clientSignal: AbortSignal | undefined,
@@ -400,10 +453,17 @@ function combineSignals(
 }
 
 /**
- * reasoning_effort as the thinking level `model` runs at (`thinkingLevelFor`), or undefined for off:
- * pi has no "off" option, an absent `reasoning` is off. pi's adapters mostly clamp too, but
+ * Converts `reasoning_effort` to the thinking level `model` runs at (`thinkingLevelFor`).
+ *
+ * @remarks
+ * pi has no "off" option: an absent `reasoning` is off. pi's adapters mostly clamp too, but
  * Anthropic's does not: without this, "none" on a model that always reasons would get the
- * provider's default effort (#41), and an unsupported level the adapter's own fallback (#43).
+ * provider's default effort (#41), and an unsupported level the adapter's own fallback (#43). A
+ * clamped level is logged at debug.
+ *
+ * @param model - the pi model
+ * @param effort - the request's `reasoning_effort`
+ * @returns the thinking level for pi's `reasoning` option, or `undefined` for off
  */
 function reasoningLevel(
   model: Model<Api>,
@@ -425,12 +485,17 @@ function reasoningLevel(
 }
 
 /**
- * The temperature to send upstream for `model`, or undefined when it must be dropped.
+ * Returns the temperature to send upstream for `model`.
  *
+ * @remarks
  * The Codex backend rejects temperature ("Unsupported parameter: temperature"), though pi 1.3.0
  * forwards it. Dropped rather than refused, so clients that always send one keep working on
  * Codex models (#49). The first drop per model is logged at info so the operator sees it; the
  * rest at debug, as a client that always sends one would otherwise log a line per request.
+ *
+ * @param model - the pi model
+ * @param temperature - the request's temperature
+ * @returns `temperature`, or `undefined` when it must be dropped (Codex models)
  */
 function upstreamTemperature(model: Model<Api>, temperature: number): number | undefined {
   if (model.api !== 'openai-codex-responses') return temperature
@@ -445,9 +510,16 @@ function upstreamTemperature(model: Model<Api>, temperature: number): number | u
 }
 
 /**
- * The `onPayload` hook injecting the request's passthrough fields for `model.api`, or undefined
- * when that API gets no passthrough. Tool `strict` is not patched here: convertTools maps it to
- * pi's constrainedSampling, which each API adapter applies in its own shape.
+ * Builds the `onPayload` hook that injects the request's passthrough fields for `model.api`.
+ *
+ * @remarks
+ * Tool `strict` is not patched here: convertTools maps it to pi's constrainedSampling, which each
+ * API adapter applies in its own shape.
+ *
+ * @param model - the pi model; its `api` picks the strategy
+ * @param request - the validated chat request
+ * @returns the hook, or `undefined` when there is nothing to inject: the API gets no passthrough,
+ *   or (for a non-Google API) the request sets none of its fields
  */
 function passthroughHook(
   model: Model<Api>,
@@ -487,7 +559,13 @@ function passthroughHook(
 }
 
 /**
- * Build pi SimpleStreamOptions from an OpenAI request.
+ * Builds pi's `SimpleStreamOptions` from an OpenAI request.
+ *
+ * @param model - the pi model
+ * @param request - the validated chat request
+ * @param options - the per-request options; `upstreamApiKey` becomes `apiKey`
+ * @param signal - the combined client and idle-timeout signal, or `undefined`
+ * @returns the options for `streamSimple`
  */
 async function buildStreamOptions(
   model: Model<Api>,
@@ -537,7 +615,14 @@ async function buildStreamOptions(
   return opts
 }
 
-/** Why an upstream call was aborted: the client went away, the upstream timeout fired, or neither. */
+/**
+ * Tells why an upstream call was aborted.
+ *
+ * @param clientSignal - the client's disconnect signal
+ * @param upstreamSignal - the signal pi was given (client and idle timeout combined)
+ * @returns `client` when the client went away, `timeout` when the idle timeout fired, else
+ *   `unknown`
+ */
 function abortCause(
   clientSignal: AbortSignal | undefined,
   upstreamSignal: AbortSignal | undefined
@@ -557,7 +642,13 @@ interface UpstreamCall {
   readonly startedAt: number
 }
 
-/** The properties every upstream log line carries: where the call went and how long it has run. */
+/**
+ * Returns the properties every upstream log line carries: where the call went and how long it has
+ * run.
+ *
+ * @param call - the upstream call
+ * @returns provider, model ID, API, stream mode and duration so far in milliseconds
+ */
 function callProperties(call: UpstreamCall): Record<string, unknown> {
   return {
     provider: call.model.provider,
@@ -568,7 +659,13 @@ function callProperties(call: UpstreamCall): Record<string, unknown> {
   }
 }
 
-/** Log the start of an upstream call: what is sent where, never what it says. */
+/**
+ * Logs the start of an upstream call at debug: what is sent where, never what it says.
+ *
+ * @param call - the upstream call
+ * @param context - pi's context, for message and tool counts
+ * @param request - the validated chat request, for its reasoning effort
+ */
 function logUpstreamStart(
   call: UpstreamCall,
   context: Context,
@@ -591,8 +688,13 @@ function logUpstreamStart(
 }
 
 /**
- * The provider's raw error text, at debug only: some providers quote parts of the request back, and
- * request content is never logged at a level a default deployment writes.
+ * Logs the provider's raw error text at debug only.
+ *
+ * @remarks
+ * Some providers quote parts of the request back, and request content is never logged at a level
+ * a default deployment writes.
+ *
+ * @param detail - the raw error text; nothing is logged when `undefined`
  */
 function logUpstreamErrorDetail(detail: string | undefined): void {
   if (detail !== undefined) {
@@ -600,7 +702,12 @@ function logUpstreamErrorDetail(detail: string | undefined): void {
   }
 }
 
-/** Log how an upstream call ended: stop reason, duration and usage, or why it failed. */
+/**
+ * Logs how an upstream call ended: stop reason, duration and usage, or why it failed.
+ *
+ * @param call - the upstream call
+ * @param message - the call's final assistant message
+ */
 function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void {
   if (message.stopReason === 'error') {
     completeLogger.warn('Upstream call to {modelId} failed after {durationMs} ms', () => ({
@@ -656,7 +763,12 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
   )
 }
 
-/** Log an upstream call that threw instead of reporting an error message; the caller rethrows. */
+/**
+ * Logs an upstream call that threw instead of reporting an error message; the caller rethrows.
+ *
+ * @param call - the upstream call
+ * @param error - what was thrown
+ */
 function logUpstreamThrow(call: UpstreamCall, error: unknown): void {
   const aborted = call.opts.signal?.aborted === true
   completeLogger.warn('Upstream call to {modelId} threw after {durationMs} ms', () => ({
@@ -677,8 +789,16 @@ interface UpstreamInput {
 }
 
 /**
- * Start an upstream call: build the options, start the idle timeout, open pi's event stream and
- * watch it. The result is logged once the stream ends with done or error.
+ * Starts an upstream call: builds the options, starts the idle timeout, opens pi's event stream and
+ * watches it.
+ *
+ * @remarks
+ * The result is logged once the stream ends with done or error.
+ *
+ * @param input - the model, pi context, request and per-request options
+ * @param stream - whether the client asked for a stream; used for logging only
+ * @returns pi's event stream, relayed through the idle timeout when there is one
+ * @throws whatever building the options or `streamSimple` throws, after disposing the timeout
  */
 async function openUpstream(
   input: UpstreamInput,
@@ -728,8 +848,18 @@ async function openUpstream(
 }
 
 /**
- * Non-streaming completion: the stream's final AssistantMessage, which is all pi's
- * completeSimple() returns, read here so the idle timeout sees every event.
+ * Runs a non-streaming completion.
+ *
+ * @remarks
+ * Reads the stream's final message, which is all pi's `completeSimple()` returns, so the idle
+ * timeout sees every event.
+ *
+ * @param model - the pi model
+ * @param context - pi's context: system prompt, messages and tools
+ * @param request - the validated chat request
+ * @param options - the per-request options
+ * @returns the final assistant message; a failed call ends with `stopReason` `error` or `aborted`
+ * @throws whatever opening the upstream call throws
  */
 export async function piComplete(
   model: Model<Api>,
@@ -742,7 +872,17 @@ export async function piComplete(
 }
 
 /**
- * Streaming completion: returns an event stream with abort capability.
+ * Starts a streaming completion.
+ *
+ * @remarks
+ * The client's `options.signal` aborts the call.
+ *
+ * @param model - the pi model
+ * @param context - pi's context: system prompt, messages and tools
+ * @param request - the validated chat request
+ * @param options - the per-request options
+ * @returns pi's event stream for the call
+ * @throws whatever opening the upstream call throws
  */
 export async function piStream(
   model: Model<Api>,

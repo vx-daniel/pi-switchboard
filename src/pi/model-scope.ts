@@ -1,16 +1,25 @@
 /**
- * pi's `enabledModels` pattern resolution, ported from pi-coding-agent 1.3.0
- * (`dist/core/model-resolver.js`: `resolveModelScopeFromModels` and the reference resolution it
- * uses). pi resolves the setting this way for its own `/scoped-models`, against the available
- * models it has, but exports only an async variant that refreshes availability first (reading the
- * credential store for every provider), which is too heavy per request (#46).
+ * pi's `enabledModels` pattern resolution, ported from pi-coding-agent 1.3.0.
+ *
+ * @remarks
+ * The source is `dist/core/model-resolver.js`: `resolveModelScopeFromModels` (line 225) and the
+ * reference resolution it uses (`resolveModelReference` 75, `resolveText` 106, `selectReference`
+ * 148, `selectFuzzy` 181, `bestFuzzyMatch` 201). pi resolves the setting this way for its own
+ * `/scoped-models` (`dist/modes/interactive/interactive-mode.js`), against the available models it
+ * has, but its package exports only the async `resolveModelScopeWithDiagnostics`, which first
+ * refreshes availability through `ModelRuntime.getAvailable()` (reading the credential store for
+ * every provider): too heavy per request (#46).
  *
  * Patterns: exact `provider/id` or bare IDs (case-insensitive), globs over `provider/id` or the
  * bare ID (`anthropic/*`, `*sonnet*`), a `:level` thinking suffix, and fuzzy substring matching of
- * IDs and names. The thinking level itself is dropped: exposure is per model.
+ * IDs and names. The thinking level itself is dropped: exposure is per model. pi's `usable`
+ * tie-break is not ported: its scope resolution passes `() => true`, so every model counts as
+ * usable.
  *
  * `test/unit/model-scope.test.ts` runs this and pi's exported resolver over the same models and
  * patterns; a pi upgrade that changes the rules fails there.
+ *
+ * @packageDocumentation
  */
 
 import {
@@ -21,7 +30,10 @@ import {
 } from '@earendil-works/pi-ai'
 import { minimatch } from 'minimatch'
 
-/** pi's thinking levels, as accepted after a `:` in a pattern. */
+/**
+ * pi's thinking levels, as accepted after a `:` in a pattern (`VALID_THINKING_LEVELS` in pi's
+ * `dist/cli/args.js`).
+ */
 const THINKING_LEVELS: ReadonlySet<string> = new Set<ModelThinkingLevel>([
   'off',
   'minimal',
@@ -42,12 +54,14 @@ export interface ScopeDiagnostic {
   readonly message: string
 }
 
+/** The models a set of `enabledModels` patterns selects, and what went wrong on the way. */
 export interface ModelScope {
   /** The selected models, each once, in pattern order. */
   readonly models: readonly Model<Api>[]
   readonly diagnostics: readonly ScopeDiagnostic[]
 }
 
+/** How one reference resolved: one model, several from different providers, or none. */
 type Resolution =
   | { readonly status: 'resolved'; readonly model: Model<Api>; readonly warning?: string }
   | {
@@ -57,6 +71,7 @@ type Resolution =
     }
   | { readonly status: 'not-found' }
 
+/** The not-found resolution. */
 const NOT_FOUND: Resolution = { status: 'not-found' }
 
 /** How a reference is read: thinking suffixes allowed (and warned about when invalid), fuzzy. */
@@ -65,12 +80,27 @@ interface ReferenceRequest {
   readonly fuzzy: boolean
 }
 
+/**
+ * Strips a valid `:level` thinking suffix.
+ *
+ * @param text - the reference text
+ * @returns the text before the last `:`, or `undefined` when there is no `:` or what follows it is
+ *   not a thinking level
+ */
 function splitThinkingSuffix(text: string): string | undefined {
   const colonIndex = text.lastIndexOf(':')
   if (colonIndex === -1 || !THINKING_LEVELS.has(text.slice(colonIndex + 1))) return undefined
   return text.slice(0, colonIndex)
 }
 
+/**
+ * Splits `provider/rest` when `provider` names a provider in `models`.
+ *
+ * @param text - the reference text
+ * @param models - the models whose providers count
+ * @returns the provider (in its catalog casing) and the text after the first `/`, or `undefined`
+ *   when there is no `/`, either side is empty, or no provider matches (case-insensitive)
+ */
 function splitProviderPrefix(
   text: string,
   models: readonly Model<Api>[]
@@ -84,10 +114,23 @@ function splitProviderPrefix(
   return provider === undefined ? undefined : { provider, modelText }
 }
 
+/**
+ * Counts the distinct providers among models.
+ *
+ * @param models - the models
+ * @returns how many providers they come from
+ */
 function providerCount(models: readonly Model<Api>[]): number {
   return new Set(models.map((model) => model.provider)).size
 }
 
+/**
+ * Finds the models whose ID or name contains the text, case-insensitively.
+ *
+ * @param text - the text to look for
+ * @param models - the models to search
+ * @returns the matches, in catalog order
+ */
 function fuzzyMatches(text: string, models: readonly Model<Api>[]): Model<Api>[] {
   const lowerText = text.toLowerCase()
   return models.filter(
@@ -96,7 +139,13 @@ function fuzzyMatches(text: string, models: readonly Model<Api>[]): Model<Api>[]
   )
 }
 
-/** Prefer aliases (`claude-sonnet-4-5`) over dated versions, then the latest by ID. */
+/**
+ * Picks the best fuzzy match: aliases (`claude-sonnet-4-5`, or IDs ending in `-latest`) over dated
+ * versions, then the latest by ID (descending order).
+ *
+ * @param matches - the fuzzy matches
+ * @returns the best match, or `undefined` when there are none
+ */
 function bestFuzzyMatch(matches: readonly Model<Api>[]): Model<Api> | undefined {
   const aliases = matches.filter(
     (model) => model.id.endsWith('-latest') || !DATED_ID.test(model.id)
@@ -106,6 +155,13 @@ function bestFuzzyMatch(matches: readonly Model<Api>[]): Model<Api> | undefined 
   )[0]
 }
 
+/**
+ * Resolves a set of fuzzy matches to the best one.
+ *
+ * @param matches - the fuzzy matches
+ * @returns the best match, every model with its ID when several providers offer it (ambiguous), or
+ *   `undefined` when there are no matches
+ */
 function selectFuzzy(matches: readonly Model<Api>[]): Resolution | undefined {
   const best = bestFuzzyMatch(matches)
   if (best === undefined) return undefined
@@ -117,9 +173,17 @@ function selectFuzzy(matches: readonly Model<Api>[]): Resolution | undefined {
 }
 
 /**
+ * Resolves a reference as an exact model ID, or as `provider/id`.
+ *
+ * @remarks
  * `provider/rest` is a hint: the whole text may also be another provider's model ID (gateway IDs
  * such as `zai/glm-5`). The named provider's model wins; otherwise one raw match wins, and several
  * from different providers are ambiguous. Every model counts as usable here, as in pi's scoping.
+ *
+ * @param text - the reference text
+ * @param pool - the models to resolve against
+ * @param fuzzy - whether `rest` may fuzzy-match within the named provider's models
+ * @returns the resolution, or `undefined` when nothing matches
  */
 function selectReference(
   text: string,
@@ -147,6 +211,17 @@ function selectReference(
   return { status: 'ambiguous', candidates }
 }
 
+/**
+ * Resolves reference text: exact or `provider/id`, then fuzzy, then without a thinking suffix.
+ *
+ * @remarks
+ * An unknown suffix after the last `:` still resolves the model before it, with a warning.
+ *
+ * @param text - the trimmed reference text
+ * @param request - whether suffixes and fuzzy matching are allowed
+ * @param pool - the models to resolve against
+ * @returns the resolution; `not-found` when nothing matches
+ */
 function resolveText(
   text: string,
   request: ReferenceRequest,
@@ -172,6 +247,14 @@ function resolveText(
   }
 }
 
+/**
+ * Resolves one reference after trimming it.
+ *
+ * @param text - the reference text
+ * @param request - whether suffixes and fuzzy matching are allowed
+ * @param models - the models to resolve against
+ * @returns the resolution; `not-found` for empty text
+ */
 function resolveReference(
   text: string,
   request: ReferenceRequest,
@@ -181,7 +264,19 @@ function resolveReference(
   return trimmed.length === 0 ? NOT_FOUND : resolveText(trimmed, request, models)
 }
 
-/** The models `enabledModels` patterns select from `models`, as pi selects them. */
+/**
+ * Selects the models `enabledModels` patterns name from `models`, as pi selects them.
+ *
+ * @remarks
+ * A pattern with `*`, `?` or `[` is a glob (unless it is an exact ID, such as
+ * `bracketed-model[1m]`); any other is a reference. An ambiguous reference selects every
+ * candidate, with a diagnostic.
+ *
+ * @param patterns - the `enabledModels` patterns, in order
+ * @param models - the models to select from (the available ones)
+ * @returns the selected models, each once, in pattern order, and a diagnostic per pattern that
+ *   matched nothing, matched several providers, or carried an invalid thinking level
+ */
 export function resolveModelScope(
   patterns: readonly string[],
   models: readonly Model<Api>[]

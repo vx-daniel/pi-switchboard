@@ -1,5 +1,7 @@
 /**
- * Hono application assembly: middleware + routes.
+ * Hono application assembly: global middleware, proxy auth and routes.
+ *
+ * @packageDocumentation
  */
 
 import type { ServerConfig } from '@proxy/config/env'
@@ -15,8 +17,22 @@ import { createRoutes, type ExposureConfigReader, fileConfigReader } from '@prox
 import type { ProxyEnv } from '@proxy/server/types'
 import { Hono } from 'hono'
 
+/** Logger for server lifecycle events. */
 const lifecycleLogger = proxyLogger('server')
 
+/**
+ * Builds the proxy's Hono app: request ID, disconnect and body size middleware on every path,
+ * proxy auth on `/v1/*` and the `/healthz/<check>` detail endpoints, then the health and OpenAI
+ * routes.
+ *
+ * @remarks
+ * Only `GET /healthz` skips proxy auth, so liveness probes need no token.
+ *
+ * @param config - the server config: proxy auth mode, body size limit, upstream timeout
+ * @param configReader - where the model exposure config comes from; `undefined` reads the config
+ *   file and pi's settings on each request ({@link fileConfigReader})
+ * @returns the assembled app, ready to serve
+ */
 export function createApp(
   config: ServerConfig,
   configReader?: ExposureConfigReader
