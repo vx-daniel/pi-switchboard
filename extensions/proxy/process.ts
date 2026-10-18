@@ -63,6 +63,11 @@ function getPidPath(): string {
   return resolve(piDir, 'proxy.pid')
 }
 
+/** Whether `error` is the EPERM `process.kill(pid, 0)` throws for a live process of another user. */
+function isPermissionDenied(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'EPERM'
+}
+
 function readPid(): number | undefined {
   const pidPath = getPidPath()
   if (!existsSync(pidPath)) {
@@ -80,7 +85,19 @@ function readPid(): number | undefined {
       process.kill(pid, 0)
       processLogger.debug('PID file {pidPath} names live process {pid}', { pidPath, pid })
       return pid
-    } catch {
+    } catch (error: unknown) {
+      // EPERM: the process exists but belongs to another user (a proxy started with sudo, say). Only
+      // a missing process (ESRCH) makes the file stale (#93).
+      if (isPermissionDenied(error)) {
+        processLogger.debug(
+          'PID file {pidPath} names process {pid}, which this user cannot signal',
+          {
+            pidPath,
+            pid
+          }
+        )
+        return pid
+      }
       processLogger.info('Removing stale PID file {pidPath}: process {pid} is not running', {
         pidPath,
         pid

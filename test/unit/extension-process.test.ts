@@ -186,6 +186,32 @@ describe('showStatus', () => {
     expect(existsSync(pidPath())).toBe(false)
   })
 
+  // Catches another user's live proxy (kill(pid, 0) answers EPERM) being read as stale, which
+  // deleted its PID file so `/proxy stop` and `status` lost track of it (#93).
+  test("another user's process (EPERM): pid shown, file kept", async () => {
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    const realKill = process.kill.bind(process)
+    const kill = vi.spyOn(process, 'kill').mockImplementation((pid, signal) => {
+      if (pid === IMPOSSIBLE_PID && signal === 0) {
+        throw Object.assign(new Error('kill EPERM'), { code: 'EPERM' })
+      }
+      return realKill(pid, signal)
+    })
+    try {
+      const { context, notifications } = fakeCommandContext({})
+      await showStatus(stateOn(port), context)
+      expect(notifications).toEqual([
+        {
+          message: `http://127.0.0.1:${String(port)} -- 2 models available [pid ${String(IMPOSSIBLE_PID)}]`,
+          level: 'info'
+        }
+      ])
+      expect(existsSync(pidPath())).toBe(true)
+    } finally {
+      kill.mockRestore()
+    }
+  })
+
   // Catches an unreadable PID file (a directory there) crashing `/proxy status`.
   test('unreadable PID file: treated as no pid', async () => {
     mkdirSync(pidPath())
