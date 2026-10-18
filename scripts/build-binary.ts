@@ -31,17 +31,16 @@ const COMPILE_FLAGS = [
   '--no-compile-autoload-bunfig'
 ]
 
-/** Compile one binary; `target` undefined means the host. Exits the script when Bun fails. */
-function compile(outfile: string, target?: string): void {
-  const targetFlags = target === undefined ? [] : ['--target', `bun-${target}`]
+/** Compile one binary, for the host unless `targetFlags` names a target. Exits when Bun fails. */
+function compile(outfile: string, targetFlags: readonly string[] = []): void {
   const result = spawnSync('bun', [...COMPILE_FLAGS, ...targetFlags, ENTRY, '--outfile', outfile], {
     stdio: 'inherit'
   })
-  if (result.error !== undefined) {
-    process.stderr.write(`build-binary: could not run bun: ${result.error.message}\n`)
-    process.exit(1)
-  }
-  if (result.status !== 0) process.exit(result.status ?? 1)
+  if (result.status === 0) return
+  // `status` is null when bun could not start (not installed) or was killed; `error` then says why.
+  const reason = result.error === undefined ? '' : `: ${result.error.message}`
+  process.stderr.write(`build-binary: bun build failed for ${outfile}${reason}\n`)
+  process.exit(result.status ?? 1)
 }
 
 mkdirSync(OUT_DIR, { recursive: true })
@@ -52,7 +51,7 @@ if (process.argv.includes('--all')) {
   const sums: string[] = []
   for (const target of RELEASE_TARGETS) {
     const file = `${NAME}-${target}`
-    compile(join(OUT_DIR, file), target)
+    compile(join(OUT_DIR, file), ['--target', `bun-${target}`])
     sums.push(
       `${createHash('sha256')
         .update(readFileSync(join(OUT_DIR, file)))
