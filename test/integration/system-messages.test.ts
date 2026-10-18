@@ -126,6 +126,45 @@ describe('a later instruction on a model that accepts mid-conversation system me
   })
 })
 
+describe('a later instruction between a tool call and its result', () => {
+  /** The model calls a tool; the client adds an instruction before sending the result back. */
+  const BETWEEN_TOOL_CALL_AND_RESULT = [
+    { role: 'user', content: 'Weather in Oslo?' },
+    {
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: 'call_1',
+          type: 'function',
+          function: { name: 'get_weather', arguments: '{"city":"Oslo"}' }
+        }
+      ]
+    },
+    { role: 'system', content: 'Report temperatures in Celsius.' },
+    { role: 'tool', tool_call_id: 'call_1', content: '{"temp":5}' }
+  ]
+
+  /** Each upstream message's role, with the tool call it answers. */
+  function roles(messages: unknown): unknown {
+    if (!Array.isArray(messages)) return messages
+    return messages.map((message: unknown) => {
+      if (!isRecord(message)) return message
+      const toolCallId = message['tool_call_id']
+      return typeof toolCallId === 'string' ? `tool(${toolCallId})` : message['role']
+    })
+  }
+
+  // Catches the instruction sent where the client put it, between the tool call and its result:
+  // OpenAI requires tool results directly after the assistant message that called the tool, and
+  // refuses the request otherwise. pi holds it until after the result.
+  test('openai-completions: sent after the tool result', async () => {
+    const sent = await sentConversation('completions/chat-mid', BETWEEN_TOOL_CALL_AND_RESULT)
+
+    expect(roles(sent.messages)).toEqual(['user', 'assistant', 'tool(call_1)', 'system'])
+  })
+})
+
 describe('a later instruction on any other model', () => {
   // Catches the change reaching models that cannot take a mid-conversation instruction: their
   // payload must stay what it was, the instruction merged into the leading prompt.

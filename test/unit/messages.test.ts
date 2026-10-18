@@ -28,6 +28,54 @@ describe('convertMessages', () => {
     expect(result.context.systemPrompt).toBe('System prompt\n\nDeveloper context')
   })
 
+  /** Each pi message's role and its text (system and user messages carry plain text here). */
+  function rolesAndText(messages: readonly { role: string; content?: unknown }[]): unknown[] {
+    return messages.map((message) => ({
+      role: message.role,
+      ...(typeof message.content === 'string' ? { content: message.content } : {})
+    }))
+  }
+
+  // Catches a later instruction merged into the system prompt (#45), or a leading one moved out of
+  // it: only messages before the first turn form the prompt; later ones keep their position.
+  test('keeps a later system or developer message in place, leading ones in the prompt', () => {
+    const result = convertMessages([
+      { role: 'system', content: 'You are terse.' },
+      { role: 'user', content: 'Hi' },
+      { role: 'assistant', content: 'Hello' },
+      { role: 'developer', content: 'Now answer only in JSON.' },
+      { role: 'user', content: 'Weather?' },
+      { role: 'system', content: 'Use Celsius.' }
+    ])
+    assert(result.ok, 'expected the conversation to convert')
+
+    expect(result.context.systemPrompt).toBe('You are terse.')
+    expect(rolesAndText(result.context.messages)).toEqual([
+      { role: 'user', content: 'Hi' },
+      { role: 'assistant' },
+      { role: 'system', content: 'Now answer only in JSON.' },
+      { role: 'user', content: 'Weather?' },
+      { role: 'system', content: 'Use Celsius.' }
+    ])
+  })
+
+  // Catches a first system message that comes after a turn being promoted to the system prompt.
+  test('a conversation with no leading system message has no system prompt', () => {
+    const result = convertMessages([
+      { role: 'user', content: 'Hi' },
+      { role: 'system', content: 'Now answer only in JSON.' },
+      { role: 'user', content: 'Weather?' }
+    ])
+    assert(result.ok, 'expected the conversation to convert')
+
+    expect(result.context.systemPrompt).toBeUndefined()
+    expect(rolesAndText(result.context.messages)).toEqual([
+      { role: 'user', content: 'Hi' },
+      { role: 'system', content: 'Now answer only in JSON.' },
+      { role: 'user', content: 'Weather?' }
+    ])
+  })
+
   test('converts user text messages', () => {
     const messages: OpenAIMessage[] = [{ role: 'user', content: 'Hello world' }]
     const result = convertMessages(messages)

@@ -101,7 +101,7 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
   }
 
   messagesLogger.debug(
-    'Converted {messageCount} messages to {piMessageCount} pi messages, merging {systemPartCount} system/developer parts',
+    'Converted {messageCount} messages to {piMessageCount} pi messages: {systemPartCount} system/developer parts in the prompt, {laterSystemCount} kept in place',
     {
       messageCount: messages.length,
       piMessageCount: piMessages.length,
