@@ -89,6 +89,33 @@ describe('streamToSSE', () => {
     ])
   })
 
+  // Catches an overflow reported after the stream started (its 200 already sent) arriving as a
+  // generic upstream error: the SSE event must carry the code agent clients compact on (#40).
+  test('maps an overflow after the stream started to context_length_exceeded', async () => {
+    const overflow = makeErrorMessage(
+      'Your input exceeds the context window of this model. notarealsecret-quoted-prompt'
+    )
+    const events: AssistantMessageEvent[] = [
+      { type: 'start', partial: overflow },
+      { type: 'error', reason: 'error', error: overflow }
+    ]
+
+    const frames: string[] = []
+    for await (const frame of streamToSSE(
+      yieldEvents(events),
+      'req-1',
+      'openai/gpt-5.4-mini',
+      false
+    )) {
+      frames.push(frame)
+    }
+
+    expect(frames.slice(1)).toEqual([
+      `data: ${JSON.stringify({ error: { message: "The messages exceed the model's context window. Shorten or summarize them and try again.", type: 'invalid_request_error', param: 'messages', code: 'context_length_exceeded' } })}\n\n`,
+      'data: [DONE]\n\n'
+    ])
+  })
+
   test('emits normal stop for successful done events', async () => {
     const doneMsg = makeErrorMessage('')
     doneMsg.stopReason = 'stop'

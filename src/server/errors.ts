@@ -16,6 +16,7 @@
  * - 504: upstream timeout
  */
 
+import { type AssistantMessage, isContextOverflow } from '@earendil-works/pi-ai'
 import { isRecord } from '@proxy/utils/guards'
 
 export interface OpenAIError {
@@ -73,7 +74,7 @@ export function internalError(message: string): OpenAIError {
 }
 
 /** The statuses an upstream failure is answered with. */
-export type UpstreamErrorStatus = 429 | 502 | 503 | 504
+export type UpstreamErrorStatus = 400 | 429 | 502 | 503 | 504
 
 /** An upstream failure as the client sees it: a status and a fixed body that quotes nothing. */
 export interface MappedUpstreamError {
@@ -105,10 +106,26 @@ const PROVIDER_FAILED: MappedUpstreamError = {
   status: 502,
   body: upstreamError('Upstream provider error')
 }
+/**
+ * OpenAI's answer to a request longer than the model's context window, which agent clients watch
+ * for to compact the history and retry (#40). Fixed text: the provider's message quotes token
+ * counts and sometimes the request.
+ */
+const CONTEXT_OVERFLOW: MappedUpstreamError = {
+  status: 400,
+  body: makeError(
+    "The messages exceed the model's context window. Shorten or summarize them and try again.",
+    'invalid_request_error',
+    'messages',
+    'context_length_exceeded'
+  )
+}
 
+const HTTP_BAD_REQUEST = 400
 const HTTP_UNAUTHORIZED = 401
 const HTTP_FORBIDDEN = 403
 const HTTP_REQUEST_TIMEOUT = 408
+const HTTP_PAYLOAD_TOO_LARGE = 413
 const HTTP_TOO_MANY_REQUESTS = 429
 const HTTP_SERVICE_UNAVAILABLE = 503
 const HTTP_GATEWAY_TIMEOUT = 504
@@ -199,4 +216,23 @@ export function mapUpstreamError(err: unknown): MappedUpstreamError {
     if (wording.test(message)) return mapped
   }
   return PROVIDER_FAILED
+}
+
+/** The statuses a provider reports a context overflow with: 400, and 413 for a too-large body. */
+const OVERFLOW_STATUSES: ReadonlySet<number> = new Set([HTTP_BAD_REQUEST, HTTP_PAYLOAD_TOO_LARGE])
+
+/**
+ * Map a failed pi call, given its final message. A context overflow, as pi recognizes it across
+ * providers (`isContextOverflow`), is OpenAI's 400 `context_length_exceeded`; anything else maps
+ * as mapUpstreamError does. A reported status other than 400 or 413 rules overflow out: a 429 that
+ * says "too many tokens" is a rate limit.
+ */
+export function mapFailedCall(message: AssistantMessage): MappedUpstreamError {
+  const errorText = message.errorMessage ?? ''
+  const status = upstreamStatusIn(errorText)
+  const statusAllowsOverflow = status === undefined || OVERFLOW_STATUSES.has(status)
+  if (statusAllowsOverflow && isContextOverflow(message)) {
+    return CONTEXT_OVERFLOW
+  }
+  return mapUpstreamError(new Error(errorText))
 }
