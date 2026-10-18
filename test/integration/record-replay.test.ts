@@ -75,7 +75,15 @@ afterAll(async () => {
   rmSync(recordingsDir, { recursive: true, force: true })
 })
 
-/** pi pointed at `baseUrl` as provider `rec`, serving `model`. */
+/**
+ * Points pi at `baseUrl` as the openai-completions provider `rec`, serving `model`.
+ *
+ * @remarks
+ * Loads a fresh fixture agent dir, removed in `afterAll`.
+ *
+ * @param baseUrl - the provider's base URL, `/v1` included
+ * @param model - the one model ID the provider serves
+ */
 async function useProvider(baseUrl: string, model: string): Promise<void> {
   agentDirs.push(
     await loadFixtureAgentDir({
@@ -88,6 +96,12 @@ async function useProvider(baseUrl: string, model: string): Promise<void> {
   )
 }
 
+/**
+ * Asks `rec/<model>` through the proxy, without streaming, and expects a 200.
+ *
+ * @param model - the model ID under provider `rec`
+ * @returns the parsed chat completion body
+ */
 async function chat(model: string): Promise<unknown> {
   const response = await testApp().request('/v1/chat/completions', {
     method: 'POST',
@@ -98,6 +112,13 @@ async function chat(model: string): Promise<unknown> {
   return response.json()
 }
 
+/**
+ * Wraps a captured exchange in the recording metadata for the `two-tools` model.
+ *
+ * @param exchange - the request and response the recorder captured
+ * @param scenario - the scenario name the recording is saved under
+ * @returns a recording with a fixed timestamp and `piVersion` `test`
+ */
 function named(exchange: CapturedExchange, scenario: string): Recording {
   return {
     version: 1,
@@ -110,7 +131,16 @@ function named(exchange: CapturedExchange, scenario: string): Recording {
   }
 }
 
-/** The parts of a completion that come from the provider, not from this request's id or clock. */
+/**
+ * Builds a matcher for the parts of a completion that come from the provider.
+ *
+ * @remarks
+ * Leaves out the request's id and clock fields, which differ between two runs.
+ *
+ * @param completion - the chat completion body to take `choices` and `usage` from
+ * @returns an `expect.objectContaining` matcher for those two fields
+ * @throws Error when `completion` is not an object
+ */
 function answer(completion: unknown): unknown {
   if (!isRecord(completion)) throw new Error('expected a chat completion object')
   return expect.objectContaining({ choices: completion['choices'], usage: completion['usage'] })
@@ -180,7 +210,7 @@ describe('recorder whose upstream cannot be reached', () => {
       }).toEqual({
         status: HTTP_BAD_GATEWAY,
         contentType: 'text/plain',
-        // The proxy's part of the message; the cause after it is Node's wording.
+        // The recorder's part of the message; the cause after it is Node's wording.
         text: expect.stringMatching(
           new RegExp(`^recorder could not reach ${unreachable.replaceAll('.', '\\.')}: .+`)
         ),
@@ -192,7 +222,11 @@ describe('recorder whose upstream cannot be reached', () => {
   })
 })
 
-/** An origin nothing listens on: a port the OS just handed out, then released. */
+/**
+ * Finds an origin nothing listens on: a port the OS just handed out, then released.
+ *
+ * @returns the origin, `http://127.0.0.1:<port>`
+ */
 async function closedOrigin(): Promise<string> {
   const server = createServer()
   const origin = await listenOnLoopback(server)

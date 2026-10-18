@@ -33,6 +33,12 @@ afterAll(() => {
   agentDir.remove()
 })
 
+/**
+ * Sends a GET to the test app and reads the JSON body.
+ *
+ * @param path - the request path, query string included
+ * @returns the response status and parsed JSON body
+ */
 async function getJson(path: string): Promise<{ status: number; body: unknown }> {
   const response = await testApp().request(path)
   return { status: response.status, body: await jsonBody(response) }

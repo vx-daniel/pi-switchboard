@@ -43,16 +43,29 @@ afterAll(() => {
   agentDir.remove()
 })
 
-/** Write pi's global settings with these `enabledModels`. */
+/**
+ * Writes pi's global settings in the fixture agent dir with these `enabledModels`.
+ *
+ * @param patterns - the `enabledModels` entries, patterns or exact IDs
+ */
 function enableModels(patterns: readonly string[]): void {
   writeFileSync(join(agentDir.path, 'settings.json'), JSON.stringify({ enabledModels: patterns }))
 }
 
-/** The proxy as deployed: exposure from its config file and pi's settings, read per request. */
+/**
+ * Builds the proxy as deployed: exposure from its config file and pi's settings, read per request.
+ *
+ * @returns the app, with {@link fileConfigReader} as its exposure config reader
+ */
 function app(): Hono<ProxyEnv> {
   return createApp(testConfig(), fileConfigReader)
 }
 
+/**
+ * Lists the public model IDs `/v1/models` returns.
+ *
+ * @returns the IDs in list order, or the whole body when it has no `data` array
+ */
 async function exposedIds(): Promise<unknown> {
   const body: unknown = await (await app().request('/v1/models')).json()
   const data = isRecord(body) ? body['data'] : undefined

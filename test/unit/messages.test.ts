@@ -28,7 +28,13 @@ describe('convertMessages', () => {
     expect(result.context.systemPrompt).toBe('System prompt\n\nDeveloper context')
   })
 
-  /** Each pi message's role and its text (system and user messages carry plain text here). */
+  /**
+   * Reduces each pi message to its role and its text (system and user messages carry plain text
+   * here).
+   *
+   * @param messages - the converted pi messages
+   * @returns `{ role, content }` per message, with `content` only when it is a string
+   */
   function rolesAndText(messages: readonly { role: string; content?: unknown }[]): unknown[] {
     return messages.map((message) => ({
       role: message.role,
@@ -103,7 +109,12 @@ describe('convertMessages', () => {
   })
 })
 
-/** An assistant turn that called these tools, as an OpenAI client sends it back in history. */
+/**
+ * Builds an assistant turn that called these tools, as an OpenAI client sends it back in history.
+ *
+ * @param calls - each call's ID, function name and raw JSON arguments string
+ * @returns an assistant message with `content: null` and one `tool_calls` entry per call
+ */
 function assistantCalling(
   ...calls: { readonly id: string; readonly name: string; readonly arguments: string }[]
 ): OpenAIMessage {
@@ -118,6 +129,13 @@ function assistantCalling(
   }
 }
 
+/**
+ * Converts messages that must convert.
+ *
+ * @param messages - the OpenAI messages to convert
+ * @returns the converted pi messages, without the system prompt
+ * @throws AssertionError when conversion fails
+ */
 function convertedMessages(messages: OpenAIMessage[]): unknown[] {
   const result = convertMessages(messages)
   assert(result.ok, 'expected the messages to convert')

@@ -51,7 +51,12 @@ const ZED_SETTINGS = '{\n  // my theme\n  "theme": "One Dark"\n}\n'
 
 type CommandHandler = (args: string, context: ExtensionCommandContext) => Promise<void>
 
-/** Loads the extension into a fake pi and returns the `/proxy` command's handler. */
+/**
+ * Loads the extension into a fake pi and returns the `/proxy` command's handler.
+ *
+ * @returns the handler of the first command the extension registers
+ * @throws Error when the extension registers no command
+ */
 function loadProxyCommand(): CommandHandler {
   const registerCommand = vi.fn<ExtensionAPI['registerCommand']>()
   proxyExtension({ on: vi.fn(), registerCommand })
@@ -60,7 +65,13 @@ function loadProxyCommand(): CommandHandler {
   return options.handler
 }
 
-/** Runs `/proxy <args>` and returns what it showed the user. */
+/**
+ * Runs `/proxy <args>` against the fixture model registry and returns what it showed the user.
+ *
+ * @param args - the text after `/proxy`, such as `zed-sync --dry-run`
+ * @param hasUI - whether the fake context reports an interactive UI; `false` when omitted
+ * @returns the notifications the command sent, in order
+ */
 async function runProxy(args: string, hasUI = false): Promise<Notification[]> {
   const { context, notifications } = fakeCommandContext({
     modelRegistry: new ModelRegistry(getRuntime()),
@@ -75,7 +86,11 @@ describe('/proxy with models on two providers', () => {
   let zedRoot: string
   let zedSettingsPath: string
 
-  /** Writes `proxy-config.json` into the fixture agent dir. */
+  /**
+   * Writes `proxy-config.json` into the fixture agent dir.
+   *
+   * @param config - the config object, written as JSON
+   */
   function writeProxyConfig(config: Record<string, unknown>): void {
     writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify(config))
   }

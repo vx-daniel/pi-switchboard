@@ -44,13 +44,23 @@ test('ordinary stderr is not an abort — diagnostics, warnings and an empty str
 })
 
 /**
- * The header of `scripts/gate.ts` is the documented authority for what "green" means. Upstream it
- * drifted to name three checks where the file ran five, with the wrong commands, and nothing exited
- * non-zero. It pins the row STRUCTURE, never the prose: the ordered names and the first backticked
+ * One numbered gate row in the header of `scripts/gate.ts`: captures its name and the first
+ * backticked command.
+ *
+ * @remarks
+ * That header is the documented authority for what "green" means. Upstream it drifted to name
+ * three checks where the file ran five, with the wrong commands, and nothing exited non-zero. The
+ * test below pins the row STRUCTURE, never the prose: the ordered names and the first backticked
  * command on each row, against GATES and the package.json scripts they run.
  */
 const HEADER_GATE_ROW = /^\s*\*\s+\d+\.\s+(\S+)\s+—\s+`([^`]+)`/
 
+/**
+ * Checks that a parsed package.json `scripts` value is an object of string commands.
+ *
+ * @param value - the `scripts` field, or `undefined` when the manifest has none
+ * @returns whether every value in the object is a string
+ */
 function isScriptTable(value: unknown): value is Record<string, string> {
   return (
     typeof value === 'object' &&
@@ -98,9 +108,15 @@ interface GateRun {
 
 /**
  * Builds a throwaway package whose `lint` gate runs `body`, then runs the real `scripts/gate.ts`
- * against it. ⚠ The scripts are DERIVED FROM `GATES`, never listed: a hand-written set stops
- * matching the day a gate is added, and the fixture then fails on the missing script rather than on
- * the crash it exists to reproduce. Every gate is a no-op here except `lint`.
+ * against it.
+ *
+ * @remarks
+ * ⚠ The scripts are DERIVED FROM `GATES`, never listed: a hand-written set stops matching the day
+ * a gate is added, and the fixture then fails on the missing script rather than on the crash it
+ * exists to reproduce. Every gate is a no-op here except `lint`.
+ *
+ * @param body - the shell script the `lint` gate runs, without the `#!/bin/sh` line
+ * @returns the gate's exit status, its stdout and stderr, and both concatenated as `output`
  */
 function runGateOver(body: string): GateRun {
   const scratch = mkdtempSync(join(tmpdir(), 'pi-proxy-gate-'))
@@ -166,9 +182,9 @@ test(
 )
 
 /**
- * Both streams are piped, so the gate is the only writer to the terminal. Every line the tool wrote
- * must arrive whole and on the stream it was written to. (Ordering ACROSS the two streams is grouped
- * in chunks, not exact; that is the price of reading either of them.)
+ * Both streams are piped, so the gate is the only writer to the terminal. Every line the tool
+ * wrote must arrive whole and on the stream it was written to. (Ordering ACROSS the two streams
+ * is grouped in chunks, not exact; that is the price of reading either of them.)
  */
 test(
   '⚠ a tool writing both streams has every line arrive whole, on the stream it came from',
@@ -187,7 +203,9 @@ test(
   END_TO_END_TIMEOUT_MS
 )
 
-/** stdout is forwarded but never scanned: a linter quoting source must not read as its own death. */
+/**
+ * stdout is forwarded but never scanned: a linter quoting source must not read as its own death.
+ */
 test(
   '⚠ a banner quoted on stdout is a tool reporting, not a tool dying',
   () => {

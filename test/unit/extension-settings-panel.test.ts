@@ -51,7 +51,12 @@ afterEach(() => {
   agentDir.remove()
 })
 
-/** A state holding this config, as the panel has it after loading. */
+/**
+ * Returns a state holding this config, as the panel has it after loading.
+ *
+ * @param config - the fields that differ from {@link DEFAULT_CONFIG}
+ * @returns a {@link ProxyState} with no model registry and empty in-memory pi settings
+ */
 function stateWith(config: Partial<ProxyConfig> = {}): ProxyState {
   return {
     config: { ...DEFAULT_CONFIG, ...config },
@@ -62,12 +67,22 @@ function stateWith(config: Partial<ProxyConfig> = {}): ProxyState {
   }
 }
 
-/** The config the panel wrote to the fixture agent dir. */
+/**
+ * Reads the config the panel wrote to the fixture agent dir.
+ *
+ * @returns the parsed `proxy-config.json`
+ * @throws Error when the file is missing or is not valid JSON
+ */
 function savedConfig(): unknown {
   return JSON.parse(readFileSync(join(agentDir.path, 'proxy-config.json'), 'utf-8'))
 }
 
-/** The captured warnings, as `{ message, properties }`. */
+/**
+ * Returns the captured warnings.
+ *
+ * @returns each `WARN` log record as `{ message, properties }`, in log order
+ * @throws AssertionError when a captured log line is not a JSON object
+ */
 function warnings(): { message: unknown; properties: unknown }[] {
   return logLines.flatMap((line) => {
     const record: unknown = JSON.parse(line)
@@ -177,14 +192,23 @@ describe('applySetting: the other settings', () => {
 })
 
 describe('refreshDescriptions', () => {
-  /** The panel's rows whose descriptions depend on the config, plus one that does not. */
+  /**
+   * Builds the panel's rows whose descriptions depend on the config, plus one that does not.
+   *
+   * @returns one row per setting ID, each with the description `stale`
+   */
   function items(): SettingItem[] {
     return ['publicModelIdMode', 'modelExposureMode', 'customModels', 'authToken', 'host'].map(
       (settingId) => ({ id: settingId, label: settingId, description: 'stale', currentValue: '' })
     )
   }
 
-  /** The rows with these descriptions, in the order `items()` builds them. */
+  /**
+   * Builds the rows with these descriptions, in the order `items()` builds them.
+   *
+   * @param descriptions - the expected descriptions; rows past the last one stay `stale`
+   * @returns the rows from `items()` with the given descriptions
+   */
   function described(...descriptions: string[]): SettingItem[] {
     return items().map((row, index) => ({ ...row, description: descriptions[index] ?? 'stale' }))
   }
@@ -226,7 +250,12 @@ describe('refreshDescriptions', () => {
 })
 
 describe('an invalid authToken in the file (#82)', () => {
-  /** Write a proxy-config.json whose authToken is not a string, and load it as the panel does. */
+  /**
+   * Writes a `proxy-config.json` whose `authToken` is not a string, and loads it as the panel
+   * does.
+   *
+   * @returns a state holding the loaded config
+   */
   function stateFromInvalidFile(): ProxyState {
     writeFileSync(
       join(agentDir.path, 'proxy-config.json'),

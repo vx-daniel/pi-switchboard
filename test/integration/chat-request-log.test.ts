@@ -1,8 +1,9 @@
 /**
- * Request logging through the real app, at the most verbose level.
+ * Request logging through the real app, at the most verbose level unless a test sets another.
  *
- * The model is a fixture provider (literal key, unreachable base URL). Requests are rejected after
- * the model resolves and before any upstream call, so nothing leaves the machine.
+ * The model is a fixture provider (literal key, unreachable base URL). Most requests are rejected
+ * after the model resolves and before any upstream call; the one that reaches the upstream call
+ * fails at once on 127.0.0.1, so nothing leaves the machine.
  */
 
 import { resetSync } from '@logtape/logtape'
@@ -61,7 +62,12 @@ interface LogRecordJson {
   properties: Record<string, unknown>
 }
 
-/** A JSON Lines log record with the fields these tests read, as written (nothing trimmed). */
+/**
+ * Checks that a parsed log line is a JSON Lines record with the fields these tests read.
+ *
+ * @param value - one parsed log line
+ * @returns whether `value` has string `logger`, `level` and `message` and an object `properties`
+ */
 function isLogRecord(value: unknown): value is LogRecordJson {
   return (
     isRecord(value) &&
@@ -72,7 +78,12 @@ function isLogRecord(value: unknown): value is LogRecordJson {
   )
 }
 
-/** The captured records of `logger`; fails the test when any line is not a log record. */
+/**
+ * Returns the captured records of one logger, failing the test when any line is not a log record.
+ *
+ * @param logger - the full logger category, joined with dots
+ * @returns the matching records, in the order they were written
+ */
 function logged(logger: string): LogRecordJson[] {
   return lines
     .map((line): LogRecordJson => {

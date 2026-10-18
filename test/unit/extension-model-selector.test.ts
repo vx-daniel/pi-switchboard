@@ -63,7 +63,13 @@ interface Selector {
   readonly closedWith: () => string | undefined
 }
 
-/** A selector over the fixture's models, with these models already selected. */
+/**
+ * Opens a selector over the fixture's models in `custom` exposure mode, with these models already
+ * selected.
+ *
+ * @param customModels - the canonical model IDs selected at the start; none when omitted
+ * @returns the selector's component, its state, and what it passed to `done` on closing
+ */
 function openSelector(customModels: string[] = []): Selector {
   const state: ProxyState = {
     config: { ...DEFAULT_CONFIG, modelExposureMode: 'custom', customModels },
@@ -79,12 +85,23 @@ function openSelector(customModels: string[] = []): Selector {
   return { component, state, closedWith: () => closed }
 }
 
-/** Send each key to the selector in turn. */
+/**
+ * Sends each key to the selector in turn.
+ *
+ * @param selector - the selector that receives the keys
+ * @param keys - the raw key sequences, such as {@link RIGHT} or a typed character
+ */
 function press(selector: Selector, ...keys: string[]): void {
   for (const key of keys) selector.component.handleInput?.(key)
 }
 
-/** The rendered row the cursor is on, as `<model> <checked>`. */
+/**
+ * Reads the rendered row the cursor is on.
+ *
+ * @param selector - the selector to render
+ * @returns the row as `<model> <checked>`, such as `alpha/a1 false`, or `undefined` when no row
+ *   is shown
+ */
 function selectedRow(selector: Selector): string | undefined {
   const row = selector.component
     .render(RENDER_WIDTH)

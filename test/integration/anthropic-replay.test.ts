@@ -23,13 +23,25 @@ const recordings = new Map<Scenario, Recording>(
   SCENARIOS.map((scenario) => [scenario, loadRecording(API, scenario)])
 )
 
+/**
+ * Returns the loaded recording for one scenario.
+ *
+ * @param scenario - the recorded scenario name
+ * @returns the recording loaded from `test/fixtures/recordings/anthropic-messages`
+ * @throws Error when no recording was loaded for `scenario`
+ */
 function recording(scenario: Scenario): Recording {
   const found = recordings.get(scenario)
   if (found === undefined) throw new Error(`no recording for ${scenario}`)
   return found
 }
 
-/** The `data:` payloads of the provider's SSE, as it sent them. */
+/**
+ * Returns the `data:` payloads of the provider's SSE, as it sent them.
+ *
+ * @param scenario - the recorded scenario whose response is parsed
+ * @returns each `data:` line parsed as JSON, keeping only objects
+ */
 function providerEvents(scenario: Scenario): Record<string, unknown>[] {
   return recording(scenario)
     .response.chunks.join('')
@@ -39,7 +51,15 @@ function providerEvents(scenario: Scenario): Record<string, unknown>[] {
     .filter(isRecord)
 }
 
-/** Every delta of one kind (`text_delta`, `thinking_delta`, `input_json_delta`) the provider sent. */
+/**
+ * Returns every delta of one kind (`text_delta`, `thinking_delta`, `input_json_delta`) the
+ * provider sent.
+ *
+ * @param scenario - the recorded scenario whose response is read
+ * @param kind - the `delta.type` to keep
+ * @param field - the string field of the delta to collect (`text`, `thinking`, …)
+ * @returns the collected field values, in the order the provider sent them
+ */
 function deltas(scenario: Scenario, kind: string, field: string): string[] {
   return providerEvents(scenario).flatMap((event) => {
     const delta = event['delta']
@@ -67,6 +87,13 @@ afterAll(async () => {
   agentDir.remove()
 })
 
+/**
+ * Sends one chat completion to the proxy for a recorded scenario's model.
+ *
+ * @param scenario - the scenario; the request uses model `recorded/<scenario>`
+ * @param stream - whether to request a streamed (SSE) response
+ * @returns the proxy's raw response
+ */
 async function chat(scenario: Scenario, stream = false): Promise<Response> {
   return testApp().request('/v1/chat/completions', {
     method: 'POST',
@@ -79,6 +106,13 @@ async function chat(scenario: Scenario, stream = false): Promise<Response> {
   })
 }
 
+/**
+ * Sends a non-streamed chat completion for a scenario and expects a 200 JSON object.
+ *
+ * @param scenario - the recorded scenario to request
+ * @returns the parsed chat completion body
+ * @throws Error when the body is not a JSON object
+ */
 async function completion(scenario: Scenario): Promise<Record<string, unknown>> {
   const response = await chat(scenario)
   expect(response.status).toBe(200)
@@ -87,6 +121,13 @@ async function completion(scenario: Scenario): Promise<Record<string, unknown>> 
   return body
 }
 
+/**
+ * Returns `choices[0].message` of a chat completion.
+ *
+ * @param body - the parsed chat completion body
+ * @returns the first choice's message object
+ * @throws Error when `choices[0].message` is missing or not an object
+ */
 function firstMessage(body: Record<string, unknown>): Record<string, unknown> {
   const choices = body['choices']
   const first: unknown = Array.isArray(choices) ? choices[0] : undefined

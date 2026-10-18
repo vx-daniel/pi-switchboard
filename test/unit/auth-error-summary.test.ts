@@ -37,7 +37,8 @@ describe('summarizeAuthError', () => {
     ).toBe('Token request failed')
   })
 
-  // Catches a `response=` field (the token endpoint's reply) leaking the issued token to the client.
+  // Catches a `response=` field (the token endpoint's reply) leaking the issued token to the
+  // client.
   test('cuts a response= field', () => {
     expect(
       summarizeAuthError('Token exchange failed; response={"access_token":"sk-live-secret"}')

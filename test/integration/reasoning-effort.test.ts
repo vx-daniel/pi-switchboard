@@ -115,7 +115,17 @@ afterAll(async () => {
   agentDir.remove()
 })
 
-/** Ask `model` with this reasoning_effort, and return the named field of what pi sent upstream. */
+/**
+ * Asks `model` with `reasoningEffort` and returns one field of the body pi sent upstream.
+ *
+ * @remarks
+ * Also asserts that the request reached the mock provider exactly once.
+ *
+ * @param model - the public model ID to ask
+ * @param reasoningEffort - the `reasoning_effort` value to send
+ * @param field - the top-level field of the upstream body to return
+ * @returns that field's value, or `undefined` when the body lacks it or is not an object
+ */
 async function sentField(model: string, reasoningEffort: string, field: string): Promise<unknown> {
   const before = mock.requests.length
   await testApp().request('/v1/chat/completions', {
@@ -220,8 +230,9 @@ describe('reasoning_effort "minimal" is unchanged', () => {
 })
 
 describe('an effort the model does not support is clamped (#43)', () => {
-  // Catches Anthropic's own fallback (effort high) instead of pi's clamp, which takes the nearest
-  // supported level above the one asked for, as every other adapter and pi itself do.
+  // Catches pi's Anthropic adapter fallback (effort high, in `mapThinkingLevelToEffort`) instead
+  // of pi's clamp, which takes the nearest supported level above the one asked for, as every
+  // other adapter and pi itself do.
   test('anthropic-messages: xhigh on an adaptive model with max but no xhigh is max', async () => {
     expect(await sentField('anthropic/claude-adaptive-max', 'xhigh', 'output_config')).toEqual({
       effort: 'max'
@@ -286,7 +297,12 @@ describe('GET /v1/pi/models', () => {
   })
 })
 
-/** A list entry's `id`, or '' when it has none. */
+/**
+ * Reads a model list entry's `id`.
+ *
+ * @param entry - one element of a `/v1/pi/models` `data` array
+ * @returns the entry's `id`, or '' when it has none
+ */
 function entryId(entry: unknown): string {
   return isRecord(entry) && typeof entry['id'] === 'string' ? entry['id'] : ''
 }

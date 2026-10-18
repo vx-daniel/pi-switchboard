@@ -45,7 +45,12 @@ afterAll(async () => {
   agentDir.remove()
 })
 
-/** The completion a client gets for the mock's "ok" answer. */
+/**
+ * Builds the completion a client gets for the mock's "ok" answer.
+ *
+ * @param response - the proxy's response, whose `x-request-id` header is the completion id
+ * @returns the expected chat completion body, for `toEqual`
+ */
 function okCompletion(response: Response): Record<string, unknown> {
   return {
     id: response.headers.get('x-request-id'),

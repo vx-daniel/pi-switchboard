@@ -44,7 +44,13 @@ afterAll(async () => {
   agentDir.remove()
 })
 
-/** Ask `model` with FIELDS, and return the body pi sent upstream. */
+/**
+ * Asks `model` with {@link FIELDS} and returns the body pi sent upstream.
+ *
+ * @param model - the public model ID to ask
+ * @returns the JSON body of the last request the mock provider received
+ * @throws Error when that request has no JSON object body
+ */
 async function sentBody(model: string): Promise<Record<string, unknown>> {
   await testApp().request('/v1/chat/completions', {
     method: 'POST',

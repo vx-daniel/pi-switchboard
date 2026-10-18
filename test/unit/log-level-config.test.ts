@@ -1,6 +1,7 @@
 /**
- * Where the proxy's log level comes from: `--log-level` over `PI_PROXY_LOG_LEVEL` over `logLevel` in
- * the config file over the `info` default, and what an invalid value at each source does.
+ * Where the proxy's log level comes from: `--log-level` over `PI_PROXY_LOG_LEVEL` over
+ * `logLevel` in the config file over the `info` default, and what an invalid value in the
+ * environment or the config file does.
  */
 
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
@@ -15,6 +16,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/tes
 let agentDir = ''
 let lines: string[] = []
 
+/**
+ * Writes `proxy-config.json` into this test's agent dir.
+ *
+ * @param contents - the raw config file content
+ */
 function writeConfigFile(contents: Record<string, unknown>): void {
   writeFileSync(join(agentDir, 'proxy-config.json'), JSON.stringify(contents))
 }

@@ -44,7 +44,13 @@ afterAll(async () => {
   agentDir.remove()
 })
 
-/** Send these extra request fields, and return the body pi sent upstream. */
+/**
+ * Sends a chat completion with extra request fields and returns the body pi sent upstream.
+ *
+ * @param fields - request fields merged over the base model and messages
+ * @returns the JSON body of the request the mock provider received
+ * @throws Error when the mock provider received no JSON object body
+ */
 async function sentBody(fields: Record<string, unknown>): Promise<Record<string, unknown>> {
   const before = mock.requests.length
   await testApp().request('/v1/chat/completions', {

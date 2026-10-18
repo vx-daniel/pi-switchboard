@@ -1,5 +1,5 @@
 /**
- * Unit tests for the model-exposure engine.
+ * The model-exposure engine (`src/openai/model-exposure.ts`).
  *
  * Tests cover:
  * - Exposure filtering: all, scoped, custom
@@ -19,6 +19,13 @@ import { describe, expect, test } from 'vite-plus/test'
 // Test helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Builds a text-only, zero-cost model on the `openai-completions` API.
+ *
+ * @param provider - the provider name; also forms the base URL host
+ * @param id - the model ID, used as its name too
+ * @returns the model
+ */
 function makeModel(provider: string, id: string): Model<Api> {
   return {
     id,
@@ -34,6 +41,13 @@ function makeModel(provider: string, id: string): Model<Api> {
   }
 }
 
+/**
+ * Builds an exposure config: collision-prefixed IDs, scoped exposure, no patterns, no custom
+ * models, no prefix overrides, then `overrides` on top.
+ *
+ * @param overrides - the fields that differ from that default
+ * @returns the config
+ */
 function defaultConfig(overrides: Partial<ModelExposureConfig> = {}): ModelExposureConfig {
   return {
     publicModelIdMode: 'collision-prefixed',
@@ -46,7 +60,11 @@ function defaultConfig(overrides: Partial<ModelExposureConfig> = {}): ModelExpos
 }
 
 /**
- * Helper: call computeModelExposure with the given available models.
+ * Calls {@link computeModelExposure} with the given available models.
+ *
+ * @param models - the available (auth-configured) models
+ * @param config - the exposure config
+ * @returns the exposure outcome
  */
 function expose(
   models: readonly Model<Api>[],
@@ -231,7 +249,7 @@ describe('public ID modes -- with collisions', () => {
 
     const publicIds = result.models.map((model) => model.publicId)
     // Catches a model emitted under both its prefixed and raw ID, or a conflict-group model left
-    // raw. Order is part of the contract: exposeModels keeps the input order.
+    // raw. Order is part of the contract: computeModelExposure keeps the input order.
     expect(publicIds).toEqual([
       'openai/gpt-4o',
       'openai/gpt-4o-mini',
@@ -404,7 +422,6 @@ describe('prefix uniqueness validation', () => {
       models,
       defaultConfig({ providerPrefixes: { openai: 'same', anthropic: 'same' } })
     )
-    // No collision -> no prefixing -> no prefix uniqueness issue
     expect(result.ok).toBe(true)
   })
 })
@@ -448,7 +465,6 @@ describe('resolveExposedModel', () => {
     expect(result.ok).toBe(true)
     if (!result.ok) return
 
-    // canonical ID should still work as fallback
     const resolved = resolveExposedModel(result, 'anthropic/claude-sonnet-4-20250514')
     expect(resolved).toBeDefined()
     expect(resolved?.model.provider).toBe('anthropic')

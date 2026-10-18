@@ -2,7 +2,15 @@ import { convertTools } from '@proxy/openai/tools'
 import { assert, describe, expect, test } from 'vite-plus/test'
 
 describe('convertTools', () => {
-  /** The schema pi sends upstream, as JSON: TypeBox adds symbol keys that never leave the process. */
+  /**
+   * Round-trips a value through JSON, giving the schema as pi sends it upstream.
+   *
+   * @remarks
+   * TypeBox adds symbol keys that never leave the process; JSON drops them.
+   *
+   * @param schema - the converted value: a TypeBox schema or a whole conversion result
+   * @returns the JSON-parsed copy
+   */
   function asJson(schema: unknown): unknown {
     return JSON.parse(JSON.stringify(schema))
   }

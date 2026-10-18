@@ -1,7 +1,7 @@
 /**
  * `temperature` on the Codex backend (#49): it rejects the parameter ("Unsupported parameter:
  * temperature"), though pi 1.3.0 forwards it, so the proxy drops it for `openai-codex-responses`
- * and says so at info. Every other API gets it.
+ * and says so at info the first time per model, then at debug. Every other API gets it.
  *
  * pi's Codex adapter reads the ChatGPT account ID from its key, a JWT, so the fixture key is an
  * unsigned one carrying a fake account ID. The mock answers in chat-completions format, which the
@@ -25,7 +25,12 @@ import { testApp } from '../helpers'
 
 const TEMPERATURE = 0.3
 
-/** A JWT segment: base64url JSON. */
+/**
+ * Encodes a value as a JWT segment: base64url JSON.
+ *
+ * @param value - the header or payload to encode
+ * @returns the base64url encoding of `value`'s JSON
+ */
 function jwtSegment(value: unknown): string {
   return Buffer.from(JSON.stringify(value)).toString('base64url')
 }
@@ -83,7 +88,14 @@ afterAll(async () => {
   agentDir.remove()
 })
 
-/** Ask `model` with this temperature, and return the body of the request pi POSTed for it. */
+/**
+ * Asks a model with a temperature and returns the body of the request pi POSTed for it.
+ *
+ * @param model - the canonical model ID to request
+ * @param temperature - the `temperature` the client sends
+ * @returns the JSON body of the first upstream request with one
+ * @throws Error when pi sent no request with a JSON object body
+ */
 async function sentBody(model: string, temperature: number): Promise<Record<string, unknown>> {
   const before = mock.requests.length
   await testApp().request('/v1/chat/completions', {

@@ -68,8 +68,15 @@ afterAll(async () => {
 })
 
 /**
- * Stream `model`, with `include_usage` unless `includeUsage` is false (then `stream_options` is
- * omitted, as most clients do), and return the request ID and the chunks, without `[DONE]`.
+ * Streams `model` and returns the request ID and the parsed chunks, without `[DONE]`.
+ *
+ * @remarks
+ * Also asserts a 200 and a body that ends with `data: [DONE]`.
+ *
+ * @param model - the model ID under provider `mock`
+ * @param includeUsage - whether to send `stream_options.include_usage`; when false,
+ *   `stream_options` is omitted, as most clients do
+ * @returns the `x-request-id` header and every `data:` JSON chunk in order
  */
 async function streamed(
   model: string,
@@ -95,7 +102,14 @@ async function streamed(
   return { requestId: response.headers.get('x-request-id'), chunks }
 }
 
-/** A chunk of this response: the same id, a creation time, the requested public model ID. */
+/**
+ * Builds the expected chunk of this response: the same id, a creation time, the public model ID.
+ *
+ * @param requestId - the response's `x-request-id`, which every chunk carries as its `id`
+ * @param model - the model ID under provider `mock`
+ * @param fields - the chunk's `choices` and `usage`
+ * @returns the expected chunk, with a matcher for `created`
+ */
 function chunk(requestId: string | null, model: string, fields: Record<string, unknown>): unknown {
   return {
     id: requestId,
@@ -106,6 +120,13 @@ function chunk(requestId: string | null, model: string, fields: Record<string, u
   }
 }
 
+/**
+ * Builds a chunk's single choice from a delta.
+ *
+ * @param value - the choice's `delta`
+ * @param finishReason - the choice's `finish_reason`; `null` while the answer is still streaming
+ * @returns the chunk fields holding that one choice at index 0
+ */
 function delta(
   value: Record<string, unknown>,
   finishReason: string | null = null

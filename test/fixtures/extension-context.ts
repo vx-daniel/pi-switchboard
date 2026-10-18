@@ -1,6 +1,8 @@
 /**
  * A fake pi `ExtensionCommandContext` for driving extension code without pi's TUI: it records what
  * the extension shows (`ui.notify`, `ui.setStatus`) and fails loudly if anything else is touched.
+ *
+ * @packageDocumentation
  */
 
 import type { ExtensionCommandContext, ModelRegistry } from '@earendil-works/pi-coding-agent'
@@ -18,15 +20,20 @@ export interface StatusUpdate {
   readonly text: string | undefined
 }
 
+/** What {@link fakeCommandContext} builds the context from. */
 export interface FakeContextOptions {
-  /** The registry the extension reads models from; build it over a fixture agent dir. Reading it
-   * when absent throws. */
+  /**
+   * The registry the extension reads models from; build it over a fixture agent dir. Reading it
+   * when absent throws.
+   */
   readonly modelRegistry?: ModelRegistry
   /** Whether pi has an interactive UI. Defaults to `false`. */
   readonly hasUI?: boolean
 }
 
+/** A fake command context and what the extension showed through it. */
 export interface FakeContext {
+  /** The context to pass to the extension's handler. */
   readonly context: ExtensionCommandContext
   /** Every `ui.notify` call, in order. */
   readonly notifications: Notification[]
@@ -34,7 +41,17 @@ export interface FakeContext {
   readonly statuses: StatusUpdate[]
 }
 
-/** Returns a fake command context that records notifications and status updates. */
+/**
+ * Returns a fake command context that records notifications and status updates.
+ *
+ * @remarks
+ * The other `ui` methods and the context's own methods are `vi.fn()` stubs that return
+ * `undefined`. `ui.theme` and `sessionManager` throw when read, and so does `modelRegistry` when
+ * `options.modelRegistry` is absent.
+ *
+ * @param options - the registry to expose and whether pi has an interactive UI
+ * @returns the context plus the arrays its `ui.notify` and `ui.setStatus` calls are pushed to
+ */
 export function fakeCommandContext(options: FakeContextOptions): FakeContext {
   const notifications: Notification[] = []
   const statuses: StatusUpdate[] = []

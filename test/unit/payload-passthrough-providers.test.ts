@@ -1,8 +1,9 @@
 /**
- * Unit tests for provider-specific onPayload passthrough translation in pi/complete.ts.
+ * Provider-specific payload passthrough translation in `src/pi/complete.ts`:
  *
- * - Anthropic: translated field names/formats
- * - Google: nested generationConfig patching
+ * - Anthropic: translated field names and formats (`collectAnthropicPayloadFields`)
+ * - Google: patching of the nested `config.generationConfig` and `config.toolConfig`
+ *   (`patchGooglePayload`)
  */
 
 import {
@@ -149,7 +150,12 @@ describe('collectAnthropicPayloadFields: tool_choice + parallel', () => {
 // --- Google nested patching ---
 
 describe('patchGooglePayload', () => {
-  /** Build a minimal Google-shaped payload. */
+  /**
+   * Builds a minimal Google-shaped payload.
+   *
+   * @param genConfig - the initial `config.generationConfig`; empty by default
+   * @returns a fresh payload with `model`, empty `contents`, and `config.generationConfig`
+   */
   function googlePayload(genConfig: Record<string, unknown> = {}): Record<string, unknown> {
     return {
       model: 'gemini-2.5-flash',
@@ -160,7 +166,15 @@ describe('patchGooglePayload', () => {
     }
   }
 
-  /** The record at `path` inside `value`; fails the test when a step is missing or not a record. */
+  /**
+   * Returns the record at `path` inside `value`, failing the test when a step is missing or is
+   * not a record.
+   *
+   * @param value - the object to walk
+   * @param path - the keys to follow, outermost first
+   * @returns the record found at the end of `path`
+   * @throws AssertionError when a step along `path` is not a record
+   */
   function recordAt(value: Record<string, unknown>, ...path: string[]): Record<string, unknown> {
     let current = value
     const walked: string[] = []

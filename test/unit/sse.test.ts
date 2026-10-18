@@ -37,6 +37,12 @@ describe('encodeDone', () => {
   })
 })
 
+/**
+ * Builds an empty OpenAI Responses assistant message that ended in an error.
+ *
+ * @param errorMessage - the upstream error text pi reports in `errorMessage`
+ * @returns the assistant message, with stop reason `error` and zero usage
+ */
 function makeErrorMessage(errorMessage: string): AssistantMessage {
   return {
     role: 'assistant',
@@ -58,6 +64,12 @@ function makeErrorMessage(errorMessage: string): AssistantMessage {
   }
 }
 
+/**
+ * Replays pi stream events as an async stream.
+ *
+ * @param events - the events to yield, in order
+ * @returns a generator that yields `events` one by one
+ */
 async function* yieldEvents(
   events: AssistantMessageEvent[]
 ): AsyncGenerator<AssistantMessageEvent> {
@@ -141,8 +153,17 @@ describe('upstream error logging', () => {
     resetSync()
   })
 
-  // Some providers quote the request back in their error text. Catches that text reaching a level a
-  // default deployment writes, while keeping it available to someone debugging.
+  /**
+   * Streams one upstream error event whose text quotes the request, and captures the log lines.
+   *
+   * @remarks
+   * Some providers quote the request back in their error text. The tests below catch that text
+   * reaching a level a default deployment writes, while keeping it available to someone
+   * debugging.
+   *
+   * @param level - the lowest log level to write
+   * @returns the JSON log lines written while the stream ran
+   */
   async function logLinesFor(level: 'info' | 'debug'): Promise<string[]> {
     const lines: string[] = []
     configureLogging({ level, format: 'json', write: (line) => lines.push(line) })

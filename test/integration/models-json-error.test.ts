@@ -16,7 +16,15 @@ const KEY = 'notarealsecret-models-json-key'
 let agentDir: FixtureAgentDir | undefined
 let lines: string[] = []
 
-/** Load `contents` as models.json with every log line captured, and return the health body. */
+/**
+ * Loads `contents` as models.json with every log line captured, and fetches `/healthz/models`.
+ *
+ * @remarks
+ * Resets {@link lines} and sets {@link agentDir}, which `afterEach` removes.
+ *
+ * @param contents - the raw models.json text, valid or not
+ * @returns the health response's status and body text
+ */
 async function healthWith(contents: string): Promise<{ status: number; text: string }> {
   lines = []
   // Before loading: the startup warning is one of the lines under test.
