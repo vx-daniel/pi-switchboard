@@ -11,6 +11,7 @@
 import { once } from 'node:events'
 import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from 'node:http'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { zstdDecompressSync } from 'node:zlib'
 
 import { isRecord } from '@proxy/utils/guards'
 
@@ -51,18 +52,32 @@ function parseBody(text: string): unknown {
   }
 }
 
+/**
+ * The request body as text. pi's Codex adapter zstd-compresses its bodies, as the Codex backend
+ * accepts. A body that does not decompress stays as sent: it is then not JSON, and the mock answers
+ * 400 instead of throwing inside the request handler.
+ */
+function decodeBody(raw: Buffer, contentEncoding: string | undefined): string {
+  if (contentEncoding !== 'zstd') return raw.toString()
+  try {
+    return zstdDecompressSync(raw).toString()
+  } catch {
+    return raw.toString()
+  }
+}
+
 /** Start the mock on a free port. `replies` maps a model ID to how requests for it are answered. */
 export async function startMockProvider(
   replies: Readonly<Record<string, MockReply>>
 ): Promise<MockProvider> {
   const requests: MockRequest[] = []
   const server: Server = createServer((incoming, response) => {
-    let text = ''
+    const parts: Buffer[] = []
     incoming.on('data', (part: Buffer) => {
-      text += part.toString()
+      parts.push(part)
     })
     incoming.on('end', () => {
-      const body = parseBody(text)
+      const body = parseBody(decodeBody(Buffer.concat(parts), incoming.headers['content-encoding']))
       const request: MockRequest = { path: incoming.url ?? '', headers: incoming.headers, body }
       requests.push(request)
       // Recorded either way, so a test can see what pi sent; but a provider would refuse it.
