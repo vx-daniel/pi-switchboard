@@ -11,7 +11,7 @@ beforeAll(async () => {
 })
 
 /** A model of a provider that no credential, environment variable or models.json defines. */
-const MODEL_WITHOUT_CREDENTIALS = {
+const MODEL_WITHOUT_CREDENTIALS: Model<Api> = {
   id: 'no-such-model',
   name: 'No such model',
   api: 'openai-completions',
@@ -22,7 +22,7 @@ const MODEL_WITHOUT_CREDENTIALS = {
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
   contextWindow: 1000,
   maxTokens: 100
-} as unknown as Model<Api>
+}
 
 describe('getRequestAuth', () => {
   // Catches the route's pre-check turning into a pass-through: a request for a model Pi cannot

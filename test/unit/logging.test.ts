@@ -15,7 +15,8 @@ import {
   proxyLogger,
   resolveLogFormat
 } from '@proxy/logging'
-import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
+import { isRecord } from '@proxy/utils/guards'
+import { afterEach, assert, describe, expect, test, vi } from 'vite-plus/test'
 
 let lines: string[] = []
 
@@ -24,8 +25,13 @@ function capture(level: 'debug' | 'info', format: LogFormat = 'json'): void {
   configureLogging({ level, format, write: (line) => lines.push(line) })
 }
 
+/** Each captured line parsed; fails the test when a line is not a JSON object. */
 function records(): Record<string, unknown>[] {
-  return lines.map((line) => JSON.parse(line) as Record<string, unknown>)
+  return lines.map((line) => {
+    const record: unknown = JSON.parse(line)
+    assert(isRecord(record), 'a log line is not a JSON object')
+    return record
+  })
 }
 
 afterEach(() => {

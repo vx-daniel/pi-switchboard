@@ -52,16 +52,20 @@ function makeUsage(): Usage {
 }
 
 /**
- * Build a mock partial AssistantMessage. Only populates fields used by
- * streamToSSE (content, stopReason, usage).
+ * A complete partial AssistantMessage with these content blocks. streamToSSE reads content,
+ * stopReason and usage; the identity fields and timestamp are fixed placeholders.
  */
-function makePartial(content: unknown[] = []): AssistantMessage {
+function makePartial(content: AssistantMessage['content'] = []): AssistantMessage {
   return {
     role: 'assistant',
     content,
+    api: 'openai-completions',
+    provider: 'openai',
+    model: 'test-model',
     stopReason: 'stop',
-    usage: makeUsage()
-  } as unknown as AssistantMessage
+    usage: makeUsage(),
+    timestamp: 0
+  }
 }
 
 async function* mockEvents(events: AssistantMessageEvent[]): AsyncGenerator<AssistantMessageEvent> {
@@ -270,7 +274,7 @@ describe('SSE usage chunk conformance', () => {
   // Agent reads context size and its compaction trigger from this chunk; with prompt caching a
   // ~9,650-token prompt arrived as prompt_tokens 4. Numbers are those of the measured case.
   test('usage chunk counts cached tokens in prompt_tokens and breaks them out', async () => {
-    const cachedMessage = {
+    const cachedMessage: AssistantMessage = {
       ...makePartial([{ type: 'text', text: 'Hi' }]),
       stopReason: 'stop',
       usage: {
@@ -280,8 +284,8 @@ describe('SSE usage chunk conformance', () => {
         cacheWrite: 642,
         totalTokens: 9650,
         cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
-      } satisfies Usage
-    } as AssistantMessage
+      }
+    }
     const cachedEvents: AssistantMessageEvent[] = [
       { type: 'start', partial: makePartial() },
       { type: 'done', reason: 'stop', message: cachedMessage }
