@@ -181,7 +181,7 @@ Control which models appear in the API:
 | Mode | Behavior |
 |---|---|
 | `all` | Expose every model with configured credentials |
-| `scoped` (default) | Expose the models pi's global `enabledModels` setting selects (`/scoped-models` in pi, or `settings.json`), resolved as pi resolves them: exact `provider/id`, bare IDs, globs such as `anthropic/*` or `*sonnet*`, and `:level` suffixes. With no `enabledModels`, every model with credentials, as `all`. Patterns that match nothing are listed in `/healthz/models`. pi's `--models` flag is per session, so it does not apply |
+| `scoped` (default) | Expose the models pi's global `enabledModels` setting selects (`/scoped-models` in pi, or `settings.json`), resolved as pi resolves them: exact `provider/id`, bare IDs, globs such as `anthropic/*` or `*sonnet*`, and `:level` suffixes. As in pi, a bare word also matches by substring of a model's ID or name (`opus` selects an Opus model), and a pattern several providers match exposes all of them (listed as `ambiguous`): write `provider/id` to pick one. With no `enabledModels`, every model with credentials, as `all`. Patterns that match nothing are listed in `/healthz/models`. pi's `--models` flag is per session, so it does not apply |
 | `custom` | Expose an explicit allowlist of canonical IDs (`customModels`), matched exactly |
 
 ### Canonical model IDs
@@ -209,7 +209,7 @@ The proxy reads two files from pi's configuration directory (`~/.pi/agent/`):
 | `auth.json` | `pi /login` | API keys for each provider (Anthropic, OpenAI, Google, etc.) |
 | `models.json` | pi built-in + user edits | Model definitions, capabilities, and pricing |
 
-The proxy does **not** read pi's `settings.json` (installed packages, enabled extensions) or session-level model filters (`--models` flag). All models with configured credentials are exposed through the proxy, regardless of pi session scope.
+From pi's `settings.json` the proxy reads only `enabledModels`, for `scoped` exposure. It does **not** read installed packages, enabled extensions, or session-level model filters (`--models` flag).
 
 ### What the proxy adds
 
