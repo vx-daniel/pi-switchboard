@@ -1,5 +1,7 @@
+import type { AssistantMessage } from '@earendil-works/pi-ai'
 import {
   invalidRequest,
+  mapFailedCall,
   mapUpstreamError,
   modelNotFound,
   unsupportedParameter
@@ -180,5 +182,91 @@ describe('mapUpstreamError', () => {
       status: 502,
       body: upstreamBody('Upstream provider error', 'upstream_error')
     })
+  })
+})
+
+describe('mapFailedCall', () => {
+  /** Token counts and request text the provider's overflow message carries: never in the answer. */
+  const QUOTED = 'notarealsecret-quoted-prompt'
+
+  /** pi's final message for a call that failed with this error text. */
+  function failedCall(errorMessage: string, provider = 'mock'): AssistantMessage {
+    return {
+      role: 'assistant',
+      content: [],
+      api: 'openai-completions',
+      provider,
+      model: 'model',
+      usage: {
+        input: 0,
+        output: 0,
+        cacheRead: 0,
+        cacheWrite: 0,
+        totalTokens: 0,
+        cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 }
+      },
+      stopReason: 'error',
+      errorMessage,
+      timestamp: 0
+    }
+  }
+
+  const CONTEXT_OVERFLOW = {
+    status: 400,
+    body: {
+      error: {
+        message:
+          "The messages exceed the model's context window. Shorten or summarize them and try again.",
+        type: 'invalid_request_error',
+        param: 'messages',
+        code: 'context_length_exceeded'
+      }
+    }
+  }
+
+  // Catches an overflow answered as a generic 502, which agent clients retry unchanged instead of
+  // compacting the history (#40), for the providers the mock provider cannot speak for.
+  test.each([
+    [
+      'Google, error body',
+      `{"error":{"code":400,"message":"The input token count (1200000) exceeds the maximum number of tokens allowed (1048576). ${QUOTED}","status":"INVALID_ARGUMENT"}}`
+    ],
+    [
+      'Google, mid-stream',
+      `got status: 400. {"error":{"code":400,"message":"The input token count (1200000) exceeds the maximum number of tokens allowed (1048576). ${QUOTED}"}}`
+    ],
+    ['Bedrock, no status', `ValidationException: Input is too long for requested model. ${QUOTED}`],
+    [
+      'Anthropic request too large (413)',
+      `413 {"type":"error","error":{"type":"request_too_large","message":"${QUOTED}"}}`
+    ],
+    [
+      'OpenAI Responses',
+      `OpenAI API error (400): Your input exceeds the context window of this model. ${QUOTED}`
+    ]
+  ])('maps an overflow from %s to 400 context_length_exceeded', (_case, errorMessage) => {
+    const mapped = mapFailedCall(failedCall(errorMessage))
+
+    expect(mapped).toEqual(CONTEXT_OVERFLOW)
+    expect(JSON.stringify(mapped)).not.toContain(QUOTED)
+  })
+
+  // Catches pi's overflow wording overriding a reported status: these say "too many tokens" or
+  // name a limit, but a 429 is a rate limit and a 503 an unavailable provider.
+  test.each([
+    [
+      '429 worded "too many tokens"',
+      '429 {"type":"error","error":{"type":"rate_limit_error","message":"Too many tokens in the last minute"}}',
+      { status: 429, code: 'rate_limit' }
+    ],
+    [
+      '503 mentioning a token limit',
+      '503: {"message":"Token limit exceeded on this shard, try again"}',
+      { status: 503, code: 'provider_unavailable' }
+    ]
+  ])('keeps a %s as its status says', (_case, errorMessage, expected) => {
+    const mapped = mapFailedCall(failedCall(errorMessage))
+
+    expect({ status: mapped.status, code: mapped.body.error.code }).toEqual(expected)
   })
 })

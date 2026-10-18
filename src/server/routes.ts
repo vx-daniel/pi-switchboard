@@ -7,6 +7,7 @@
  * - POST /v1/chat/completions
  */
 
+import type { AssistantMessageEvent } from '@earendil-works/pi-ai'
 import type { ServerConfig } from '@proxy/config/env'
 import { loadConfigFromFile } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
@@ -28,10 +29,10 @@ import { getAvailableModels, getEnabledModels, getRequestAuth } from '@proxy/pi/
 import {
   authenticationError,
   invalidRequest,
+  type MappedUpstreamError,
+  mapFailedCall,
   mapUpstreamError,
   modelNotFound,
-  type OpenAIError,
-  type UpstreamErrorStatus,
   unsupportedParameter
 } from '@proxy/server/errors'
 import {
@@ -106,20 +107,22 @@ async function getExposure(configReader: ExposureConfigReader): Promise<ModelExp
 }
 
 /**
- * Map an upstream error and log it: an error line for the failure, plus a warning for rate limiting
- * or overload so those can be counted apart from real failures. The request's IDs come from the
- * logging context.
+ * Log a mapped upstream failure: an error line for the failure, plus a warning for rate limiting or
+ * overload so those can be counted apart from real failures. The raw upstream `detail` stays at
+ * debug: some providers quote parts of the request back. The request's IDs come from the logging
+ * context.
  */
-function handleUpstreamError(err: unknown): { status: UpstreamErrorStatus; body: OpenAIError } {
-  const mapped = mapUpstreamError(err)
+function reportUpstreamFailure(
+  mapped: MappedUpstreamError,
+  detail: string | undefined
+): MappedUpstreamError {
   chatLogger.error('Upstream call failed with {status}: {message}', {
     status: mapped.status,
     message: mapped.body.error.message,
     code: mapped.body.error.code
   })
-  // The raw upstream message stays at debug: some providers quote parts of the request back.
-  if (err instanceof Error) {
-    chatLogger.debug('Upstream error detail: {detail}', { detail: err.message })
+  if (detail !== undefined) {
+    chatLogger.debug('Upstream error detail: {detail}', { detail })
   }
   if (mapped.status === HTTP_TOO_MANY_REQUESTS || mapped.status === HTTP_SERVICE_UNAVAILABLE) {
     chatLogger.warn('Upstream overloaded ({upstreamStatus}, {code})', {
@@ -128,6 +131,14 @@ function handleUpstreamError(err: unknown): { status: UpstreamErrorStatus; body:
     })
   }
   return mapped
+}
+
+/** reportUpstreamFailure for a thrown value: mapped from its message, which is also the detail. */
+function reportThrownFailure(err: unknown): MappedUpstreamError {
+  return reportUpstreamFailure(
+    mapUpstreamError(err),
+    err instanceof Error ? err.message : undefined
+  )
 }
 
 /** Parse the JSON body and validate it as a chat completion request. */
@@ -280,29 +291,81 @@ interface CompletionJob {
   readonly options: CompletionOptions
 }
 
-function streamChat(honoContext: ProxyContext, job: CompletionJob): Response {
+/**
+ * The first result of an event iterator, then the rest of it, as one async iterable. Ending it early
+ * (the client left mid-stream) ends the rest too.
+ */
+async function* startingWith<T>(
+  first: IteratorResult<T>,
+  rest: AsyncIterator<T>
+): AsyncGenerator<T> {
+  try {
+    if (first.done === true) return
+    yield first.value
+    for (let next = await rest.next(); next.done !== true; next = await rest.next()) {
+      yield next.value
+    }
+  } finally {
+    await rest.return?.()
+  }
+}
+
+/**
+ * Stream a completion as SSE. Nothing is sent until pi's first event: every pi adapter emits
+ * `start` only once the provider has accepted the request, so a failure before it (an overflow, a
+ * rate limit, bad credentials, a provider that never answers) still gets its HTTP status and JSON
+ * body, as OpenAI answers a streaming request it refuses. Once the stream has started, a failure
+ * can only be an SSE error event with the same body.
+ */
+async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promise<Response> {
   const { requestId, canonicalModelId, model, context, request, options } = job
   const includeUsage =
     request.stream_options !== null &&
     request.stream_options !== undefined &&
     request.stream_options.include_usage === true
+  const start = performance.now()
+  // The client's own departure aborts the call, which then fails: not an upstream failure, and
+  // nobody is waiting for the answer.
+  const answerClientLeft = (): Response => {
+    chatLogger.debug('Client left before the stream started, after {durationMs} ms', {
+      durationMs: Math.round(performance.now() - start)
+    })
+    return honoContext.body(null)
+  }
+
+  let events: AsyncIterator<AssistantMessageEvent>
+  let first: IteratorResult<AssistantMessageEvent>
+  try {
+    events = (await piStream(model, context, request, options))[Symbol.asyncIterator]()
+    first = await events.next()
+  } catch (err: unknown) {
+    if (options.signal?.aborted === true) return answerClientLeft()
+    const mapped = reportThrownFailure(err)
+    return honoContext.json(mapped.body, mapped.status)
+  }
+  if (first.done !== true && first.value.type === 'error') {
+    if (options.signal?.aborted === true) return answerClientLeft()
+    const failed = first.value.error
+    const mapped = reportUpstreamFailure(mapFailedCall(failed), failed.errorMessage)
+    chatLogger.debug('Upstream failed before the stream started; answering {status}', {
+      status: mapped.status
+    })
+    return honoContext.json(mapped.body, mapped.status)
+  }
 
   honoContext.header('content-type', 'text/event-stream')
   honoContext.header('cache-control', 'no-cache')
   honoContext.header('connection', 'keep-alive')
+  chatLogger.debug('Streaming {model} with includeUsage={includeUsage}', {
+    model: canonicalModelId,
+    includeUsage
+  })
 
   return honoStream(honoContext, async (stream) => {
-    const start = performance.now()
     let frameCount = 0
     try {
-      const eventStream = await piStream(model, context, request, options)
-      chatLogger.debug('Streaming {model} with includeUsage={includeUsage}', {
-        model: canonicalModelId,
-        includeUsage
-      })
-
       for await (const frame of streamToSSE(
-        eventStream,
+        startingWith(first, events),
         requestId,
         canonicalModelId,
         includeUsage
@@ -316,16 +379,12 @@ function streamChat(honoContext: ProxyContext, job: CompletionJob): Response {
         aborted: stream.aborted
       })
     } catch (err: unknown) {
-      const mapped = handleUpstreamError(err)
+      const mapped = reportThrownFailure(err)
       chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
         frameCount,
         durationMs: Math.round(performance.now() - start)
       })
-      // For streams, write an error event and close
-      const errorChunk = JSON.stringify({
-        error: mapped.body.error
-      })
-      await stream.write(`data: ${errorChunk}\n\n`)
+      await stream.write(`data: ${JSON.stringify(mapped.body)}\n\n`)
       await stream.write('data: [DONE]\n\n')
     }
   })
@@ -344,14 +403,13 @@ async function completeChat(honoContext: ProxyContext, job: CompletionJob): Prom
 
     // Detect upstream errors reported via stopReason
     if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-      const errorMessage = message.errorMessage ?? 'Upstream provider error'
-      const mapped = handleUpstreamError(new Error(errorMessage))
+      const mapped = reportUpstreamFailure(mapFailedCall(message), message.errorMessage)
       return honoContext.json(mapped.body, mapped.status)
     }
 
     return honoContext.json(buildChatCompletion(requestId, canonicalModelId, message))
   } catch (err: unknown) {
-    const mapped = handleUpstreamError(err)
+    const mapped = reportThrownFailure(err)
     return honoContext.json(mapped.body, mapped.status)
   }
 }
@@ -405,6 +463,8 @@ async function handleChatCompletion(
     request,
     options: {
       upstreamApiKey,
+      // The client's disconnect only. streamChat reads it to tell a client that left from an
+      // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
       signal: context.get('abortController').signal,
       upstreamTimeoutMs: config.upstreamTimeoutMs
     }

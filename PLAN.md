@@ -740,7 +740,9 @@ Use an OpenAI-style shape:
 
 ### Error mapping
 
-- `400` invalid request shape, ambiguous shorthand model, invalid headers
+- `400` invalid request shape, ambiguous shorthand model, invalid headers; or the conversation is
+  longer than the model's context window (`invalid_request_error`, `param: "messages"`,
+  `context_length_exceeded`, as OpenAI answers it)
 - `401` proxy auth failure or no upstream credential for target provider
 - `404` model not found
 - `422` unsupported parameter, unsupported content part, unsupported tool schema
@@ -767,9 +769,20 @@ counts (#42). The client gets a fixed message and code, never the upstream text.
 upstream credential is refused with `401` before any response starts, streamed or not
 (`checkRequestAuth`).
 
-A stream that has already started cannot change its status (it is `200`): it ends with an error
-event carrying the same mapped `{ message, type, param, code }` as the non-streaming answer, then
-`[DONE]` (#54). The raw upstream text is logged at debug only, in both paths.
+Context overflow (#40): `mapFailedCall` runs pi's `isContextOverflow` on the failed call's final
+message, which recognizes overflow wording from about 15 providers (Anthropic, OpenAI, Google,
+Bedrock, Mistral, OpenRouter, …), before the status mapping. A reported status other than 400 or 413
+rules it out, so a 429 that says "too many tokens" stays a rate limit. A provider that accepts an
+over-long prompt and answers anyway (input beyond the context window, or a `length` stop with no
+output) is not an error: the answer goes to the client and a warning is logged.
+
+A streaming request is not answered until pi's first event. pi's adapters emit `start` only once the
+provider has accepted the request, so a failure before it (an overflow, a rate limit, bad
+credentials, a provider that never answers) gets its HTTP status and JSON body, as OpenAI answers a
+streaming request it refuses. Once the stream has started its status is `200`, and a failure ends it
+with an error event carrying the same mapped `{ message, type, param, code }` as the non-streaming
+answer, then `[DONE]` (#54). A client that leaves during the wait is not logged as an upstream
+failure. The raw upstream text is logged at debug only, in all paths.
 
 Error rules:
 

@@ -20,6 +20,7 @@ import {
 import { testApp } from '../helpers'
 
 const HTTP_OK = 200
+const HTTP_BAD_REQUEST = 400
 const HTTP_UNAUTHORIZED = 401
 const HTTP_FORBIDDEN = 403
 const HTTP_TOO_MANY_REQUESTS = 429
@@ -254,6 +255,64 @@ const STATUS_CASES: readonly StatusCase[] = [
         }
       }
     }
+  },
+  // The conversation is longer than the context window, in each provider's words (#40).
+  {
+    label: 'context overflow',
+    status: HTTP_BAD_REQUEST,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message:
+            "This model's maximum context length is 128000 tokens. However, your messages resulted in 131072 tokens. Please reduce the length of the messages.",
+          type: 'invalid_request_error',
+          param: 'messages',
+          code: 'context_length_exceeded'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'prompt is too long: 210000 tokens > 200000 maximum'
+        }
+      }
+    },
+    expected: {
+      status: HTTP_BAD_REQUEST,
+      body: {
+        error: {
+          message:
+            "The messages exceed the model's context window. Shorten or summarize them and try again.",
+          type: 'invalid_request_error',
+          param: 'messages',
+          code: 'context_length_exceeded'
+        }
+      }
+    }
+  },
+  // A rate limit in words pi's overflow check would match ("too many tokens") is still a rate
+  // limit: the reported 429 decides (#40).
+  {
+    label: 'token rate limit',
+    status: HTTP_TOO_MANY_REQUESTS,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message: 'Too many tokens per minute for this organization. Please slow down.',
+          type: 'tokens',
+          code: 'tokens_exceeded'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: {
+          type: 'rate_limit_error',
+          message: 'Too many tokens in the last minute, please retry later.'
+        }
+      }
+    },
+    expected: RATE_LIMITED
   }
 ]
 
@@ -370,23 +429,23 @@ describe.each(APIS)('upstream HTTP error through %s', (api) => {
     }
   )
 
-  // Catches a failed stream that ends silently, or with a normal finish, instead of an error event
-  // and `[DONE]`; and an error frame that quotes the provider or carries a different code than the
-  // non-streaming answer (#54).
+  // Catches a refused streaming request answered as HTTP 200 with an error event: OpenAI answers it
+  // with the status, and clients key retries, backoff and compaction on it (#40). The body is the
+  // non-streaming one: a fixed message that never quotes the provider (#54).
   test.each(STATUS_CASES)(
-    '$label: upstream $status ends the stream with the same error, mapped',
+    '$label: upstream $status refuses a streaming request with the same status and body',
     async (statusCase) => {
       const outcome = await chat(`${providerName}/${failingModel(api, statusCase)}`, true)
 
       expect({
         status: outcome.status,
         contentType: outcome.contentType,
-        events: dataEvents(outcome.text),
+        body: JSON.parse(outcome.text) as unknown,
         attempts: outcome.attempts
       }).toEqual({
-        status: HTTP_OK,
-        contentType: 'text/event-stream',
-        events: [statusCase.expected.body, '[DONE]'],
+        status: statusCase.expected.status,
+        contentType: 'application/json',
+        body: statusCase.expected.body,
         attempts: 1
       })
     }

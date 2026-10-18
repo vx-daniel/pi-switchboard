@@ -14,7 +14,7 @@
 import type { AssistantMessageEvent, Usage } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import { mapFinishReason, mapUsage } from '@proxy/openai/responses'
-import { mapUpstreamError, type OpenAIError } from '@proxy/server/errors'
+import { mapFailedCall, type OpenAIError } from '@proxy/server/errors'
 
 const sseLogger = proxyLogger('openai', 'sse')
 
@@ -210,7 +210,7 @@ function eventToFrames(
       return []
     case 'error': {
       state.terminated = true
-      const { body } = mapUpstreamError(new Error(event.error.errorMessage ?? ''))
+      const { body } = mapFailedCall(event.error)
       logUpstreamStreamError(event, body.error.code)
       return encodeUpstreamError(body)
     }

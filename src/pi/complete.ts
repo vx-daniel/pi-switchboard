@@ -12,6 +12,7 @@ import {
   type AssistantMessageEventStream,
   clampThinkingLevel,
   type Context,
+  isContextOverflow,
   type Model,
   type ModelThinkingLevel,
   type SimpleStreamOptions
@@ -400,7 +401,10 @@ function passthroughStrategy(api: string): 'openai' | 'codex' | 'anthropic' | 'g
 export interface CompletionOptions {
   /** Per-request upstream API key override via X-Pi-Upstream-Api-Key header. */
   readonly upstreamApiKey?: string | undefined
-  /** Abort signal for cancellation. */
+  /**
+   * The client's disconnect, and nothing else: the route tells a client that left from an upstream
+   * failure by it. The upstream idle timeout is combined with it only for pi (combineSignals).
+   */
   readonly signal?: AbortSignal | undefined
   /**
    * The longest the provider may go without sending anything, in milliseconds. Restarts on every
@@ -600,6 +604,21 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
     )
     logUpstreamErrorDetail(message.errorMessage)
     return
+  }
+  // A provider that accepted an over-long prompt and answered anyway (input beyond the context
+  // window, or a length stop with no output) truncated it silently. The answer still goes to the
+  // client: it was not an error, but the operator should know the model did not see everything.
+  if (isContextOverflow(message, call.model.contextWindow)) {
+    completeLogger.warn(
+      'Upstream call to {modelId} looks like a silent context overflow: {inputTokens} input tokens for a {contextWindow}-token window',
+      () => ({
+        ...callProperties(call),
+        stopReason: message.stopReason,
+        inputTokens: message.usage.input + message.usage.cacheRead,
+        outputTokens: message.usage.output,
+        contextWindow: call.model.contextWindow
+      })
+    )
   }
   completeLogger.debug(
     'Upstream call to {modelId} finished in {durationMs} ms: {stopReason}',

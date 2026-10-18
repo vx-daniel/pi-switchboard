@@ -104,4 +104,19 @@ describe('upstream timeout', () => {
     expect(complete.status).toBe(504)
     expect(await complete.json()).toMatchObject({ error: { code: 'timeout' } })
   })
+
+  // Catches a streaming request to a provider that never answers getting HTTP 200 and an error
+  // event: nothing was streamed, so it gets the 504 a non-streaming request gets (#40).
+  test('answers a streaming request to a provider that never answers with 504', async () => {
+    const streamed = await chat('silent', true)
+    expect(streamed.status).toBe(504)
+    expect(await streamed.json()).toEqual({
+      error: {
+        message: 'Upstream request timed out',
+        type: 'server_error',
+        param: null,
+        code: 'timeout'
+      }
+    })
+  })
 })
