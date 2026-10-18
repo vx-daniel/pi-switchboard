@@ -425,6 +425,68 @@ function reasoningLevel(
 }
 
 /**
+ * The temperature to send upstream for `model`, or undefined when it must be dropped.
+ *
+ * The Codex backend rejects temperature ("Unsupported parameter: temperature"), though pi 1.3.0
+ * forwards it. Dropped rather than refused, so clients that always send one keep working on
+ * Codex models (#49). The first drop per model is logged at info so the operator sees it; the
+ * rest at debug, as a client that always sends one would otherwise log a line per request.
+ */
+function upstreamTemperature(model: Model<Api>, temperature: number): number | undefined {
+  if (model.api !== 'openai-codex-responses') return temperature
+  const firstForModel = !modelsWithDroppedTemperature.has(model.id)
+  modelsWithDroppedTemperature.add(model.id)
+  const dropped =
+    'Dropped temperature {temperature} for {modelId}: the Codex backend does not accept it'
+  const properties = { temperature, modelId: model.id, api: model.api }
+  if (firstForModel) completeLogger.info(dropped, properties)
+  else completeLogger.debug(dropped, properties)
+  return undefined
+}
+
+/**
+ * The `onPayload` hook injecting the request's passthrough fields for `model.api`, or undefined
+ * when that API gets no passthrough. Tool `strict` is not patched here: convertTools maps it to
+ * pi's constrainedSampling, which each API adapter applies in its own shape.
+ */
+function passthroughHook(
+  model: Model<Api>,
+  request: ChatCompletionRequest
+): SimpleStreamOptions['onPayload'] {
+  const payloadFields = collectPayloadFields(request, model.api)
+  const needsGooglePatch = isGoogleApi(model.api)
+  const payloadFieldNames = payloadFields === undefined ? [] : Object.keys(payloadFields)
+
+  completeLogger.debug('Payload passthrough for {api}: {passthrough}', {
+    api: model.api,
+    passthrough: passthroughStrategy(model.api),
+    payloadFields: payloadFieldNames,
+    googlePatch: needsGooglePatch
+  })
+
+  if (payloadFields === undefined && !needsGooglePatch) return undefined
+  return (payload: unknown) => {
+    if (!isRecord(payload)) {
+      completeLogger.warn('Upstream payload for {api} is not an object; passthrough not applied', {
+        api: model.api,
+        payloadType: typeof payload
+      })
+      return payload
+    }
+    // Flat field injection (OpenAI-compatible and Anthropic)
+    if (payloadFields !== undefined) Object.assign(payload, payloadFields)
+    // Google nested generationConfig patching
+    const googlePatched = needsGooglePatch && patchGooglePayload(payload, request)
+    completeLogger.debug('Patched upstream payload for {api}', {
+      api: model.api,
+      patchedFields: payloadFieldNames,
+      googlePatched
+    })
+    return payload
+  }
+}
+
+/**
  * Build pi SimpleStreamOptions from an OpenAI request.
  */
 async function buildStreamOptions(
@@ -435,22 +497,9 @@ async function buildStreamOptions(
 ): Promise<SimpleStreamOptions> {
   const opts: SimpleStreamOptions = {}
 
-  // The Codex backend rejects temperature ("Unsupported parameter: temperature"), though pi 1.3.0
-  // forwards it. Dropped rather than refused, so clients that always send one keep working on
-  // Codex models (#49). The first drop per model is logged at info so the operator sees it; the
-  // rest at debug, as a client that always sends one would otherwise log a line per request.
   if (request.temperature !== undefined) {
-    if (model.api === 'openai-codex-responses') {
-      const firstForModel = !modelsWithDroppedTemperature.has(model.id)
-      modelsWithDroppedTemperature.add(model.id)
-      const dropped =
-        'Dropped temperature {temperature} for {modelId}: the Codex backend does not accept it'
-      const properties = { temperature: request.temperature, modelId: model.id, api: model.api }
-      if (firstForModel) completeLogger.info(dropped, properties)
-      else completeLogger.debug(dropped, properties)
-    } else {
-      opts.temperature = request.temperature
-    }
+    const temperature = upstreamTemperature(model, request.temperature)
+    if (temperature !== undefined) opts.temperature = temperature
   }
 
   // Normalize max_tokens / max_completion_tokens
@@ -482,47 +531,8 @@ async function buildStreamOptions(
     opts.apiKey = options.upstreamApiKey
   }
 
-  // Inject passthrough fields via onPayload. Tool `strict` is not patched here: convertTools
-  // maps it to pi's constrainedSampling, which each API adapter applies in its own shape.
-  const payloadFields = collectPayloadFields(request, model.api)
-  const needsGooglePatch = isGoogleApi(model.api)
-  const payloadFieldNames = payloadFields === undefined ? [] : Object.keys(payloadFields)
-
-  completeLogger.debug('Payload passthrough for {api}: {passthrough}', {
-    api: model.api,
-    passthrough: passthroughStrategy(model.api),
-    payloadFields: payloadFieldNames,
-    googlePatch: needsGooglePatch
-  })
-
-  if (payloadFields !== undefined || needsGooglePatch) {
-    opts.onPayload = (payload: unknown) => {
-      if (isRecord(payload)) {
-        // Flat field injection (OpenAI-compatible and Anthropic)
-        if (payloadFields !== undefined) {
-          for (const [fieldName, fieldValue] of Object.entries(payloadFields)) {
-            payload[fieldName] = fieldValue
-          }
-        }
-        // Google nested generationConfig patching
-        const googlePatched = needsGooglePatch && patchGooglePayload(payload, request)
-        completeLogger.debug('Patched upstream payload for {api}', {
-          api: model.api,
-          patchedFields: payloadFieldNames,
-          googlePatched
-        })
-      } else {
-        completeLogger.warn(
-          'Upstream payload for {api} is not an object; passthrough not applied',
-          {
-            api: model.api,
-            payloadType: typeof payload
-          }
-        )
-      }
-      return payload
-    }
-  }
+  const onPayload = passthroughHook(model, request)
+  if (onPayload !== undefined) opts.onPayload = onPayload
 
   return opts
 }
