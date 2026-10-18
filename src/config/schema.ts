@@ -519,7 +519,9 @@ export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions
  *
  * @remarks
  * Covers host, port, auth token (only when non-empty), remote images, body size, upstream timeout
- * and log level. Not `lifetime` or `zed` (extension-only), and not `PI_PROXY_AGENTIC`.
+ * and log level. Not `lifetime` or `zed` (extension-only). Not `PI_PROXY_AGENTIC` either, on
+ * purpose: agentic mode is not built, the variable only reaches the startup log, and the
+ * extension has no setting for it.
  *
  * @param config - The config to translate.
  * @returns Env var names and values.

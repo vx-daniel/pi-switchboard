@@ -187,16 +187,17 @@ const main = defineCommand({
     },
     'remote-images': {
       type: 'boolean',
-      description: 'Enable remote image URL fetching'
+      description:
+        'Allow remote image URLs (currently no effect: remote URLs are always rejected, #109)'
     },
     'max-body-size': {
       type: 'string',
-      description: 'Maximum request body size in MB (default: 50)'
+      description: 'Maximum request body size in MB (default: from config or 50)'
     },
     'upstream-timeout': {
       type: 'string',
       description:
-        'Seconds the upstream provider may send nothing before a call is aborted (default: 120)'
+        'Seconds the upstream provider may send nothing before a call is aborted (default: from config or 120)'
     },
     'log-level': {
       type: 'string',
@@ -208,7 +209,7 @@ const main = defineCommand({
     },
     'config': {
       type: 'boolean',
-      description: 'Show effective configuration and exit'
+      description: "Show the config file's settings and exit (flags and env vars not applied)"
     }
   },
   run: async ({ args }) => {
