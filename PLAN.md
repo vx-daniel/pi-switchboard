@@ -575,7 +575,7 @@ Fields translated to Anthropic's wire format:
 |---|---|
 | `top_p` | `top_p` (same name, natively supported) |
 | `stop` | `stop_sequences` (string or array → always array) |
-| `user` | `metadata: { user_id }` |
+| `user` | `metadata: { user_id }`, through pi's `metadata` option, which its Anthropic adapter sends (#48), not the payload patch |
 | `tool_choice: "auto"` | `tool_choice: { type: "auto" }` |
 | `tool_choice: "none"` | `tool_choice: { type: "none" }` |
 | `tool_choice: "required"` | `tool_choice: { type: "any" }` |

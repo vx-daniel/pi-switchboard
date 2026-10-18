@@ -287,8 +287,7 @@ describe('collectPayloadFields: whole payload per API family', () => {
       {
         top_p: 0.9,
         stop_sequences: ['END'],
-        tool_choice: { type: 'any', disable_parallel_tool_use: true },
-        metadata: { user_id: 'user-1' }
+        tool_choice: { type: 'any', disable_parallel_tool_use: true }
       }
     ],
     ['openai-codex-responses', { tool_choice: 'required', parallel_tool_calls: false }],
