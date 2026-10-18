@@ -125,7 +125,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | Feature | Notes |
 |---|---|
 | `model` | Public ID, canonical (`provider/model-id`), or collision-prefixed shorthand |
-| `messages` (text) | `system`, `developer`, `user`, `assistant`, `tool` roles |
+| `messages` (text) | `system`, `developer`, `user`, `assistant`, `tool` roles. `system` and `developer` before the first turn form the system prompt; a later one stays in place on models that accept mid-conversation instructions (pi's `supportsMidConvoSystemMessages`; Anthropic: just before the next answer) and is merged into the system prompt on others |
 | `messages` (base64 images) | Base64 data URI image content parts (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) |
 | `stream` | SSE with `text_delta` and `toolcall_delta` mapping |
 | `temperature` | Direct passthrough |

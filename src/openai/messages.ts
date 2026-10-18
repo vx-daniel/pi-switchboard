@@ -2,8 +2,8 @@
  * OpenAI messages -> pi Context conversion.
  *
  * Phase 0 contract:
- * - `system` messages -> accumulated system prompt
- * - `developer` messages -> merged into effective system prompt in message order
+ * - `system` and `developer` messages before the first conversation turn -> the system prompt
+ * - later `system` and `developer` messages -> pi SystemMessages in place (#45)
  * - `user` text -> pi UserMessage
  * - `assistant` text -> pi AssistantMessage history
  * - `tool` -> pi ToolResultMessage
@@ -46,13 +46,17 @@ export type ConversionResult = ConversionSuccess | ConversionError
 /**
  * Convert OpenAI messages array into a pi Context.
  *
- * System and developer messages are merged into `systemPrompt`.
+ * System and developer messages before the first conversation turn are merged into
+ * `systemPrompt`. A later one stays where the client put it, as a pi SystemMessage: pi keeps it in
+ * place on models that accept mid-conversation instructions (`supportsMidConvoSystemMessages`) and
+ * merges it into the leading prompt for the others, as the proxy used to for every model.
  * Conversation messages are mapped into pi message types.
  */
 export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
   const systemParts: string[] = []
   const piMessages: Message[] = []
   const roleCounts = { system: 0, developer: 0, user: 0, assistant: 0, tool: 0 }
+  let laterSystemCount = 0
 
   const toolCallNames = collectToolCallNames(messages)
 
@@ -61,10 +65,13 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
     if (message === undefined) continue
     roleCounts[message.role]++
 
-    if (message.role === 'system') {
-      systemParts.push(message.content)
-    } else if (message.role === 'developer') {
-      systemParts.push(message.content)
+    if (message.role === 'system' || message.role === 'developer') {
+      if (piMessages.length === 0) {
+        systemParts.push(message.content)
+      } else {
+        piMessages.push({ role: 'system', content: message.content, timestamp: Date.now() })
+        laterSystemCount++
+      }
     } else if (message.role === 'user') {
       const userMsg = convertUserMessage(message.content, messageIndex)
       if (!userMsg.ok) return userMsg
@@ -94,11 +101,12 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
   }
 
   messagesLogger.debug(
-    'Converted {messageCount} messages to {piMessageCount} pi messages, merging {systemPartCount} system/developer parts',
+    'Converted {messageCount} messages to {piMessageCount} pi messages: {systemPartCount} system/developer parts in the prompt, {laterSystemCount} kept in place',
     {
       messageCount: messages.length,
       piMessageCount: piMessages.length,
       systemPartCount: systemParts.length,
+      laterSystemCount,
       systemPromptChars: context.systemPrompt?.length ?? 0,
       roleCounts
     }

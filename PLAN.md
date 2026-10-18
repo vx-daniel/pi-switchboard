@@ -333,8 +333,13 @@ Default behavior:
 
 ### Roles
 
-- `system` -> system prompt accumulator
-- `developer` -> merged into the effective system prompt in message order
+- `system`, `developer` (treated alike):
+  - before the first conversation turn -> the system prompt, joined with a blank line, in order
+  - later -> a pi `SystemMessage` where the client put it (#45). On a model whose compat sets
+    `supportsMidConvoSystemMessages`, pi sends it in place: chat completions and Responses between
+    the same turns; Anthropic just before the next assistant turn, because Anthropic refuses
+    anything between a `tool_use` and its `tool_result`. On any other model pi merges it into the
+    leading prompt (`collapseSystemMessages`), so the payload is what the proxy sent before #45.
 - `user` -> pi user message
 - `assistant` -> pi assistant message history
 - `tool` -> pi tool result message
