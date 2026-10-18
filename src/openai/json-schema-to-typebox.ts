@@ -351,26 +351,43 @@ function collectKeywords(
       })
       continue
     }
-    const kind = ANNOTATION_KEYWORDS.get(keyword) ?? allowed.constraints.get(keyword)
-    if (kind === undefined) {
-      const forType = allowed.typeName === undefined ? '' : ` for type '${allowed.typeName}'`
-      return {
-        ok: false,
-        message: `Unsupported JSON Schema keyword '${keyword}'${forType} at ${path || 'root'}`,
-        path
-      }
-    }
-    const valueKind = KEYWORD_VALUE_KINDS[kind]
-    if (!valueKind.accepts(keywordValue)) {
-      return {
-        ok: false,
-        message: `'${keyword}' must be ${valueKind.description} at ${path || 'root'}`,
-        path
-      }
+    const error = checkCarriedKeyword(keyword, keywordValue, path, allowed)
+    if (error !== undefined) {
+      return error
     }
     opts[keyword] = keywordValue
   }
   return { ok: true, opts }
+}
+
+/**
+ * Check that a non-structural, non-meta keyword is an annotation or a constraint allowed on the
+ * node, and that its value has the right kind. Returns the error, or undefined when it is carried.
+ */
+function checkCarriedKeyword(
+  keyword: string,
+  keywordValue: unknown,
+  path: string,
+  allowed: AllowedKeywords
+): SchemaConversionError | undefined {
+  const kind = ANNOTATION_KEYWORDS.get(keyword) ?? allowed.constraints.get(keyword)
+  if (kind === undefined) {
+    const forType = allowed.typeName === undefined ? '' : ` for type '${allowed.typeName}'`
+    return {
+      ok: false,
+      message: `Unsupported JSON Schema keyword '${keyword}'${forType} at ${path || 'root'}`,
+      path
+    }
+  }
+  const valueKind = KEYWORD_VALUE_KINDS[kind]
+  if (!valueKind.accepts(keywordValue)) {
+    return {
+      ok: false,
+      message: `'${keyword}' must be ${valueKind.description} at ${path || 'root'}`,
+      path
+    }
+  }
+  return undefined
 }
 
 /**
@@ -530,13 +547,26 @@ function convertNullableType(
   }
 }
 
+/** The string names in an object's `required` array; non-strings and a non-array are ignored. */
+function collectRequiredNames(rawRequired: unknown): Set<string> {
+  const requiredSet = new Set<string>()
+  if (!Array.isArray(rawRequired)) {
+    return requiredSet
+  }
+  for (const requiredName of rawRequired) {
+    if (typeof requiredName === 'string') {
+      requiredSet.add(requiredName)
+    }
+  }
+  return requiredSet
+}
+
 function convertObject(
   schema: Record<string, unknown>,
   path: string,
   opts: Record<string, unknown>
 ): SchemaConversionResult {
   const rawProperties = schema['properties']
-  const rawRequired = schema['required']
 
   // Object with no properties -- just return an empty object type
   if (rawProperties === undefined) {
@@ -551,15 +581,7 @@ function convertObject(
     }
   }
 
-  const requiredSet = new Set<string>()
-  if (Array.isArray(rawRequired)) {
-    for (const requiredName of rawRequired) {
-      if (typeof requiredName === 'string') {
-        requiredSet.add(requiredName)
-      }
-    }
-  }
-
+  const requiredSet = collectRequiredNames(schema['required'])
   const typeboxProperties: Record<string, TSchema> = {}
 
   for (const [key, propSchema] of Object.entries(rawProperties)) {
@@ -568,12 +590,7 @@ function convertObject(
     if (!result.ok) {
       return result
     }
-
-    if (requiredSet.has(key)) {
-      typeboxProperties[key] = result.schema
-    } else {
-      typeboxProperties[key] = Type.Optional(result.schema)
-    }
+    typeboxProperties[key] = requiredSet.has(key) ? result.schema : Type.Optional(result.schema)
   }
 
   return { ok: true, schema: Type.Object(typeboxProperties, opts) }
