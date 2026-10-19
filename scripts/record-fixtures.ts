@@ -211,7 +211,8 @@ async function recordScenario(
       ...captured.exchange
     },
     captured.secrets,
-    ...(outDir === undefined || outDir === '' ? [] : [outDir])
+    // `undefined` takes saveRecording's default, the committed fixtures; so does an empty value.
+    outDir === '' ? undefined : outDir
   )
 }
 
