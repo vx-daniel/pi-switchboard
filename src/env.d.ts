@@ -18,6 +18,7 @@ declare namespace NodeJS {
     PI_PROXY_AUTH_TOKEN?: string | undefined
     PI_PROXY_AGENTIC?: string | undefined
     PI_PROXY_REMOTE_IMAGES?: string | undefined
+    PI_PROXY_DOCS_UI?: string | undefined
     PI_PROXY_MAX_BODY_SIZE?: string | undefined
     PI_PROXY_UPSTREAM_TIMEOUT_MS?: string | undefined
     PI_PROXY_LOG_LEVEL?: string | undefined

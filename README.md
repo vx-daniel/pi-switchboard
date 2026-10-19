@@ -100,6 +100,16 @@ curl http://localhost:4141/v1/chat/completions \
 | `GET /v1/models/{model}` | Model details by public ID or canonical ID (supports URL-encoded IDs with `/`) |
 | `POST /v1/chat/completions` | Chat completions (streaming and non-streaming) |
 | `GET /v1/switchboard/models` | Not OpenAI's: each exposed model's pi capabilities, such as its supported `reasoning_effort` values ([below](#discovering-available-models)) |
+| `GET /v1/switchboard/openapi.json` | Not OpenAI's: this API as an OpenAPI 3.1 document ([below](#api-documentation)) |
+| `GET /v1/switchboard/docs` | Not OpenAI's, off by default: Swagger UI for the document, to read the API and try requests ([below](#api-documentation)) |
+
+### API documentation
+
+`GET /v1/switchboard/openapi.json` describes the routes above: each request and response schema, every error status, and the bearer token. Point any OpenAPI tool at it, such as a client generator, Postman or an API diff. The same document is committed as [`openapi.json`](openapi.json), so a change to the API shows up in a pull request.
+
+Turn on `docsUi` (`--docs-ui`, `PI_PROXY_DOCS_UI=true`, or the settings panel) and open `http://localhost:4141/v1/switchboard/docs` in a browser to browse the API and send requests with "Try it out". With proxy auth on, click **Authorize** and enter the token first. The page loads Swagger UI 5.34.0 from the jsDelivr CDN, so it needs internet access; that is why it is off by default.
+
+Neither route needs the proxy token, even with proxy auth on: a browser cannot send one to open a page. Both name routes and schemas only, never a model, provider or credential, and every route they describe still needs the token.
 
 ### Health checks
 
@@ -223,6 +233,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 | Port | `PI_PROXY_PORT` | `4141` | HTTP listen port (`--port`, `port`) |
 | Auth token | `PI_PROXY_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication (`--auth-token`, `authToken`) |
 | Remote images | `PI_PROXY_REMOTE_IMAGES` | `false` | Fetch remote image URLs server-side and inline them as base64; off, they are rejected with `400`. The proxy then makes requests for its clients, so only public `http`/`https` hosts are allowed (see [Security defaults](#security-defaults)) (`--remote-images`, `remoteImages`) |
+| Docs UI | `PI_PROXY_DOCS_UI` | `false` | Serve Swagger UI at `/v1/switchboard/docs` ([API documentation](#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
 | Max body size | `PI_PROXY_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
 | Upstream timeout | `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds (`upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
 | Log level | `PI_PROXY_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |

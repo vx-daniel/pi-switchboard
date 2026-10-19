@@ -267,7 +267,7 @@ describe('--config', () => {
 
 describe('starting the server', () => {
   // Catches a CLI flag being dropped on its way to the server: the port it binds, the token it
-  // demands, the body and timeout limits, remote images and the log level.
+  // demands, the body and timeout limits, remote images, the docs UI and the log level.
   test('the flags configure the server that starts', async () => {
     const port = await freePort()
     const origin = `http://127.0.0.1:${String(port)}`
@@ -280,6 +280,7 @@ describe('starting the server', () => {
       '--auth-token',
       FIXTURE_TOKEN,
       '--remote-images',
+      '--docs-ui',
       '--max-body-size',
       String(BODY_SIZE_MB),
       '--upstream-timeout',
@@ -308,6 +309,7 @@ describe('starting the server', () => {
       proxyAuthMode: 'token',
       agenticEnabled: false,
       remoteImagesEnabled: true,
+      docsUiEnabled: true,
       maxBodySize: BODY_SIZE_MB * BYTES_PER_MB,
       upstreamTimeoutMs: UPSTREAM_TIMEOUT_SEC * MS_PER_SECOND,
       publicModelIdMode: expect.any(String) as string,

@@ -9,7 +9,8 @@
  * - `POST /v1/chat/completions`
  * - a fixed list of OpenAI endpoints the proxy does not implement, answered with 404
  *
- * All of them sit behind proxy auth, applied to `/v1/*` in `createApp`.
+ * All of them sit behind proxy auth, applied to `/v1/*` in `createApp`. Each documented one
+ * carries its OpenAPI description (`@proxy/server/openapi`).
  *
  * @packageDocumentation
  */
@@ -55,8 +56,16 @@ import {
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE_ENTITY
 } from '@proxy/server/http-status'
+import {
+  createChatCompletionDescription,
+  listModelCapabilitiesDescription,
+  listModelsDescription,
+  retrieveModelDescription,
+  SWITCHBOARD_PREFIX
+} from '@proxy/server/openapi'
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
+import { describeRoute } from 'hono-openapi'
 import { stream as honoStream } from 'hono/streaming'
 
 /**
@@ -100,8 +109,6 @@ export async function fileConfigReader(): Promise<ModelExposureConfig> {
 
 /** The chat completions path. */
 const CHAT_PATH = '/v1/chat/completions'
-/** The prefix before the model ID in a model detail path. */
-const MODELS_PREFIX = '/v1/models/'
 
 /** The Hono context a route handler gets. */
 type ProxyContext = Context<ProxyEnv>
@@ -642,7 +649,7 @@ export function createRoutes(
   const routes = new Hono<ProxyEnv>()
 
   // --- GET /v1/models ---
-  routes.get('/v1/models', async (context) => {
+  routes.get('/v1/models', describeRoute(listModelsDescription), async (context) => {
     const exposure = await getExposure(configReader)
     chatLogger.debug('Listing {modelCount} models', { modelCount: exposure.models.length })
     return context.json(buildModelList(exposure.models))
@@ -650,30 +657,28 @@ export function createRoutes(
 
   // --- GET /v1/switchboard/models ---
   // Not OpenAI's: pi's capabilities for each exposed model, which PLAN keeps off /v1/models.
-  routes.get('/v1/switchboard/models', async (context) => {
-    const exposure = await getExposure(configReader)
-    chatLogger.debug('Listing capabilities of {modelCount} models', {
-      modelCount: exposure.models.length
-    })
-    return context.json(buildPiModelList(exposure.models))
-  })
+  routes.get(
+    `${SWITCHBOARD_PREFIX}/models`,
+    describeRoute(listModelCapabilitiesDescription),
+    async (context) => {
+      const exposure = await getExposure(configReader)
+      chatLogger.debug('Listing capabilities of {modelCount} models', {
+        modelCount: exposure.models.length
+      })
+      return context.json(buildPiModelList(exposure.models))
+    }
+  )
 
   // --- GET /v1/models/:model ---
-  // Use a wildcard to capture slash-containing model IDs
-  routes.get('/v1/models/*', async (context) => {
-    const rawPath = context.req.path
-    // Strip the "/v1/models/" prefix to get the full (possibly multi-segment) model ID
-    if (!rawPath.startsWith(MODELS_PREFIX)) {
-      chatLogger.debug('Model detail request without a model ID: {path}', { path: rawPath })
-      return context.json(modelNotFound(''), HTTP_NOT_FOUND)
-    }
-    const modelIdEncoded = rawPath.slice(MODELS_PREFIX.length)
-    if (modelIdEncoded.length === 0) {
-      // `/v1/models/` with a trailing slash: the exact /v1/models route does not match it
-      chatLogger.debug('Model detail request without a model ID: {path}', { path: rawPath })
-      return context.json(modelNotFound(''), HTTP_NOT_FOUND)
-    }
-    const modelId = decodeURIComponent(modelIdEncoded)
+  // `{.+}` lets the ID span slashes (`/v1/models/org/model` as well as `org%2Fmodel`); Hono
+  // decodes it once, and a malformed escape is left as is rather than thrown.
+  routes.get('/v1/models/', (context) => {
+    // A trailing slash and no ID: the exact /v1/models route does not match it.
+    chatLogger.debug('Model detail request without a model ID: {path}', { path: context.req.path })
+    return context.json(modelNotFound(''), HTTP_NOT_FOUND)
+  })
+  routes.get('/v1/models/:model{.+}', describeRoute(retrieveModelDescription), async (context) => {
+    const modelId = context.req.param('model')
 
     const exposure = await getExposure(configReader)
     const resolved = resolveExposedModel(exposure, modelId)
@@ -693,7 +698,7 @@ export function createRoutes(
   })
 
   // --- POST /v1/chat/completions ---
-  routes.post(CHAT_PATH, (context) =>
+  routes.post(CHAT_PATH, describeRoute(createChatCompletionDescription), (context) =>
     handleChatCompletion(context, config, configReader, remoteImageFetch)
   )
 

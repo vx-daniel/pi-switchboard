@@ -155,6 +155,7 @@ describe('normalizeConfig', () => {
       lifetime: 'session',
       authToken: 'tok',
       remoteImages: true,
+      docsUi: true,
       maxBodySizeMb: 100,
       upstreamTimeoutSec: 300,
       publicModelIdMode: 'always-prefixed',

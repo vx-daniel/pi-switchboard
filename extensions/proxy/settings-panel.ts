@@ -161,6 +161,7 @@ const SETTING_DISPLAY_VALUES = {
   'port': (config: ProxyConfig) => String(config.port),
   'authToken': (config: ProxyConfig) => authDisplay(config),
   'remoteImages': (config: ProxyConfig) => (config.remoteImages ? 'on' : 'off'),
+  'docsUi': (config: ProxyConfig) => (config.docsUi ? 'on' : 'off'),
   'maxBodySizeMb': (config: ProxyConfig) => `${String(config.maxBodySizeMb)} MB`,
   'upstreamTimeoutSec': (config: ProxyConfig) => `${String(config.upstreamTimeoutSec)}s`,
   'logLevel': (config: ProxyConfig) => config.logLevel,
@@ -232,6 +233,14 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
       description:
         'Fetch remote image URLs server-side and inline them; public hosts only (the proxy makes requests for its clients)',
       currentValue: config.remoteImages ? 'on' : 'off',
+      values: ['off', 'on']
+    },
+    {
+      id: 'docsUi',
+      label: 'Docs UI',
+      description:
+        'Serve the Swagger UI docs page at /v1/switchboard/docs, without proxy auth; its scripts load from a CDN',
+      currentValue: config.docsUi ? 'on' : 'off',
       values: ['off', 'on']
     },
     {
@@ -380,6 +389,7 @@ const CONFIG_UPDATERS: Record<Exclude<SettingId, 'authToken'>, ConfigUpdater> = 
     port: Math.max(1, Math.min(MAX_PORT, Number.parseInt(value, 10) || config.port))
   }),
   'remoteImages': (config, value) => ({ ...config, remoteImages: value === 'on' }),
+  'docsUi': (config, value) => ({ ...config, docsUi: value === 'on' }),
   'maxBodySizeMb': (config, value) => {
     const mb = parsePositiveInt(value)
     return mb === undefined ? config : { ...config, maxBodySizeMb: mb }

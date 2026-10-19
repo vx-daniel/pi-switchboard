@@ -116,6 +116,42 @@ port, as `/v1/chat/completions` is; it can do less harm than a completion: pi re
 when it is about to expire, and runs the refresh inside its credential store's serialized `modify`,
 so repeated or concurrent calls neither refresh every time nor refresh twice.
 
+### OpenAPI document and docs UI
+
+The proxy describes its own API in OpenAPI 3.1 (#129), built with
+[`hono-openapi`](https://github.com/rhinobase/hono-openapi) from the routes
+(`src/server/openapi.ts`):
+
+- `GET /v1/switchboard/openapi.json`: the document. Always on.
+- `GET /v1/switchboard/docs`: [Swagger UI](https://github.com/honojs/middleware/tree/main/packages/swagger-ui)
+  for it, with "Try it out". Off unless `docsUi` (`--docs-ui`, `PI_PROXY_DOCS_UI`, the settings
+  panel) is on, because the page loads `swagger-ui-dist`, pinned to `SWAGGER_UI_VERSION`, from the
+  jsDelivr CDN. It is not bundled: `swagger-ui-dist` depends on `@scarf/scarf`, whose install
+  script reports installs to an analytics service.
+
+Both skip proxy auth (constitution 2.1.0). A browser cannot send a bearer token to open a page,
+and Swagger UI cannot load the document before the token is entered with "Authorize". Neither
+names a model, provider or credential, and every route they describe still needs the token. They
+are registered before the auth middleware in `createApp`.
+
+What the document covers: the stable routes and `GET /v1/switchboard/models`, each with its
+request and response schemas, its error statuses, and the bearer scheme. It leaves out the health
+endpoints, the OpenAI endpoints answered with 404, and the document and docs routes themselves.
+The response schemas are the Zod schemas the builders type their bodies with (`OpenAIChatCompletion`
+is `z.infer` of `openAIChatCompletionSchema`, and so on), so the document cannot name a field the
+code does not send. They are never parsed at runtime. Validation stays in `validateChatRequest`;
+hono-openapi's `validator()` is not used, since it would replace the 400/422 split and its messages.
+
+`openapi.json` at the repository root is the document as committed: a file snapshot in
+`test/integration/openapi-document.test.ts`. A change to a route, field, status or description
+fails the test until `vp test -u` rewrites it, so the contract change shows up in review. Its
+`info.version` is the API's (`v1`), not the package's, so a release does not change it.
+
+The model detail route is `/v1/models/:model{.+}`: hono-openapi leaves a wildcard route out of the
+document. Hono decodes the ID once (`%252F` stays a literal `%2F`), and a malformed escape is
+answered `404 model_not_found` rather than thrown as a 500. `/v1/models/` with no ID keeps its
+OpenAI-style 404.
+
 ### Unsupported endpoints
 
 Return OpenAI-style errors for:
