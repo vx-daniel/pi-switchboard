@@ -2,12 +2,12 @@
  * Maps OpenAI `reasoning_effort` values to pi's thinking levels.
  *
  * @remarks
- * OpenAI: "none" | "minimal" | "low" | "medium" | "high" | "xhigh"
+ * OpenAI: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
  * Pi: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
  *
- * "none" is pi's "off"; pi's "max" has no OpenAI effort. A model supports a subset of the levels
- * (`getSupportedThinkingLevels`): only "off" without reasoning, no "off" for a model that always
- * reasons, "xhigh" and "max" only when its definition maps them.
+ * "none" is pi's "off"; every other effort is the pi level of the same name. A model supports a
+ * subset of the levels (`getSupportedThinkingLevels`): only "off" without reasoning, no "off" for
+ * a model that always reasons, "xhigh" and "max" only when its definition maps them.
  *
  * @packageDocumentation
  */
@@ -28,7 +28,8 @@ const THINKING_LEVEL_BY_EFFORT: Readonly<Record<ReasoningEffort, ModelThinkingLe
   low: 'low',
   medium: 'medium',
   high: 'high',
-  xhigh: 'xhigh'
+  xhigh: 'xhigh',
+  max: 'max'
 }
 
 /** The thinking level pi runs a model at for an effort, and whether it differs from the effort. */
