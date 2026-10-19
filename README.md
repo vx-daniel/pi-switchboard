@@ -159,7 +159,7 @@ Fields are translated to each provider's native format, not blindly forwarded:
 - **Anthropic**: `tool_choice` → `{ type }` format, `stop` → `stop_sequences`, `user` → `metadata.user_id`, `parallel_tool_calls: false` → `disable_parallel_tool_use`
 - **Google**: Translated to camelCase names (`topP`, `stopSequences`, `seed`, `frequencyPenalty`, `presencePenalty`) in Google's generation config; `tool_choice` maps to `toolConfig.functionCallingConfig.mode`
 
-Fields that have no equivalent in a target provider are silently skipped — the request succeeds and the provider's default applies.
+Fields that have no equivalent in a target provider are skipped: the request succeeds and the provider's default applies. That, and dropping `temperature` on Codex models, are the only parameters the proxy ignores instead of rejecting; `CONSTITUTION.md` (principle I) lists them as deliberate exceptions, and PLAN.md's per-API tables list exactly what each API receives.
 
 ## Model Naming and Exposure
 

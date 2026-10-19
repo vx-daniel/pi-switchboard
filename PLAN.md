@@ -42,7 +42,7 @@ Out of scope for the stable proxy:
 - Log a per-request proxy request ID
 - Accept an incoming `X-Client-Request-Id` and propagate it through logs
 - Abort upstream work when the client disconnects
-- Reject unsupported parameters clearly instead of silently ignoring them
+- Reject unsupported parameters clearly instead of silently ignoring them (the exceptions are listed in `CONSTITUTION.md` principle I)
 
 ## Tooling and type safety
 
@@ -438,9 +438,11 @@ Rejected (`422`, naming the keyword and its path; logged as a warning with the t
 
 ## Known gaps and silent drops
 
-The following issues violate the project's own policy of rejecting unsupported parameters
-clearly instead of silently ignoring them. These should be addressed before the proxy is
-considered production-complete.
+The sections below record where the proxy once ignored parameters instead of rejecting them, and
+what became of each. Two kinds of drop remain, as deliberate exceptions listed in
+`CONSTITUTION.md` principle I (1.2.0): Codex `temperature`, and passthrough fields a provider has
+no equivalent for (the per-API tables under "API-aware payload translation", #81). Any other
+silent drop is a violation of that principle.
 
 ### `tool_choice` — resolved
 
@@ -563,8 +565,9 @@ is intended to address this but is not started.
 ### API-aware payload translation
 
 The proxy translates OpenAI request fields into the correct format for each provider API.
-Fields that have no equivalent in a target API are silently skipped — the request succeeds
-and the provider's default behavior applies.
+Fields that have no equivalent in a target API are skipped: the request succeeds and the
+provider's default behavior applies. This is one of the two deliberate exceptions
+`CONSTITUTION.md` principle I lists (#81); the tables below are the record of what each API gets.
 
 #### OpenAI-compatible APIs
 
@@ -633,7 +636,7 @@ true`. The proxy overrides both when the client sends explicit values.
 | `tool_choice` | Direct override of SDK default |
 | `parallel_tool_calls` | Direct override of SDK default |
 | All other passthrough fields | Skipped (rejected by Codex API) |
-| `temperature` | Dropped; the first drop per model is logged at `info`, later ones at `debug` (#49). The Codex backend rejects it with `400 Unsupported parameter: temperature`, though pi 1.3.0 forwards it. A deliberate exception to "reject unsupported parameters clearly": a `422` would break clients that always send a temperature, on every Codex model |
+| `temperature` | Dropped; the first drop per model is logged at `info`, later ones at `debug` (#49). The Codex backend rejects it with `400 Unsupported parameter: temperature`, though pi 1.3.0 forwards it. A deliberate exception to "reject unsupported parameters clearly", listed in `CONSTITUTION.md` principle I (#80): a `422` would break clients that always send a temperature, on every Codex model |
 
 #### Other APIs (`bedrock-converse-stream`)
 
@@ -964,7 +967,7 @@ Release gate:
 
 - unit tests for mapping logic
 - integration tests for models and validation
-- no unsupported parameters silently accepted
+- no unsupported parameters silently accepted, beyond the exceptions `CONSTITUTION.md` principle I lists
 - zero oxlint errors, zero biome errors
 - typecheck passes with ultra-strict tsconfig
 
