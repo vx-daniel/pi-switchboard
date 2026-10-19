@@ -247,12 +247,19 @@ describe('findZedSettings', () => {
     expect(findZedSettings()).toBe(resolve(xdgDir, 'settings.json'))
   })
 
-  test('returns undefined when no config found', () => {
+  // Catches a missing file reported as found, or the not-found error naming paths when none was
+  // checked: with no variable to build a path from, it says what to set (#111).
+  test('nothing found: undefined, and with no variable set the error says what to set', () => {
     vi.stubEnv('CUSTOM_DATA_DIR', undefined)
-    vi.stubEnv('HOME', resolve(tempDir, 'no-such-home'))
     vi.stubEnv('XDG_CONFIG_HOME', undefined)
-
+    vi.stubEnv('HOME', resolve(tempDir, 'no-such-home'))
     expect(findZedSettings()).toBeUndefined()
+
+    vi.stubEnv('HOME', undefined)
+    const result = syncToZed([], { providerName: 'Pi Proxy', apiUrl: 'http://x/v1', dryRun: true })
+    expect(result.error).toBe(
+      'Zed settings.json not found. Nowhere to look: set HOME or XDG_CONFIG_HOME'
+    )
   })
 
   test('CUSTOM_DATA_DIR takes priority over HOME', () => {

@@ -88,7 +88,8 @@ interface SettingsCandidate {
  * 2. `$XDG_CONFIG_HOME/zed/settings.json`: Zed on Linux uses this when the variable is set.
  * 3. `$HOME/.config/zed/settings.json`: Zed on macOS, and on Linux without XDG_CONFIG_HOME.
  *
- * A variable that is unset or empty adds no candidate.
+ * A variable that is unset or empty adds no candidate. `XDG_CONFIG_HOME` is honoured on every
+ * platform, though Zed reads it on Linux only; it is rarely set on macOS, where Zed uses 3.
  *
  * @returns the candidates, possibly none
  */
