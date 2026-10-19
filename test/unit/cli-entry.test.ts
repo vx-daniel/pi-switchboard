@@ -383,6 +383,28 @@ describe('starting the server', () => {
     expect((await fetch(`${origin}/v1/models`)).status).toBe(HTTP_UNAUTHORIZED)
   })
 
+  // Catches `--auth-token ''` starting a proxy that refuses every request without a word (#99):
+  // startup logs an error naming the flag, and requests are refused.
+  test("--auth-token '' logs an error naming the flag, and requests are refused", async () => {
+    const port = await freePort()
+    const origin = `http://127.0.0.1:${String(port)}`
+    writeConfigFile({ port })
+
+    await runCli(['--auth-token', '', '--log-format', 'json'])
+    await waitForListening(origin)
+
+    const errors = logRecords().filter((record) => record['level'] === 'ERROR')
+    expect({
+      errors: errors.map((record) => record['message']),
+      status: (await fetch(`${origin}/v1/models`)).status
+    }).toEqual({
+      errors: [
+        'Proxy auth is misconfigured: "--auth-token" is set but empty. Every /v1 request is refused with 401 until it holds a token, or is unset to use the config file'
+      ],
+      status: HTTP_UNAUTHORIZED
+    })
+  })
+
   // Catches --auth-token not winning over a non-string authToken in the file (#82), which would
   // leave an operator no way to run the proxy short of editing the file.
   test('--auth-token wins over a non-string authToken, with no error', async () => {

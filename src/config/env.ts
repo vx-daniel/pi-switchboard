@@ -26,31 +26,68 @@ import { proxyLogger } from '@proxy/logging'
 /** Logger for config resolution (`config` category). */
 const configLogger = proxyLogger('config')
 
+/** Where an override token came from: the flag wins over the env var. */
+type OverrideSource = '--auth-token' | 'PI_PROXY_AUTH_TOKEN'
+
+/** A token set by flag or env var, which wins over the config file's. */
+interface TokenOverride {
+  readonly source: OverrideSource
+  readonly value: string
+}
+
+/**
+ * Why proxy auth cannot be applied:
+ * - `file-token-not-string`: `authToken` in proxy-config.json is not a string (#82);
+ * - `empty-override`: `--auth-token` or `PI_PROXY_AUTH_TOKEN` is set but empty, a token nothing
+ *   can match (#99). The file's token is not used instead: that would ignore what was set.
+ */
+export type InvalidAuthCause =
+  | { readonly cause: 'file-token-not-string' }
+  | { readonly cause: 'empty-override'; readonly source: OverrideSource }
+
 /**
  * Proxy auth, as configured:
  * - `off`: every request is let through;
  * - `token`: a request needs `Authorization: Bearer <token>`;
- * - `invalid`: `authToken` in proxy-config.json is not a string, so the configured auth cannot be
- *   applied. Every authenticated route refuses until it is fixed, never let through as if off
- *   (#82).
+ * - `invalid`: the configured auth cannot be applied ({@link InvalidAuthCause}). Every
+ *   authenticated route refuses until it is fixed, never let through as if off.
  */
 export type ProxyAuth =
   | { readonly kind: 'off' }
   | { readonly kind: 'token'; readonly token: string }
-  | { readonly kind: 'invalid' }
+  | ({ readonly kind: 'invalid' } & InvalidAuthCause)
+
+/**
+ * Picks the override token, if any: the flag's, else the env var's.
+ *
+ * @param flagToken - the `--auth-token` value, or `undefined` when not given
+ * @param envToken - `PI_PROXY_AUTH_TOKEN`, or `undefined` when unset
+ * @returns the override with its source, or `undefined` when neither is set
+ */
+function tokenOverride(
+  flagToken: string | undefined,
+  envToken: string | undefined
+): TokenOverride | undefined {
+  if (flagToken !== undefined) return { source: '--auth-token', value: flagToken }
+  if (envToken !== undefined) return { source: 'PI_PROXY_AUTH_TOKEN', value: envToken }
+  return undefined
+}
 
 /**
  * Resolves proxy auth: a flag or env token wins, else the config file's token.
  *
- * @param overrideToken - The `--auth-token` or `PI_PROXY_AUTH_TOKEN` value; `undefined` when
- *   neither is set. Any string, even '', is used as the token.
+ * @param override - the flag or env token, or `undefined` when neither is set
  * @param fileToken - The config file's (normalized) `authToken`; '' means off.
- * @returns `token` for an override or a non-empty file token, `invalid` when the file's
- *   `authToken` is set but not a string (#82), else `off`.
+ * @returns `token` for a non-empty override or file token; `invalid` for an empty override
+ *   (#99) or a file `authToken` that is set but not a string (#82); else `off`.
  */
-function resolveProxyAuth(overrideToken: string | undefined, fileToken: string): ProxyAuth {
-  if (overrideToken !== undefined) return { kind: 'token', token: overrideToken }
-  if (configFileAuthTokenInvalid()) return { kind: 'invalid' }
+function resolveProxyAuth(override: TokenOverride | undefined, fileToken: string): ProxyAuth {
+  if (override !== undefined) {
+    return override.value === ''
+      ? { kind: 'invalid', cause: 'empty-override', source: override.source }
+      : { kind: 'token', token: override.value }
+  }
+  if (configFileAuthTokenInvalid()) return { kind: 'invalid', cause: 'file-token-not-string' }
   return fileToken.length > 0 ? { kind: 'token', token: fileToken } : { kind: 'off' }
 }
 
@@ -189,9 +226,10 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
   const host = cli.host ?? process.env.PI_PROXY_HOST ?? file.host
   const port = cli.port ?? parsePositiveInt('PI_PROXY_PORT', process.env.PI_PROXY_PORT, file.port)
 
-  // Auth: CLI > env > file. A file token that is not a string fails closed rather than off (#82).
-  const overrideToken = cli.authToken ?? process.env.PI_PROXY_AUTH_TOKEN
-  const proxyAuth = resolveProxyAuth(overrideToken, file.authToken)
+  // Auth: CLI > env > file. A file token that is not a string, or an override that is set but
+  // empty, fails closed rather than off (#82, #99).
+  const override = tokenOverride(cli.authToken, process.env.PI_PROXY_AUTH_TOKEN)
+  const proxyAuth = resolveProxyAuth(override, file.authToken)
 
   const remoteImagesEnabled =
     cli.remoteImages ??

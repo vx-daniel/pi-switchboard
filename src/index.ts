@@ -160,6 +160,38 @@ function loadConfigWithLogging(args: CliArgs): ServerConfig {
   return config
 }
 
+/**
+ * Logs how proxy auth is set, at the level its risk deserves.
+ *
+ * @remarks
+ * Never the token: it is what the operator meant as a secret. A misconfiguration is an error
+ * (every /v1 request is refused); auth off is a warning when the proxy listens beyond loopback.
+ *
+ * @param config - the resolved server config
+ */
+function logProxyAuth(config: ServerConfig): void {
+  const proxyAuth = config.proxyAuth
+  if (proxyAuth.kind === 'invalid' && proxyAuth.cause === 'empty-override') {
+    lifecycleLogger.error(
+      'Proxy auth is misconfigured: {source} is set but empty. Every /v1 request is refused with 401 until it holds a token, or is unset to use the config file',
+      { source: proxyAuth.source }
+    )
+  } else if (proxyAuth.kind === 'invalid') {
+    lifecycleLogger.error(
+      'Proxy auth is misconfigured: authToken in {configPath} is not a string. Every /v1 request is refused with 401 until it is fixed, or a token is set with --auth-token or PI_PROXY_AUTH_TOKEN',
+      { configPath: getConfigPath() }
+    )
+  } else if (proxyAuth.kind === 'off' && isLoopbackHost(config.host)) {
+    lifecycleLogger.debug('Proxy auth is disabled: /v1 endpoints accept unauthenticated requests')
+  } else if (proxyAuth.kind === 'off') {
+    // Off-loopback without auth is an exposure worth seeing at the default level.
+    lifecycleLogger.warn(
+      'Proxy auth is disabled and the proxy listens on {host}: any client that can reach it can use your provider credentials',
+      { host: config.host }
+    )
+  }
+}
+
 /** The `pi-openai-proxy` command: its flags, and `run`, which starts the server. */
 const main = defineCommand({
   meta: {
@@ -245,25 +277,7 @@ const main = defineCommand({
       providerPrefixCount: Object.keys(config.providerPrefixes).length,
       logLevel: config.logLevel
     })
-    if (config.proxyAuth.kind === 'invalid') {
-      // Not the value: it is what the operator meant as a secret.
-      lifecycleLogger.error(
-        'Proxy auth is misconfigured: authToken in {configPath} is not a string. Every /v1 request is refused with 401 until it is fixed, or a token is set with --auth-token or PI_PROXY_AUTH_TOKEN',
-        { configPath: getConfigPath() }
-      )
-    } else if (config.proxyAuth.kind === 'off') {
-      // Off-loopback without auth is an exposure worth seeing at the default level.
-      if (isLoopbackHost(config.host)) {
-        lifecycleLogger.debug(
-          'Proxy auth is disabled: /v1 endpoints accept unauthenticated requests'
-        )
-      } else {
-        lifecycleLogger.warn(
-          'Proxy auth is disabled and the proxy listens on {host}: any client that can reach it can use your provider credentials',
-          { host: config.host }
-        )
-      }
-    }
+    logProxyAuth(config)
 
     // Initialize pi integration; initRegistry logs a models.json load failure itself.
     await initRegistry()

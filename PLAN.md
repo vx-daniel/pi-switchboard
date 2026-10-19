@@ -283,7 +283,7 @@ Reason:
 
 - incoming `Authorization: Bearer <proxy-key>` protects the proxy itself; off by default for local use
 - the token comes from `--auth-token`, `PI_PROXY_AUTH_TOKEN` or `authToken` in the config file, in that order; `"authToken": ""` turns it off
-- three states (`ServerConfig.proxyAuth`): `off`, `token`, and `invalid`. A file `authToken` that is not a string (`null` included) is `invalid`: the proxy starts (principle II) but every authenticated route answers `401` with a fixed message, `/healthz` stays up, and startup logs an error naming the field (principle III; #82). It never falls back to `off`, which would turn a requested token into an open proxy
+- three states (`ServerConfig.proxyAuth`): `off`, `token`, and `invalid`, which carries its cause. A file `authToken` that is not a string (`null` included) is `invalid` (#82), and so is a `--auth-token` or `PI_PROXY_AUTH_TOKEN` that is set but empty (#99); the file's token is not used instead, since that would ignore what was set. Either way the proxy starts (principle II) but every authenticated route answers `401` with a fixed message for the cause, `/healthz` stays up, and startup logs an error naming the field or the flag/variable (principle III). It never falls back to `off`, which would turn a requested token into an open proxy
 - saving the config (the extension's settings panel, the model selector) writes such a value back unchanged; only an explicit choice on the auth row or `/proxy reset` replaces it
 
 ## Request contract for `POST /v1/chat/completions`

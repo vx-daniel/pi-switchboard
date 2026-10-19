@@ -1,8 +1,9 @@
 /**
- * Proxy auth when `authToken` in proxy-config.json is not a string (#82). Repairing it to the
- * default '' would turn auth off: the operator asked for a token and would get an open proxy. So
- * the proxy starts but fails closed: every authenticated route refuses with a fixed message until
- * the file is fixed or a token is set by flag or env; `/healthz` stays up. Only '' turns auth off.
+ * Proxy auth that cannot be applied: `authToken` in proxy-config.json is not a string (#82), or
+ * `--auth-token` / `PI_PROXY_AUTH_TOKEN` is set but empty (#99). Repairing either to "auth off"
+ * would turn a requested token into an open proxy. So the proxy starts but fails closed: every
+ * authenticated route refuses with a fixed message until it is fixed; `/healthz` stays up. Only
+ * '' in the file (or no authToken) turns auth off.
  */
 
 import { rmSync, readFileSync, writeFileSync } from 'node:fs'
@@ -11,7 +12,7 @@ import { join } from 'node:path'
 import { loadConfig } from '@proxy/config/env'
 import { DEFAULT_CONFIG, loadConfigFromFile, saveConfigToFile } from '@proxy/config/schema'
 import { createApp } from '@proxy/server/app'
-import { MISCONFIGURED_AUTH_MESSAGE } from '@proxy/server/middleware'
+import { EMPTY_OVERRIDE_AUTH_MESSAGE, MISCONFIGURED_AUTH_MESSAGE } from '@proxy/server/middleware'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
@@ -112,6 +113,36 @@ describe('a non-string authToken fails closed', () => {
     writeProxyConfig({ port: 4141 })
 
     expect((await ask('/v1/models')).status).toBe(HTTP_OK)
+  })
+})
+
+describe('an empty token override fails closed (#99)', () => {
+  // Catches an empty PI_PROXY_AUTH_TOKEN becoming a token nothing can match, refusing every request
+  // without a word, or falling back to the file's token, which would ignore what was set: the
+  // proxy refuses with a message that says the override is empty, and /healthz stays up.
+  test('PI_PROXY_AUTH_TOKEN="": refused with the fixed message, the file token unused', async () => {
+    writeProxyConfig({ authToken: 'notarealsecret-file-token' })
+    vi.stubEnv('PI_PROXY_AUTH_TOKEN', '')
+
+    expect({
+      withoutToken: await ask('/v1/models'),
+      withFileToken: (await ask('/v1/models', 'notarealsecret-file-token')).status,
+      liveness: (await ask('/healthz')).status
+    }).toEqual({
+      withoutToken: {
+        status: HTTP_UNAUTHORIZED,
+        body: {
+          error: {
+            message: EMPTY_OVERRIDE_AUTH_MESSAGE,
+            type: 'authentication_error',
+            param: null,
+            code: null
+          }
+        }
+      },
+      withFileToken: HTTP_UNAUTHORIZED,
+      liveness: HTTP_OK
+    })
   })
 })
 

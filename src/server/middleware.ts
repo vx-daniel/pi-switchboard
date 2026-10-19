@@ -96,12 +96,19 @@ export const MISCONFIGURED_AUTH_MESSAGE =
   'Proxy auth is misconfigured: authToken in proxy-config.json is not a string. Fix it, or set a token with --auth-token or PI_PROXY_AUTH_TOKEN.'
 
 /**
+ * The 401 message a request gets while `--auth-token` or `PI_PROXY_AUTH_TOKEN` is set but empty
+ * (#99). Fixed; it names neither source, which the client cannot change.
+ */
+export const EMPTY_OVERRIDE_AUTH_MESSAGE =
+  'Proxy auth is misconfigured: the proxy token set by flag or environment variable is empty. Set a token, or unset it to use the config file.'
+
+/**
  * Creates the proxy auth middleware for `config.proxyAuth`.
  *
  * @remarks
  * `off` lets everything through; `invalid` refuses everything with 401
- * {@link MISCONFIGURED_AUTH_MESSAGE} (#82); `token` needs `Authorization: Bearer <token>` and
- * answers 401 for a missing header or a wrong token.
+ * {@link MISCONFIGURED_AUTH_MESSAGE} (#82) or {@link EMPTY_OVERRIDE_AUTH_MESSAGE} (#99); `token`
+ * needs `Authorization: Bearer <token>` and answers 401 for a missing header or a wrong token.
  *
  * @param config - the server config; only `proxyAuth` is read, once, when the middleware is made
  * @returns the middleware
@@ -115,12 +122,17 @@ export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<Pro
     }
 
     if (proxyAuth.kind === 'invalid') {
-      // Fail closed: the operator asked for a token the proxy cannot read. Never let it through.
-      authLogger.warn('Rejected {method} {path}: proxy auth is misconfigured', {
+      // Fail closed: the operator asked for a token the proxy cannot use. Never let it through.
+      authLogger.warn('Rejected {method} {path}: proxy auth is misconfigured ({cause})', {
         method: context.req.method,
-        path: context.req.path
+        path: context.req.path,
+        cause: proxyAuth.cause
       })
-      return context.json(authenticationError(MISCONFIGURED_AUTH_MESSAGE), HTTP_UNAUTHORIZED)
+      const message =
+        proxyAuth.cause === 'empty-override'
+          ? EMPTY_OVERRIDE_AUTH_MESSAGE
+          : MISCONFIGURED_AUTH_MESSAGE
+      return context.json(authenticationError(message), HTTP_UNAUTHORIZED)
     }
 
     const authHeader = context.req.header('authorization')
