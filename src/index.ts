@@ -10,7 +10,12 @@
 
 import { serve } from '@hono/node-server'
 import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
-import { type CliOverrides, loadConfig, type ServerConfig } from '@proxy/config/env'
+import {
+  type CliOverrides,
+  type InvalidAuthCause,
+  loadConfig,
+  type ServerConfig
+} from '@proxy/config/env'
 import { configFileAuthTokenInvalid, getConfigPath, loadConfigFromFile } from '@proxy/config/schema'
 import {
   configureLogging,
@@ -160,6 +165,65 @@ function loadConfigWithLogging(args: CliArgs): ServerConfig {
   return config
 }
 
+/**
+ * Logs a proxy auth misconfiguration as an error: every /v1 request is refused until it is fixed.
+ *
+ * @remarks
+ * Never the token: it is what the operator meant as a secret. A `switch` on the cause, so the
+ * lint's exhaustiveness check flags a cause added without a message.
+ *
+ * @param invalid - why the configured auth cannot be applied
+ */
+function logInvalidProxyAuth(invalid: InvalidAuthCause): void {
+  switch (invalid.cause) {
+    case 'empty-override':
+      lifecycleLogger.error(
+        'Proxy auth is misconfigured: {source} is set but empty. Every /v1 request is refused with 401 until it holds a token, or is unset to use the config file',
+        { source: invalid.source }
+      )
+      break
+    case 'file-token-not-string':
+      lifecycleLogger.error(
+        'Proxy auth is misconfigured: authToken in {configPath} is not a string. Every /v1 request is refused with 401 until it is fixed, or a token is set with --auth-token or PI_PROXY_AUTH_TOKEN',
+        { configPath: getConfigPath() }
+      )
+      break
+  }
+}
+
+/**
+ * Logs how proxy auth is set, at the level its risk deserves.
+ *
+ * @remarks
+ * A misconfiguration is an error ({@link logInvalidProxyAuth}); auth off is a warning when the
+ * proxy listens beyond loopback, and debug otherwise; a token needs no line.
+ *
+ * @param config - the resolved server config
+ */
+function logProxyAuth(config: ServerConfig): void {
+  const proxyAuth = config.proxyAuth
+  switch (proxyAuth.kind) {
+    case 'invalid':
+      logInvalidProxyAuth(proxyAuth)
+      break
+    case 'off':
+      if (isLoopbackHost(config.host)) {
+        lifecycleLogger.debug(
+          'Proxy auth is disabled: /v1 endpoints accept unauthenticated requests'
+        )
+      } else {
+        // Off-loopback without auth is an exposure worth seeing at the default level.
+        lifecycleLogger.warn(
+          'Proxy auth is disabled and the proxy listens on {host}: any client that can reach it can use your provider credentials',
+          { host: config.host }
+        )
+      }
+      break
+    case 'token':
+      break
+  }
+}
+
 /** The `pi-openai-proxy` command: its flags, and `run`, which starts the server. */
 const main = defineCommand({
   meta: {
@@ -245,25 +309,7 @@ const main = defineCommand({
       providerPrefixCount: Object.keys(config.providerPrefixes).length,
       logLevel: config.logLevel
     })
-    if (config.proxyAuth.kind === 'invalid') {
-      // Not the value: it is what the operator meant as a secret.
-      lifecycleLogger.error(
-        'Proxy auth is misconfigured: authToken in {configPath} is not a string. Every /v1 request is refused with 401 until it is fixed, or a token is set with --auth-token or PI_PROXY_AUTH_TOKEN',
-        { configPath: getConfigPath() }
-      )
-    } else if (config.proxyAuth.kind === 'off') {
-      // Off-loopback without auth is an exposure worth seeing at the default level.
-      if (isLoopbackHost(config.host)) {
-        lifecycleLogger.debug(
-          'Proxy auth is disabled: /v1 endpoints accept unauthenticated requests'
-        )
-      } else {
-        lifecycleLogger.warn(
-          'Proxy auth is disabled and the proxy listens on {host}: any client that can reach it can use your provider credentials',
-          { host: config.host }
-        )
-      }
-    }
+    logProxyAuth(config)
 
     // Initialize pi integration; initRegistry logs a models.json load failure itself.
     await initRegistry()

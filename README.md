@@ -301,6 +301,8 @@ curl http://localhost:4141/v1/models \
 
 The token can also live in the config file (`"authToken": "…"`); a flag or `PI_PROXY_AUTH_TOKEN` wins over it, and `"authToken": ""` (the default) turns auth off. An `authToken` that is set but is not a string (`12345`, `true`, `null`, an object) does **not** turn auth off: the proxy still starts, but answers every authenticated route with `401` "Proxy auth is misconfigured" until the file is fixed or a token is set by flag or environment. `GET /healthz` stays up, and startup logs an error naming the field, never its value. The settings panel and `/proxy show` say "invalid"; saving another setting from the panel keeps the file's value, and only a choice on the auth row (or `/proxy reset`) replaces it.
 
+An empty override (`--auth-token ''` or `PI_PROXY_AUTH_TOKEN=`) fails closed the same way: every authenticated route answers `401` "the proxy token set by flag or environment variable is empty", and startup logs an error naming the flag or variable. The config file's token is not used instead; unset the variable to use it.
+
 ### API compatibility
 
 The proxy implements a subset of the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat/create). Request and response shapes match the OpenAI specification for supported fields. Unsupported fields are rejected with `422` and an OpenAI-style error body naming the offending parameter.
