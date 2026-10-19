@@ -1,18 +1,17 @@
 /**
  * Proxy auth that cannot be applied: `authToken` in proxy-config.json is not a string (#82), or
  * `--auth-token` / `PI_PROXY_AUTH_TOKEN` is set but empty (#99). Repairing either to "auth off"
- * would turn a requested token into an open proxy. So the proxy starts but fails closed: every
- * authenticated route refuses with a fixed message until it is fixed; `/healthz` stays up. Only
- * '' in the file (or no authToken) turns auth off.
+ * would turn a requested token into an open proxy, and starting to refuse every request hides the
+ * mistake behind a running process. So loading the config refuses, and the proxy does not start.
+ * Only '' in the file (or no authToken) turns auth off.
  */
 
 import { rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
-import { loadConfig } from '@proxy/config/env'
+import { type CliOverrides, loadConfig, UnusableProxyAuthError } from '@proxy/config/env'
 import { DEFAULT_CONFIG, loadConfigFromFile, saveConfigToFile } from '@proxy/config/schema'
 import { createApp } from '@proxy/server/app'
-import { EMPTY_OVERRIDE_AUTH_MESSAGE, MISCONFIGURED_AUTH_MESSAGE } from '@proxy/server/middleware'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
@@ -67,27 +66,30 @@ async function ask(path: string, bearer?: string): Promise<{ status: number; bod
   return { status: response.status, body: await jsonBody(response) }
 }
 
-describe('a non-string authToken fails closed', () => {
+/**
+ * Loads the config from the current files and reports why proxy auth refused it.
+ *
+ * @param cli - the CLI overrides to load with
+ * @returns the refusal's cause; `undefined` when the config loaded; anything else thrown, as is
+ */
+function refusal(cli: CliOverrides = {}): unknown {
+  try {
+    loadConfig(cli)
+    return undefined
+  } catch (error) {
+    return error instanceof UnusableProxyAuthError ? error.invalid : error
+  }
+}
+
+describe('a non-string authToken refuses to start', () => {
   // Catches the #82 bug: a token the proxy cannot read turning auth off, so any client reaches
-  // the provider logins. Also catches the refusal quoting the configured value.
+  // the provider logins; or the proxy starting at all with it.
   test.each([12345, true, null, { token: 'notarealsecret-in-an-object' }])(
-    '%j: /v1 refuses with the fixed message, /healthz stays up',
-    async (authToken) => {
+    '%j: loading the config refuses',
+    (authToken) => {
       writeProxyConfig({ authToken })
 
-      expect(await ask('/v1/models')).toEqual({
-        status: HTTP_UNAUTHORIZED,
-        body: {
-          error: {
-            message: MISCONFIGURED_AUTH_MESSAGE,
-            type: 'authentication_error',
-            param: null,
-            code: null
-          }
-        }
-      })
-      expect((await ask('/healthz')).status).toBe(HTTP_OK)
-      expect((await ask('/healthz/models')).status).toBe(HTTP_UNAUTHORIZED)
+      expect(refusal()).toEqual({ cause: 'file-token-not-string' })
     }
   )
 
@@ -116,32 +118,28 @@ describe('a non-string authToken fails closed', () => {
   })
 })
 
-describe('an empty token override fails closed (#99)', () => {
-  // Catches an empty PI_PROXY_AUTH_TOKEN becoming a token nothing can match, refusing every request
-  // without a word, or falling back to the file's token, which would ignore what was set: the
-  // proxy refuses with a message that says the override is empty, and /healthz stays up.
-  test('PI_PROXY_AUTH_TOKEN="": refused with the fixed message, the file token unused', async () => {
+describe('an empty token override refuses to start (#99)', () => {
+  // Catches an empty override becoming a token nothing can match, falling back to the file's token
+  // (which would ignore what was set), or turning auth off: loading the config refuses, naming
+  // which override was empty.
+  test.each([
+    { label: 'PI_PROXY_AUTH_TOKEN=""', env: '', cli: {}, source: 'PI_PROXY_AUTH_TOKEN' },
+    { label: "--auth-token ''", env: undefined, cli: { authToken: '' }, source: '--auth-token' }
+  ])('$label refuses, the file token unused', ({ env, cli, source }) => {
     writeProxyConfig({ authToken: 'notarealsecret-file-token' })
+    vi.stubEnv('PI_PROXY_AUTH_TOKEN', env)
+
+    expect(refusal(cli)).toEqual({ cause: 'empty-override', source })
+  })
+
+  // Catches the flag not winning over an empty env var, which would refuse a proxy the operator
+  // gave a usable token on the command line.
+  test('--auth-token wins over an empty PI_PROXY_AUTH_TOKEN', () => {
     vi.stubEnv('PI_PROXY_AUTH_TOKEN', '')
 
-    expect({
-      withoutToken: await ask('/v1/models'),
-      withFileToken: (await ask('/v1/models', 'notarealsecret-file-token')).status,
-      liveness: (await ask('/healthz')).status
-    }).toEqual({
-      withoutToken: {
-        status: HTTP_UNAUTHORIZED,
-        body: {
-          error: {
-            message: EMPTY_OVERRIDE_AUTH_MESSAGE,
-            type: 'authentication_error',
-            param: null,
-            code: null
-          }
-        }
-      },
-      withFileToken: HTTP_UNAUTHORIZED,
-      liveness: HTTP_OK
+    expect(loadConfig({ authToken: ENV_TOKEN }).proxyAuth).toEqual({
+      kind: 'token',
+      token: ENV_TOKEN
     })
   })
 })

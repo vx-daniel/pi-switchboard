@@ -28,7 +28,13 @@ import {
   vi
 } from 'vite-plus/test'
 
-import { killStalePid, refreshStatus, showStatus, stopProxy } from '../../extensions/proxy/process'
+import {
+  killStalePid,
+  refreshStatus,
+  showStatus,
+  startProxy,
+  stopProxy
+} from '../../extensions/proxy/process'
 import type { ProxyState } from '../../extensions/proxy/state'
 import { fakeCommandContext } from '../fixtures/extension-context'
 import { listenOnLoopback } from '../fixtures/local-server'
@@ -475,4 +481,46 @@ describe('killStalePid', () => {
       notifications: []
     })
   })
+})
+
+describe('startProxy', () => {
+  // Catches `/proxy start` spawning a proxy that refuses to start: its output is discarded, so the
+  // user would only hear that it never answered. The refusal names the cause and comes before
+  // anything is touched (the stale PID file stays, no "starting" status).
+  test.each([
+    {
+      label: 'a non-string authToken in the file',
+      authToken: 12345,
+      inherited: undefined,
+      message:
+        'Proxy not started: authToken in proxy-config.json is not a string, and the proxy refuses to start with it. Set a new token in /proxy config.'
+    },
+    {
+      label: "an empty PI_PROXY_AUTH_TOKEN in pi's environment",
+      authToken: '',
+      inherited: '',
+      message:
+        "Proxy not started: PI_PROXY_AUTH_TOKEN is set but empty in pi's environment, and the proxy refuses to start with an empty token. Unset it, or set a token in /proxy config."
+    }
+  ])(
+    '$label: refused with the reason, nothing spawned',
+    async ({ authToken, inherited, message }) => {
+      const freePort = await closedPort()
+      writeFileSync(
+        join(agentDir, 'proxy-config.json'),
+        JSON.stringify({ host: '127.0.0.1', port: freePort, authToken })
+      )
+      vi.stubEnv('PI_PROXY_AUTH_TOKEN', inherited)
+      writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+      const { context, notifications, statuses } = fakeCommandContext({})
+
+      await startProxy(stateOn(freePort), context)
+
+      expect({ notifications, statuses, pidFileKept: existsSync(pidPath()) }).toEqual({
+        notifications: [{ message, level: 'error' }],
+        statuses: [],
+        pidFileKept: true
+      })
+    }
+  )
 })

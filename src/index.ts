@@ -14,7 +14,8 @@ import {
   type CliOverrides,
   type InvalidAuthCause,
   loadConfig,
-  type ServerConfig
+  type ServerConfig,
+  UnusableProxyAuthError
 } from '@proxy/config/env'
 import { configFileAuthTokenInvalid, getConfigPath, loadConfigFromFile } from '@proxy/config/schema'
 import {
@@ -142,9 +143,11 @@ function buildCliOverrides(args: CliArgs): CliOverrides {
  * flags have already been checked (`run`).
  *
  * @param args - The parsed CLI flags.
- * @returns The config.
+ * @returns The config; `undefined` when proxy auth is set but cannot be applied, which is logged
+ *   and must stop the proxy from starting.
+ * @throws whatever loading the config throws, other than {@link UnusableProxyAuthError}
  */
-function loadConfigWithLogging(args: CliArgs): ServerConfig {
+function loadConfigWithLogging(args: CliArgs): ServerConfig | undefined {
   const format = resolveLogFormat(args['log-format'], process.env.PI_PROXY_LOG_FORMAT)
   const earlyLogLevel =
     [args['log-level'], process.env.PI_PROXY_LOG_LEVEL].find(
@@ -152,7 +155,14 @@ function loadConfigWithLogging(args: CliArgs): ServerConfig {
     ) ?? 'info'
   configureLogging({ level: earlyLogLevel, format })
 
-  const config = loadConfig(buildCliOverrides(args))
+  let config: ServerConfig
+  try {
+    config = loadConfig(buildCliOverrides(args))
+  } catch (error) {
+    if (!(error instanceof UnusableProxyAuthError)) throw error
+    logUnusableProxyAuth(error.invalid)
+    return undefined
+  }
   configureLogging({ level: config.logLevel, format })
   const envFormat = process.env.PI_PROXY_LOG_FORMAT
   if (envFormat !== undefined && !isLogFormat(envFormat)) {
@@ -166,25 +176,26 @@ function loadConfigWithLogging(args: CliArgs): ServerConfig {
 }
 
 /**
- * Logs a proxy auth misconfiguration as an error: every /v1 request is refused until it is fixed.
+ * Logs why the proxy refuses to start: proxy auth is set but cannot be applied.
  *
  * @remarks
- * Never the token: it is what the operator meant as a secret. A `switch` on the cause, so the
- * lint's exhaustiveness check flags a cause added without a message.
+ * At `fatal`, which no log level filters out, so the reason always reaches the operator. Never the
+ * token: it is what the operator meant as a secret. A `switch` on the cause, so the lint's
+ * exhaustiveness check flags a cause added without a message.
  *
  * @param invalid - why the configured auth cannot be applied
  */
-function logInvalidProxyAuth(invalid: InvalidAuthCause): void {
+function logUnusableProxyAuth(invalid: InvalidAuthCause): void {
   switch (invalid.cause) {
     case 'empty-override':
-      lifecycleLogger.error(
-        'Proxy auth is misconfigured: {source} is set but empty. Every /v1 request is refused with 401 until it holds a token, or is unset to use the config file',
+      lifecycleLogger.fatal(
+        'Refusing to start: {source} is set but empty. Set a token, or unset it to use the config file',
         { source: invalid.source }
       )
       break
     case 'file-token-not-string':
-      lifecycleLogger.error(
-        'Proxy auth is misconfigured: authToken in {configPath} is not a string. Every /v1 request is refused with 401 until it is fixed, or a token is set with --auth-token or PI_PROXY_AUTH_TOKEN',
+      lifecycleLogger.fatal(
+        'Refusing to start: authToken in {configPath} is not a string. Fix it, or set a token with --auth-token or PI_PROXY_AUTH_TOKEN',
         { configPath: getConfigPath() }
       )
       break
@@ -195,32 +206,21 @@ function logInvalidProxyAuth(invalid: InvalidAuthCause): void {
  * Logs how proxy auth is set, at the level its risk deserves.
  *
  * @remarks
- * A misconfiguration is an error ({@link logInvalidProxyAuth}); auth off is a warning when the
- * proxy listens beyond loopback, and debug otherwise; a token needs no line.
+ * Auth off is a warning when the proxy listens beyond loopback, and debug otherwise; a token needs
+ * no line.
  *
  * @param config - the resolved server config
  */
 function logProxyAuth(config: ServerConfig): void {
-  const proxyAuth = config.proxyAuth
-  switch (proxyAuth.kind) {
-    case 'invalid':
-      logInvalidProxyAuth(proxyAuth)
-      break
-    case 'off':
-      if (isLoopbackHost(config.host)) {
-        lifecycleLogger.debug(
-          'Proxy auth is disabled: /v1 endpoints accept unauthenticated requests'
-        )
-      } else {
-        // Off-loopback without auth is an exposure worth seeing at the default level.
-        lifecycleLogger.warn(
-          'Proxy auth is disabled and the proxy listens on {host}: any client that can reach it can use your provider credentials',
-          { host: config.host }
-        )
-      }
-      break
-    case 'token':
-      break
+  if (config.proxyAuth.kind === 'token') return
+  if (isLoopbackHost(config.host)) {
+    lifecycleLogger.debug('Proxy auth is disabled: /v1 endpoints accept unauthenticated requests')
+  } else {
+    // Off-loopback without auth is an exposure worth seeing at the default level.
+    lifecycleLogger.warn(
+      'Proxy auth is disabled and the proxy listens on {host}: any client that can reach it can use your provider credentials',
+      { host: config.host }
+    )
   }
 }
 
@@ -292,8 +292,13 @@ const main = defineCommand({
     }
 
     const config = loadConfigWithLogging(args)
+    // Proxy auth set but unusable: logged, and the proxy does not start.
+    if (config === undefined) {
+      process.exitCode = 1
+      return
+    }
 
-    // Never the auth token itself: only how proxy auth is set (`off`, `token` or `invalid`).
+    // Never the auth token itself: only how proxy auth is set (`off` or `token`).
     lifecycleLogger.debug('Effective config', {
       configPath: getConfigPath(),
       host: config.host,
