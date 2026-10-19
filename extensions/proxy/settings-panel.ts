@@ -418,8 +418,8 @@ function isConfigUpdaterId(id: string): id is keyof typeof CONFIG_UPDATERS {
  * Applies a setting change, saves it, and reloads the config.
  *
  * @remarks
- * Enabling auth generates a token only when none is set. An unknown ID saves the config
- * unchanged.
+ * Enabling auth generates a token only when none is set. An unknown ID changes nothing: it is
+ * logged and the config file is not written.
  *
  * @param state - the extension state; its config is replaced by the reloaded file
  * @param id - the setting ID
@@ -438,7 +438,9 @@ export function applySetting(state: ProxyState, id: string, value: string): stri
   } else if (isConfigUpdaterId(id)) {
     state.config = CONFIG_UPDATERS[id](state.config, value)
   } else {
-    settingsLogger.warn('Unknown setting {settingId}; saving config unchanged', { settingId: id })
+    // Nothing changes, so nothing is saved, and the one warning says so (#95).
+    settingsLogger.warn('Unknown setting {settingId}; ignored', { settingId: id })
+    return undefined
   }
   // Only a choice made on the auth row may replace an invalid authToken in the file (#82); any
   // other setting saves the file's value back, so it cannot quietly turn auth off.
@@ -509,6 +511,7 @@ export async function openSettingsPanel(
             settingsList.updateValue('customModels', customModelsDisplay(state.config))
           }
 
+          // Not awaited, so the panel redraws at once; it logs its own failures and never rejects.
           void maybeAutoSyncZed(state, context)
           tui.requestRender()
         },

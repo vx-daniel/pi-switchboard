@@ -72,22 +72,29 @@ export interface ZedSyncResult {
 // Settings file discovery
 // ---------------------------------------------------------------------------
 
+/** A place Zed's settings.json may be, and the variable that put it on the list. */
+interface SettingsCandidate {
+  readonly source: 'CUSTOM_DATA_DIR' | 'XDG_CONFIG_HOME' | 'HOME'
+  readonly settingsPath: string
+}
+
 /**
- * Finds Zed's global settings.json: the first candidate that exists.
+ * Lists where Zed's global settings.json may be, in the order they are tried.
  *
  * @remarks
- * Candidates, in order:
- * 1. `$CUSTOM_DATA_DIR/settings.json`. Zed reads no such variable: its `--user-data-dir` flag sets
- *    an internal `CUSTOM_DATA_DIR` and puts settings at `<dir>/config/settings.json` (Zed's
- *    `crates/paths/src/paths.rs`, `config_dir`).
- * 2. `$HOME/.config/zed/settings.json` (Zed's macOS location, and Linux's without XDG).
- * 3. `$XDG_CONFIG_HOME/zed/settings.json` (Linux XDG).
+ * 1. `$CUSTOM_DATA_DIR/settings.json`: the proxy's own override. Zed reads no such variable: its
+ *    `--user-data-dir` flag sets an internal `CUSTOM_DATA_DIR` and puts settings at
+ *    `<dir>/config/settings.json` (Zed's `crates/paths/src/paths.rs`, `config_dir`).
+ * 2. `$XDG_CONFIG_HOME/zed/settings.json`: Zed on Linux uses this when the variable is set.
+ * 3. `$HOME/.config/zed/settings.json`: Zed on macOS, and on Linux without XDG_CONFIG_HOME.
  *
- * @returns the settings path, or `undefined` when none of the candidates exists
+ * A variable that is unset or empty adds no candidate. `XDG_CONFIG_HOME` is honoured on every
+ * platform, though Zed reads it on Linux only; it is rarely set on macOS, where Zed uses 3.
+ *
+ * @returns the candidates, possibly none
  */
-export function findZedSettings(): string | undefined {
-  const candidates: { source: string; settingsPath: string }[] = []
-
+function zedSettingsCandidates(): SettingsCandidate[] {
+  const candidates: SettingsCandidate[] = []
   const customDir = process.env.CUSTOM_DATA_DIR
   if (customDir !== undefined && customDir.length > 0) {
     candidates.push({
@@ -95,15 +102,6 @@ export function findZedSettings(): string | undefined {
       settingsPath: resolve(customDir, 'settings.json')
     })
   }
-
-  const home = process.env.HOME
-  if (home !== undefined && home.length > 0) {
-    candidates.push({
-      source: 'HOME',
-      settingsPath: resolve(home, '.config', 'zed', 'settings.json')
-    })
-  }
-
   const xdg = process.env.XDG_CONFIG_HOME
   if (xdg !== undefined && xdg.length > 0) {
     candidates.push({
@@ -111,7 +109,23 @@ export function findZedSettings(): string | undefined {
       settingsPath: resolve(xdg, 'zed', 'settings.json')
     })
   }
+  const home = process.env.HOME
+  if (home !== undefined && home.length > 0) {
+    candidates.push({
+      source: 'HOME',
+      settingsPath: resolve(home, '.config', 'zed', 'settings.json')
+    })
+  }
+  return candidates
+}
 
+/**
+ * Finds Zed's global settings.json: the first of {@link zedSettingsCandidates} that exists.
+ *
+ * @returns the settings path, or `undefined` when none of the candidates exists
+ */
+export function findZedSettings(): string | undefined {
+  const candidates = zedSettingsCandidates()
   for (const { source, settingsPath } of candidates) {
     if (existsSync(settingsPath)) {
       zedLogger.debug('Found Zed settings at {settingsPath} (from {source})', {
@@ -127,6 +141,18 @@ export function findZedSettings(): string | undefined {
     candidateCount: candidates.length
   })
   return undefined
+}
+
+/**
+ * Describes where the settings were looked for, for the not-found error.
+ *
+ * @returns the checked paths, each once, or what to set when there was nowhere to look
+ */
+function checkedLocations(): string {
+  const paths = [...new Set(zedSettingsCandidates().map((candidate) => candidate.settingsPath))]
+  return paths.length > 0
+    ? `Checked ${paths.join(', ')}`
+    : 'Nowhere to look: set HOME or XDG_CONFIG_HOME'
 }
 
 // ---------------------------------------------------------------------------
@@ -420,8 +446,7 @@ export function syncToZed(
       removed: 0,
       unchanged: 0,
       summary: '',
-      error:
-        'Zed settings.json not found. Checked ~/.config/zed/settings.json and $XDG_CONFIG_HOME/zed/settings.json'
+      error: `Zed settings.json not found. ${checkedLocations()}`
     }
   }
 

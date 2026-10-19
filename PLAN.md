@@ -433,7 +433,8 @@ Rejected (`422`, naming the keyword and its path; logged as a warning with the t
 - non-string enum values
 - any other keyword (e.g. `x-*` extensions, OpenAPI `nullable`, `propertyNames`), or a supported
   keyword on a type it does not apply to
-- a supported keyword whose value is of the wrong kind
+- a supported keyword whose value is of the wrong kind, including a `required` that is not an
+  array of property names (ignoring it would make every property optional)
 
 ## Known gaps and silent drops
 
@@ -594,19 +595,20 @@ Fields translated to Anthropic's wire format:
 | `metadata` (arbitrary) | Skipped (Anthropic only accepts `user_id`) |
 | `prediction` | Skipped (not supported) |
 
-#### Google (`google-generative-ai`, `google-gemini-cli`, `google-vertex`)
+#### Google (`google-generative-ai`, `google-vertex`)
 
-Fields translated into Google's nested `config.generationConfig` structure (camelCase). The
-sampling fields below are likely dropped before they reach Google
-([#110](https://github.com/vx-daniel/pi-openai-proxy/issues/110)):
+Fields translated to Google's camelCase names and set flat on the payload's `config`, beside
+pi's own `temperature` and `maxOutputTokens`. `@google/genai` builds the wire request's
+`generationConfig` from those keys; a nested `config.generationConfig` is never read, which is
+how these fields were dropped before #110.
 
 | OpenAI field | Google translation |
 |---|---|
-| `top_p` | `config.generationConfig.topP` |
-| `stop` | `config.generationConfig.stopSequences` (always array) |
-| `seed` | `config.generationConfig.seed` |
-| `frequency_penalty` | `config.generationConfig.frequencyPenalty` |
-| `presence_penalty` | `config.generationConfig.presencePenalty` |
+| `top_p` | `config.topP` |
+| `stop` | `config.stopSequences` (always array) |
+| `seed` | `config.seed` |
+| `frequency_penalty` | `config.frequencyPenalty` |
+| `presence_penalty` | `config.presencePenalty` |
 | `tool_choice: "auto"` | `config.toolConfig.functionCallingConfig.mode: "AUTO"` |
 | `tool_choice: "none"` | `config.toolConfig.functionCallingConfig.mode: "NONE"` |
 | `tool_choice: "required"` or `{ function: { name } }` | `config.toolConfig.functionCallingConfig.mode: "ANY"` |

@@ -220,6 +220,37 @@ describe('recorder whose upstream cannot be reached', () => {
       await deadEnd.close()
     }
   })
+
+  // Catches a mid-stream upstream failure answered with a second status line, which threw
+  // ERR_HTTP_HEADERS_SENT into an unhandled rejection and left pi waiting (#111): the response is
+  // cut instead, as a dropped upstream looks, and no exchange is kept.
+  test('cuts the response when the upstream fails after answering', async () => {
+    const halfAnswer = createServer((request, response) => {
+      request.resume()
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      response.write('data: {"partial":true}\n\n', () => {
+        response.socket?.destroy()
+      })
+    })
+    const cutRecorder = await startRecorder(await listenOnLoopback(halfAnswer))
+    try {
+      const response = await fetch(`${cutRecorder.baseUrl}/v1/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'any', messages: [] })
+      })
+
+      await expect(response.text()).rejects.toThrow()
+      expect({ status: response.status, exchanges: cutRecorder.exchanges }).toEqual({
+        status: 200,
+        exchanges: []
+      })
+    } finally {
+      await cutRecorder.close()
+      halfAnswer.closeAllConnections()
+      halfAnswer.close()
+    }
+  })
 })
 
 /**

@@ -141,14 +141,14 @@ function deliverShutdownSignals(): void {
  * Waits until the started proxy answers on this origin.
  *
  * @remarks
- * Any HTTP response counts, including the 404 that `/health` gets; only a refused connection
+ * Asks the liveness check, `/healthz`, which answers without proxy auth; only a refused connection
  * keeps it waiting.
  *
  * @param origin - the proxy's origin, such as `http://127.0.0.1:4141`
  */
 async function waitForListening(origin: string): Promise<void> {
   await vi.waitFor(async () => {
-    await fetch(`${origin}/health`)
+    await fetch(`${origin}/healthz`)
   })
 }
 
@@ -201,6 +201,20 @@ describe('logging flags', () => {
     })
     expect(stderr).toEqual(['--log-format must be one of: pretty, json\n'])
     expect(stdout).toEqual([])
+  })
+
+  // Catches --config printing the config and exiting 0 past an unusable flag, where every other
+  // path refuses it with the valid values (#95; CONSTITUTION.md, principle II).
+  test('--config with an invalid --log-level refuses too, printing no config', async () => {
+    await runCli(['--config', '--log-level', 'loud'])
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect({ stderr, stdout }).toEqual({
+      stderr: ['--log-level must be one of: trace, debug, info, warning, error, fatal\n'],
+      stdout: []
+    })
   })
 })
 
@@ -341,7 +355,7 @@ describe('starting the server', () => {
     deliverShutdownSignals()
 
     await vi.waitFor(async () => {
-      await expect(fetch(`${origin}/health`)).rejects.toThrow()
+      await expect(fetch(`${origin}/healthz`)).rejects.toThrow()
     })
     const messages = logRecords().map((record) => String(record['message']))
     expect(messages.filter((message) => message.startsWith('Received'))).toEqual([

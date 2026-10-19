@@ -84,7 +84,7 @@ describe('image URL security', () => {
     [
       'an oversized base64 payload',
       `data:image/png;base64,${OVERSIZED_BASE64}`,
-      'exceeds maximum size'
+      'base64 characters'
     ],
     [
       'an unsupported MIME type',

@@ -1,9 +1,10 @@
 /**
  * A local mock provider for tests that need a real upstream: pi's real provider code calls it over
  * real HTTP on 127.0.0.1, and each model ID is answered by a reply. The scripted replies below
- * speak OpenAI's chat completions SSE (pi's `openai-completions` API); `replay` from
- * `test/fixtures/recording.ts` serves recorded real traffic of any API, such as
- * `anthropic-messages`. It records every request it receives, so a test can check what pi sent.
+ * speak OpenAI's chat completions SSE (pi's `openai-completions` API), and `googleSse` speaks
+ * Google's (`google-generative-ai`); `replay` from `test/fixtures/recording.ts` serves recorded
+ * real traffic of any API, such as `anthropic-messages`. It records every request it receives, so
+ * a test can check what pi sent.
  *
  * Point a fixture `models.json` at it with `mock.provider(api)` (see `test/fixtures/agent-dir.ts`).
  *
@@ -40,12 +41,15 @@ export interface MockProvider {
   /**
    * A `models.json` provider entry pointing at this server, with a literal fake key and one model
    * per scripted reply. `openai-completions` (the default) puts `/v1` in the base URL, as OpenAI
-   * clients expect; `anthropic-messages` does not, because Anthropic's client adds it.
+   * clients expect; `anthropic-messages` and `google-generative-ai` do not, because their clients
+   * add their own path.
    *
    * @param api - the pi API the entry declares; `openai-completions` when omitted
    * @returns the provider entry, to put under `providers.<name>` in `models.json`
    */
-  provider(api?: 'openai-completions' | 'anthropic-messages'): Record<string, unknown>
+  provider(
+    api?: 'openai-completions' | 'anthropic-messages' | 'google-generative-ai'
+  ): Record<string, unknown>
   /** Drops open connections and stops the server. */
   close(): Promise<void>
 }
@@ -93,12 +97,32 @@ function decodeBody(raw: Buffer, contentEncoding: string | undefined): string {
   }
 }
 
+/** Google's request path: `/models/<id>:<method>`, the model ID before the colon. */
+const GOOGLE_MODEL_PATH = /\/models\/([^/:?]+):/u
+
+/**
+ * Finds the model a request asks for.
+ *
+ * @remarks
+ * OpenAI-style and Anthropic APIs name it in the body's `model` field; Google's names it in the
+ * URL path (`/models/<id>:streamGenerateContent`).
+ *
+ * @param body - the decoded request body
+ * @param path - the request path and query
+ * @returns the model ID, or `''` when the request names none
+ */
+function requestedModel(body: unknown, path: string): string {
+  if (isRecord(body) && typeof body['model'] === 'string') return body['model']
+  return GOOGLE_MODEL_PATH.exec(path)?.[1] ?? ''
+}
+
 /**
  * Starts the mock on a free loopback port.
  *
  * @remarks
- * A request is matched on its body's `model` field. A body that is not JSON gets a 400, and a
- * model with no reply gets a 404; every request is recorded in `requests` either way.
+ * A request is matched on the model it asks for ({@link requestedModel}). A body that is not
+ * JSON gets a 400, and a model with no reply gets a 404; every request is recorded in `requests`
+ * either way.
  *
  * @param replies - maps a model ID to how requests for it are answered
  * @returns the running mock: its origin, the requests received, a provider entry, and `close()`
@@ -123,7 +147,7 @@ export async function startMockProvider(
         })(response, request)
         return
       }
-      const model = isRecord(body) && typeof body['model'] === 'string' ? body['model'] : ''
+      const model = requestedModel(body, request.path)
       const reply = replies[model]
       if (reply === undefined) {
         void httpError(HTTP_NOT_FOUND, { error: { message: `mock has no model ${model}` } })(
@@ -259,6 +283,37 @@ export function sse(
       response.write(`data: ${JSON.stringify(event)}\n\n`)
     }
     response.end('data: [DONE]\n\n')
+  }
+}
+
+/**
+ * Builds a complete Google answer for pi's `google-generative-ai` API: status 200, then one SSE
+ * `data:` event per text part, the last with `finishReason: STOP` and token counts. Google's
+ * stream has no `[DONE]` marker; the response just ends.
+ *
+ * @param parts - the text parts, in order
+ * @returns the reply
+ */
+export function googleSse(...parts: string[]): MockReply {
+  return (response) => {
+    response.writeHead(HTTP_OK, { 'content-type': 'text/event-stream' })
+    for (const [partIndex, partText] of parts.entries()) {
+      const last = partIndex === parts.length - 1
+      const event = {
+        candidates: [
+          {
+            content: { role: 'model', parts: [{ text: partText }] },
+            index: 0,
+            ...(last ? { finishReason: 'STOP' } : {})
+          }
+        ],
+        ...(last
+          ? { usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 } }
+          : {})
+      }
+      response.write(`data: ${JSON.stringify(event)}\n\n`)
+    }
+    response.end()
   }
 }
 

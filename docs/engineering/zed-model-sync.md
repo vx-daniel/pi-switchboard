@@ -237,17 +237,17 @@ again`.
 
 ```
 1. $CUSTOM_DATA_DIR/settings.json
-2. $HOME/.config/zed/settings.json
-3. $XDG_CONFIG_HOME/zed/settings.json
+2. $XDG_CONFIG_HOME/zed/settings.json
+3. $HOME/.config/zed/settings.json
 ```
 
-It never creates the file. With none found, the sync fails with `Zed settings.json not found.
-Checked ~/.config/zed/settings.json and $XDG_CONFIG_HOME/zed/settings.json`. There is no
+An unset or empty variable adds no path. It never creates the file. With none found, the sync
+fails with `Zed settings.json not found. Checked <each path above, once>`. There is no
 `~/Library/Application Support/Zed` path and no Zed Preview path.
 
-This order does not match Zed's own (#111): `$CUSTOM_DATA_DIR` is not a Zed setting (Zed's
-`--user-data-dir` puts settings in `<dir>/config/settings.json`, and no env var sets it), and on
-Linux Zed reads `$XDG_CONFIG_HOME` before `~/.config`.
+2 and 3 follow Zed: on Linux it reads `$XDG_CONFIG_HOME` when set, else `~/.config`, and on macOS
+`~/.config`. `$CUSTOM_DATA_DIR` is the proxy's own override, not a Zed setting: Zed's
+`--user-data-dir` puts settings in `<dir>/config/settings.json`, and no env var sets it.
 
 ## Target: Continue.dev (future)
 

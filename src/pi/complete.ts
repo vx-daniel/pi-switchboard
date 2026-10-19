@@ -56,13 +56,8 @@ const CODEX_APIS = new Set(['openai-codex-responses'])
 /** APIs whose passthrough fields are translated to Anthropic's names and shapes. */
 const ANTHROPIC_APIS = new Set(['anthropic-messages'])
 
-/**
- * APIs whose passthrough fields are patched into Google's nested payload.
- *
- * @remarks
- * pi 1.3.0 has no `google-gemini-cli` API; that entry matches no model.
- */
-const GOOGLE_APIS = new Set(['google-generative-ai', 'google-gemini-cli', 'google-vertex'])
+/** APIs whose passthrough fields are patched onto Google's `config` by {@link patchGooglePayload}. */
+const GOOGLE_APIS = new Set(['google-generative-ai', 'google-vertex'])
 
 // ---------------------------------------------------------------------------
 // OpenAI-compatible payload fields
@@ -237,15 +232,20 @@ function translateToolChoiceForGoogle(
 }
 
 /**
- * Patches the translated passthrough fields into Google's nested payload, in place.
+ * Patches the translated passthrough fields into Google's payload, in place.
  *
  * @remarks
  * pi 1.3.0 builds `{ model, contents, config }`, with its own generation fields (temperature,
  * maxOutputTokens) flat on `config` and `toolConfig` beside them (pi-ai
- * dist/api/google-generative-ai.js and google-vertex.js, `buildParams`). This function writes:
- * - top_p, stop, seed, frequency_penalty, presence_penalty → `config.generationConfig`
+ * dist/api/google-generative-ai.js and google-vertex.js, `buildParams`). `@google/genai` turns
+ * those flat keys into the wire request's `generationConfig`; it does not read a nested
+ * `config.generationConfig` (#110). This function writes:
+ * - top_p, stop, seed, frequency_penalty, presence_penalty → flat on `config`
  *   (`topP`, `stopSequences`, `seed`, `frequencyPenalty`, `presencePenalty`)
  * - tool_choice → `config.toolConfig.functionCallingConfig.mode`
+ *
+ * A request field overrides a same-named key pi set: the client asked for that value. pi 1.3.0
+ * sets none of these keys, so nothing is overridden today.
  *
  * Skipped silently: response_format, metadata, prediction, parallel_tool_calls, user.
  *
@@ -267,11 +267,11 @@ export function patchGooglePayload(
   }
 
   let patched = false
+  // Flat on `config`, beside pi's own fields: @google/genai builds the wire request's
+  // generationConfig from these keys and never reads a `config.generationConfig` object (#110).
   const genFields = collectGoogleGenerationFields(request)
   if (Object.keys(genFields).length > 0) {
-    const genConfig = isRecord(config['generationConfig']) ? config['generationConfig'] : {}
-    Object.assign(genConfig, genFields)
-    config['generationConfig'] = genConfig
+    Object.assign(config, genFields)
     patched = true
   }
 
@@ -366,7 +366,7 @@ export function collectCodexPayloadFields(
  * - OpenAI full passthrough: every standard field, same names
  * - Codex: tool_choice and parallel_tool_calls only
  * - Anthropic: translated field names and formats
- * - Google: none here; the nested payload is patched in onPayload by {@link patchGooglePayload}
+ * - Google: none here; `config` is patched in onPayload by {@link patchGooglePayload}
  * - Others (Bedrock, …): no passthrough
  *
  * Exported for unit tests.
@@ -395,7 +395,7 @@ export function collectPayloadFields(
 }
 
 /**
- * Reports whether an API needs Google-style nested payload patching.
+ * Reports whether an API's payload is patched the Google way ({@link patchGooglePayload}).
  *
  * @param api - the model's pi API
  * @returns whether `api` is in {@link GOOGLE_APIS}
@@ -547,7 +547,7 @@ function passthroughHook(
     }
     // Flat field injection (OpenAI-compatible and Anthropic)
     if (payloadFields !== undefined) Object.assign(payload, payloadFields)
-    // Google nested generationConfig patching
+    // Google: fields set on the payload's `config` object
     const googlePatched = needsGooglePatch && patchGooglePayload(payload, request)
     completeLogger.debug('Patched upstream payload for {api}', {
       api: model.api,

@@ -1,7 +1,7 @@
 /**
  * Request fields pi has no option for, end to end: the proxy sets them on the payload pi builds
- * (`onPayload`), verbatim for an OpenAI-compatible API, translated for Anthropic. The unit tests
- * cover what each translation returns; this covers that pi's real clients send it.
+ * (`onPayload`), verbatim for an OpenAI-compatible API, translated for Anthropic and Google. The
+ * unit tests cover what each translation returns; this covers that pi's real clients send it.
  */
 
 import { isRecord } from '@proxy/utils/guards'
@@ -10,6 +10,7 @@ import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
   finishChunk,
+  googleSse,
   type MockProvider,
   sse,
   startMockProvider,
@@ -27,12 +28,17 @@ let agentDir: FixtureAgentDir
 
 beforeAll(async () => {
   const answer = sse([...textChunks('ok'), finishChunk('stop')])
-  mock = await startMockProvider({ 'chat-mock': answer, 'claude-mock': answer })
+  mock = await startMockProvider({
+    'chat-mock': answer,
+    'claude-mock': answer,
+    'gemini-mock': googleSse('ok')
+  })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
       providers: {
         completions: { ...mock.provider(), models: [{ id: 'chat-mock' }] },
-        anthropic: { ...mock.provider('anthropic-messages'), models: [{ id: 'claude-mock' }] }
+        anthropic: { ...mock.provider('anthropic-messages'), models: [{ id: 'claude-mock' }] },
+        google: { ...mock.provider('google-generative-ai'), models: [{ id: 'gemini-mock' }] }
       }
     }
   })
@@ -82,5 +88,19 @@ describe('passthrough fields reach the provider', () => {
       hasStop: 'stop' in body,
       hasSeed: 'seed' in body
     }).toEqual({ stop_sequences: ['END'], top_p: TOP_P, hasStop: false, hasSeed: false })
+  })
+
+  // Catches the Google fields written where @google/genai never reads them (#110): pi's client
+  // builds the wire request's generationConfig from flat `config` keys, so fields nested under
+  // `config.generationConfig` are dropped without an error and the client gets a normal answer.
+  test('google-generative-ai: translated into the wire generationConfig', async () => {
+    const body = await sentBody('google/gemini-mock')
+    const sent = isRecord(body['generationConfig']) ? body['generationConfig'] : {}
+
+    expect({
+      topP: sent['topP'],
+      stopSequences: sent['stopSequences'],
+      seed: sent['seed']
+    }).toEqual({ topP: TOP_P, stopSequences: ['END'], seed: SEED })
   })
 })

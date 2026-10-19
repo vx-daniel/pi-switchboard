@@ -123,7 +123,21 @@ function encodeChoiceChunk(
 }
 
 /**
- * Encodes a text delta, adding `role: "assistant"` when no chunk has been sent yet.
+ * Returns the delta for the next choice chunk, with `role: "assistant"` when it is the stream's
+ * first: OpenAI's first chunk carries the role, whichever event produced it (#111).
+ *
+ * @param state - the stream state; marks the first chunk as sent
+ * @param delta - the delta the event produces
+ * @returns `delta`, with the role added on the first chunk
+ */
+function firstDelta(state: StreamState, delta: SSEChunkDelta): SSEChunkDelta {
+  if (state.sentFirstChunk) return delta
+  state.sentFirstChunk = true
+  return { role: 'assistant', ...delta }
+}
+
+/**
+ * Encodes a text delta.
  *
  * @param meta - the shared chunk fields
  * @param state - the stream state; marks the first chunk as sent
@@ -131,11 +145,7 @@ function encodeChoiceChunk(
  * @returns the SSE frame
  */
 function encodeTextDelta(meta: ChunkMeta, state: StreamState, text: string): string {
-  if (state.sentFirstChunk) {
-    return encodeChoiceChunk(meta, { content: text })
-  }
-  state.sentFirstChunk = true
-  return encodeChoiceChunk(meta, { role: 'assistant', content: text })
+  return encodeChoiceChunk(meta, firstDelta(state, { content: text }))
 }
 
 /**
@@ -163,19 +173,22 @@ function encodeToolCallStart(
   const tcIndex = state.toolCallIndexes.size
   state.toolCallIndexes.set(ci, true)
   return [
-    encodeChoiceChunk(meta, {
-      tool_calls: [
-        {
-          index: tcIndex,
-          id: toolCallContent.id,
-          type: 'function',
-          function: {
-            name: toolCallContent.name,
-            arguments: ''
+    encodeChoiceChunk(
+      meta,
+      firstDelta(state, {
+        tool_calls: [
+          {
+            index: tcIndex,
+            id: toolCallContent.id,
+            type: 'function',
+            function: {
+              name: toolCallContent.name,
+              arguments: ''
+            }
           }
-        }
-      ]
-    })
+        ]
+      })
+    )
   ]
 }
 
@@ -253,9 +266,7 @@ function eventToFrames(
 ): string[] {
   switch (event.type) {
     case 'start':
-      // Emit the first chunk with role
-      state.sentFirstChunk = true
-      return [encodeChoiceChunk(meta, { role: 'assistant' })]
+      return [encodeChoiceChunk(meta, firstDelta(state, {}))]
     case 'text_delta':
       return [encodeTextDelta(meta, state, event.delta)]
     case 'toolcall_start':
@@ -340,7 +351,7 @@ function closingFrames(
       eventCount
     })
   } else {
-    frames.push(encodeChoiceChunk(meta, {}, state.finishReason))
+    frames.push(encodeChoiceChunk(meta, firstDelta(state, {}), state.finishReason))
   }
 
   if (includeUsage && state.finalUsage !== undefined) {

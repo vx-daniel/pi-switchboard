@@ -502,7 +502,7 @@ function parseAndValidateDataUri(uri: string): DataUriResult {
   if (data.length > MAX_BASE64_PAYLOAD_SIZE) {
     return {
       ok: false,
-      message: `Image payload exceeds maximum size of ${String(MAX_BASE64_PAYLOAD_SIZE)} bytes`
+      message: `Image data exceeds the maximum of ${String(MAX_BASE64_PAYLOAD_SIZE)} base64 characters`
     }
   }
 

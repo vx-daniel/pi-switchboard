@@ -238,15 +238,10 @@ async function parseChatRequest(context: ProxyContext): Promise<Step<ChatRequest
  * Converts the OpenAI messages and tools into a pi `Context`.
  *
  * @param honoContext - the request's Hono context, for the error response
- * @param model - the resolved pi model
  * @param request - the validated chat request
  * @returns the pi context, or a 400 (message conversion failed) or 422 (unsupported tool) response
  */
-function buildPiContext(
-  honoContext: ProxyContext,
-  model: PiModel,
-  request: ChatRequest
-): Step<PiContext> {
+function buildPiContext(honoContext: ProxyContext, request: ChatRequest): Step<PiContext> {
   const conversion = convertMessages(request.messages)
   if (!conversion.ok) {
     chatLogger.warn('Rejected chat request: message conversion failed at {param}', {
@@ -263,16 +258,6 @@ function buildPiContext(
   }
 
   const context = conversion.context
-
-  // The Codex Responses API requires the `instructions` field (system prompt). The intent here is
-  // to send no behavioural instructions: a translation proxy should be transparent. pi 1.3.0
-  // drops an empty system prompt, though, and sends "You are a helpful assistant." when there is
-  // none (pi-ai dist/utils/transcript.js, dist/api/openai-codex-responses.js), so this empty
-  // string does not change the request.
-  if (model.api === 'openai-codex-responses' && context.systemPrompt === undefined) {
-    chatLogger.debug('No system prompt for {api}; sending empty instructions', { api: model.api })
-    context.systemPrompt = ''
-  }
 
   // Convert tools if provided
   if (request.tools !== undefined && request.tools.length > 0) {
@@ -545,7 +530,7 @@ async function handleChatCompletion(
     stream: request.stream === true
   })
 
-  const built = buildPiContext(context, model, request)
+  const built = buildPiContext(context, request)
   if (!built.ok) return built.response
 
   const authFailure = await checkRequestAuth(context, model, upstreamApiKey)

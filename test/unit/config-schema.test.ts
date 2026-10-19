@@ -1,15 +1,19 @@
 /**
- * Unit tests for config/schema.ts normalization.
+ * Unit tests for config/schema.ts: normalization and the config file's path.
  *
  * Checks that normalizeConfig repairs rather than refuses: missing fields take their defaults,
  * values of the wrong type fall back, numbers are rounded and clamped, list and map entries are
- * filtered, and each set of repaired fields is warned about once, by path.
+ * filtered, and each set of repaired fields is warned about once, by path. And that the config
+ * file lives in pi's agent dir, whatever HOME holds.
  */
 
+import { homedir } from 'node:os'
+import { join } from 'node:path'
+
 import { resetSync } from '@logtape/logtape'
-import { DEFAULT_CONFIG, normalizeConfig } from '@proxy/config/schema'
+import { DEFAULT_CONFIG, getConfigPath, normalizeConfig } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
-import { afterEach, describe, expect, test } from 'vite-plus/test'
+import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
 describe('normalizeConfig', () => {
   // Catches `null` (the one non-object input with `typeof === 'object'`) slipping past the object
@@ -324,5 +328,25 @@ describe('normalizeConfig: repairs', () => {
   test('host is trimmed, and a blank host takes the default', () => {
     expect(normalizeConfig({ host: ' 0.0.0.0 ' }).host).toBe('0.0.0.0')
     expect(normalizeConfig({ host: '   ' }).host).toBe(DEFAULT_CONFIG.host)
+  })
+})
+
+describe('getConfigPath', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+  })
+
+  // Catches the path built from HOME's text, which made a relative `./~/.pi/agent` with HOME unset
+  // and the working directory with an empty PI_CODING_AGENT_DIR (#111): pi's own agent dir is
+  // used, which falls back to the user's home directory and expands a leading `~`.
+  test.each([
+    { case: 'HOME unset', agentDir: undefined, under: ['.pi', 'agent'] },
+    { case: 'PI_CODING_AGENT_DIR empty', agentDir: '', under: ['.pi', 'agent'] },
+    { case: 'PI_CODING_AGENT_DIR with ~', agentDir: '~/custom-agent', under: ['custom-agent'] }
+  ])('$case: in the home directory', ({ agentDir, under }) => {
+    vi.stubEnv('PI_CODING_AGENT_DIR', agentDir)
+    vi.stubEnv('HOME', undefined)
+
+    expect(getConfigPath()).toBe(join(homedir(), ...under, 'proxy-config.json'))
   })
 })

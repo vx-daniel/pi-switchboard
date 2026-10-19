@@ -217,12 +217,13 @@ describe('/proxy with models on two providers', () => {
       expect(readFileSync(zedSettingsPath, 'utf-8')).toEqual(ZED_SETTINGS)
     })
 
-    // Catches a missing Zed install being reported as success.
-    test('missing Zed settings is an error', async () => {
+    // Catches a missing Zed install being reported as success, or the error naming places it
+    // never looked: it lists each checked path once (CUSTOM_DATA_DIR and XDG_CONFIG_HOME resolve
+    // to the same file here).
+    test('missing Zed settings is an error naming the paths checked', async () => {
       expect(await runProxy('zed-sync')).toEqual([
         {
-          message:
-            'Zed sync: Zed settings.json not found. Checked ~/.config/zed/settings.json and $XDG_CONFIG_HOME/zed/settings.json',
+          message: `Zed sync: Zed settings.json not found. Checked ${zedSettingsPath}, ${join(zedRoot, '.config', 'zed', 'settings.json')}`,
           level: 'error'
         }
       ])

@@ -87,11 +87,12 @@ export async function handleZedSync(
  * saves a change.
  *
  * @remarks
- * A failure is logged but not shown in the UI, so auto-sync does not interrupt the user.
+ * A failure, thrown or reported, is logged but not shown in the UI, so auto-sync does not
+ * interrupt the user. It never rejects: the settings panel does not wait for it (#111), and at
+ * session start a throw would stop the status refresh that follows.
  *
  * @param state - the extension state
  * @param context - the extension context, used for the success notification
- * @throws Error when the session's model registry is not available yet
  */
 export async function maybeAutoSyncZed(
   state: ProxyState,
@@ -101,7 +102,13 @@ export async function maybeAutoSyncZed(
     zedSyncLogger.debug('Zed auto-sync disabled; skipping')
     return
   }
-  const result = await runZedSync(state, false)
+  let result: { ok: boolean; message: string }
+  try {
+    result = await runZedSync(state, false)
+  } catch (error: unknown) {
+    zedSyncLogger.warn('Zed auto-sync failed: {error}', { error })
+    return
+  }
   if (result.ok) {
     zedSyncLogger.info('Zed auto-sync succeeded: {message}', { message: result.message })
     context.ui.notify(`Zed auto-sync: ${result.message}`, 'info')

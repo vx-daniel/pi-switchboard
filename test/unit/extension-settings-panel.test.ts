@@ -7,7 +7,7 @@
  * sources, as `extension-reports.test.ts` does.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { SettingsManager } from '@earendil-works/pi-coding-agent'
@@ -24,7 +24,9 @@ import {
   refreshDescriptions
 } from '../../extensions/proxy/settings-panel'
 import type { ProxyState } from '../../extensions/proxy/state'
+import { maybeAutoSyncZed } from '../../extensions/proxy/zed-sync'
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { fakeCommandContext } from '../fixtures/extension-context'
 
 vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
 vi.mock('@vx-daniel/pi-openai-proxy/exposure', () => import('@proxy/openai/model-exposure'))
@@ -171,23 +173,23 @@ describe('applySetting: the other settings', () => {
     ])
   })
 
-  // Catches an unknown setting crashing the panel or corrupting the config. The second warning is a
-  // duplicate, pinned as today's behaviour (#95, item 1).
-  test('an unknown setting warns and saves the config unchanged', () => {
+  // Catches an unknown setting crashing the panel, corrupting the config, or warning twice (the
+  // second warning claimed a value "not applied" for a setting that does not exist, #95).
+  test('an unknown setting warns once and changes nothing', () => {
     const state = stateWith({ port: 5151 })
     expect(applySetting(state, 'colour', 'blue')).toBeUndefined()
 
-    expect(savedConfig()).toEqual({ ...DEFAULT_CONFIG, port: 5151 })
-    expect(warnings()).toEqual([
-      {
-        message: 'Unknown setting "colour"; saving config unchanged',
-        properties: { settingId: 'colour' }
-      },
-      {
-        message: 'Setting "colour": value "blue" not applied as given; now ""',
-        properties: { settingId: 'colour', value: 'blue', applied: '' }
-      }
-    ])
+    expect({
+      config: state.config,
+      fileWritten: existsSync(join(agentDir.path, 'proxy-config.json')),
+      warnings: warnings()
+    }).toEqual({
+      config: { ...DEFAULT_CONFIG, port: 5151 },
+      fileWritten: false,
+      warnings: [
+        { message: 'Unknown setting "colour"; ignored', properties: { settingId: 'colour' } }
+      ]
+    })
   })
 })
 
@@ -302,5 +304,22 @@ describe('an invalid authToken in the file (#82)', () => {
     applySetting(stateFromInvalidFile(), 'authToken', 'disabled')
 
     expect(savedConfig()).toEqual(DEFAULT_CONFIG)
+  })
+})
+
+describe('Zed auto-sync after a change', () => {
+  // Catches auto-sync rejecting when it cannot run (#111): the panel does not wait for it, so a
+  // rejection would go unhandled, and at session start it would stop the status refresh. It is
+  // logged as a warning and shown nowhere.
+  test('with no model registry yet: resolves, warns, shows nothing', async () => {
+    const state = stateWith({ zed: { ...DEFAULT_CONFIG.zed, autoSync: true } })
+    const { context, notifications } = fakeCommandContext({})
+
+    await expect(maybeAutoSyncZed(state, context)).resolves.toBeUndefined()
+
+    expect({ notifications, warned: warnings().map((warning) => warning.message) }).toEqual({
+      notifications: [],
+      warned: [expect.stringMatching(/^Zed auto-sync failed: /u) as string]
+    })
   })
 })
