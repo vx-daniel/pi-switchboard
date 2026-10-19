@@ -333,7 +333,8 @@ pi install npm:@vx-daniel/pi-openai-proxy
 /proxy models        List the exposed models
 /proxy zed-sync      Sync exposed models to Zed's settings.json (--dry-run to preview)
 /proxy config        Open the settings panel
-/proxy show          Summarize current configuration
+/proxy show          Summarize current configuration (the auth token as a short preview)
+/proxy token         Show the whole proxy auth token, to copy into a client
 /proxy path          Show config file location
 /proxy reset         Restore default settings
 /proxy help          Show usage

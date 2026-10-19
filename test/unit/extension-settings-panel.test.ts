@@ -230,7 +230,7 @@ describe('refreshDescriptions', () => {
         'Always provider/model-id for every model',
         'Expose only manually selected models',
         'Press Enter to open model selector',
-        'Token: notareal... (use /proxy show to copy)'
+        'Token: notarea... (use /proxy token to copy)'
       )
     )
   })

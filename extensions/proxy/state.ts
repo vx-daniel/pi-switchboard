@@ -118,3 +118,23 @@ export async function buildExposureConfig(state: ProxyState): Promise<ModelExpos
 export function proxyUrl(config: ProxyConfig): string {
   return `http://${config.host}:${String(config.port)}`
 }
+
+/** Most characters of the proxy token a preview shows; the rest stays hidden (#90). */
+const TOKEN_PREVIEW_MAX = 8
+/** A preview shows at most one character in this many, so a short token is not shown whole. */
+const TOKEN_PREVIEW_FRACTION = 4
+
+/**
+ * Returns a preview of the proxy auth token for display: its first characters, then `...`.
+ *
+ * @remarks
+ * At most {@link TOKEN_PREVIEW_MAX} characters, and at most a quarter of the token: a generated
+ * 32-character token shows 8, and a token of 3 characters or fewer shows none.
+ *
+ * @param token - the token
+ * @returns the preview; never the whole token
+ */
+export function tokenPreview(token: string): string {
+  const shown = Math.min(TOKEN_PREVIEW_MAX, Math.floor(token.length / TOKEN_PREVIEW_FRACTION))
+  return `${token.slice(0, shown)}...`
+}

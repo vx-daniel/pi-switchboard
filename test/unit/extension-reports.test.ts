@@ -92,7 +92,8 @@ describe('with models on two providers', () => {
       )
     })
 
-    // Catches the auth token, the scoped pattern count or unresolved patterns going missing.
+    // Catches the auth token shown whole (#90), the scoped pattern count or unresolved patterns
+    // going missing. A 20-character token shows a quarter of itself, 5 characters.
     test('scoped with patterns and an auth token', async () => {
       const state = stateWith(agentDir, { authToken: 'notarealsecret-token', port: 5151 }, [
         'alpha/a1',
@@ -100,7 +101,7 @@ describe('with models on two providers', () => {
       ])
       const report = await buildConfigReport(state)
       expect(report).toEqual(
-        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: notarealsecret-token) | remote images: false | max body: 50 MB | timeout: 120s\n' +
+        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: notar...; /proxy token shows it) | remote images: false | max body: 50 MB | timeout: 120s\n' +
           'id mode: collision-prefixed | exposure: scoped | enabled: 2 pi pattern(s) | exposed: a1 | unresolved: nothing-like-this (no-match)'
       )
     })
