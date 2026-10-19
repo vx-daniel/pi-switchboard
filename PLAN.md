@@ -123,28 +123,40 @@ The proxy describes its own API in OpenAPI 3.1 (#129), built with
 (`src/server/openapi.ts`):
 
 - `GET /v1/switchboard/openapi.json`: the document. Always on.
-- `GET /v1/switchboard/docs`: [Swagger UI](https://github.com/honojs/middleware/tree/main/packages/swagger-ui)
-  for it, with "Try it out". Off unless `docsUi` (`--docs-ui`, `PI_PROXY_DOCS_UI`, the settings
-  panel) is on, because the page loads `swagger-ui-dist`, pinned to `SWAGGER_UI_VERSION`, from the
-  jsDelivr CDN. It is not bundled: `swagger-ui-dist` depends on `@scarf/scarf`, whose install
-  script reports installs to an analytics service.
+- `GET /docs`: [Swagger UI](https://github.com/honojs/middleware/tree/main/packages/swagger-ui)
+  for it, with "Try it out", at the root where a browser goes (an operational endpoint). Off
+  unless `docsUi` (`--docs-ui`, `PI_PROXY_DOCS_UI`, the settings panel) is on, because the page
+  loads `swagger-ui-dist`, pinned to `SWAGGER_UI_VERSION`, from the jsDelivr CDN; off, it answers
+  an OpenAI-style 404. It is not bundled: `swagger-ui-dist` depends on `@scarf/scarf`, whose
+  install script reports installs to an analytics service.
 
-Both skip proxy auth (constitution 2.1.0). A browser cannot send a bearer token to open a page,
+Both skip proxy auth (constitution 2.2.0). A browser cannot send a bearer token to open a page,
 and Swagger UI cannot load the document before the token is entered with "Authorize". Neither
-names a model, provider or credential, and every route they describe still needs the token. They
-are registered before the auth middleware in `createApp`.
+names a model, provider or credential, and every route they describe still needs the token. The
+document is registered before the auth middleware in `createApp`; `/docs` is outside `/v1`.
 
-What the document covers: the stable routes and `GET /v1/switchboard/models`, each with its
-request and response schemas, its error statuses, and the bearer scheme. It leaves out the health
-endpoints, the OpenAI endpoints answered with 404, and the document and docs routes themselves.
+What the document covers: every route the proxy serves, which a test checks against the app's
+route table.
+
+- the stable routes and `GET /v1/switchboard/models`, with their request and response schemas,
+  error statuses and the bearer scheme;
+- the health endpoints, under "Operational", with their bodies (`/healthz` needs no token);
+- the document and the docs page, under "Documentation". `/docs` is registered whatever the
+  config, so the document does not depend on `docsUi`;
+- the OpenAI endpoints the proxy answers with 404, under "Not supported", as deprecated `GET` and
+  `POST` operations (they answer any method). They are written into the document by hand: hono-
+  openapi leaves wildcard and `ALL` routes out.
+
 The response schemas are the Zod schemas the builders type their bodies with (`OpenAIChatCompletion`
-is `z.infer` of `openAIChatCompletionSchema`, and so on), so the document cannot name a field the
-code does not send. They are never parsed at runtime. Validation stays in `validateChatRequest`;
-hono-openapi's `validator()` is not used, since it would replace the 400/422 split and its messages.
+is `z.infer` of `openAIChatCompletionSchema`, the health bodies likewise in `src/server/health.ts`),
+so the document cannot name a field the code does not send. They are never parsed at runtime.
+Validation stays in `validateChatRequest`; hono-openapi's `validator()` is not used, since it would
+replace the 400/422 split and its messages.
 
 `openapi.json` at the repository root is the document as committed: a file snapshot in
 `test/integration/openapi-document.test.ts`. A change to a route, field, status or description
-fails the test until `vp test -u` rewrites it, so the contract change shows up in review. Its
+fails the test until `vp test -u` rewrites it, so the contract change shows up in review. The
+health bodies are tracked there too, so a new health field is a reviewed change. Its
 `info.version` is the API's (`v1`), not the package's, so a release does not change it.
 
 The model detail route is `/v1/models/:model{.+}`: hono-openapi leaves a wildcard route out of the

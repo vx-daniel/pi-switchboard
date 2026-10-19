@@ -8,31 +8,42 @@ import { swaggerUI } from '@hono/swagger-ui'
 import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
+import { invalidRequest } from '@proxy/server/errors'
 import { createHealthRoutes } from '@proxy/server/health'
+import { HTTP_NOT_FOUND } from '@proxy/server/http-status'
 import {
   bodySizeLimitMiddleware,
   disconnectMiddleware,
   proxyAuthMiddleware,
   requestIdMiddleware
 } from '@proxy/server/middleware'
-import { DOCS_PATH, OPENAPI_OPTIONS, OPENAPI_PATH, SWAGGER_UI_VERSION } from '@proxy/server/openapi'
+import {
+  DOCS_PATH,
+  docsPageDescription,
+  OPENAPI_OPTIONS,
+  OPENAPI_PATH,
+  openAPIDocumentDescription,
+  SWAGGER_UI_VERSION
+} from '@proxy/server/openapi'
 import { createRoutes, type ExposureConfigReader, fileConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
 import { Hono } from 'hono'
-import { openAPIRouteHandler } from 'hono-openapi'
+import { describeRoute, openAPIRouteHandler } from 'hono-openapi'
 
 /** Logger for server lifecycle events. */
 const lifecycleLogger = proxyLogger('server')
 
 /**
  * Builds the proxy's Hono app: request ID, disconnect and body size middleware on every path,
- * the OpenAPI document (and the docs UI when on), proxy auth on `/v1/*` and the
- * `/healthz/<check>` detail endpoints, then the health and OpenAI routes.
+ * the OpenAPI document and the docs page, proxy auth on `/v1/*` and the `/healthz/<check>` detail
+ * endpoints, then the health and OpenAI routes.
  *
  * @remarks
  * Three paths skip proxy auth: `GET /healthz`, so liveness probes need no token, and the OpenAPI
- * document and docs page, which name routes and schemas but no model, provider or credential
- * (#129). They are registered before the auth middleware, so they answer before it runs.
+ * document and docs page (`/docs`), which name routes and schemas but no model, provider or
+ * credential (#129). The document is registered before the auth middleware, so it answers before
+ * that runs; `/docs` is outside `/v1`. The docs route is always registered, so the document is
+ * the same whatever the config; with `docsUi` off it answers 404.
  *
  * @param config - the server config: proxy auth mode, body size limit, upstream timeout, remote
  *   images, docs UI
@@ -54,11 +65,27 @@ export function createApp(
   app.use('*', disconnectMiddleware())
   app.use('*', bodySizeLimitMiddleware(config))
 
-  // The OpenAPI document and the docs UI, open like `/healthz`: registered before proxy auth.
+  // The OpenAPI document and the docs page, open like `/healthz`: registered before proxy auth.
   // The document is built from the routes once, on its first request.
-  app.get(OPENAPI_PATH, openAPIRouteHandler(app, OPENAPI_OPTIONS))
+  app.get(
+    OPENAPI_PATH,
+    describeRoute(openAPIDocumentDescription),
+    openAPIRouteHandler(app, OPENAPI_OPTIONS)
+  )
   if (config.docsUiEnabled) {
-    app.get(DOCS_PATH, swaggerUI({ url: OPENAPI_PATH, version: SWAGGER_UI_VERSION }))
+    app.get(
+      DOCS_PATH,
+      describeRoute(docsPageDescription),
+      swaggerUI({ url: OPENAPI_PATH, version: SWAGGER_UI_VERSION })
+    )
+  } else {
+    // Still registered and described, so the document does not depend on the config.
+    app.get(DOCS_PATH, describeRoute(docsPageDescription), (context) =>
+      context.json(
+        invalidRequest('The docs page is off; turn on docsUi (--docs-ui, PI_PROXY_DOCS_UI)'),
+        HTTP_NOT_FOUND
+      )
+    )
   }
 
   app.use('/v1/*', proxyAuthMiddleware(config))

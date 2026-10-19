@@ -13,6 +13,18 @@
     {
       "name": "Switchboard",
       "description": "The proxy's own routes."
+    },
+    {
+      "name": "Operational",
+      "description": "Health checks, outside the OpenAI-compatible surface. Not shaped like OpenAI."
+    },
+    {
+      "name": "Documentation",
+      "description": "This document and its docs page."
+    },
+    {
+      "name": "Not supported",
+      "description": "OpenAI endpoints the proxy does not implement. Each answers 404."
     }
   ],
   "components": {
@@ -23,7 +35,250 @@
         "description": "Only when proxy auth is on (`--auth-token`, `PI_PROXY_AUTH_TOKEN` or `authToken`); otherwise any or no token is accepted."
       }
     },
+    "responses": {
+      "NotSupported": {
+        "description": "The endpoint is not supported by this proxy (`invalid_request_error`).",
+        "content": {
+          "application/json": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "error": {
+                  "type": "object",
+                  "properties": {
+                    "message": {
+                      "type": "string",
+                      "description": "Fixed text; never quotes the provider."
+                    },
+                    "type": {
+                      "type": "string",
+                      "description": "Such as `invalid_request_error`."
+                    },
+                    "param": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "The request field at fault."
+                    },
+                    "code": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Such as `model_not_found`."
+                    }
+                  },
+                  "required": [
+                    "message",
+                    "type",
+                    "param",
+                    "code"
+                  ],
+                  "additionalProperties": false
+                }
+              },
+              "required": [
+                "error"
+              ],
+              "additionalProperties": false,
+              "description": "OpenAI's error shape."
+            }
+          }
+        }
+      }
+    },
     "schemas": {
+      "ModelsHealth": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "availableModelCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "exposedModelCount": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "modelExposureMode": {
+            "type": "string",
+            "enum": [
+              "scoped",
+              "all",
+              "custom"
+            ]
+          },
+          "publicModelIdMode": {
+            "type": "string",
+            "enum": [
+              "collision-prefixed",
+              "universal",
+              "always-prefixed"
+            ]
+          },
+          "exposureError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why the exposure config is invalid."
+          },
+          "scopeDiagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "no-match",
+                    "ambiguous",
+                    "invalid-thinking-level"
+                  ]
+                },
+                "pattern": {
+                  "type": "string",
+                  "description": "The `enabledModels` pattern, as written."
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "pattern",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            "description": "`enabledModels` patterns that matched nothing, matched several providers, or carried an invalid thinking level."
+          },
+          "modelsJsonError": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Why `models.json` did not load; a parse error says only where, never what."
+          }
+        },
+        "required": [
+          "status",
+          "availableModelCount",
+          "exposedModelCount",
+          "modelExposureMode",
+          "publicModelIdMode",
+          "exposureError",
+          "scopeDiagnostics",
+          "modelsJsonError"
+        ],
+        "additionalProperties": false
+      },
+      "FailedCheck": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "const": "unavailable"
+          },
+          "error": {
+            "type": "string",
+            "description": "Which check failed; the reason is in the log."
+          }
+        },
+        "required": [
+          "status",
+          "error"
+        ],
+        "additionalProperties": false
+      },
+      "CredentialsHealth": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "unavailable"
+            ]
+          },
+          "verified": {
+            "type": "boolean",
+            "description": "Whether `?verify=true` was asked for."
+          },
+          "providers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "provider": {
+                  "type": "string"
+                },
+                "type": {
+                  "type": "string",
+                  "enum": [
+                    "oauth",
+                    "api_key"
+                  ],
+                  "description": "`oauth` for a subscription login, `api_key` otherwise."
+                },
+                "source": {
+                  "description": "Where pi found the credential: `stored`, `environment`, `models_json_key`, …",
+                  "type": "string"
+                },
+                "availableModelCount": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "verified": {
+                  "description": "Only with `?verify=true`: whether pi resolved a usable credential just now, which may refresh an OAuth token over the network. `error` says why not.",
+                  "type": "boolean"
+                },
+                "error": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "type",
+                "availableModelCount"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "status",
+          "verified",
+          "providers"
+        ],
+        "additionalProperties": false
+      },
       "Model": {
         "type": "object",
         "properties": {
@@ -172,12 +427,513 @@
       }
     }
   },
-  "security": [
-    {
-      "proxyAuth": []
-    }
-  ],
   "paths": {
+    "/v1/switchboard/openapi.json": {
+      "get": {
+        "operationId": "getOpenAPIDocument",
+        "tags": [
+          "Documentation"
+        ],
+        "summary": "This document",
+        "description": "Built from the routes; committed as `openapi.json`. Needs no token.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The OpenAPI 3.1 document.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/docs": {
+      "get": {
+        "operationId": "getDocsPage",
+        "tags": [
+          "Documentation"
+        ],
+        "summary": "The Swagger UI page for this document",
+        "description": "Only when `docsUi` is on (`--docs-ui`, `PI_PROXY_DOCS_UI`); it loads Swagger UI from the jsDelivr CDN. Needs no token: a browser cannot send one to open it.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The page.",
+            "content": {
+              "text/html": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "`docsUi` is off.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz": {
+      "get": {
+        "operationId": "getLiveness",
+        "tags": [
+          "Operational"
+        ],
+        "summary": "Liveness",
+        "description": "Answers once the proxy listens and pi's model runtime is loaded. No upstream calls, and no token needed: for container healthchecks.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "The proxy is up.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "const": "ok"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz/models": {
+      "get": {
+        "operationId": "getModelsHealth",
+        "tags": [
+          "Operational"
+        ],
+        "summary": "The model runtime and the exposure it gives",
+        "responses": {
+          "200": {
+            "description": "At least one model is exposed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "unavailable"
+                      ]
+                    },
+                    "availableModelCount": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "exposedModelCount": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "modelExposureMode": {
+                      "type": "string",
+                      "enum": [
+                        "scoped",
+                        "all",
+                        "custom"
+                      ]
+                    },
+                    "publicModelIdMode": {
+                      "type": "string",
+                      "enum": [
+                        "collision-prefixed",
+                        "universal",
+                        "always-prefixed"
+                      ]
+                    },
+                    "exposureError": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Why the exposure config is invalid."
+                    },
+                    "scopeDiagnostics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "no-match",
+                              "ambiguous",
+                              "invalid-thinking-level"
+                            ]
+                          },
+                          "pattern": {
+                            "type": "string",
+                            "description": "The `enabledModels` pattern, as written."
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "pattern",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "`enabledModels` patterns that matched nothing, matched several providers, or carried an invalid thinking level."
+                    },
+                    "modelsJsonError": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Why `models.json` did not load; a parse error says only where, never what."
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "availableModelCount",
+                    "exposedModelCount",
+                    "modelExposureMode",
+                    "publicModelIdMode",
+                    "exposureError",
+                    "scopeDiagnostics",
+                    "modelsJsonError"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No model is exposed or the exposure config is invalid (the same report), or the check threw.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/ModelsHealth"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FailedCheck"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/healthz/creds": {
+      "get": {
+        "operationId": "getCredentialsHealth",
+        "tags": [
+          "Operational"
+        ],
+        "summary": "Each provider's credential status",
+        "description": "Local state only, unless `verify=true` asks pi to resolve each credential now, which may refresh an OAuth token over the network. Never returns a credential.",
+        "parameters": [
+          {
+            "name": "verify",
+            "in": "query",
+            "required": false,
+            "description": "`true` resolves each credential now.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "true",
+                "false"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Every provider has a credential, verified when asked.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "ok",
+                        "unavailable"
+                      ]
+                    },
+                    "verified": {
+                      "type": "boolean",
+                      "description": "Whether `?verify=true` was asked for."
+                    },
+                    "providers": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "provider": {
+                            "type": "string"
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "oauth",
+                              "api_key"
+                            ],
+                            "description": "`oauth` for a subscription login, `api_key` otherwise."
+                          },
+                          "source": {
+                            "description": "Where pi found the credential: `stored`, `environment`, `models_json_key`, …",
+                            "type": "string"
+                          },
+                          "availableModelCount": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "verified": {
+                            "description": "Only with `?verify=true`: whether pi resolved a usable credential just now, which may refresh an OAuth token over the network. `error` says why not.",
+                            "type": "boolean"
+                          },
+                          "error": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "provider",
+                          "type",
+                          "availableModelCount"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "verified",
+                    "providers"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "No provider has a credential, or a verified one failed (the same report), or the check threw.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/CredentialsHealth"
+                    },
+                    {
+                      "$ref": "#/components/schemas/FailedCheck"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/models": {
       "get": {
         "operationId": "listModels",
@@ -1910,6 +2666,471 @@
           }
         }
       }
+    },
+    "/v1/completions": {
+      "get": {
+        "operationId": "notSupportedGetV1Completions",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1Completions",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/embeddings": {
+      "get": {
+        "operationId": "notSupportedGetV1Embeddings",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1Embeddings",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/audio/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "notSupportedGetV1AudioPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1AudioPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/images/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "notSupportedGetV1ImagesPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1ImagesPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/assistants": {
+      "get": {
+        "operationId": "notSupportedGetV1Assistants",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1Assistants",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/assistants/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "notSupportedGetV1AssistantsPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1AssistantsPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/threads": {
+      "get": {
+        "operationId": "notSupportedGetV1Threads",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1Threads",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/threads/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "notSupportedGetV1ThreadsPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1ThreadsPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/files": {
+      "get": {
+        "operationId": "notSupportedGetV1Files",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1Files",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/files/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "notSupportedGetV1FilesPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1FilesPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/batches": {
+      "get": {
+        "operationId": "notSupportedGetV1Batches",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1Batches",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/batches/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "notSupportedGetV1BatchesPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1BatchesPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/fine_tuning/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "notSupportedGetV1FineTuningPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1FineTuningPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
     }
-  }
+  },
+  "security": [
+    {
+      "proxyAuth": []
+    }
+  ]
 }

@@ -124,7 +124,7 @@ const ProxyConfigSchema = z.object({
   authToken: VerbatimStringSchema,
   /** Allow remote image URL fetching. */
   remoteImages: z.boolean(),
-  /** Serve the Swagger UI docs page at `/v1/switchboard/docs` (#129). */
+  /** Serve the Swagger UI docs page at `/docs` (#129). */
   docsUi: z.boolean(),
   /** Max request body in MB. */
   maxBodySizeMb: boundedInt(1, MAX_BODY_SIZE_MB),

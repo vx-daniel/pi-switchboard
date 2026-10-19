@@ -61,7 +61,8 @@ import {
   listModelCapabilitiesDescription,
   listModelsDescription,
   retrieveModelDescription,
-  SWITCHBOARD_PREFIX
+  SWITCHBOARD_PREFIX,
+  UNSUPPORTED_ENDPOINTS
 } from '@proxy/server/openapi'
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
@@ -614,23 +615,6 @@ async function handleChatCompletion(
   return request.stream === true ? streamChat(context, job) : completeChat(context, job)
 }
 
-/** OpenAI endpoints the proxy does not implement; each answers 404 with a clear message. */
-const unsupportedEndpoints = [
-  '/v1/completions',
-  '/v1/embeddings',
-  '/v1/audio/*',
-  '/v1/images/*',
-  '/v1/assistants',
-  '/v1/assistants/*',
-  '/v1/threads',
-  '/v1/threads/*',
-  '/v1/files',
-  '/v1/files/*',
-  '/v1/batches',
-  '/v1/batches/*',
-  '/v1/fine_tuning/*'
-]
-
 /**
  * Builds the OpenAI-compatible routes.
  *
@@ -702,8 +686,8 @@ export function createRoutes(
     handleChatCompletion(context, config, configReader, remoteImageFetch)
   )
 
-  // --- Unsupported endpoints: clear errors ---
-  for (const path of unsupportedEndpoints) {
+  // --- Unsupported endpoints: clear errors (documented by hand in `@proxy/server/openapi`) ---
+  for (const path of UNSUPPORTED_ENDPOINTS) {
     routes.all(path, (context) => {
       httpLogger.warn('Rejected {method} {path}: endpoint not supported', {
         method: context.req.method,

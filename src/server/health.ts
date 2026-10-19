@@ -25,19 +25,139 @@
  * @packageDocumentation
  */
 
+import { ModelExposureModeSchema, PublicModelIdModeSchema } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
-import { getAvailableModels, getCredentialStatuses, getModelsJsonError } from '@proxy/pi/registry'
+import { scopeDiagnosticSchema } from '@proxy/pi/model-scope'
+import {
+  getAvailableModels,
+  getCredentialStatuses,
+  getModelsJsonError,
+  providerCredentialStatusSchema
+} from '@proxy/pi/registry'
 import { HTTP_SERVICE_UNAVAILABLE } from '@proxy/server/http-status'
+import { jsonResponse, OPERATIONAL_TAG, UNAUTHORIZED } from '@proxy/server/openapi'
 import type { ExposureConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
+import { type DescribeRouteOptions, describeRoute } from 'hono-openapi'
+import * as z from 'zod'
 
 /** Logger for health check failures. */
 const healthLogger = proxyLogger('server', 'health')
 
 /** The Hono context a health handler gets. */
 type HealthContext = Context<ProxyEnv>
+
+/** Whether a detail check passed; `unavailable` comes with a 503. */
+const checkStatusSchema = z.enum(['ok', 'unavailable'])
+
+/** `GET /healthz`'s body. Documents the response; never parsed. */
+const livenessSchema = z.object({ status: z.literal('ok') }).meta({ id: 'Liveness' })
+
+/** `GET /healthz/models`'s body. Documents the response; never parsed. */
+const modelsHealthSchema = z
+  .object({
+    status: checkStatusSchema,
+    availableModelCount: z.int(),
+    exposedModelCount: z.int(),
+    modelExposureMode: ModelExposureModeSchema,
+    publicModelIdMode: PublicModelIdModeSchema,
+    exposureError: z
+      .string()
+      .trim()
+      .nullable()
+      .meta({ description: 'Why the exposure config is invalid.' }),
+    scopeDiagnostics: z.array(scopeDiagnosticSchema).meta({
+      description:
+        '`enabledModels` patterns that matched nothing, matched several providers, or carried an ' +
+        'invalid thinking level.'
+    }),
+    modelsJsonError: z.string().trim().nullable().meta({
+      description: 'Why `models.json` did not load; a parse error says only where, never what.'
+    })
+  })
+  .meta({ id: 'ModelsHealth' })
+
+/** `GET /healthz/models`'s body. */
+type ModelsHealth = z.infer<typeof modelsHealthSchema>
+
+/** `GET /healthz/creds`'s body. Documents the response; never parsed. */
+const credentialsHealthSchema = z
+  .object({
+    status: checkStatusSchema,
+    verified: z.boolean().meta({ description: 'Whether `?verify=true` was asked for.' }),
+    providers: z.array(providerCredentialStatusSchema)
+  })
+  .meta({ id: 'CredentialsHealth' })
+
+/** `GET /healthz/creds`'s body. */
+type CredentialsHealth = z.infer<typeof credentialsHealthSchema>
+
+/** The body of a detail check that threw. Documents the response; never parsed. */
+const failedCheckSchema = z
+  .object({
+    status: z.literal('unavailable'),
+    error: z.string().trim().meta({ description: 'Which check failed; the reason is in the log.' })
+  })
+  .meta({ id: 'FailedCheck' })
+
+/** `GET /healthz`. */
+const livenessDescription: DescribeRouteOptions = {
+  operationId: 'getLiveness',
+  tags: [OPERATIONAL_TAG],
+  summary: 'Liveness',
+  description:
+    "Answers once the proxy listens and pi's model runtime is loaded. No upstream calls, and no " +
+    'token needed: for container healthchecks.',
+  security: [],
+  responses: { 200: jsonResponse('The proxy is up.', livenessSchema) }
+}
+
+/** `GET /healthz/models`. */
+const modelsHealthDescription: DescribeRouteOptions = {
+  operationId: 'getModelsHealth',
+  tags: [OPERATIONAL_TAG],
+  summary: 'The model runtime and the exposure it gives',
+  responses: {
+    200: jsonResponse('At least one model is exposed.', modelsHealthSchema),
+    401: UNAUTHORIZED,
+    503: jsonResponse(
+      'No model is exposed or the exposure config is invalid (the same report), or the check threw.',
+      z.union([modelsHealthSchema, failedCheckSchema])
+    )
+  }
+}
+
+/** `GET /healthz/creds`. */
+const credentialsHealthDescription: DescribeRouteOptions = {
+  operationId: 'getCredentialsHealth',
+  tags: [OPERATIONAL_TAG],
+  summary: "Each provider's credential status",
+  description:
+    'Local state only, unless `verify=true` asks pi to resolve each credential now, which may ' +
+    'refresh an OAuth token over the network. Never returns a credential.',
+  parameters: [
+    {
+      name: 'verify',
+      in: 'query',
+      required: false,
+      description: '`true` resolves each credential now.',
+      schema: { type: 'string', enum: ['true', 'false'] }
+    }
+  ],
+  responses: {
+    200: jsonResponse(
+      'Every provider has a credential, verified when asked.',
+      credentialsHealthSchema
+    ),
+    401: UNAUTHORIZED,
+    503: jsonResponse(
+      'No provider has a credential, or a verified one failed (the same report), or the check threw.',
+      z.union([credentialsHealthSchema, failedCheckSchema])
+    )
+  }
+}
 
 /**
  * Answers 503 for a detail check that threw, logging its message instead of returning it.
@@ -75,7 +195,7 @@ async function checkModels(
   const exposure = computeModelExposure(available, config)
   const exposedModelCount = exposure.ok ? exposure.models.length : 0
   const healthy = exposure.ok && exposedModelCount > 0
-  const body = {
+  const body: ModelsHealth = {
     status: healthy ? 'ok' : 'unavailable',
     availableModelCount: available.length,
     exposedModelCount,
@@ -84,7 +204,7 @@ async function checkModels(
     exposureError: exposure.ok ? null : exposure.message,
     // `enabledModels` patterns that matched nothing, or several providers, or carried an invalid
     // thinking level. Patterns are model names from the settings file, not secrets.
-    scopeDiagnostics: exposure.ok ? exposure.scopeDiagnostics : [],
+    scopeDiagnostics: exposure.ok ? [...exposure.scopeDiagnostics] : [],
     modelsJsonError: getModelsJsonError() ?? null
   }
   if (!healthy) {
@@ -109,7 +229,11 @@ async function checkCredentials(context: HealthContext): Promise<Response> {
   const providers = await getCredentialStatuses(verify)
   const failed = providers.filter((provider) => provider.verified === false)
   const healthy = providers.length > 0 && failed.length === 0
-  const body = { status: healthy ? 'ok' : 'unavailable', verified: verify, providers }
+  const body: CredentialsHealth = {
+    status: healthy ? 'ok' : 'unavailable',
+    verified: verify,
+    providers
+  }
   if (!healthy) {
     healthLogger.warn(
       'Credential health check failed: {providerCount} providers, {failedCount} failed to verify',
@@ -132,9 +256,11 @@ async function checkCredentials(context: HealthContext): Promise<Response> {
 export function createHealthRoutes(configReader: ExposureConfigReader): Hono<ProxyEnv> {
   const routes = new Hono<ProxyEnv>()
 
-  routes.get('/healthz', (context) => context.json({ status: 'ok' }))
+  routes.get('/healthz', describeRoute(livenessDescription), (context) =>
+    context.json({ status: 'ok' })
+  )
 
-  routes.get('/healthz/models', async (context) => {
+  routes.get('/healthz/models', describeRoute(modelsHealthDescription), async (context) => {
     try {
       return await checkModels(context, configReader)
     } catch (error) {
@@ -142,7 +268,7 @@ export function createHealthRoutes(configReader: ExposureConfigReader): Hono<Pro
     }
   })
 
-  routes.get('/healthz/creds', async (context) => {
+  routes.get('/healthz/creds', describeRoute(credentialsHealthDescription), async (context) => {
     try {
       return await checkCredentials(context)
     } catch (error) {
