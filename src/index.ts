@@ -187,8 +187,8 @@ const main = defineCommand({
     },
     'remote-images': {
       type: 'boolean',
-      description:
-        'Allow remote image URLs (currently no effect: remote URLs are always rejected, #109)'
+      // Read but unused until #109 is decided; update this text with it.
+      description: 'Allow remote image URLs (currently has no effect: they are always rejected)'
     },
     'max-body-size': {
       type: 'string',
@@ -209,7 +209,8 @@ const main = defineCommand({
     },
     'config': {
       type: 'boolean',
-      description: "Show the config file's settings and exit (flags and env vars not applied)"
+      description:
+        "Show the config file's contents and exit (not the effective config: flags and env vars are not applied)"
     }
   },
   run: async ({ args }) => {
