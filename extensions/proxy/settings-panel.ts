@@ -22,7 +22,7 @@ import {
 import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
 
 import { buildModelSelectorSubmenu } from './model-selector'
-import type { ProxyState } from './state'
+import { type ProxyState, tokenPreview } from './state'
 import { maybeAutoSyncZed } from './zed-sync'
 
 /** Rows visible in the settings list before it scrolls. */
@@ -35,8 +35,6 @@ const AUTH_TOKEN_BYTES = 16
 const HEX_RADIX = 16
 /** Hex characters per byte. */
 const HEX_BYTE_WIDTH = 2
-/** Token characters shown in the auth setting description. */
-const AUTH_TOKEN_PREVIEW_LENGTH = 8
 
 /** Logger for settings changes made in the panel. */
 const settingsLogger = proxyLogger('extension', 'settings')
@@ -117,7 +115,7 @@ function authDescription(config: ProxyConfig, invalid = configFileAuthTokenInval
     return 'authToken in proxy-config.json is not a string: every request is refused. Enable to set a new token'
   }
   if (config.authToken.length > 0) {
-    return `Token: ${config.authToken.slice(0, AUTH_TOKEN_PREVIEW_LENGTH)}... (use /proxy show to copy)`
+    return `Token: ${tokenPreview(config.authToken)} (use /proxy token to copy)`
   }
   return 'Require bearer token for all requests'
 }

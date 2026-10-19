@@ -40,7 +40,7 @@ vi.mock('@vx-daniel/pi-openai-proxy/logging', () => import('@proxy/logging'))
 vi.mock('@vx-daniel/pi-openai-proxy/sync/zed', () => import('@proxy/sync/zed'))
 
 const USAGE =
-  '/proxy [start|stop|restart|status|verify|models|zed-sync|config|show|path|reset|help]'
+  '/proxy [start|stop|restart|status|verify|models|zed-sync|config|show|token|path|reset|help]'
 
 /** The exposure error `universal` mode gives when two providers share a model ID. */
 const UNIVERSAL_CONFLICT =
@@ -154,6 +154,30 @@ describe('/proxy with models on two providers', () => {
     expect(await runProxy('path')).toEqual([
       { message: join(agentDir.path, 'proxy-config.json'), level: 'info' }
     ])
+  })
+
+  // Catches `/proxy token` not showing the whole token (the one place it is shown, #90), or
+  // showing something misleading when auth is off or the file's token is not a string.
+  test.each([
+    {
+      file: { authToken: 'notarealsecret-whole-token' },
+      shown: { message: 'Proxy auth token: notarealsecret-whole-token', level: 'info' }
+    },
+    {
+      file: { authToken: '' },
+      shown: { message: 'Proxy auth is disabled: no token is set.', level: 'info' }
+    },
+    {
+      file: { authToken: 12345 },
+      shown: {
+        message:
+          'Proxy auth is invalid: authToken in proxy-config.json is not a string. Set a new token in /proxy config.',
+        level: 'warning'
+      }
+    }
+  ])('token with authToken $file.authToken', async ({ file, shown }) => {
+    writeProxyConfig(file)
+    expect(await runProxy('token')).toEqual([shown])
   })
 
   // Catches `/proxy reset` keeping an invalid authToken (#82): the reset is an explicit choice, so

@@ -12,7 +12,8 @@
  *   /proxy models     List all exposed models with their public IDs
  *   /proxy zed-sync   Sync exposed models to Zed settings.json (--dry-run)
  *   /proxy config     Open settings panel (alias)
- *   /proxy show       Summarize current config and exposure policy
+ *   /proxy show       Summarize current config and exposure policy (token as a preview)
+ *   /proxy token      Show the whole proxy auth token
  *   /proxy path       Show config file location
  *   /proxy reset      Restore default settings
  *   /proxy help       Usage line
@@ -46,7 +47,7 @@ import {
   stopProxy,
   stopSessionProcess
 } from './process'
-import { showConfig, showModels, verifyExposure } from './reports'
+import { showConfig, showModels, showToken, verifyExposure } from './reports'
 import { openSettingsPanel } from './settings-panel'
 import { createProxyState, type ProxyState, useModelRegistry } from './state'
 import { handleZedSync, maybeAutoSyncZed } from './zed-sync'
@@ -62,6 +63,7 @@ const SUBCOMMANDS = [
   'zed-sync',
   'config',
   'show',
+  'token',
   'path',
   'reset',
   'help'
@@ -71,7 +73,7 @@ const extensionLogger = proxyLogger('extension')
 
 /** Usage line shown by `/proxy help` and for an unknown subcommand. */
 const USAGE =
-  '/proxy [start|stop|restart|status|verify|models|zed-sync|config|show|path|reset|help]'
+  '/proxy [start|stop|restart|status|verify|models|zed-sync|config|show|token|path|reset|help]'
 
 /** Handler for one /proxy subcommand; `args` is the full argument string, subcommand included. */
 type SubcommandHandler = (
@@ -90,6 +92,7 @@ const SUBCOMMAND_HANDLERS: Record<string, SubcommandHandler> = {
   'models': showModels,
   'zed-sync': handleZedSync,
   'show': showConfig,
+  'token': showToken,
   'path': (_state, context) => {
     context.ui.notify(getConfigPath(), 'info')
   },

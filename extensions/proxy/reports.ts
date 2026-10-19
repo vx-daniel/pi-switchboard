@@ -1,5 +1,5 @@
 /**
- * Read-only reports: /proxy show, /proxy models, /proxy verify.
+ * Read-only reports: /proxy show, /proxy token, /proxy models, /proxy verify.
  *
  * @packageDocumentation
  */
@@ -22,7 +22,8 @@ import {
   buildExposureConfig,
   getSessionAvailableModels,
   getSessionEnabledModels,
-  type ProxyState
+  type ProxyState,
+  tokenPreview
 } from './state'
 
 /** How many exposed public IDs `/proxy show` lists before summarizing the rest. */
@@ -80,21 +81,53 @@ export async function buildConfigReport(state: ProxyState): Promise<string> {
  * Returns the `/proxy show` auth field.
  *
  * @remarks
- * Shows the token when one is set, or `invalid` when `authToken` in the file is not a string,
- * which the proxy refuses requests for (#82) rather than turning auth off.
+ * Shows a preview of the token, never the whole of it (#90): `/proxy show` output gets pasted
+ * into issues and chats. `/proxy token` shows it whole. `invalid` when `authToken` in the file is
+ * not a string, which the proxy refuses requests for (#82) rather than turning auth off.
  *
  * @param config - the loaded proxy config
- * @returns `enabled (token: …)`, `disabled`, or the `invalid` explanation
+ * @returns `enabled (token: <preview>; /proxy token shows it)`, `disabled`, or the `invalid`
+ *   explanation
  */
 function authSummary(config: ProxyConfig): string {
   if (configFileAuthTokenInvalid()) {
     return 'invalid (authToken in proxy-config.json is not a string: every request is refused)'
   }
-  return config.authToken.length > 0 ? `enabled (token: ${config.authToken})` : 'disabled'
+  return config.authToken.length > 0
+    ? `enabled (token: ${tokenPreview(config.authToken)}; /proxy token shows it)`
+    : 'disabled'
+}
+
+// --- /proxy token ---
+
+/**
+ * Handles `/proxy token`: reloads the config and shows the whole proxy auth token, for copying
+ * into a client.
+ *
+ * @remarks
+ * The token reaches the notification only, never a log line. Without a token it says auth is
+ * off; with an `authToken` that is not a string, that it is invalid (#82).
+ *
+ * @param state - the extension state; its config is replaced by the file's
+ * @param context - the extension context, used for the notification
+ */
+export function showToken(state: ProxyState, context: ExtensionContext): void {
+  state.config = loadConfigFromFile()
+  if (configFileAuthTokenInvalid()) {
+    context.ui.notify(
+      'Proxy auth is invalid: authToken in proxy-config.json is not a string. Set a new token in /proxy config.',
+      'warning'
+    )
+  } else if (state.config.authToken.length === 0) {
+    context.ui.notify('Proxy auth is disabled: no token is set.', 'info')
+  } else {
+    reportsLogger.debug('Showed the proxy auth token')
+    context.ui.notify(`Proxy auth token: ${state.config.authToken}`, 'info')
+  }
 }
 
 /**
- * Returns the `/proxy show` server-settings fields; the auth token is shown when one is set.
+ * Returns the `/proxy show` server-settings fields; a set auth token is shown as a preview.
  *
  * @param config - the loaded proxy config
  * @returns one `name: value` string per field

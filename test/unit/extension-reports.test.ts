@@ -20,7 +20,7 @@ import {
   buildModelsReport,
   buildVerifyReport
 } from '../../extensions/proxy/reports'
-import type { ProxyState } from '../../extensions/proxy/state'
+import { type ProxyState, tokenPreview } from '../../extensions/proxy/state'
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
 
 vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
@@ -92,7 +92,8 @@ describe('with models on two providers', () => {
       )
     })
 
-    // Catches the auth token, the scoped pattern count or unresolved patterns going missing.
+    // Catches the auth token shown whole (#90), the scoped pattern count or unresolved patterns
+    // going missing. A 20-character token shows a quarter of itself, 5 characters.
     test('scoped with patterns and an auth token', async () => {
       const state = stateWith(agentDir, { authToken: 'notarealsecret-token', port: 5151 }, [
         'alpha/a1',
@@ -100,7 +101,7 @@ describe('with models on two providers', () => {
       ])
       const report = await buildConfigReport(state)
       expect(report).toEqual(
-        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: notarealsecret-token) | remote images: false | max body: 50 MB | timeout: 120s\n' +
+        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: notar...; /proxy token shows it) | remote images: false | max body: 50 MB | timeout: 120s\n' +
           'id mode: collision-prefixed | exposure: scoped | enabled: 2 pi pattern(s) | exposed: a1 | unresolved: nothing-like-this (no-match)'
       )
     })
@@ -300,5 +301,20 @@ describe('with no models', () => {
         'Custom mode with empty model list will expose 0 models.',
       level: 'warning'
     })
+  })
+})
+
+describe('tokenPreview', () => {
+  // Catches a preview that shows the whole token (#90): at most a quarter of it, and never more
+  // than 8 characters, so a short token shows nothing and a long one its first 8.
+  test.each([
+    ['', '...'],
+    ['abc', '...'],
+    ['abcd', 'a...'],
+    ['notarealsecret-token', 'notar...'],
+    ['0123456789abcdef0123456789abcdef', '01234567...'],
+    ['0123456789abcdef0123456789abcdef0123456789abcdef', '01234567...']
+  ])('%j shows %j', (token, preview) => {
+    expect(tokenPreview(token)).toBe(preview)
   })
 })
