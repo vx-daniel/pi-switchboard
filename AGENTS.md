@@ -41,7 +41,7 @@ Treat these as stable unless the user explicitly changes direction:
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.
 - Keep stable responses close to OpenAI's schema. If pi-specific metadata is exposed, namespace it under `x_pi`.
-- Reject unsupported parameters clearly. Do **not** silently ignore them.
+- Reject unsupported parameters clearly. Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (Codex `temperature`; passthrough fields a provider has no equivalent for); any other needs an amendment.
 - Agentic mode is experimental and security-sensitive. Do not expand it casually under the stable chat-completions contract.
 - Default network posture should remain local-first and safe by default.
 

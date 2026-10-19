@@ -1,21 +1,27 @@
 <!--
 Sync Impact Report
-Version change: 1.1.1 → 1.1.2 (PATCH)
-Rationale: fallow joins the gate (#83). The constitution named the gate's steps and the inline
-directives it bans, and both lists grew, so they are brought in step with the code. No principle
-changes.
+Version change: 1.1.2 → 1.2.0 (MINOR)
+Rationale: two kinds of request field were dropped rather than rejected, against principle I as
+written: Codex `temperature` (#49, #80) and passthrough fields a provider has no equivalent for
+(#81). The maintainer decided to keep both behaviours as deliberate exceptions. Principle I now
+lists them with their reasons and where they are documented, and makes any other silent drop a
+violation that needs an amendment. No code changes.
 Modified sections:
-- II. Validate at Boundaries: the directive ban names fallow's `fallow-ignore…` and `@expected-unused`
-- Development Workflow and Quality Gates: fallow in the stack; the gate runs the tests with coverage,
-  then fallow, then the build
+- I. Stable OpenAI Contract: an exception list (Codex `temperature`; passthrough fields without a
+  provider equivalent)
+- API Compatibility and Security Boundaries: "silent downgrades are not acceptable" now points to
+  principle I's exceptions
 Templates requiring updates:
-- ✅ AGENTS.md: the directive ban, the fallow paragraph, the gate's steps
-- ✅ README.md, PLAN.md: the gate's steps and tooling
+- ✅ AGENTS.md: "Reject unsupported parameters clearly" names the constitution's exceptions
+- ✅ PLAN.md: the Codex table and "Known gaps and silent drops" cite the exceptions instead of
+  calling the drops a policy violation
+- ✅ README.md: the passthrough section cites the exceptions
 Follow-up TODOs:
-- A non-string `authToken` in the config file disables proxy auth (with a warning). That fails open
-  against principle III; deciding whether it must refuse to start is open.
-- #80 and #81: parameters dropped rather than rejected (Codex `temperature`; passthrough fields a
-  provider cannot honour) conflict with principle I; amend or reject is open.
+- None. Resolved since 1.1.2: a non-string `authToken` now fails closed (#82, PR #98); #80 and #81
+  by this amendment.
+
+1.1.2 (2026-10-18): fallow joined the gate (#83); the directive ban names `fallow-ignore…` and
+`@expected-unused`, and the gate lists its steps.
 
 1.1.1 (2026-10-18): moved from the unversioned `.local/constitution.md` to the repository root; governance
 says where it lives and that AGENTS.md links to it.
@@ -31,6 +37,10 @@ rule, logging limits, the lint-directive ban, verbatim exposure, and commit type
 
 ### I. Stable OpenAI Contract
 The stable HTTP surface is exactly `GET /v1/models`, `GET /v1/models/{model}`, and `POST /v1/chat/completions`. Responses on it MUST stay close to OpenAI's schema; pi-specific data on a stable response MUST be namespaced under `x_pi` and documented. Unsupported routes or parameters MUST fail with clear OpenAI-style errors rather than being silently ignored.
+
+Exceptions: a request field MAY be dropped instead of rejected only where it is listed here, with its reason, and documented where operators read the contract. Any other silent drop is a violation, and a new one needs an amendment.
+- Codex `temperature` (`openai-codex-responses`): the Codex backend refuses any request that carries it, and widely used clients send one on every request, so a `422` would make every Codex model unusable from them (#49, #80). Each drop is logged (the first per model at `info`, later ones at `debug`) and documented in `PLAN.md`'s Codex table and in `README.md`.
+- Passthrough fields a provider has no equivalent for (#81): `stop`, `user`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`, `tool_choice`, `parallel_tool_calls`, `metadata` and `prediction` reach each API verbatim or translated where it has an equivalent, and are dropped where it has none. Clients commonly send one parameter set to every model, and rejecting per API would break them. The per-API tables in `PLAN.md` ("API-aware payload translation") list exactly what each API receives, and `README.md` says fields without an equivalent are skipped; a change to what an API receives updates those tables.
 
 Two kinds of route sit outside the stable surface, and only these:
 - Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`. Only `/healthz` may skip proxy authentication, and none may return a credential.
@@ -79,7 +89,7 @@ Rationale: the proxy's public contract is documentation-heavy. If behavior chang
 ## API Compatibility and Security Boundaries
 
 - Stable support is limited to the documented chat-completions and models routes; operational and `/v1/pi/` routes are governed by principle I.
-- Unsupported fields and endpoints MUST fail explicitly; silent downgrades are not acceptable.
+- Unsupported fields and endpoints MUST fail explicitly; silent downgrades are not acceptable, except the drops principle I lists.
 - Model exposure policy MUST be derived from configured credentials and the active exposure mode, not from ad hoc request-time guessing.
 - Experimental capabilities MUST be separated from the stable contract and require explicit opt-in before they can affect user traffic.
 - Security-sensitive defaults, including localhost binding and disabled remote image fetching, MUST remain conservative unless the constitution is amended.
@@ -116,4 +126,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 1.1.2 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-18
+**Version**: 1.2.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-19
