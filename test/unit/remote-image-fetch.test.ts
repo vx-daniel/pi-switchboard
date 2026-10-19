@@ -7,6 +7,8 @@
 
 import type { LookupAddress } from 'node:dns'
 
+import { resetSync } from '@logtape/logtape'
+import { configureLogging } from '@proxy/logging'
 import {
   classifyAddress,
   type FetchImageResult,
@@ -450,21 +452,42 @@ describe('fetchRemoteImage: the strict policy', () => {
     ).toEqual({ ok: false, reason: 'blocked-address' })
   })
 
-  // Catches a host that does not resolve being reported as a network failure, or fetched.
-  test('refuses a host that does not resolve', async () => {
+  // Catches a DNS failure fetched anyway, or logged without its code, which leaves an operator
+  // unable to tell a host that does not exist (ENOTFOUND) from a passing failure (EAI_AGAIN).
+  test('refuses a host that does not resolve, logging the resolver error code', async () => {
     const options: RemoteImageFetchOptions = {
       ...STRICT_REMOTE_IMAGE_FETCH,
       resolveHost: async (): Promise<readonly LookupAddress[]> => {
-        throw new Error('ENOTFOUND')
+        throw Object.assign(new Error('getaddrinfo EAI_AGAIN nowhere.example'), {
+          code: 'EAI_AGAIN'
+        })
       }
     }
-    expect(
-      await fetchRemoteImage(
+    const lines: string[] = []
+    configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
+    try {
+      const result = await fetchRemoteImage(
         'http://nowhere.example/image.png',
         options,
         new AbortController().signal
       )
-    ).toEqual({ ok: false, reason: 'unresolvable' })
+      const logged = lines.map((line): unknown => JSON.parse(line))
+
+      expect({ result, logged }).toEqual({
+        result: { ok: false, reason: 'unresolvable' },
+        logged: [
+          expect.objectContaining({
+            properties: expect.objectContaining({
+              host: 'nowhere.example',
+              reason: 'unresolvable',
+              detail: 'EAI_AGAIN'
+            }) as unknown
+          }) as unknown
+        ]
+      })
+    } finally {
+      resetSync()
+    }
   })
 })
 

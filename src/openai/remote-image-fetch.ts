@@ -435,11 +435,21 @@ async function vetAddresses(url: URL, attempt: FetchAttempt): Promise<Addresses 
   // A URL holds an IPv6 literal in brackets
   const hostname = url.hostname.replace(/^\[(.*)\]$/u, '$1')
   const family = isIP(hostname)
-  const resolved =
-    family === 0 ? await resolveUntilAborted(hostname, attempt) : [{ address: hostname, family }]
+  const resolution: Resolution =
+    family === 0
+      ? await resolveUntilAborted(hostname, attempt)
+      : { addresses: [{ address: hostname, family }] }
+  const resolved = resolution.addresses
 
   const [first, ...rest] = resolved
-  if (first === undefined) return { kind: 'refused', host: url.host, reason: 'unresolvable' }
+  if (first === undefined) {
+    return {
+      kind: 'refused',
+      host: url.host,
+      reason: 'unresolvable',
+      detail: resolution.failure ?? 'no addresses'
+    }
+  }
 
   const blocked = resolved
     .map(({ address }) => attempt.options.classifyAddress(address))
@@ -450,25 +460,33 @@ async function vetAddresses(url: URL, attempt: FetchAttempt): Promise<Addresses 
   return [first, ...rest]
 }
 
+/** A host's addresses, or none with the resolver's error code when it failed. */
+interface Resolution {
+  readonly addresses: readonly LookupAddress[]
+  /** The resolver's error code (`ENOTFOUND`, `EAI_AGAIN`, …); absent when it answered. */
+  readonly failure?: string
+}
+
 /**
  * Resolves a host name, giving up when the fetch is aborted (a resolver cannot be cancelled).
  *
  * @param hostname - the host name
  * @param attempt - the fetch's options and signals
- * @returns the addresses; none when resolution fails
+ * @returns the addresses; none, with the resolver's error code, when resolution fails, so the log
+ *   tells a host that does not exist (`ENOTFOUND`) from a passing DNS failure (`EAI_AGAIN`)
  * @throws Error (or the signal's reason) when the fetch is aborted before the host resolves
  */
-async function resolveUntilAborted(
-  hostname: string,
-  attempt: FetchAttempt
-): Promise<readonly LookupAddress[]> {
+async function resolveUntilAborted(hostname: string, attempt: FetchAttempt): Promise<Resolution> {
   const { signal } = attempt
   signal.throwIfAborted()
   // Stops listening for the abort once the race is decided.
   const settled = new AbortController()
   try {
     return await Promise.race([
-      attempt.options.resolveHost(hostname).catch((): readonly LookupAddress[] => []),
+      attempt.options.resolveHost(hostname).then(
+        (addresses): Resolution => ({ addresses }),
+        (error: unknown): Resolution => ({ addresses: [], failure: errorCode(error) })
+      ),
       once(signal, 'abort', { signal: settled.signal }).then(() => {
         throw new Error('Image fetch aborted while resolving its host')
       })
