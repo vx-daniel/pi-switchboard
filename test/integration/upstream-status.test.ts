@@ -11,11 +11,11 @@ import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
+  cutOff,
   httpError,
   type MockProvider,
   type MockReply,
-  startMockProvider,
-  textChunks
+  startMockProvider
 } from '../fixtures/mock-provider'
 import { testApp } from '../helpers'
 
@@ -327,26 +327,6 @@ const TRUNCATED_MODEL = 'truncated'
  */
 function failingModel(api: Api, statusCase: StatusCase): string {
   return `${api}-${statusCase.label.replaceAll(' ', '-')}`
-}
-
-/**
- * Builds a mock reply that starts a stream, sends these text deltas, then drops the connection.
- *
- * @remarks
- * No finish chunk and no `[DONE]` are sent.
- *
- * @param parts - the text of each delta, in order
- * @returns the mock provider reply
- */
-function cutOff(...parts: string[]): MockReply {
-  return (response) => {
-    response.writeHead(HTTP_OK, { 'content-type': 'text/event-stream' })
-    const events = textChunks(...parts)
-      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
-      .join('')
-    // Destroyed once written: destroying right after `write` can drop the data unsent.
-    response.write(events, () => response.destroy())
-  }
 }
 
 let mock: MockProvider

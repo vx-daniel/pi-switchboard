@@ -300,6 +300,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] `choices[0].message.content` is `string | null` (explicitly `null` when tool_calls present)
 - [x] `choices[0].message.tool_calls` shape: `id`, `type: "function"`, `function.name`, `function.arguments`
 - [x] `usage` fields are all numbers
+- [x] Every stable response, stream chunk and error body validates against OpenAI's published spec, pinned (#132)
+- [x] Request fields and enum values checked against OpenAI's request both ways; each one not accepted is listed (#132)
 
 ### SDK round-trip conformance (requires credentials, skip otherwise)
 
