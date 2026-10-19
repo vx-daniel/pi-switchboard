@@ -239,6 +239,20 @@ describe('an effort the model does not support is clamped (#43)', () => {
     })
   })
 
+  // Catches "max" rejected or mapped to another level on a model whose definition maps it.
+  test('anthropic-messages: max on an adaptive model with max is max, unclamped', async () => {
+    expect(await sentField('anthropic/claude-adaptive-max', 'max', 'output_config')).toEqual({
+      effort: 'max'
+    })
+    expect(clampRecords).toEqual([])
+  })
+
+  // Catches "max" on a model without it sent upstream as is, or dropped: it is the model's
+  // highest level.
+  test('openai-completions: max on a model whose highest level is xhigh is xhigh', async () => {
+    expect(await sentField('completions/chat-xhigh', 'max', 'reasoning_effort')).toBe('xhigh')
+  })
+
   // Catches the clamp going unreported, or reported without what the client could have asked for.
   test('the clamp is logged at debug, with the efforts the model supports', async () => {
     await sentField('anthropic/claude-thinking', 'xhigh', 'thinking')
@@ -276,7 +290,7 @@ describe('GET /v1/switchboard/models', () => {
       'chat-plain': ['none'],
       'chat-undeclared-off': upToHigh,
       'chat-xhigh': [...upToHigh, 'xhigh'],
-      'claude-adaptive-max': upToHigh,
+      'claude-adaptive-max': [...upToHigh, 'max'],
       'claude-always-thinking': upToHigh.slice(1),
       'claude-thinking': upToHigh,
       'gpt-always-reasoning': upToHigh.slice(1),

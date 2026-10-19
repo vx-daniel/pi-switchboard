@@ -137,6 +137,7 @@ export function testConfig(): ServerConfig {
     proxyAuth: { kind: 'off' },
     agenticEnabled: false,
     remoteImagesEnabled: false,
+    docsUiEnabled: false,
     maxBodySize: 52428800,
     upstreamTimeoutMs: 120000,
     publicModelIdMode: 'collision-prefixed',

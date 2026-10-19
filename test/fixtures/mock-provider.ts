@@ -332,6 +332,26 @@ export function stall(chunks: readonly Record<string, unknown>[]): MockReply {
 }
 
 /**
+ * Builds a reply that starts a stream, sends these text deltas, then drops the connection.
+ *
+ * @remarks
+ * No finish chunk and no `[DONE]` are sent.
+ *
+ * @param parts - the text of each delta, in order
+ * @returns the reply
+ */
+export function cutOff(...parts: string[]): MockReply {
+  return (response) => {
+    response.writeHead(HTTP_OK, { 'content-type': 'text/event-stream' })
+    const events = textChunks(...parts)
+      .map((event) => `data: ${JSON.stringify(event)}\n\n`)
+      .join('')
+    // Destroyed once written: destroying right after `write` can drop the data unsent.
+    response.write(events, () => response.destroy())
+  }
+}
+
+/**
  * Builds a reply that never answers: no status, no headers, no body.
  *
  * @returns the reply

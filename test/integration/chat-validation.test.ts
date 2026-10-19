@@ -57,8 +57,14 @@ function okCompletion(response: Response): Record<string, unknown> {
     object: 'chat.completion',
     created: expect.any(Number) as number,
     model: MOCK_MODEL,
-    system_fingerprint: null,
-    choices: [{ index: 0, message: { role: 'assistant', content: 'ok' }, finish_reason: 'stop' }],
+    choices: [
+      {
+        index: 0,
+        message: { role: 'assistant', content: 'ok' },
+        finish_reason: 'stop',
+        logprobs: null
+      }
+    ],
     usage: {
       prompt_tokens: 0,
       completion_tokens: 0,

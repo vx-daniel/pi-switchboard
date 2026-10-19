@@ -1,0 +1,1915 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "pi-openai-proxy",
+    "description": "An OpenAI-compatible API over pi: its models, logins and providers. The OpenAI-compatible routes follow OpenAI's schemas; pi-specific data on them sits under `x_pi`. The `/v1/switchboard/` routes are the proxy's own.",
+    "version": "v1"
+  },
+  "tags": [
+    {
+      "name": "OpenAI-compatible",
+      "description": "OpenAI's routes, as the proxy implements them."
+    },
+    {
+      "name": "Switchboard",
+      "description": "The proxy's own routes."
+    }
+  ],
+  "components": {
+    "securitySchemes": {
+      "proxyAuth": {
+        "type": "http",
+        "scheme": "bearer",
+        "description": "Only when proxy auth is on (`--auth-token`, `PI_PROXY_AUTH_TOKEN` or `authToken`); otherwise any or no token is accepted."
+      }
+    },
+    "schemas": {
+      "Model": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The public model ID; may contain `/`."
+          },
+          "object": {
+            "type": "string",
+            "const": "model"
+          },
+          "created": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "Unix time (seconds) the proxy started."
+          },
+          "owned_by": {
+            "type": "string",
+            "description": "The model's pi provider."
+          }
+        },
+        "required": [
+          "id",
+          "object",
+          "created",
+          "owned_by"
+        ],
+        "additionalProperties": false,
+        "description": "An OpenAI model object."
+      },
+      "ModelCapabilities": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "The public ID, as on `/v1/models`."
+          },
+          "reasoning_efforts": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "none",
+                "minimal",
+                "low",
+                "medium",
+                "high",
+                "xhigh",
+                "max"
+              ]
+            },
+            "description": "The `reasoning_effort` values the model runs at as asked, lowest first. Any other value is accepted and clamped to the nearest level the model supports. `[\"none\"]` for a model without reasoning."
+          }
+        },
+        "required": [
+          "id",
+          "reasoning_efforts"
+        ],
+        "additionalProperties": false,
+        "description": "What pi knows about an exposed model."
+      },
+      "ToolCall": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string",
+            "const": "function"
+          },
+          "function": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "arguments": {
+                "type": "string",
+                "description": "The arguments, as JSON text."
+              }
+            },
+            "required": [
+              "name",
+              "arguments"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "function"
+        ],
+        "additionalProperties": false
+      },
+      "CompletionUsage": {
+        "type": "object",
+        "properties": {
+          "prompt_tokens": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The whole prompt: uncached, cache reads and cache writes."
+          },
+          "completion_tokens": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "total_tokens": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991
+          },
+          "prompt_tokens_details": {
+            "type": "object",
+            "properties": {
+              "cached_tokens": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "cache_write_tokens": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991,
+                "description": "Not OpenAI's: prompt tokens written to the cache."
+              }
+            },
+            "required": [
+              "cached_tokens",
+              "cache_write_tokens"
+            ],
+            "additionalProperties": false
+          }
+        },
+        "required": [
+          "prompt_tokens",
+          "completion_tokens",
+          "total_tokens",
+          "prompt_tokens_details"
+        ],
+        "additionalProperties": false
+      }
+    }
+  },
+  "security": [
+    {
+      "proxyAuth": []
+    }
+  ],
+  "paths": {
+    "/v1/models": {
+      "get": {
+        "operationId": "listModels",
+        "tags": [
+          "OpenAI-compatible"
+        ],
+        "summary": "List the exposed models",
+        "description": "The models the exposure config exposes that have a credential, as standard OpenAI model objects with their public IDs.",
+        "responses": {
+          "200": {
+            "description": "The exposed models.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "list"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Model"
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The exposed models."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/switchboard/models": {
+      "get": {
+        "operationId": "listModelCapabilities",
+        "tags": [
+          "Switchboard"
+        ],
+        "summary": "List each exposed model's pi capabilities",
+        "description": "Not OpenAI's: what pi knows about each model `GET /v1/models` lists, such as the `reasoning_effort` values it runs at as asked.",
+        "responses": {
+          "200": {
+            "description": "Each exposed model, with its capabilities.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "list"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/ModelCapabilities"
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Each exposed model, with its capabilities."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/models/{model}": {
+      "get": {
+        "operationId": "retrieveModel",
+        "tags": [
+          "OpenAI-compatible"
+        ],
+        "summary": "Retrieve an exposed model",
+        "parameters": [
+          {
+            "name": "model",
+            "in": "path",
+            "required": true,
+            "description": "A public model ID, or a canonical `provider/model-id` of an exposed model. IDs may contain `/`: send it URL-encoded (`%2F`) or as is.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The model.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "The public model ID; may contain `/`."
+                    },
+                    "object": {
+                      "type": "string",
+                      "const": "model"
+                    },
+                    "created": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Unix time (seconds) the proxy started."
+                    },
+                    "owned_by": {
+                      "type": "string",
+                      "description": "The model's pi provider."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "object",
+                    "created",
+                    "owned_by"
+                  ],
+                  "additionalProperties": false,
+                  "description": "An OpenAI model object."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No exposed model has this ID (`model_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/v1/chat/completions": {
+      "post": {
+        "operationId": "createChatCompletion",
+        "tags": [
+          "OpenAI-compatible"
+        ],
+        "summary": "Create a chat completion",
+        "description": "Runs the request on the model through pi. Unsupported fields are rejected, not ignored: 422 for a field the proxy does not accept, 400 for an invalid value.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "messages": {
+                    "minItems": 1,
+                    "type": "array",
+                    "items": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "role": {
+                              "type": "string",
+                              "const": "system"
+                            },
+                            "content": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "role",
+                            "content"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "role": {
+                              "type": "string",
+                              "const": "developer"
+                            },
+                            "content": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "role",
+                            "content"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "role": {
+                              "type": "string",
+                              "const": "user"
+                            },
+                            "content": {
+                              "type": "string"
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "role",
+                            "content"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "role": {
+                              "type": "string",
+                              "const": "user"
+                            },
+                            "content": {
+                              "type": "array",
+                              "items": {
+                                "oneOf": [
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "text"
+                                      },
+                                      "text": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "text"
+                                    ]
+                                  },
+                                  {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "image_url"
+                                      },
+                                      "image_url": {
+                                        "type": "object",
+                                        "properties": {
+                                          "url": {
+                                            "type": "string"
+                                          },
+                                          "detail": {
+                                            "type": "string",
+                                            "enum": [
+                                              "auto",
+                                              "low",
+                                              "high"
+                                            ]
+                                          }
+                                        },
+                                        "required": [
+                                          "url"
+                                        ]
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "image_url"
+                                    ]
+                                  }
+                                ]
+                              }
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "role",
+                            "content"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "role": {
+                              "type": "string",
+                              "const": "assistant"
+                            },
+                            "content": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            },
+                            "tool_calls": {
+                              "type": "array",
+                              "items": {
+                                "type": "object",
+                                "properties": {
+                                  "id": {
+                                    "type": "string"
+                                  },
+                                  "type": {
+                                    "type": "string",
+                                    "const": "function"
+                                  },
+                                  "function": {
+                                    "type": "object",
+                                    "properties": {
+                                      "name": {
+                                        "type": "string"
+                                      },
+                                      "arguments": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "name",
+                                      "arguments"
+                                    ]
+                                  }
+                                },
+                                "required": [
+                                  "id",
+                                  "type",
+                                  "function"
+                                ]
+                              }
+                            }
+                          },
+                          "required": [
+                            "role"
+                          ]
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "role": {
+                              "type": "string",
+                              "const": "tool"
+                            },
+                            "content": {
+                              "type": "string"
+                            },
+                            "tool_call_id": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "role",
+                            "content",
+                            "tool_call_id"
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "stream": {
+                    "type": "boolean"
+                  },
+                  "temperature": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 2
+                  },
+                  "max_tokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "max_completion_tokens": {
+                    "type": "integer",
+                    "exclusiveMinimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "stop": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "maxItems": 4,
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      }
+                    ]
+                  },
+                  "user": {
+                    "type": "string"
+                  },
+                  "stream_options": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "include_usage": {
+                            "type": "boolean"
+                          }
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "function"
+                        },
+                        "function": {
+                          "type": "object",
+                          "properties": {
+                            "name": {
+                              "type": "string"
+                            },
+                            "description": {
+                              "type": "string"
+                            },
+                            "parameters": {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {}
+                            },
+                            "strict": {
+                              "anyOf": [
+                                {
+                                  "type": "boolean"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "name"
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "function"
+                      ]
+                    }
+                  },
+                  "tool_choice": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "auto",
+                          "required"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "function"
+                          },
+                          "function": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "function"
+                        ]
+                      }
+                    ]
+                  },
+                  "parallel_tool_calls": {
+                    "type": "boolean"
+                  },
+                  "reasoning_effort": {
+                    "type": "string",
+                    "enum": [
+                      "none",
+                      "minimal",
+                      "low",
+                      "medium",
+                      "high",
+                      "xhigh",
+                      "max"
+                    ]
+                  },
+                  "top_p": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 1
+                  },
+                  "frequency_penalty": {
+                    "type": "number",
+                    "minimum": -2,
+                    "maximum": 2
+                  },
+                  "presence_penalty": {
+                    "type": "number",
+                    "minimum": -2,
+                    "maximum": 2
+                  },
+                  "seed": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "response_format": {
+                    "oneOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "text"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "json_object"
+                          }
+                        },
+                        "required": [
+                          "type"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "json_schema"
+                          },
+                          "json_schema": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "schema": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "strict": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "json_schema"
+                        ]
+                      }
+                    ]
+                  },
+                  "metadata": {
+                    "type": "object",
+                    "propertyNames": {
+                      "type": "string"
+                    },
+                    "additionalProperties": {}
+                  },
+                  "prediction": {
+                    "type": "object",
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "content"
+                      },
+                      "content": {
+                        "anyOf": [
+                          {
+                            "type": "string"
+                          },
+                          {
+                            "type": "array",
+                            "items": {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "text"
+                                },
+                                "text": {
+                                  "type": "string"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "text"
+                              ]
+                            }
+                          }
+                        ]
+                      }
+                    },
+                    "required": [
+                      "type",
+                      "content"
+                    ]
+                  }
+                },
+                "required": [
+                  "model",
+                  "messages"
+                ],
+                "additionalProperties": false
+              },
+              "example": {
+                "model": "MODEL_ID",
+                "messages": [
+                  {
+                    "role": "user",
+                    "content": "Hello!"
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "With `stream` false or absent, one JSON completion. With `stream: true`, server-sent events: each `data:` line is a chunk; a failure after the stream started is one `data:` line with an error body; the stream ends with `data: [DONE]`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "The request ID, as in `x-request-id`."
+                    },
+                    "object": {
+                      "type": "string",
+                      "const": "chat.completion"
+                    },
+                    "created": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "choices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "message": {
+                            "type": "object",
+                            "properties": {
+                              "role": {
+                                "type": "string",
+                                "const": "assistant"
+                              },
+                              "content": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "tool_calls": {
+                                "type": "array",
+                                "items": {
+                                  "$ref": "#/components/schemas/ToolCall"
+                                }
+                              }
+                            },
+                            "required": [
+                              "role",
+                              "content"
+                            ],
+                            "additionalProperties": false
+                          },
+                          "finish_reason": {
+                            "type": "string",
+                            "enum": [
+                              "stop",
+                              "length",
+                              "tool_calls"
+                            ]
+                          },
+                          "logprobs": {
+                            "type": "null",
+                            "description": "Always `null`: pi returns no token probabilities, and `logprobs` is rejected."
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "message",
+                          "finish_reason",
+                          "logprobs"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "usage": {
+                      "$ref": "#/components/schemas/CompletionUsage"
+                    },
+                    "x_pi": {
+                      "type": "object",
+                      "properties": {
+                        "cost": {
+                          "type": "object",
+                          "properties": {
+                            "input": {
+                              "type": "number"
+                            },
+                            "output": {
+                              "type": "number"
+                            },
+                            "cacheRead": {
+                              "type": "number"
+                            },
+                            "cacheWrite": {
+                              "type": "number"
+                            },
+                            "total": {
+                              "type": "number"
+                            }
+                          },
+                          "required": [
+                            "input",
+                            "output",
+                            "cacheRead",
+                            "cacheWrite",
+                            "total"
+                          ],
+                          "additionalProperties": false
+                        },
+                        "cache_read_tokens": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        },
+                        "cache_write_tokens": {
+                          "type": "integer",
+                          "minimum": -9007199254740991,
+                          "maximum": 9007199254740991
+                        }
+                      },
+                      "required": [
+                        "cost",
+                        "cache_read_tokens",
+                        "cache_write_tokens"
+                      ],
+                      "additionalProperties": false,
+                      "description": "Not OpenAI's: pi's cost (USD) and cache token counts."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "object",
+                    "created",
+                    "model",
+                    "choices",
+                    "usage",
+                    "x_pi"
+                  ],
+                  "additionalProperties": false,
+                  "description": "A non-streaming chat completion."
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string",
+                      "description": "The request ID, the same in every chunk."
+                    },
+                    "object": {
+                      "type": "string",
+                      "const": "chat.completion.chunk"
+                    },
+                    "created": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "choices": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "index": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "delta": {
+                            "type": "object",
+                            "properties": {
+                              "role": {
+                                "description": "In the first chunk only.",
+                                "type": "string",
+                                "const": "assistant"
+                              },
+                              "content": {
+                                "type": "string"
+                              },
+                              "tool_calls": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "index": {
+                                      "type": "integer",
+                                      "minimum": -9007199254740991,
+                                      "maximum": 9007199254740991
+                                    },
+                                    "id": {
+                                      "type": "string"
+                                    },
+                                    "type": {
+                                      "type": "string",
+                                      "const": "function"
+                                    },
+                                    "function": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "arguments": {
+                                          "description": "The next piece of JSON text.",
+                                          "type": "string"
+                                        }
+                                      },
+                                      "additionalProperties": false
+                                    }
+                                  },
+                                  "required": [
+                                    "index"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "additionalProperties": false
+                          },
+                          "finish_reason": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "stop",
+                                  "length",
+                                  "tool_calls"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "required": [
+                          "index",
+                          "delta",
+                          "finish_reason"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Empty in the final usage chunk."
+                    },
+                    "usage": {
+                      "description": "Only in the final chunk, and only with `stream_options.include_usage`.",
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/CompletionUsage"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "object",
+                    "created",
+                    "model",
+                    "choices"
+                  ],
+                  "additionalProperties": false,
+                  "description": "One `data:` event of a streamed completion."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON, an invalid field value or message, or a conversation longer than the model takes.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth failed, or pi has no credential for the model and no `X-Pi-Upstream-Api-Key` was sent.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No exposed model has this ID (`model_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "The body is over the size limit.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field the proxy does not accept (`unsupported_parameter`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "The provider rate-limited the request.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "502": {
+            "description": "The provider refused the credential, or failed.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "The provider is unavailable or overloaded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "504": {
+            "description": "The provider timed out, or sent nothing for the upstream timeout.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

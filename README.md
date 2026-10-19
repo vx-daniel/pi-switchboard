@@ -100,6 +100,16 @@ curl http://localhost:4141/v1/chat/completions \
 | `GET /v1/models/{model}` | Model details by public ID or canonical ID (supports URL-encoded IDs with `/`) |
 | `POST /v1/chat/completions` | Chat completions (streaming and non-streaming) |
 | `GET /v1/switchboard/models` | Not OpenAI's: each exposed model's pi capabilities, such as its supported `reasoning_effort` values ([below](#discovering-available-models)) |
+| `GET /v1/switchboard/openapi.json` | Not OpenAI's: this API as an OpenAPI 3.1 document ([below](#api-documentation)) |
+| `GET /v1/switchboard/docs` | Not OpenAI's, off by default: Swagger UI for the document, to read the API and try requests ([below](#api-documentation)) |
+
+### API documentation
+
+`GET /v1/switchboard/openapi.json` describes the routes above: each request and response schema, every error status, and the bearer token. Point any OpenAPI tool at it, such as a client generator, Postman or an API diff. The same document is committed as [`openapi.json`](openapi.json), so a change to the API shows up in a pull request.
+
+Turn on `docsUi` (`--docs-ui`, `PI_PROXY_DOCS_UI=true`, or the settings panel) and open `http://localhost:4141/v1/switchboard/docs` in a browser to browse the API and send requests with "Try it out". With proxy auth on, click **Authorize** and enter the token first. The page loads Swagger UI 5.34.0 from the jsDelivr CDN, so it needs internet access; that is why it is off by default.
+
+Neither route needs the proxy token, even with proxy auth on: a browser cannot send one to open a page. Both name routes and schemas only, never a model, provider or credential, and every route they describe still needs the token.
 
 ### Health checks
 
@@ -139,7 +149,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `strict` on function tools | Applied where pi marks the model strict-capable, in each API's own shape (OpenAI, Responses, Anthropic, …). Strict rewrites the schema: every property becomes required and optional ones nullable, so the model may send `null` for a field it would otherwise omit. Elsewhere, or when the schema is outside the provider's strict subset, the tool is sent without strict, with no error (see [PLAN.md](PLAN.md#strict-on-function-tools--strict-where-supported-44)) |
 | `tool_calls` in messages | Assistant tool call + tool result roundtrip |
 | `parallel_tool_calls` | Forwarded to OpenAI/Codex; translated to `disable_parallel_tool_use` for Anthropic |
-| `reasoning_effort` | Maps to pi's thinking level. `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`). An effort the model does not support is clamped with pi's `clampThinkingLevel`: the nearest supported level above it, else the nearest below. So `none` on a model whose reasoning cannot be turned off is its lowest level (not the provider's default), `xhigh` on a model with `max` but no `xhigh` is `max`, and any effort on a model without reasoning is off. A clamp is logged at `debug`; `GET /v1/switchboard/models` lists the efforts each model supports. For a custom `models.json` model with `reasoning: true`, `none` sends whatever its `thinkingLevelMap.off` says: nothing if unset, so set `off: "none"` (or `off: null` if reasoning cannot be turned off) when the endpoint reasons by default |
+| `reasoning_effort` | Maps to pi's thinking level of the same name (`none` through `max`). `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`). An effort the model does not support is clamped with pi's `clampThinkingLevel`: the nearest supported level above it, else the nearest below. So `none` on a model whose reasoning cannot be turned off is its lowest level (not the provider's default), `xhigh` on a model with `max` but no `xhigh` is `max`, `max` on a model without it is its highest level, and any effort on a model without reasoning is off. A clamp is logged at `debug`; `GET /v1/switchboard/models` lists the efforts each model supports. For a custom `models.json` model with `reasoning: true`, `none` sends whatever its `thinkingLevelMap.off` says: nothing if unset, so set `off: "none"` (or `off: null` if reasoning cannot be turned off) when the endpoint reasons by default |
 | `response_format` | `text`, `json_object`, and `json_schema` (OpenAI-compatible APIs only) |
 | `top_p` | Supported by OpenAI, Anthropic (native), and Google (translated to `topP`) |
 | `frequency_penalty` | OpenAI and Google only (translated to `frequencyPenalty`) |
@@ -223,6 +233,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 | Port | `PI_PROXY_PORT` | `4141` | HTTP listen port (`--port`, `port`) |
 | Auth token | `PI_PROXY_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication (`--auth-token`, `authToken`) |
 | Remote images | `PI_PROXY_REMOTE_IMAGES` | `false` | Fetch remote image URLs server-side and inline them as base64; off, they are rejected with `400`. The proxy then makes requests for its clients, so only public `http`/`https` hosts are allowed (see [Security defaults](#security-defaults)) (`--remote-images`, `remoteImages`) |
+| Docs UI | `PI_PROXY_DOCS_UI` | `false` | Serve Swagger UI at `/v1/switchboard/docs` ([API documentation](#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
 | Max body size | `PI_PROXY_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
 | Upstream timeout | `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds (`upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
 | Log level | `PI_PROXY_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
@@ -428,12 +439,15 @@ vp check --fix        # Format and apply lint fixes
 vp test               # Offline tests (unit + integration): no real login, no network beyond 127.0.0.1
 pnpm run test:live    # Live conformance tests against real providers: uses your pi login and quota
 pnpm run test:live:record  # Re-record the Anthropic replay fixtures (needs a login made for recording)
+pnpm run openai-spec:update <commit>  # Re-pin OpenAI's OpenAPI spec subset to a full commit SHA
 vp pack               # Build for npm (ESM + .d.ts)
 ```
 
 `check:all` (`scripts/gate.ts`) is the one definition of "green": the pre-commit hook, CI, and the release workflow all run it.
 
 Offline tests run with pi pointed at an empty agent directory and credential env vars removed (`test/setup/offline.ts`). Tests that need models or an upstream build them with `test/fixtures/agent-dir.ts` and the local mock provider in `test/fixtures/mock-provider.ts`, which serves scripted replies or replays real provider traffic recorded by `test:live:record` (`test/fixtures/recording.ts`, `test/fixtures/recordings/`). Recording forwards pi's real requests to the provider through a local recorder and saves the responses without credentials; it refuses to save one that contains a credential. Set `PI_PROXY_RECORD_AGENT_DIR` to a pi agent directory with a login made for recording: never a copy of a login another pi or proxy uses, because refreshing an expired token rotates it under every copy. Recordings go to `test/fixtures/recordings/` unless `PI_PROXY_RECORD_OUT_DIR` names another directory (a relative path is taken from the working directory).
+
+`test/integration/openai-spec.test.ts` checks the stable surface against OpenAI's published OpenAPI spec, pinned to one commit of [`openai/openai-openapi`](https://github.com/openai/openai-openapi) in `test/fixtures/openai-spec/openapi-subset.json`. Every response body, stream chunk and error body has to validate against OpenAI's schema for it. Every request field and enum value the proxy accepts has to exist in OpenAI's request, and every one OpenAI has that the proxy doesn't accept is listed in the test with the reason. To move the pin, run `openai-spec:update` with the new commit. If OpenAI added a field or value, the test fails until you accept it or list it.
 
 ### Tooling
 

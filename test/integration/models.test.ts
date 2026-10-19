@@ -112,4 +112,30 @@ describe('GET /v1/models/:model', () => {
       code: 'model_not_found'
     })
   })
+
+  // Catches the trailing-slash path falling through to Hono's plain-text 404 once the detail
+  // route needs a non-empty ID.
+  test('returns 404 model_not_found for /v1/models/ with no ID', async () => {
+    const { status, body } = await getJson('/v1/models/')
+
+    expect(status).toBe(404)
+    expect(isErrorBody(body) ? body.error.code : undefined).toBe('model_not_found')
+  })
+
+  // Catches a malformed percent escape thrown as a 500 (decodeURIComponent's URIError) instead of
+  // answered as the unknown model it is.
+  test('returns 404 model_not_found for an ID with a malformed escape', async () => {
+    const { status, body } = await getJson('/v1/models/org%E0%A4%A')
+
+    expect(status).toBe(404)
+    expect(isErrorBody(body) ? body.error.code : undefined).toBe('model_not_found')
+  })
+
+  // Catches the ID decoded twice: `%252F` is a literal `%2F` in the ID, not a slash.
+  test('decodes the ID once', async () => {
+    const { status, body } = await getJson('/v1/models/gamma%252Forg%252Fmodel-x')
+
+    expect(status).toBe(404)
+    expect(isErrorBody(body) ? body.error.message : undefined).toContain('gamma%2Forg%2Fmodel-x')
+  })
 })

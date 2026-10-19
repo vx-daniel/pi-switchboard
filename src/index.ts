@@ -82,6 +82,7 @@ interface CliArgs {
   'port'?: string | undefined
   'auth-token'?: string | undefined
   'remote-images'?: boolean | undefined
+  'docs-ui'?: boolean | undefined
   'max-body-size'?: string | undefined
   'upstream-timeout'?: string | undefined
   'log-level'?: string | undefined
@@ -124,6 +125,9 @@ function buildCliOverrides(args: CliArgs): CliOverrides {
   }
   if (args['remote-images'] !== undefined) {
     cli.remoteImages = args['remote-images']
+  }
+  if (args['docs-ui'] !== undefined) {
+    cli.docsUi = args['docs-ui']
   }
   const mb = parsePositiveIntArg('max-body-size', args['max-body-size'])
   if (mb !== undefined) cli.maxBodySizeMb = mb
@@ -248,6 +252,11 @@ const main = defineCommand({
       description:
         'Fetch remote image URLs and inline them (off by default; public http/https hosts only, size, time and redirect limits)'
     },
+    'docs-ui': {
+      type: 'boolean',
+      description:
+        'Serve the Swagger UI docs page at /v1/switchboard/docs (off by default; its scripts load from a CDN)'
+    },
     'max-body-size': {
       type: 'string',
       description: 'Maximum request body size in MB (default: from config or 50)'
@@ -306,6 +315,7 @@ const main = defineCommand({
       proxyAuthMode: config.proxyAuth.kind,
       agenticEnabled: config.agenticEnabled,
       remoteImagesEnabled: config.remoteImagesEnabled,
+      docsUiEnabled: config.docsUiEnabled,
       maxBodySize: config.maxBodySize,
       upstreamTimeoutMs: config.upstreamTimeoutMs,
       publicModelIdMode: config.publicModelIdMode,

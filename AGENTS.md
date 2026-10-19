@@ -35,8 +35,9 @@ Treat these as stable unless the user explicitly changes direction:
   - `GET /v1/models`
   - `GET /v1/models/{model}`
   - `POST /v1/chat/completions`
-- Operational endpoints (`GET /healthz`, `/healthz/models`, `/healthz/creds`) sit outside that surface; see [`PLAN.md`](PLAN.md). Only `/healthz` skips proxy auth, and none may return a credential.
+- Operational endpoints (`GET /healthz`, `/healthz/models`, `/healthz/creds`) sit outside that surface; see [`PLAN.md`](PLAN.md). None may return a credential.
 - Non-OpenAI capability data goes on `GET /v1/switchboard/models`, never on the standard model objects; non-standard routes live under `/v1/switchboard/`. See [`PLAN.md`](PLAN.md).
+- Only three paths skip proxy auth: `/healthz`, `GET /v1/switchboard/openapi.json` and the opt-in `GET /v1/switchboard/docs`. The document and docs page name no model, provider or credential. `openapi.json` at the repo root is the committed document; `vp test -u` rewrites it after a deliberate contract change.
 - Canonical internal model IDs use `provider/model-id`.
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.
@@ -84,6 +85,7 @@ vp check --fix      # apply formatting and lint fixes
 vp test             # offline tests: unit + integration, no real login (test:ci runs them with coverage, for fallow)
 pnpm run test:live  # live provider conformance tests: real login, spends quota; on demand only
 pnpm run test:live:record  # re-record replay fixtures (PI_PROXY_RECORD_AGENT_DIR = a login made for recording)
+pnpm run openai-spec:update <sha>  # re-pin OpenAI's OpenAPI spec subset (test/integration/openai-spec.test.ts)
 vp pack             # build
 ```
 

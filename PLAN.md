@@ -73,6 +73,28 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 - `GET /v1/models/{model}`
 - `POST /v1/chat/completions`
 
+### Reference spec
+
+"Close to OpenAI's schema" (constitution, principle I) is measured against OpenAI's published
+OpenAPI spec ([`openai/openai-openapi`](https://github.com/openai/openai-openapi)), pinned to one
+commit (#132). `test/fixtures/openai-spec/openapi-subset.json` holds the schemas the stable surface
+is checked against, and everything they reference:
+
+- `ListModelsResponse`, `Model`
+- `CreateChatCompletionRequest`, `CreateChatCompletionResponse`, `CreateChatCompletionStreamResponse`
+- `ErrorResponse`
+
+`test/integration/openai-spec.test.ts` validates every response body of the stable routes against
+it: models, chat completions streamed and not, and each error status. It also checks the request
+schema in both directions. Every field and enum value the proxy accepts must exist in OpenAI's
+request. Every OpenAI field or value the proxy does not accept must be listed in the test, with
+what the proxy does instead.
+
+Moving the pin is deliberate: `pnpm run openai-spec:update <commit>` rewrites the subset, and a
+bump that adds a request field or enum value fails the test until it is accepted or listed. The
+fields the proxy adds (`x_pi`, `prompt_tokens_details.cache_write_tokens`) pass because OpenAI's
+schemas leave `additionalProperties` open; a bump that closes one fails.
+
 ### Operational endpoints
 
 Outside the OpenAI-compatible surface, not shaped like OpenAI responses (`src/server/health.ts`):
@@ -93,6 +115,42 @@ None returns a credential. Without a proxy token, `?verify=true` is open to whoe
 port, as `/v1/chat/completions` is; it can do less harm than a completion: pi refreshes a token only
 when it is about to expire, and runs the refresh inside its credential store's serialized `modify`,
 so repeated or concurrent calls neither refresh every time nor refresh twice.
+
+### OpenAPI document and docs UI
+
+The proxy describes its own API in OpenAPI 3.1 (#129), built with
+[`hono-openapi`](https://github.com/rhinobase/hono-openapi) from the routes
+(`src/server/openapi.ts`):
+
+- `GET /v1/switchboard/openapi.json`: the document. Always on.
+- `GET /v1/switchboard/docs`: [Swagger UI](https://github.com/honojs/middleware/tree/main/packages/swagger-ui)
+  for it, with "Try it out". Off unless `docsUi` (`--docs-ui`, `PI_PROXY_DOCS_UI`, the settings
+  panel) is on, because the page loads `swagger-ui-dist`, pinned to `SWAGGER_UI_VERSION`, from the
+  jsDelivr CDN. It is not bundled: `swagger-ui-dist` depends on `@scarf/scarf`, whose install
+  script reports installs to an analytics service.
+
+Both skip proxy auth (constitution 2.1.0). A browser cannot send a bearer token to open a page,
+and Swagger UI cannot load the document before the token is entered with "Authorize". Neither
+names a model, provider or credential, and every route they describe still needs the token. They
+are registered before the auth middleware in `createApp`.
+
+What the document covers: the stable routes and `GET /v1/switchboard/models`, each with its
+request and response schemas, its error statuses, and the bearer scheme. It leaves out the health
+endpoints, the OpenAI endpoints answered with 404, and the document and docs routes themselves.
+The response schemas are the Zod schemas the builders type their bodies with (`OpenAIChatCompletion`
+is `z.infer` of `openAIChatCompletionSchema`, and so on), so the document cannot name a field the
+code does not send. They are never parsed at runtime. Validation stays in `validateChatRequest`;
+hono-openapi's `validator()` is not used, since it would replace the 400/422 split and its messages.
+
+`openapi.json` at the repository root is the document as committed: a file snapshot in
+`test/integration/openapi-document.test.ts`. A change to a route, field, status or description
+fails the test until `vp test -u` rewrites it, so the contract change shows up in review. Its
+`info.version` is the API's (`v1`), not the package's, so a release does not change it.
+
+The model detail route is `/v1/models/:model{.+}`: hono-openapi leaves a wildcard route out of the
+document. Hono decodes the ID once (`%252F` stays a literal `%2F`), and a malformed escape is
+answered `404 model_not_found` rather than thrown as a 500. `/v1/models/` with no ID keeps its
+OpenAI-style 404.
 
 ### Unsupported endpoints
 
@@ -304,7 +362,7 @@ Reason:
 - `tool_choice`
 - assistant `tool_calls`
 - `tool` role messages
-- `reasoning_effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`): an effort the model does not support is clamped with pi's `clampThinkingLevel` (nearest supported level above, else below) and logged at debug, not rejected (#43). A client that sends one effort to every model must keep working when the model changes; `GET /v1/switchboard/models` lists each model's supported efforts
+- `reasoning_effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`): an effort the model does not support is clamped with pi's `clampThinkingLevel` (nearest supported level above, else below) and logged at debug, not rejected (#43). `max` is pi's `max` level (#132); on a model without it, it is the model's highest level. A client that sends one effort to every model must keep working when the model changes; `GET /v1/switchboard/models` lists each model's supported efforts
 - `response_format` (`text`, `json_object`, `json_schema`)
 - `top_p`
 - `frequency_penalty`
@@ -666,7 +724,12 @@ Choice policy:
 - always `choices[0].index = 0`
 - emit assistant text in `choices[0].message.content`
 - emit tool calls in `choices[0].message.tool_calls`
+- always `choices[0].logprobs: null`: OpenAI's spec requires the field, and the proxy rejects
+  `logprobs` requests (#132)
 - map finish reasons conservatively
+
+No `system_fingerprint`: OpenAI's spec types it as a string (deprecated, optional), and pi has no
+value to send. It was `null` before #132, which the spec does not allow.
 
 Finish reason mapping:
 
@@ -771,7 +834,7 @@ Not part of OpenAI's API: what pi knows about each exposed model that the standa
 }
 ```
 
-- `reasoning_efforts`: the `reasoning_effort` values the model runs at as asked, lowest first, from pi's `getSupportedThinkingLevels` (`off` is `none`; pi's `max` has no OpenAI effort and is not listed). `["none"]` for a model without reasoning
+- `reasoning_efforts`: the `reasoning_effort` values the model runs at as asked, lowest first, from pi's `getSupportedThinkingLevels` (`off` is `none`, and every other level the effort of the same name, `max` included). `["none"]` for a model without reasoning
 - new capability fields go here, never on `/v1/models`
 - non-standard routes live under `/v1/switchboard/`, as `/v1/switchboard/agent/completions` would. The prefix was `/v1/pi/` until constitution 2.0.0; `/v1/pi/models` moved here with no alias
 
@@ -1222,6 +1285,7 @@ Validate the exact response shapes that the OpenAI SDK expects. These are the hi
 
 - SSE chunk conformance: required/optional fields, `delta` shape, `finish_reason` lifecycle, tool call deltas, usage chunk, `[DONE]` termination
 - non-streaming response conformance: `ChatCompletion` required fields, `message.content` nullability, `tool_calls` shape, `usage` fields
+- OpenAI spec conformance (#132): every stable response, stream chunk and error body validated against the pinned OpenAI spec ([Reference spec](#reference-spec)), and the request schema checked against OpenAI's request in both directions
 
 ### Conformance tests — SDK round-trip (require credentials)
 

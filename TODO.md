@@ -300,6 +300,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] `choices[0].message.content` is `string | null` (explicitly `null` when tool_calls present)
 - [x] `choices[0].message.tool_calls` shape: `id`, `type: "function"`, `function.name`, `function.arguments`
 - [x] `usage` fields are all numbers
+- [x] Every stable response, stream chunk and error body validates against OpenAI's published spec, pinned (#132)
+- [x] Request fields and enum values checked against OpenAI's request both ways; each one not accepted is listed (#132)
 
 ### SDK round-trip conformance (requires credentials, skip otherwise)
 
@@ -422,3 +424,5 @@ Analysis document: `docs/engineering/phase-3d-analysis.md`
 - [x] Keep this file focused on concrete action items only
 - [x] Document all silent-drop fields and their resolution plan
 - [x] Add "Known gaps" tracking to `PLAN.md`
+- [x] Publish the API as an OpenAPI document at `/v1/switchboard/openapi.json`, committed as `openapi.json` and checked against the routes (#129)
+- [x] Opt-in Swagger UI at `/v1/switchboard/docs` (`docsUi`), Swagger UI pinned on the CDN (#129)

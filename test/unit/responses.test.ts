@@ -83,12 +83,12 @@ describe('buildChatCompletion', () => {
       object: 'chat.completion',
       created: expect.any(Number) as number,
       model: 'anthropic/claude-haiku-5-5',
-      system_fingerprint: null,
       choices: [
         {
           index: 0,
           message: { role: 'assistant', content: 'Hello there!' },
-          finish_reason: 'stop'
+          finish_reason: 'stop',
+          logprobs: null
         }
       ],
       usage: {
@@ -139,7 +139,8 @@ describe('buildChatCompletion', () => {
             }
           ]
         },
-        finish_reason: 'tool_calls'
+        finish_reason: 'tool_calls',
+        logprobs: null
       }
     ])
   })
@@ -174,7 +175,8 @@ describe('buildChatCompletion', () => {
             }
           ]
         },
-        finish_reason: 'tool_calls'
+        finish_reason: 'tool_calls',
+        logprobs: null
       }
     ])
   })

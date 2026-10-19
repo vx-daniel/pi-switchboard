@@ -140,7 +140,7 @@ describe('validateChatRequest', () => {
   })
 
   test('accepts all reasoning_effort values', () => {
-    for (const effort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const) {
+    for (const effort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const) {
       const result = validateChatRequest({
         model: 'openai/gpt-4o',
         messages: [{ role: 'user', content: 'Hello' }],

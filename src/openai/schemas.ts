@@ -181,8 +181,16 @@ const MIN_PENALTY = -2
 /** Upper bound of `frequency_penalty` and `presence_penalty`. */
 const MAX_PENALTY = 2
 
-/** OpenAI's `reasoning_effort` values, lowest first. */
-export const REASONING_EFFORTS = ['none', 'minimal', 'low', 'medium', 'high', 'xhigh'] as const
+/** OpenAI's `reasoning_effort` values, lowest first (OpenAI's `ReasoningEffort` schema, #132). */
+export const REASONING_EFFORTS = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max'
+] as const
 /** One of the {@link REASONING_EFFORTS} values. */
 export type ReasoningEffort = (typeof REASONING_EFFORTS)[number]
 
