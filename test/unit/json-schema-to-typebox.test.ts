@@ -102,11 +102,16 @@ describe('jsonSchemaToTypebox', () => {
     })
 
     // Catches a malformed `required` ignored, which made every property optional: a silent
-    // downgrade of the client's schema (#111).
-    test.each([['name'], [['name', 1]], [{ name: true }]])('rejects required %j', (required) => {
+    // downgrade of the client's schema (#111). Refused with or without `properties`.
+    test.each([
+      { required: 'name', properties: { name: { type: 'string' } } },
+      { required: ['name', 1], properties: { name: { type: 'string' } } },
+      { required: { name: true }, properties: { name: { type: 'string' } } },
+      { required: true, properties: undefined }
+    ])('rejects required $required', ({ required, properties }) => {
       const result = jsonSchemaToTypebox({
         type: 'object',
-        properties: { name: { type: 'string' } },
+        ...(properties === undefined ? {} : { properties }),
         required
       })
 
