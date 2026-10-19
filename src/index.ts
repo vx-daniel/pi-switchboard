@@ -133,19 +133,13 @@ function buildCliOverrides(args: CliArgs): CliOverrides {
  *
  * @remarks
  * Config loading logs too, so logging is configured first with the level the CLI or env asks for,
- * then again with the fully resolved level (which may come from the config file).
+ * then again with the fully resolved level (which may come from the config file). The logging
+ * flags have already been checked (`run`).
  *
  * @param args - The parsed CLI flags.
- * @returns The config, or `undefined` (with exit code 1) when a logging flag is unusable.
+ * @returns The config.
  */
-function loadConfigWithLogging(args: CliArgs): ServerConfig | undefined {
-  const invalidFlag = invalidLoggingFlag(args)
-  if (invalidFlag !== undefined) {
-    process.stderr.write(`${invalidFlag}\n`)
-    process.exitCode = 1
-    return undefined
-  }
-
+function loadConfigWithLogging(args: CliArgs): ServerConfig {
   const format = resolveLogFormat(args['log-format'], process.env.PI_PROXY_LOG_FORMAT)
   const earlyLogLevel =
     [args['log-level'], process.env.PI_PROXY_LOG_LEVEL].find(
@@ -214,6 +208,14 @@ const main = defineCommand({
     }
   },
   run: async ({ args }) => {
+    // An unusable flag refuses every path, `--config` included, with the valid values (#95).
+    const invalidFlag = invalidLoggingFlag(args)
+    if (invalidFlag !== undefined) {
+      process.stderr.write(`${invalidFlag}\n`)
+      process.exitCode = 1
+      return
+    }
+
     // --config: show the config file's values (not CLI or env overrides) and exit. Command
     // output, not a log line, so it goes to stdout, where it is easily piped or captured: the
     // token is masked.
@@ -226,7 +228,6 @@ const main = defineCommand({
     }
 
     const config = loadConfigWithLogging(args)
-    if (config === undefined) return
 
     // Never the auth token itself: only how proxy auth is set (`off`, `token` or `invalid`).
     lifecycleLogger.debug('Effective config', {

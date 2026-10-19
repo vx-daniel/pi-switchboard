@@ -202,6 +202,20 @@ describe('logging flags', () => {
     expect(stderr).toEqual(['--log-format must be one of: pretty, json\n'])
     expect(stdout).toEqual([])
   })
+
+  // Catches --config printing the config and exiting 0 past an unusable flag, where every other
+  // path refuses it with the valid values (#95; CONSTITUTION.md, principle II).
+  test('--config with an invalid --log-level refuses too, printing no config', async () => {
+    await runCli(['--config', '--log-level', 'loud'])
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect({ stderr, stdout }).toEqual({
+      stderr: ['--log-level must be one of: trace, debug, info, warning, error, fatal\n'],
+      stdout: []
+    })
+  })
 })
 
 describe('--config', () => {

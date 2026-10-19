@@ -1,8 +1,9 @@
 /**
  * `scripts/record-fixtures.ts`, run offline: its recorder forwards to the mock provider (standing
  * in for Anthropic, `PI_PROXY_RECORD_UPSTREAM`), its login is a fixture agent dir with a fake API
- * key (`PI_PROXY_RECORD_AGENT_DIR`), and its recordings go to a temp dir instead of the committed
- * `test/fixtures/recordings`. The script runs `main()` on import, so each test imports it afresh.
+ * key (`PI_PROXY_RECORD_AGENT_DIR`), and its recordings go to a temp dir
+ * (`PI_PROXY_RECORD_OUT_DIR`) instead of the committed `test/fixtures/recordings`. The script runs
+ * `main()` on import, so each test imports it afresh.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -16,21 +17,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vite
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import { type MockProvider, startMockProvider } from '../fixtures/mock-provider'
-import type * as RecordingModule from '../fixtures/recording'
 import { loadRecording, type Recording, replay } from '../fixtures/recording'
-
-/** Where the script's recordings go during these tests; set once the temp dir exists. */
-const saveTarget = vi.hoisted(() => ({ directory: '' }))
-
-// The script saves to the committed recordings; a test run must not overwrite them.
-vi.mock('../fixtures/recording', async (importOriginal) => {
-  const original = await importOriginal<typeof RecordingModule>()
-  return {
-    ...original,
-    saveRecording: (recording: Recording, secrets: readonly string[]) =>
-      original.saveRecording(recording, secrets, saveTarget.directory)
-  }
-})
 
 const API = 'anthropic-messages'
 const MODEL_ID = 'claude-haiku-5-5'
@@ -55,6 +42,8 @@ class ExitCalled extends Error {
 }
 
 let upstream: MockProvider
+/** Where the script saves recordings in these tests (PI_PROXY_RECORD_OUT_DIR), never the fixtures. */
+let saveDir = ''
 const tempDirs: string[] = []
 const agentDirs: FixtureAgentDir[] = []
 
@@ -75,7 +64,7 @@ beforeAll(async () => {
     [MODEL_ID]: replay(textAnswer),
     [MISSING_MODEL_ID]: replay(missingModelAnswer)
   })
-  saveTarget.directory = tempDir('pi-proxy-record-fixtures-')
+  saveDir = tempDir('pi-proxy-record-fixtures-')
 })
 
 afterEach(() => {
@@ -186,6 +175,7 @@ describe('recording every scenario', () => {
   beforeAll(async () => {
     vi.stubEnv('PI_PROXY_RECORD_AGENT_DIR', await recordingAgentDir(true))
     vi.stubEnv('PI_PROXY_RECORD_UPSTREAM', upstream.origin)
+    vi.stubEnv('PI_PROXY_RECORD_OUT_DIR', saveDir)
     run = await runScript()
   })
 
@@ -194,8 +184,7 @@ describe('recording every scenario', () => {
     expect({ exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr }).toEqual({
       exitCode: undefined,
       stdout: SCENARIOS.map(
-        (scenario) =>
-          `recorded ${scenario} -> ${join(saveTarget.directory, API, `${scenario}.json`)}\n`
+        (scenario) => `recorded ${scenario} -> ${join(saveDir, API, `${scenario}.json`)}\n`
       ).join(''),
       stderr: ''
     })
@@ -211,14 +200,14 @@ describe('recording every scenario', () => {
   // Catches a recording that replay cannot load, or that holds another scenario's exchange, the
   // wrong model, or a body other than what the provider sent.
   test.each(SCENARIOS)('saves %s as a loadable recording of its own exchange', (scenario) => {
-    expect(withJoinedBody(loadRecording(API, scenario, saveTarget.directory))).toEqual(
+    expect(withJoinedBody(loadRecording(API, scenario, saveDir))).toEqual(
       expectedRecording(scenario)
     )
   })
 
   // Catches the login's API key reaching a committed fixture.
   test.each(SCENARIOS)('keeps the credential out of %s', (scenario) => {
-    const saved = readFileSync(join(saveTarget.directory, API, `${scenario}.json`), 'utf8')
+    const saved = readFileSync(join(saveDir, API, `${scenario}.json`), 'utf8')
     expect({ hasKey: saved.includes(API_KEY), hasKeyHeader: saved.includes('x-api-key') }).toEqual({
       hasKey: false,
       hasKeyHeader: false

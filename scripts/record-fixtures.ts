@@ -16,6 +16,9 @@
  *
  * Runs under Node directly (`node scripts/record-fixtures.ts`), so imports are relative with `.ts`.
  *
+ * OUTPUT: recordings go to `test/fixtures/recordings`, to be committed; set
+ * PI_PROXY_RECORD_OUT_DIR to save them somewhere else (the offline test of this script does).
+ *
  * @packageDocumentation
  */
 
@@ -195,6 +198,8 @@ async function recordScenario(
   }
   const captured = recorder.exchanges.at(-1)
   if (captured === undefined) fail(`${scenario.name}: the recorder saw no request`)
+  // Saved under PI_PROXY_RECORD_OUT_DIR when set, else into the committed fixtures (#95).
+  const outDir = process.env.PI_PROXY_RECORD_OUT_DIR
   return saveRecording(
     {
       version: 1,
@@ -205,7 +210,8 @@ async function recordScenario(
       piVersion: VERSION,
       ...captured.exchange
     },
-    captured.secrets
+    captured.secrets,
+    ...(outDir === undefined || outDir === '' ? [] : [outDir])
   )
 }
 

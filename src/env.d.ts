@@ -28,6 +28,8 @@ declare namespace NodeJS {
     PI_PROXY_LIVE_TESTS?: string | undefined
     /** scripts/record-fixtures.ts: the pi agent dir holding the login used for recording. */
     PI_PROXY_RECORD_AGENT_DIR?: string | undefined
+    /** scripts/record-fixtures.ts: where recordings are saved (default test/fixtures/recordings). */
+    PI_PROXY_RECORD_OUT_DIR?: string | undefined
     /** scripts/record-fixtures.ts: where the recorder forwards to (default api.anthropic.com). */
     PI_PROXY_RECORD_UPSTREAM?: string | undefined
     /** Set by the package manager running a script; read by `scripts/gate.ts`. */
