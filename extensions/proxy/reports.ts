@@ -140,6 +140,7 @@ function formatServerSettings(config: ProxyConfig): string[] {
     `port: ${String(config.port)}`,
     `auth: ${authDisplay}`,
     `remote images: ${String(config.remoteImages)}`,
+    `docs ui: ${String(config.docsUi)}`,
     `max body: ${String(config.maxBodySizeMb)} MB`,
     `timeout: ${String(config.upstreamTimeoutSec)}s`
   ]

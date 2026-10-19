@@ -424,3 +424,5 @@ Analysis document: `docs/engineering/phase-3d-analysis.md`
 - [x] Keep this file focused on concrete action items only
 - [x] Document all silent-drop fields and their resolution plan
 - [x] Add "Known gaps" tracking to `PLAN.md`
+- [x] Publish the API as an OpenAPI document at `/v1/switchboard/openapi.json`, committed as `openapi.json` and checked against the routes (#129)
+- [x] Opt-in Swagger UI at `/v1/switchboard/docs` (`docsUi`), Swagger UI pinned on the CDN (#129)

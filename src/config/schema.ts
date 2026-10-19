@@ -124,6 +124,8 @@ const ProxyConfigSchema = z.object({
   authToken: VerbatimStringSchema,
   /** Allow remote image URL fetching. */
   remoteImages: z.boolean(),
+  /** Serve the Swagger UI docs page at `/v1/switchboard/docs` (#129). */
+  docsUi: z.boolean(),
   /** Max request body in MB. */
   maxBodySizeMb: boundedInt(1, MAX_BODY_SIZE_MB),
   /** Seconds the upstream provider may send nothing before a call is aborted. */
@@ -173,6 +175,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   port: 4141,
   authToken: '',
   remoteImages: false,
+  docsUi: false,
   maxBodySizeMb: 50,
   upstreamTimeoutSec: 120,
   lifetime: 'detached',
@@ -336,6 +339,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     port: field('port', fields.port, clampInt(fields.port, DEFAULT_CONFIG.port)),
     authToken: field('authToken', fields.authToken, () => DEFAULT_CONFIG.authToken),
     remoteImages: field('remoteImages', fields.remoteImages, () => DEFAULT_CONFIG.remoteImages),
+    docsUi: field('docsUi', fields.docsUi, () => DEFAULT_CONFIG.docsUi),
     maxBodySizeMb: field(
       'maxBodySizeMb',
       fields.maxBodySizeMb,
@@ -524,8 +528,9 @@ export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions
  * Builds the env vars the pi extension passes to the proxy it spawns.
  *
  * @remarks
- * Covers host, port, auth token (only when non-empty), remote images, body size, upstream timeout
- * and log level. Not `lifetime` or `zed` (extension-only). Not `PI_PROXY_AGENTIC` either, on
+ * Covers host, port, auth token (only when non-empty), remote images, the docs UI, body size,
+ * upstream timeout and log level. Not `lifetime` or `zed` (extension-only). Not
+ * `PI_PROXY_AGENTIC` either, on
  * purpose: agentic mode is not built, the variable only reaches the startup log, and the
  * extension has no setting for it.
  *
@@ -540,6 +545,7 @@ export function configToEnv(config: ProxyConfig): Record<string, string> {
     env['PI_PROXY_AUTH_TOKEN'] = config.authToken
   }
   env['PI_PROXY_REMOTE_IMAGES'] = String(config.remoteImages)
+  env['PI_PROXY_DOCS_UI'] = String(config.docsUi)
   env['PI_PROXY_MAX_BODY_SIZE'] = String(config.maxBodySizeMb * BYTES_PER_MB)
   env['PI_PROXY_UPSTREAM_TIMEOUT_MS'] = String(config.upstreamTimeoutSec * MS_PER_SECOND)
   env['PI_PROXY_LOG_LEVEL'] = config.logLevel

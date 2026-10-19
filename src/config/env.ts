@@ -125,6 +125,8 @@ export interface ServerConfig {
   readonly agenticEnabled: boolean
   /** Whether remote image URL fetching is enabled. */
   readonly remoteImagesEnabled: boolean
+  /** Whether the Swagger UI docs page is served. */
+  readonly docsUiEnabled: boolean
   /** Maximum request body size in bytes. */
   readonly maxBodySize: number
   /**
@@ -150,6 +152,7 @@ const CONFIG_ENV_VARS = [
   'PI_PROXY_PORT',
   'PI_PROXY_AUTH_TOKEN',
   'PI_PROXY_REMOTE_IMAGES',
+  'PI_PROXY_DOCS_UI',
   'PI_PROXY_MAX_BODY_SIZE',
   'PI_PROXY_UPSTREAM_TIMEOUT_MS',
   'PI_PROXY_AGENTIC',
@@ -224,6 +227,7 @@ export interface CliOverrides {
   port?: number | undefined
   authToken?: string | undefined
   remoteImages?: boolean | undefined
+  docsUi?: boolean | undefined
   maxBodySizeMb?: number | undefined
   upstreamTimeoutSec?: number | undefined
   logLevel?: LogLevel | undefined
@@ -259,6 +263,9 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     cli.remoteImages ??
     parseBoolean('PI_PROXY_REMOTE_IMAGES', process.env.PI_PROXY_REMOTE_IMAGES, file.remoteImages)
 
+  const docsUiEnabled =
+    cli.docsUi ?? parseBoolean('PI_PROXY_DOCS_UI', process.env.PI_PROXY_DOCS_UI, file.docsUi)
+
   const maxBodySize =
     cli.maxBodySizeMb === undefined
       ? parsePositiveInt(
@@ -285,6 +292,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     proxyAuth,
     agenticEnabled,
     remoteImagesEnabled,
+    docsUiEnabled,
     maxBodySize,
     upstreamTimeoutMs,
     publicModelIdMode: file.publicModelIdMode,

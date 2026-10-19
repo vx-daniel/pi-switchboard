@@ -20,6 +20,7 @@ import type {
   Usage
 } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
+import * as z from 'zod'
 
 /** Logger for non-streaming response building. */
 const responsesLogger = proxyLogger('openai', 'responses')
@@ -27,54 +28,97 @@ const responsesLogger = proxyLogger('openai', 'responses')
 /** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
 const MS_PER_SECOND = 1000
 
+/** The finish reasons the proxy sends; pi cannot tell apart any other OpenAI one. */
+export const finishReasonSchema = z.enum(['stop', 'length', 'tool_calls'])
+
+/** A finish reason the proxy sends. */
+export type FinishReason = z.infer<typeof finishReasonSchema>
+
+/**
+ * OpenAI `usage` object, with pi's cache write count added to `prompt_tokens_details`. Documents
+ * the response; never parsed.
+ */
+export const openAIUsageSchema = z
+  .object({
+    prompt_tokens: z
+      .int()
+      .meta({ description: 'The whole prompt: uncached, cache reads and cache writes.' }),
+    completion_tokens: z.int(),
+    total_tokens: z.int(),
+    prompt_tokens_details: z.object({
+      cached_tokens: z.int(),
+      cache_write_tokens: z
+        .int()
+        .meta({ description: "Not OpenAI's: prompt tokens written to the cache." })
+    })
+  })
+  .meta({ id: 'CompletionUsage' })
+
 /** OpenAI `usage` object, with pi's cache write count added to `prompt_tokens_details`. */
-export interface OpenAIUsage {
-  readonly prompt_tokens: number
-  readonly completion_tokens: number
-  readonly total_tokens: number
-  readonly prompt_tokens_details: {
-    readonly cached_tokens: number
-    readonly cache_write_tokens: number
-  }
-}
+export type OpenAIUsage = z.infer<typeof openAIUsageSchema>
 
-/** A non-streaming `chat.completion` response, with pi cost and cache data under `x_pi`. */
-export interface OpenAIChatCompletion {
-  readonly id: string
-  readonly object: 'chat.completion'
-  readonly created: number
-  readonly model: string
-  readonly choices: OpenAIChatCompletionChoice[]
-  readonly usage: OpenAIUsage
-  readonly x_pi?: {
-    readonly cost: Usage['cost']
-    readonly cache_read_tokens: number
-    readonly cache_write_tokens: number
-  }
-}
-
-/** One choice of a {@link OpenAIChatCompletion}. */
-export interface OpenAIChatCompletionChoice {
-  readonly index: number
-  readonly message: {
-    readonly role: 'assistant'
-    readonly content: string | null
-    readonly tool_calls?: OpenAIToolCall[] | undefined
-  }
-  readonly finish_reason: string
-  /** Always `null`: pi returns no token probabilities, and `logprobs` requests are rejected. */
-  readonly logprobs: null
-}
+/** An OpenAI function tool call in an assistant message. Documents the response; never parsed. */
+const openAIToolCallSchema = z
+  .object({
+    id: z.string().trim(),
+    type: z.literal('function'),
+    function: z.object({
+      name: z.string().trim(),
+      arguments: z.string().trim().meta({ description: 'The arguments, as JSON text.' })
+    })
+  })
+  .meta({ id: 'ToolCall' })
 
 /** An OpenAI function tool call in an assistant message. */
-export interface OpenAIToolCall {
-  readonly id: string
-  readonly type: 'function'
-  readonly function: {
-    readonly name: string
-    readonly arguments: string
-  }
-}
+type OpenAIToolCall = z.infer<typeof openAIToolCallSchema>
+
+/** One choice of a `chat.completion`. Documents the response; never parsed. */
+const openAIChatCompletionChoiceSchema = z.object({
+  index: z.int(),
+  message: z.object({
+    role: z.literal('assistant'),
+    content: z.string().trim().nullable(),
+    tool_calls: z.array(openAIToolCallSchema).optional()
+  }),
+  finish_reason: finishReasonSchema,
+  logprobs: z.null().meta({
+    description: 'Always `null`: pi returns no token probabilities, and `logprobs` is rejected.'
+  })
+})
+
+/** One choice of a {@link OpenAIChatCompletion}. */
+type OpenAIChatCompletionChoice = z.infer<typeof openAIChatCompletionChoiceSchema>
+
+/**
+ * A non-streaming `chat.completion` response, with pi cost and cache data under `x_pi`. Documents
+ * the response; never parsed.
+ */
+export const openAIChatCompletionSchema = z
+  .object({
+    id: z.string().trim().meta({ description: 'The request ID, as in `x-request-id`.' }),
+    object: z.literal('chat.completion'),
+    created: z.int(),
+    model: z.string().trim(),
+    choices: z.array(openAIChatCompletionChoiceSchema),
+    usage: openAIUsageSchema,
+    x_pi: z
+      .object({
+        cost: z.object({
+          input: z.number(),
+          output: z.number(),
+          cacheRead: z.number(),
+          cacheWrite: z.number(),
+          total: z.number()
+        }),
+        cache_read_tokens: z.int(),
+        cache_write_tokens: z.int()
+      })
+      .meta({ description: "Not OpenAI's: pi's cost (USD) and cache token counts." })
+  })
+  .meta({ id: 'ChatCompletion', description: 'A non-streaming chat completion.' })
+
+/** A non-streaming `chat.completion` response, with pi cost and cache data under `x_pi`. */
+export type OpenAIChatCompletion = z.infer<typeof openAIChatCompletionSchema>
 
 /**
  * Pi StopReason to OpenAI finish_reason.
@@ -85,7 +129,7 @@ export interface OpenAIToolCall {
  * options, which this proxy never does, so neither reaches a client. They map like `error` and
  * `aborted` (a finish_reason is required, and OpenAI has no better fit).
  */
-const FINISH_REASON_MAP: Record<StopReason, string> = {
+const FINISH_REASON_MAP: Record<StopReason, FinishReason> = {
   pending: 'stop',
   stop: 'stop',
   length: 'length',
@@ -101,7 +145,7 @@ const FINISH_REASON_MAP: Record<StopReason, string> = {
  * @param reason - the pi stop reason
  * @returns the finish_reason from {@link FINISH_REASON_MAP}
  */
-export function mapFinishReason(reason: StopReason): string {
+export function mapFinishReason(reason: StopReason): FinishReason {
   return FINISH_REASON_MAP[reason]
 }
 

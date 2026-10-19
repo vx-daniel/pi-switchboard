@@ -18,8 +18,9 @@ export default defineConfig({
     useTabs: false,
     insertFinalNewline: true,
     sortImports: true,
-    // Prose and generated files stay as written.
-    ignorePatterns: ['**/*.md', 'pnpm-lock.yaml']
+    // Prose and generated files stay as written. `openapi.json` is the snapshot
+    // `test/integration/openapi-document.test.ts` writes; formatting it would fail the snapshot.
+    ignorePatterns: ['**/*.md', 'pnpm-lock.yaml', 'openapi.json']
   },
 
   lint: {

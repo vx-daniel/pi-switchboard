@@ -14,46 +14,70 @@
 
 import type { AssistantMessageEvent, Usage } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
-import { mapFinishReason, mapUsage } from '@proxy/openai/responses'
+import {
+  type FinishReason,
+  finishReasonSchema,
+  mapFinishReason,
+  mapUsage,
+  openAIUsageSchema
+} from '@proxy/openai/responses'
 import { mapFailedCall, type OpenAIError } from '@proxy/server/errors'
+import * as z from 'zod'
 
 /** Logger for SSE encoding. */
 const sseLogger = proxyLogger('openai', 'sse')
 
+/**
+ * One streamed tool call fragment; `id`, `type` and `name` come only in its first fragment.
+ * Documents the response; never parsed.
+ */
+const sseToolCallDeltaSchema = z.object({
+  index: z.int(),
+  id: z.string().trim().optional(),
+  type: z.literal('function').optional(),
+  function: z
+    .object({
+      name: z.string().trim().optional(),
+      arguments: z.string().trim().optional().meta({ description: 'The next piece of JSON text.' })
+    })
+    .optional()
+})
+
+/** The incremental `delta` of a chunk choice. Documents the response; never parsed. */
+const sseChunkDeltaSchema = z.object({
+  role: z.literal('assistant').optional().meta({ description: 'In the first chunk only.' }),
+  content: z.string().trim().optional(),
+  tool_calls: z.array(sseToolCallDeltaSchema).optional()
+})
+
+/** The incremental `delta` of a chunk choice. */
+type SSEChunkDelta = z.infer<typeof sseChunkDeltaSchema>
+
+/** One choice of a chunk. Documents the response; never parsed. */
+const sseChunkChoiceSchema = z.object({
+  index: z.int(),
+  delta: sseChunkDeltaSchema,
+  finish_reason: finishReasonSchema.nullable()
+})
+
+/** One `chat.completion.chunk` SSE payload. Documents the response; never parsed. */
+export const sseChunkSchema = z
+  .object({
+    id: z.string().trim().meta({ description: 'The request ID, the same in every chunk.' }),
+    object: z.literal('chat.completion.chunk'),
+    created: z.int(),
+    model: z.string().trim(),
+    choices: z.array(sseChunkChoiceSchema).meta({
+      description: 'Empty in the final usage chunk.'
+    }),
+    usage: openAIUsageSchema.nullable().optional().meta({
+      description: 'Only in the final chunk, and only with `stream_options.include_usage`.'
+    })
+  })
+  .meta({ id: 'ChatCompletionChunk', description: 'One `data:` event of a streamed completion.' })
+
 /** One `chat.completion.chunk` SSE payload. */
-export interface SSEChunk {
-  readonly id: string
-  readonly object: 'chat.completion.chunk'
-  readonly created: number
-  readonly model: string
-  readonly choices: SSEChunkChoice[]
-  readonly usage?: ReturnType<typeof mapUsage> | null
-}
-
-/** One choice of an {@link SSEChunk}. */
-export interface SSEChunkChoice {
-  readonly index: number
-  readonly delta: SSEChunkDelta
-  readonly finish_reason: string | null
-}
-
-/** The incremental `delta` of an {@link SSEChunkChoice}. */
-export interface SSEChunkDelta {
-  readonly role?: 'assistant'
-  readonly content?: string
-  readonly tool_calls?: SSEToolCallDelta[]
-}
-
-/** One streamed tool call fragment; `id`, `type` and `name` come only in its first fragment. */
-export interface SSEToolCallDelta {
-  readonly index: number
-  readonly id?: string
-  readonly type?: 'function'
-  readonly function?: {
-    readonly name?: string
-    readonly arguments?: string
-  }
-}
+export type SSEChunk = z.infer<typeof sseChunkSchema>
 
 /**
  * Encodes a chunk as an SSE `data:` frame.
@@ -87,7 +111,7 @@ interface ChunkMeta {
 /** Mutable state of one stream while events are encoded. */
 interface StreamState {
   sentFirstChunk: boolean
-  finishReason: string | null
+  finishReason: FinishReason | null
   finalUsage: Usage | undefined
   terminated: boolean
   // Content indexes of started tool calls, in start order; the order gives the OpenAI index
@@ -105,7 +129,7 @@ interface StreamState {
 function encodeChoiceChunk(
   meta: ChunkMeta,
   delta: SSEChunkDelta,
-  finishReason: string | null = null
+  finishReason: FinishReason | null = null
 ): string {
   return encodeSSE({
     id: meta.id,
