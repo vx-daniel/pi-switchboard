@@ -363,46 +363,50 @@ describe('starting the server', () => {
     ])
   })
 
-  // Catches a non-string authToken starting the proxy with auth off (#82) without a word at the
-  // default level, or the error quoting the value.
-  test('a non-string authToken logs an error naming the field, and requests are refused', async () => {
+  // Catches a non-string authToken starting the proxy (#82): with auth off, any client reaches the
+  // provider logins; refusing every request hides the mistake behind a running process. Also
+  // catches the reason missing, filtered out by the log level, or quoting the value.
+  test('a non-string authToken refuses to start, naming the field', async () => {
     const port = await freePort()
-    const origin = `http://127.0.0.1:${String(port)}`
     writeConfigFile({ port, authToken: 987654321 })
 
-    await runCli(['--log-format', 'json'])
-    await waitForListening(origin)
+    await runCli(['--log-format', 'json', '--log-level', 'fatal'])
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
 
     assert(agentDir !== undefined, 'no fixture agent dir')
     const configFile = join(agentDir.path, 'proxy-config.json')
-    const errors = logRecords().filter((record) => record['level'] === 'ERROR')
-    expect(errors.map((record) => record['message'])).toEqual([
-      `Proxy auth is misconfigured: authToken in "${configFile}" is not a string. Every /v1 request is refused with 401 until it is fixed, or a token is set with --auth-token or PI_PROXY_AUTH_TOKEN`
+    expect(
+      logRecords().map((record) => ({ level: record['level'], message: record['message'] }))
+    ).toEqual([
+      {
+        level: 'FATAL',
+        message: `Refusing to start: authToken in "${configFile}" is not a string. Fix it, or set a token with --auth-token or PI_PROXY_AUTH_TOKEN`
+      }
     ])
     expect(JSON.stringify(logRecords())).not.toContain('987654321')
-    expect((await fetch(`${origin}/v1/models`)).status).toBe(HTTP_UNAUTHORIZED)
+    await expect(fetch(`http://127.0.0.1:${String(port)}/healthz`)).rejects.toThrow()
   })
 
-  // Catches `--auth-token ''` starting a proxy that refuses every request without a word (#99):
-  // startup logs an error naming the flag, and requests are refused.
-  test("--auth-token '' logs an error naming the flag, and requests are refused", async () => {
+  // Catches `--auth-token ''` starting a proxy (#99) that refuses every request, or one with auth
+  // off: the CLI exits 1 and names the flag.
+  test("--auth-token '' refuses to start, naming the flag", async () => {
     const port = await freePort()
-    const origin = `http://127.0.0.1:${String(port)}`
     writeConfigFile({ port })
 
     await runCli(['--auth-token', '', '--log-format', 'json'])
-    await waitForListening(origin)
-
-    const errors = logRecords().filter((record) => record['level'] === 'ERROR')
-    expect({
-      errors: errors.map((record) => record['message']),
-      status: (await fetch(`${origin}/v1/models`)).status
-    }).toEqual({
-      errors: [
-        'Proxy auth is misconfigured: "--auth-token" is set but empty. Every /v1 request is refused with 401 until it holds a token, or is unset to use the config file'
-      ],
-      status: HTTP_UNAUTHORIZED
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
     })
+
+    expect(logRecords().filter((record) => record['level'] === 'FATAL')).toEqual([
+      expect.objectContaining({
+        message:
+          'Refusing to start: "--auth-token" is set but empty. Set a token, or unset it to use the config file'
+      }) as unknown
+    ])
+    await expect(fetch(`http://127.0.0.1:${String(port)}/healthz`)).rejects.toThrow()
   })
 
   // Catches --auth-token not winning over a non-string authToken in the file (#82), which would

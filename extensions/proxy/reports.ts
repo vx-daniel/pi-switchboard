@@ -83,7 +83,7 @@ export async function buildConfigReport(state: ProxyState): Promise<string> {
  * @remarks
  * Shows a preview of the token, never the whole of it (#90): `/proxy show` output gets pasted
  * into issues and chats. `/proxy token` shows it whole. `invalid` when `authToken` in the file is
- * not a string, which the proxy refuses requests for (#82) rather than turning auth off.
+ * not a string, which the proxy refuses to start with (#82) rather than turning auth off.
  *
  * @param config - the loaded proxy config
  * @returns `enabled (token: <preview>; /proxy token shows it)`, `disabled`, or the `invalid`
@@ -91,7 +91,7 @@ export async function buildConfigReport(state: ProxyState): Promise<string> {
  */
 function authSummary(config: ProxyConfig): string {
   if (configFileAuthTokenInvalid()) {
-    return 'invalid (authToken in proxy-config.json is not a string: every request is refused)'
+    return 'invalid (authToken in proxy-config.json is not a string: the proxy refuses to start)'
   }
   return config.authToken.length > 0
     ? `enabled (token: ${tokenPreview(config.authToken)}; /proxy token shows it)`

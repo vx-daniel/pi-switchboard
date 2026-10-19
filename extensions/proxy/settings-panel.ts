@@ -90,8 +90,8 @@ function customModelsDescription(config: ProxyConfig): string {
  * Returns the auth setting's state.
  *
  * @remarks
- * `invalid` when `authToken` in proxy-config.json is not a string, which the proxy refuses
- * requests for (#82), not `disabled`, which would read as auth off.
+ * `invalid` when `authToken` in proxy-config.json is not a string, which the proxy refuses to
+ * start with (#82), not `disabled`, which would read as auth off.
  *
  * @param config - the current proxy config
  * @param invalid - whether the file's `authToken` is invalid; read from the file by default
@@ -112,7 +112,7 @@ function authDisplay(config: ProxyConfig, invalid = configFileAuthTokenInvalid()
  */
 function authDescription(config: ProxyConfig, invalid = configFileAuthTokenInvalid()): string {
   if (invalid) {
-    return 'authToken in proxy-config.json is not a string: every request is refused. Enable to set a new token'
+    return 'authToken in proxy-config.json is not a string: the proxy refuses to start. Enable to set a new token'
   }
   if (config.authToken.length > 0) {
     return `Token: ${tokenPreview(config.authToken)} (use /proxy token to copy)`

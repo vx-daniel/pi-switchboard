@@ -1,24 +1,23 @@
 <!--
 Sync Impact Report
-Version change: 1.1.2 → 1.2.0 (MINOR)
-Rationale: two kinds of request field were dropped rather than rejected, against principle I as
-written: Codex `temperature` (#49, #80) and passthrough fields a provider has no equivalent for
-(#81). The maintainer decided to keep both behaviours as deliberate exceptions. Principle I now
-lists them with their reasons and where they are documented, and makes any other silent drop a
-violation that needs an amendment. No code changes.
+Version change: 1.2.0 → 1.3.0 (MINOR)
+Rationale: proxy auth that is set but cannot be applied (an empty `--auth-token` or
+`PI_PROXY_AUTH_TOKEN`, #99; an `authToken` in the config file that is not a string, #82) did not
+follow principle II as written, which ignores an invalid env var and repairs an invalid config
+field. Doing either turns auth off. The proxy had started and refused every authenticated request
+instead. The maintainer decided it should fail at once: such auth now refuses to start, from any
+source, and principle II names it as the one exception to its operator-config rules.
 Modified sections:
-- I. Stable OpenAI Contract: an exception list (Codex `temperature`; passthrough fields without a
-  provider equivalent)
-- API Compatibility and Security Boundaries: "silent downgrades are not acceptable" now points to
-  principle I's exceptions
+- II. Validate at Boundaries: an exception for proxy auth that cannot be applied
 Templates requiring updates:
-- ✅ AGENTS.md: "Reject unsupported parameters clearly" names the constitution's exceptions
-- ✅ PLAN.md: the Codex table and "Known gaps and silent drops" cite the exceptions instead of
-  calling the drops a policy violation
-- ✅ README.md: the passthrough section cites the exceptions
+- ✅ PLAN.md: proxy auth has two states, `off` and `token`; unusable auth refuses to start
+- ✅ README.md: proxy authentication and the config-file repair rule say the proxy refuses to start
+- ✅ AGENTS.md: no change; it defers to the constitution and says nothing on operator config
 Follow-up TODOs:
-- None. Resolved since 1.1.2: a non-string `authToken` now fails closed (#82, PR #98); #80 and #81
-  by this amendment.
+- None.
+
+1.2.0 (2026-10-19): principle I lists its two exceptions, Codex `temperature` (#49, #80) and
+passthrough fields a provider has no equivalent for (#81); any other silent drop needs an amendment.
 
 1.1.2 (2026-10-18): fallow joined the gate (#83); the directive ban names `fallow-ignore…` and
 `@expected-unused`, and the gate lists its steps.
@@ -58,6 +57,8 @@ All untrusted input MUST be validated at the edge before use, with Zod schemas p
   - an invalid CLI flag refuses to start and lists the valid values;
   - an invalid environment variable is ignored with a warning;
   - an invalid field in the config file is repaired (a number clamped to its schema's bounds, a list or map keeping its valid entries, anything else its default), and every repaired field is named in a warning, by path only.
+
+  Exception: proxy auth that is set but cannot be applied refuses to start, whatever its source: an empty `--auth-token` or `PI_PROXY_AUTH_TOKEN`, or an `authToken` in the config file that is not a string. Ignoring or repairing it would turn a token the operator asked for into an open proxy (principle III), and starting to refuse every request hides the mistake behind a running process. The proxy logs why at `fatal`, and the pi extension refuses to spawn such a proxy and says why, since the proxy's own output is discarded.
 
 Type safety is part of the contract: no `any`, no `@ts-ignore`, no unsafe `as` casts, and no inline directives (`oxlint-disable…`, `eslint-disable…`, fallow's `fallow-ignore…` and its `@expected-unused` tag), which `test/unit/lint-directives.test.ts` enforces. Narrow with repository type guards or schemas. When a lint rule's premise does not fit a line, express the code differently and say why in an ordinary comment; a deliberate fallow exception goes in `.fallowrc.jsonc` with its reason.
 
@@ -126,4 +127,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 1.2.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-19
+**Version**: 1.3.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-19

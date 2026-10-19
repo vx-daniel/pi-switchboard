@@ -462,8 +462,8 @@ function invalidAuthToken(raw: unknown): { readonly value: unknown } | undefined
  *
  * @remarks
  * Repairing it to the default '' would mean "auth off": an operator who asked for a token would get
- * an open proxy. So the proxy treats it as misconfigured and fails closed instead. A missing,
- * unreadable or non-JSON file is not this case. Reads the file on every call.
+ * an open proxy. So the proxy refuses to start instead. A missing, unreadable or non-JSON file is
+ * not this case. Reads the file on every call.
  *
  * @returns Whether the file's `authToken` is present and not a string.
  */

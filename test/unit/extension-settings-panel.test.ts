@@ -277,7 +277,7 @@ describe('an invalid authToken in the file (#82)', () => {
       id: 'authToken',
       label: 'Proxy auth',
       description:
-        'authToken in proxy-config.json is not a string: every request is refused. Enable to set a new token',
+        'authToken in proxy-config.json is not a string: the proxy refuses to start. Enable to set a new token',
       currentValue: 'invalid',
       values: ['enabled', 'disabled']
     })

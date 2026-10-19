@@ -10,7 +10,12 @@ import { dirname, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 import { type ExtensionContext, getAgentDir } from '@earendil-works/pi-coding-agent'
-import { configToEnv, loadConfigFromFile } from '@vx-daniel/pi-openai-proxy/config'
+import {
+  configFileAuthTokenInvalid,
+  configToEnv,
+  loadConfigFromFile,
+  type ProxyConfig
+} from '@vx-daniel/pi-openai-proxy/config'
 import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
 import * as z from 'zod'
 
@@ -479,10 +484,35 @@ async function spawnProxy(state: ProxyState, context: ExtensionContext): Promise
 }
 
 /**
+ * Says why a proxy spawned with this config would refuse to start, before it is spawned.
+ *
+ * @remarks
+ * The proxy refuses to start when its auth is set but cannot be applied (`UnusableProxyAuthError`).
+ * Its output is discarded, so without this check the reason would be lost and `/proxy start`
+ * would only report a proxy that never answered. Mirrors what the child sees: the token
+ * {@link configToEnv} passes wins over pi's own `PI_PROXY_AUTH_TOKEN`, which the child inherits,
+ * and either wins over the file.
+ *
+ * @param config - the config the proxy would be spawned with
+ * @returns why it would refuse, or `undefined` when it would start
+ */
+function startRefusal(config: ProxyConfig): string | undefined {
+  const token = configToEnv(config)['PI_PROXY_AUTH_TOKEN'] ?? process.env.PI_PROXY_AUTH_TOKEN
+  if (token === '') {
+    return "PI_PROXY_AUTH_TOKEN is set but empty in pi's environment, and the proxy refuses to start with an empty token. Unset it, or set a token in /proxy config."
+  }
+  if (token === undefined && configFileAuthTokenInvalid()) {
+    return 'authToken in proxy-config.json is not a string, and the proxy refuses to start with it. Set a new token in /proxy config.'
+  }
+  return undefined
+}
+
+/**
  * Handles `/proxy start`: reloads the config and starts the proxy unless one already answers.
  *
  * @remarks
- * Clears a stale PID file first; a failed start is notified, not thrown.
+ * Refuses, with the reason, a config the proxy would refuse to start with ({@link startRefusal});
+ * clears a stale PID file; a failed start is notified, not thrown.
  *
  * @param state - the extension state; its config is replaced by the file's
  * @param context - the extension context, used for notifications and the status line
@@ -501,6 +531,13 @@ export async function startProxy(state: ProxyState, context: ExtensionContext): 
       'info'
     )
     await refreshStatus(state, context)
+    return
+  }
+
+  const refusal = startRefusal(state.config)
+  if (refusal !== undefined) {
+    processLogger.error('Not starting the proxy: {reason}', { reason: refusal })
+    context.ui.notify(`Proxy not started: ${refusal}`, 'error')
     return
   }
 

@@ -106,12 +106,12 @@ describe('with models on two providers', () => {
       )
     })
 
-    // Catches `/proxy show` reporting auth as "disabled" while the proxy refuses every request
-    // because the file's authToken is not a string (#82).
+    // Catches `/proxy show` reporting auth as "disabled" while the proxy refuses to start because
+    // the file's authToken is not a string (#82).
     test('an authToken that is not a string shows as invalid', async () => {
       const report = await buildConfigReport(stateWith(agentDir, { authToken: 12345 }))
       expect(report).toEqual(
-        'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: invalid (authToken in proxy-config.json is not a string: every request is refused) | remote images: false | max body: 50 MB | timeout: 120s\n' +
+        'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: invalid (authToken in proxy-config.json is not a string: the proxy refuses to start) | remote images: false | max body: 50 MB | timeout: 120s\n' +
           `id mode: collision-prefixed | exposure: scoped | exposed: ${ALL_EXPOSED_PREVIEW}`
       )
     })

@@ -36,7 +36,7 @@ interface TokenOverride {
 }
 
 /**
- * Why proxy auth cannot be applied:
+ * Why proxy auth is set but cannot be applied:
  * - `file-token-not-string`: `authToken` in proxy-config.json is not a string (#82);
  * - `empty-override`: `--auth-token` or `PI_PROXY_AUTH_TOKEN` is set but empty, a token nothing
  *   can match (#99). The file's token is not used instead: that would ignore what was set.
@@ -46,16 +46,34 @@ export type InvalidAuthCause =
   | { readonly cause: 'empty-override'; readonly source: OverrideSource }
 
 /**
+ * Thrown by {@link loadConfig} when proxy auth is set but cannot be applied. The proxy refuses to
+ * start: repairing the setting to auth off would turn a requested token into an open proxy, and
+ * starting to refuse every request hides the mistake behind a running process.
+ */
+export class UnusableProxyAuthError extends Error {
+  /** Why the configured auth cannot be applied. */
+  readonly invalid: InvalidAuthCause
+
+  /**
+   * Creates the error.
+   *
+   * @param invalid - why the configured auth cannot be applied
+   */
+  constructor(invalid: InvalidAuthCause) {
+    super(`Proxy auth cannot be applied (${invalid.cause})`)
+    this.name = 'UnusableProxyAuthError'
+    this.invalid = invalid
+  }
+}
+
+/**
  * Proxy auth, as configured:
  * - `off`: every request is let through;
- * - `token`: a request needs `Authorization: Bearer <token>`;
- * - `invalid`: the configured auth cannot be applied ({@link InvalidAuthCause}). Every
- *   authenticated route refuses until it is fixed, never let through as if off.
+ * - `token`: a request needs `Authorization: Bearer <token>`.
  */
 export type ProxyAuth =
   | { readonly kind: 'off' }
   | { readonly kind: 'token'; readonly token: string }
-  | ({ readonly kind: 'invalid' } & InvalidAuthCause)
 
 /**
  * Picks the override token, if any: the flag's, else the env var's.
@@ -78,16 +96,20 @@ function tokenOverride(
  *
  * @param override - the flag or env token, or `undefined` when neither is set
  * @param fileToken - The config file's (normalized) `authToken`; '' means off.
- * @returns `token` for a non-empty override or file token; `invalid` for an empty override
- *   (#99) or a file `authToken` that is set but not a string (#82); else `off`.
+ * @returns `token` for a non-empty override or file token; else `off`.
+ * @throws UnusableProxyAuthError for an empty override (#99), or a file `authToken` that is set
+ *   but not a string (#82)
  */
 function resolveProxyAuth(override: TokenOverride | undefined, fileToken: string): ProxyAuth {
   if (override !== undefined) {
-    return override.value === ''
-      ? { kind: 'invalid', cause: 'empty-override', source: override.source }
-      : { kind: 'token', token: override.value }
+    if (override.value === '') {
+      throw new UnusableProxyAuthError({ cause: 'empty-override', source: override.source })
+    }
+    return { kind: 'token', token: override.value }
   }
-  if (configFileAuthTokenInvalid()) return { kind: 'invalid', cause: 'file-token-not-string' }
+  if (configFileAuthTokenInvalid()) {
+    throw new UnusableProxyAuthError({ cause: 'file-token-not-string' })
+  }
   return fileToken.length > 0 ? { kind: 'token', token: fileToken } : { kind: 'off' }
 }
 
@@ -212,6 +234,8 @@ export interface CliOverrides {
  *
  * @param cli - Settings from CLI flags; defaults to none.
  * @returns The resolved config.
+ * @throws UnusableProxyAuthError when proxy auth is set but cannot be applied: the proxy must not
+ *   start, with auth off or otherwise.
  */
 export function loadConfig(cli: CliOverrides = {}): ServerConfig {
   const file = loadConfigFromFile()
@@ -227,7 +251,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
   const port = cli.port ?? parsePositiveInt('PI_PROXY_PORT', process.env.PI_PROXY_PORT, file.port)
 
   // Auth: CLI > env > file. A file token that is not a string, or an override that is set but
-  // empty, fails closed rather than off (#82, #99).
+  // empty, refuses to start rather than run with auth off (#82, #99).
   const override = tokenOverride(cli.authToken, process.env.PI_PROXY_AUTH_TOKEN)
   const proxyAuth = resolveProxyAuth(override, file.authToken)
 
