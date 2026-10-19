@@ -29,6 +29,7 @@ import {
   modelsAreEqual
 } from '@earendil-works/pi-ai'
 import { minimatch } from 'minimatch'
+import * as z from 'zod'
 
 /**
  * pi's thinking levels, as accepted after a `:` in a pattern (`VALID_THINKING_LEVELS` in pi's
@@ -47,12 +48,18 @@ const THINKING_LEVELS: ReadonlySet<string> = new Set<ModelThinkingLevel>([
 /** A dated model ID (`claude-sonnet-4-5-20250929`), which fuzzy matching ranks below its alias. */
 const DATED_ID = /-\d{8}$/
 
+/**
+ * Why a pattern did not select exactly the models it names. `/healthz/models` lists these; the
+ * schema documents that response and is never parsed.
+ */
+export const scopeDiagnosticSchema = z.object({
+  code: z.enum(['no-match', 'ambiguous', 'invalid-thinking-level']),
+  pattern: z.string().trim().meta({ description: 'The `enabledModels` pattern, as written.' }),
+  message: z.string().trim()
+})
+
 /** Why a pattern did not select exactly the models it names. */
-export interface ScopeDiagnostic {
-  readonly code: 'no-match' | 'ambiguous' | 'invalid-thinking-level'
-  readonly pattern: string
-  readonly message: string
-}
+export type ScopeDiagnostic = z.infer<typeof scopeDiagnosticSchema>
 
 /** The models a set of `enabledModels` patterns selects, and what went wrong on the way. */
 export interface ModelScope {
