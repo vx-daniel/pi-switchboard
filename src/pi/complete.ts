@@ -249,6 +249,9 @@ function translateToolChoiceForGoogle(
  *   (`topP`, `stopSequences`, `seed`, `frequencyPenalty`, `presencePenalty`)
  * - tool_choice → `config.toolConfig.functionCallingConfig.mode`
  *
+ * A request field overrides a same-named key pi set: the client asked for that value. pi 1.3.0
+ * sets none of these keys, so nothing is overridden today.
+ *
  * Skipped silently: response_format, metadata, prediction, parallel_tool_calls, user.
  *
  * Exported for unit tests.
