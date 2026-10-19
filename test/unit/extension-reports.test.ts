@@ -234,8 +234,7 @@ describe('with models on two providers', () => {
       })
     })
 
-    // Catches an empty custom list going unreported. "Will expose 0 models" is today's text,
-    // though the proxy exposes every model then: #88 decides which is right.
+    // Catches an empty custom list going unreported: it exposes no model (#88), as the line says.
     test('custom mode with an empty list', async () => {
       const state = stateWith(agentDir, { modelExposureMode: 'custom', customModels: [] })
       const report = await buildVerifyReport(state)
@@ -290,8 +289,8 @@ describe('with no models', () => {
     })
   })
 
-  // Catches a model-less setup passing verification. The empty-custom-list line is pinned as
-  // today's text (#88).
+  // Catches a model-less setup passing verification, or an empty custom list (which exposes
+  // nothing, #88) going unreported.
   test('buildVerifyReport reports that no model has auth', async () => {
     const report = await buildVerifyReport(stateWith(agentDir, { modelExposureMode: 'custom' }))
     expect(report).toEqual({
