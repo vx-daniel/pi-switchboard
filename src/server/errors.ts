@@ -22,16 +22,22 @@
 
 import { type AssistantMessage, isContextOverflow } from '@earendil-works/pi-ai'
 import { isRecord } from '@proxy/utils/guards'
+import * as z from 'zod'
+
+/** OpenAI's error response body. Documents the response; never parsed. */
+export const openAIErrorSchema = z
+  .object({
+    error: z.object({
+      message: z.string().trim().meta({ description: 'Fixed text; never quotes the provider.' }),
+      type: z.string().trim().meta({ description: 'Such as `invalid_request_error`.' }),
+      param: z.string().trim().nullable().meta({ description: 'The request field at fault.' }),
+      code: z.string().trim().nullable().meta({ description: 'Such as `model_not_found`.' })
+    })
+  })
+  .meta({ id: 'ErrorResponse', description: "OpenAI's error shape." })
 
 /** OpenAI's error response body. */
-export interface OpenAIError {
-  readonly error: {
-    readonly message: string
-    readonly type: string
-    readonly param: string | null
-    readonly code: string | null
-  }
-}
+export type OpenAIError = z.infer<typeof openAIErrorSchema>
 
 /**
  * Builds an OpenAI error body.
