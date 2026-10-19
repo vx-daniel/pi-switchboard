@@ -573,14 +573,16 @@ async function handleChatCompletion(
     stream: request.stream === true
   })
 
+  // Upstream credentials first: a request that cannot reach the provider must not make the proxy
+  // fetch anything on its behalf (#109 review).
+  const authFailure = await checkRequestAuth(context, model, upstreamApiKey)
+  if (authFailure !== undefined) return authFailure
+
   const prepared = await inlineImages(context, request, config, remoteImageFetch)
   if (!prepared.ok) return prepared.response
 
   const built = buildPiContext(context, prepared.value)
   if (!built.ok) return built.response
-
-  const authFailure = await checkRequestAuth(context, model, upstreamApiKey)
-  if (authFailure !== undefined) return authFailure
 
   const job: CompletionJob = {
     requestId,

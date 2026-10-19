@@ -875,15 +875,25 @@ is a request the proxy's host makes for a client, so every hop is held to:
   `image/gif` or `image/webp`; an empty body is refused.
 - **Count:** at most 8 remote images per request, checked before any fetch. A request's images are
   fetched together; the first refusal cancels the rest, and so does the client disconnecting.
+- **Memory:** the images of one request share a budget of 15 MiB in all (one full-size image, or
+  several smaller ones), drawn down while their bodies stream; past it the fetch is dropped and the
+  request refused. Without it, 8 full-size images would hold about 120 MiB, and twice that in
+  base64, for one request. Concurrent requests each have their own budget.
 - **Credentials:** a plain GET with the proxy's user agent; no client header, cookie or
   `Authorization` is forwarded.
 
+Images are fetched only after the model's upstream credential is checked (`checkRequestAuth`): a
+request that cannot reach the provider gets its `401` without the proxy fetching anything.
+
 A refusal answers `400` `invalid_request_error` at that part's `param` with a fixed message per
-reason; it never quotes the remote server's response. Each fetch logs one line under
-`openai.images` (host, status, bytes, duration; never the full URL, whose query can carry a
-token), and a refusal logs a warning naming the reason. The address policy and resolver are
-parameters of the fetch (`createApp`'s `remoteImageFetch`) so tests can reach a local server; no
-setting loosens them.
+reason; it never quotes the remote server's response. The reasons differ, though (`blocked`,
+`unresolvable`, `timeout`, …), so a client that may fetch can learn whether a host name resolves
+to an internal address. That is accepted for an opt-in feature on a local-first proxy; a deployment
+that exposes the proxy with remote images on should keep proxy auth on. Each fetch logs one line
+under `openai.images` (host, status, bytes, duration; never the full URL, whose query can carry a
+token), and a refusal logs a warning naming the reason. The address policy, resolver and limits
+are parameters of the fetch (`createApp`'s `remoteImageFetch`) so tests can reach a local server;
+no setting loosens them.
 
 ### Agentic mode
 

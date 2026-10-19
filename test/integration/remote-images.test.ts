@@ -6,6 +6,7 @@
  */
 
 import type { ServerConfig } from '@proxy/config/env'
+import { MAX_REMOTE_IMAGE_BYTES_PER_REQUEST } from '@proxy/openai/remote-image-fetch'
 import { MAX_REMOTE_IMAGES_PER_REQUEST } from '@proxy/openai/remote-images'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { Hono } from 'hono'
@@ -44,6 +45,13 @@ beforeAll(async () => {
         'images-fixture': {
           ...mock.provider(),
           models: [{ id: 'vision-model', input: ['text', 'image'] }]
+        },
+        // A credential that never resolves: its key command prints nothing (`!` runs a command).
+        'images-broken': {
+          baseUrl: 'http://127.0.0.1:9/v1',
+          api: 'openai-completions',
+          apiKey: '!true',
+          models: [{ id: 'broken-vision', input: ['text', 'image'] }]
         }
       }
     }
@@ -71,9 +79,14 @@ function enabledConfig(): ServerConfig {
  *
  * @param app - the proxy app
  * @param imageUrls - the `image_url.url` of each image part, after the text part
+ * @param model - the public model ID; the vision model with a working credential by default
  * @returns the proxy's response
  */
-async function sendImages(app: Hono<ProxyEnv>, imageUrls: string[]): Promise<Response> {
+async function sendImages(
+  app: Hono<ProxyEnv>,
+  imageUrls: string[],
+  model = MODEL_ID
+): Promise<Response> {
   return app.request('/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -83,7 +96,7 @@ async function sendImages(app: Hono<ProxyEnv>, imageUrls: string[]): Promise<Res
       'Cookie': 'session=notarealsecret'
     },
     body: JSON.stringify({
-      model: MODEL_ID,
+      model,
       messages: [
         {
           role: 'user',
@@ -214,5 +227,55 @@ describe('remote image URLs', () => {
       }
     })
     expect(mock.requests.length).toEqual(upstreamBefore)
+  })
+
+  // Catches images fetched for a request that cannot reach the provider: a model whose credential
+  // does not resolve answers 401 before the proxy fetches anything on the client's behalf.
+  test('are not fetched when the model has no usable credential', async () => {
+    const imagesBefore = images.requests.length
+
+    const response = await sendImages(
+      testApp(enabledConfig(), LOOPBACK_IMAGE_FETCH),
+      [`${images.origin}/image.png`],
+      'images-broken/broken-vision'
+    )
+
+    expect({ status: response.status, fetched: images.requests.length - imagesBefore }).toEqual({
+      status: 401,
+      fetched: 0
+    })
+  })
+
+  // Catches each image of a request getting a budget of its own (#109 review): with room for one
+  // and a half images, the second is refused, at its own path, and the provider is not called.
+  test('share one byte budget per request', async () => {
+    const imageBytes = Buffer.from(PNG_BASE64, 'base64').length
+    const tightBudget = {
+      ...LOOPBACK_IMAGE_FETCH,
+      limits: { ...LOOPBACK_IMAGE_FETCH.limits, maxRequestBytes: imageBytes + imageBytes / 2 }
+    }
+    const upstreamBefore = mock.requests.length
+
+    const response = await sendImages(testApp(enabledConfig(), tightBudget), [
+      `${images.origin}/image.png`,
+      `${images.origin}/image.png`
+    ])
+
+    expect({
+      status: response.status,
+      body: await jsonBody(response),
+      upstreamCalled: mock.requests.length > upstreamBefore
+    }).toEqual({
+      status: 400,
+      body: {
+        error: {
+          message: `Remote images exceed the maximum of ${String(MAX_REMOTE_IMAGE_BYTES_PER_REQUEST)} bytes per request, all images together`,
+          type: 'invalid_request_error',
+          param: 'messages[0].content[2].image_url.url',
+          code: null
+        }
+      },
+      upstreamCalled: false
+    })
   })
 })

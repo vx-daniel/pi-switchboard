@@ -128,7 +128,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `model` | Public ID, canonical (`provider/model-id`), or collision-prefixed shorthand |
 | `messages` (text) | `system`, `developer`, `user`, `assistant`, `tool` roles. `system` and `developer` before the first turn form the system prompt; a later one stays in place on models that accept mid-conversation instructions (pi's `supportsMidConvoSystemMessages`; Anthropic: just before the next answer) and is merged into the system prompt on others |
 | `messages` (base64 images) | Base64 data URI image content parts (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) |
-| `messages` (remote images) | Only with the remote-images setting on (off by default): the proxy downloads each `http`/`https` image URL and sends it to the provider as base64. Public hosts only, at most 8 per request, 15 MiB and 10 seconds each, 3 redirects; see [Security defaults](#security-defaults). Off, a remote URL is rejected with `400` |
+| `messages` (remote images) | Only with the remote-images setting on (off by default): the proxy downloads each `http`/`https` image URL and sends it to the provider as base64. Public hosts only, at most 8 per request and 15 MiB in all, 10 seconds each, 3 redirects; see [Security defaults](#security-defaults). Off, a remote URL is rejected with `400` |
 | `stream` | SSE with `text_delta` and `toolcall_delta` mapping |
 | `temperature` | Direct passthrough, except Codex models (`openai-codex-responses`): the Codex backend rejects it, so it is dropped there; the first drop per model is logged at `info`, later ones at `debug` |
 | `max_completion_tokens` | Preferred; `max_tokens` accepted as deprecated fallback |
@@ -406,7 +406,9 @@ Requires Pi 1.x (`^1.3.0`). Pi 1.0 is the first release whose Anthropic client i
   - stops reading past 15 MiB (the base64 data URI limit);
   - accepts only an `image/png`, `image/jpeg`, `image/gif` or `image/webp` response;
   - sends a plain GET: no client header, cookie or credential;
-  - and a request may carry at most 8 remote images.
+  - and a request may carry at most 8 remote images, of 15 MiB in all.
+
+  Images are fetched only after the provider credential is checked, so a request that would get `401` fetches nothing.
 
   A refused image fails the request with `400` at that part's `param`, with a fixed message that never quotes the remote server.
 - Request body size limited to 50 MB by default

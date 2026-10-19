@@ -52,6 +52,15 @@ beforeAll(async () => {
       })
       response.end(Buffer.alloc(SMALL_CAP_BYTES + 1))
     },
+    // Declares a length but never sends the body: only a check of the declared length stops it.
+    '/declared-never-sent.png': (response) => {
+      response.writeHead(200, {
+        'content-type': 'image/png',
+        'content-length': String(SMALL_CAP_BYTES + 1)
+      })
+      // Without a body write, Node holds the head back; send it now.
+      response.flushHeaders()
+    },
     // Undeclared length, and it never ends: only a cap enforced while streaming stops it.
     '/endless.png': (response) => {
       response.writeHead(200, { 'content-type': 'image/png' })
@@ -267,6 +276,45 @@ describe('fetchRemoteImage: refusals', () => {
   test('the real cap is the most bytes whose base64 fits the data URI limit', () => {
     expect(MAX_REMOTE_IMAGE_BYTES).toEqual(15 * 1024 * 1024)
     expect(Math.ceil(MAX_REMOTE_IMAGE_BYTES / 3) * 4).toEqual(20 * 1024 * 1024)
+  })
+
+  // Catches a request's images held in memory past its budget (#109 review): each image fits its
+  // own cap, but the budget they share runs out. The declared case sends no body at all, so only
+  // the check of the declared length answers; the endless one, only the streaming check.
+  test.each(['/declared-never-sent.png', '/endless.png'])(
+    'refuses %s past the request budget',
+    async (path) => {
+      const budget = { remaining: SMALL_CAP_BYTES }
+      const result = await fetchRemoteImage(
+        `${server.origin}${path}`,
+        LOOPBACK_IMAGE_FETCH,
+        new AbortController().signal,
+        budget
+      )
+      expect(result).toEqual({ ok: false, reason: 'request-too-large' })
+    }
+  )
+
+  // Catches each fetch getting a budget of its own: two images draw down one shared budget, so the
+  // second is refused when the first left too little.
+  test('fetches of one request draw down one budget', async () => {
+    const imageBytes = Buffer.from(PNG_BASE64, 'base64').length
+    const budget = { remaining: imageBytes + imageBytes / 2 }
+    const fetchImage = async (): Promise<FetchImageResult> =>
+      fetchRemoteImage(
+        `${server.origin}/image.png`,
+        LOOPBACK_IMAGE_FETCH,
+        new AbortController().signal,
+        budget
+      )
+
+    const first = await fetchImage()
+    const second = await fetchImage()
+
+    expect({ first: first.ok, second }).toEqual({
+      first: true,
+      second: { ok: false, reason: 'request-too-large' }
+    })
   })
 
   // Catches an empty body passed on as an image the data URI parser then calls malformed.

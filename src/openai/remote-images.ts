@@ -19,6 +19,7 @@ import {
   fetchRemoteImage,
   MAX_REDIRECTS,
   MAX_REMOTE_IMAGE_BYTES,
+  MAX_REMOTE_IMAGE_BYTES_PER_REQUEST,
   type RemoteImageFetchOptions
 } from '@proxy/openai/remote-image-fetch'
 import type { OpenAIMessage } from '@proxy/openai/schemas'
@@ -64,6 +65,7 @@ const REFUSAL_MESSAGES: Record<FetchRefusalReason, string> = {
   'http-status': 'Remote image server did not answer with the image',
   'wrong-type': 'Remote image is not a supported image type',
   'too-large': `Remote image exceeds the maximum of ${String(MAX_REMOTE_IMAGE_BYTES)} bytes`,
+  'request-too-large': `Remote images exceed the maximum of ${String(MAX_REMOTE_IMAGE_BYTES_PER_REQUEST)} bytes per request, all images together`,
   'empty': 'Remote image is empty',
   'too-many-redirects': `Remote image fetch followed more than ${String(MAX_REDIRECTS)} redirects`,
   'timeout': 'Remote image fetch timed out',
@@ -105,9 +107,16 @@ export async function inlineRemoteImages(
   // One abort for the batch: the first refusal cancels the fetches still running.
   const batch = new AbortController()
   const batchSignal = AbortSignal.any([signal, batch.signal])
+  // One byte budget for the batch: all the request's images together hold at most this much.
+  const budget = { remaining: options.limits.maxRequestBytes }
   const results = await Promise.all(
     remoteImages.map(async (remoteImage) => {
-      const fetched = await fetchRemoteImage(remoteImage.part.image_url.url, options, batchSignal)
+      const fetched = await fetchRemoteImage(
+        remoteImage.part.image_url.url,
+        options,
+        batchSignal,
+        budget
+      )
       if (!fetched.ok) batch.abort()
       return fetched
     })

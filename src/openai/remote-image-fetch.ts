@@ -141,14 +141,16 @@ export function classifyAddress(address: string): AddressClass {
 /** Resolves a host name to every address it has. */
 export type HostResolver = (hostname: string) => Promise<readonly LookupAddress[]>
 
-/** The limits of one image fetch. */
+/** The limits of one image fetch, and of all a request's fetches together. */
 export interface RemoteImageLimits {
   /** How long a connection may take to open. */
   readonly connectTimeoutMs: number
   /** How long the whole fetch may take, redirects and body included. */
   readonly totalTimeoutMs: number
-  /** The most body bytes accepted. */
+  /** The most body bytes one image may have. */
   readonly maxBytes: number
+  /** The most body bytes all remote images of one request may total. */
+  readonly maxRequestBytes: number
   /** The most redirects followed. */
   readonly maxRedirects: number
 }
@@ -181,6 +183,18 @@ export const MAX_REMOTE_IMAGE_BYTES =
   Math.floor(MAX_BASE64_PAYLOAD_SIZE / BASE64_GROUP_CHARS) * BASE64_GROUP_BYTES
 
 /**
+ * The most bytes all remote images of one request may total: one full-size image, or several
+ * smaller ones. Without it, 8 images of the full size would hold about 120 MiB, and twice that once
+ * converted to base64, for one request.
+ */
+export const MAX_REMOTE_IMAGE_BYTES_PER_REQUEST = MAX_REMOTE_IMAGE_BYTES
+
+/** The bytes a request's remote images may still use; its fetches draw it down as bytes arrive. */
+export interface ByteBudget {
+  remaining: number
+}
+
+/**
  * Resolves a host name with the system resolver, every address in the order it gives them.
  *
  * @param hostname - the host name
@@ -198,6 +212,7 @@ export const STRICT_REMOTE_IMAGE_FETCH: RemoteImageFetchOptions = {
     connectTimeoutMs: CONNECT_TIMEOUT_MS,
     totalTimeoutMs: TOTAL_TIMEOUT_MS,
     maxBytes: MAX_REMOTE_IMAGE_BYTES,
+    maxRequestBytes: MAX_REMOTE_IMAGE_BYTES_PER_REQUEST,
     maxRedirects: MAX_REDIRECTS
   }
 }
@@ -213,6 +228,7 @@ export type FetchRefusalReason =
   | 'http-status'
   | 'wrong-type'
   | 'too-large'
+  | 'request-too-large'
   | 'empty'
   | 'too-many-redirects'
   | 'timeout'
@@ -252,6 +268,8 @@ interface FetchAttempt {
   readonly deadline: AbortSignal
   /** Either of the two. */
   readonly signal: AbortSignal
+  /** The request's byte budget, shared with its other fetches. */
+  readonly budget: ByteBudget
 }
 
 /** A downloaded image body. */
@@ -304,12 +322,15 @@ class ConnectTimeoutError extends Error {
  * @param options - the address policy, resolver and limits ({@link STRICT_REMOTE_IMAGE_FETCH} in
  *   production)
  * @param signal - aborts the fetch: the client left, or another image of the request failed
+ * @param budget - the bytes the request's images may still use, shared by its fetches; unlimited
+ *   when one image is fetched alone
  * @returns the image, or why it was refused
  */
 export async function fetchRemoteImage(
   url: string,
   options: RemoteImageFetchOptions,
-  signal: AbortSignal
+  signal: AbortSignal,
+  budget: ByteBudget = { remaining: Number.POSITIVE_INFINITY }
 ): Promise<FetchImageResult> {
   const start = performance.now()
   const deadline = AbortSignal.timeout(options.limits.totalTimeoutMs)
@@ -317,7 +338,8 @@ export async function fetchRemoteImage(
     options,
     callerSignal: signal,
     deadline,
-    signal: AbortSignal.any([signal, deadline])
+    signal: AbortSignal.any([signal, deadline]),
+    budget
   }
   const outcome = await followRedirects(url, attempt)
   const durationMs = Math.round(performance.now() - start)
@@ -390,7 +412,7 @@ async function fetchHop(target: string, attempt: FetchAttempt): Promise<HopOutco
     const addresses = await vetAddresses(url, attempt)
     if ('kind' in addresses) return addresses
     const response = await openResponse(url, addresses, attempt)
-    return await readResponse(url, response, attempt.options.limits.maxBytes)
+    return await readResponse(url, response, attempt)
   } catch (error: unknown) {
     return {
       kind: 'refused',
@@ -518,15 +540,17 @@ function openResponse(
  *
  * @param url - the URL of this hop, which a relative redirect resolves against
  * @param response - the response, body unread
- * @param maxBytes - the most body bytes accepted
+ * @param attempt - the fetch's limits and the request's byte budget
  * @returns the image, the redirect, or a refusal
  * @throws Error when the body fails or is aborted while streaming
  */
 async function readResponse(
   url: URL,
   response: IncomingMessage,
-  maxBytes: number
+  attempt: FetchAttempt
 ): Promise<HopOutcome> {
+  const { maxBytes } = attempt.options.limits
+  const { budget } = attempt
   const status = response.statusCode ?? 0
   const host = url.host
   if (status < HTTP_OK || status >= HTTP_MULTIPLE_CHOICES) {
@@ -539,15 +563,39 @@ async function readResponse(
     response.destroy()
     return { kind: 'refused', host, reason: 'wrong-type' }
   }
-  if (Number(response.headers['content-length']) > maxBytes) {
+  // A declared length is compared with what the budget has left; only streamed bytes draw it down.
+  const declaredBytes = Number(response.headers['content-length'])
+  const declared = bodyLimitPassed(declaredBytes, maxBytes, budget.remaining - declaredBytes)
+  if (declared !== undefined) {
     response.destroy()
-    return { kind: 'refused', host, reason: 'too-large', detail: 'content-length' }
+    return { kind: 'refused', host, reason: declared, detail: 'content-length' }
   }
 
-  const body = await readBody(response, maxBytes)
-  if (body === undefined) return { kind: 'refused', host, reason: 'too-large', detail: 'streamed' }
+  const body = await readBody(response, maxBytes, budget)
+  if (!Buffer.isBuffer(body)) return { kind: 'refused', host, reason: body, detail: 'streamed' }
   if (body.length === 0) return { kind: 'refused', host, reason: 'empty' }
   return { kind: 'image', host, status, mimeType, body }
+}
+
+/** A body limit: the image's own cap, or the request's budget for all its images. */
+type BodyLimit = 'too-large' | 'request-too-large'
+
+/**
+ * Tells which body limit a byte count passes, if any.
+ *
+ * @param bytes - the image's bytes so far, or its declared length (`NaN` when not declared)
+ * @param maxBytes - the most bytes one image may have
+ * @param budgetLeft - what the request's budget has left after these bytes
+ * @returns the limit passed (the image cap first), or `undefined` within both
+ */
+function bodyLimitPassed(
+  bytes: number,
+  maxBytes: number,
+  budgetLeft: number
+): BodyLimit | undefined {
+  if (bytes > maxBytes) return 'too-large'
+  if (budgetLeft < 0) return 'request-too-large'
+  return undefined
 }
 
 /**
@@ -567,22 +615,31 @@ function redirectOrRefusal(url: URL, status: number, location: string | undefine
 }
 
 /**
- * Reads a body, stopping as soon as it passes the byte cap: nothing past it is buffered.
+ * Reads a body, stopping as soon as it passes the image cap or the request's budget: nothing past
+ * either is buffered.
  *
  * @param response - the response
- * @param maxBytes - the most bytes accepted
- * @returns the body; `undefined` when it passed the cap (the response is destroyed)
+ * @param maxBytes - the most bytes one image may have
+ * @param budget - the request's remaining bytes, drawn down as chunks arrive
+ * @returns the body; or which limit it passed (the response is destroyed)
  * @throws Error when the body fails or is aborted before it ends
  */
-function readBody(response: IncomingMessage, maxBytes: number): Promise<Buffer | undefined> {
+function readBody(
+  response: IncomingMessage,
+  maxBytes: number,
+  budget: ByteBudget
+): Promise<Buffer | BodyLimit> {
+  // The executor form: Promise.withResolvers is ES2024, and the project's lib is ES2023.
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = []
     let received = 0
     response.on('data', (chunk: Buffer) => {
       received += chunk.length
-      if (received > maxBytes) {
+      budget.remaining -= chunk.length
+      const passed = bodyLimitPassed(received, maxBytes, budget.remaining)
+      if (passed !== undefined) {
         response.destroy()
-        resolve(undefined)
+        resolve(passed)
         return
       }
       chunks.push(chunk)
