@@ -36,7 +36,7 @@ Treat these as stable unless the user explicitly changes direction:
   - `GET /v1/models/{model}`
   - `POST /v1/chat/completions`
 - Operational endpoints (`GET /healthz`, `/healthz/models`, `/healthz/creds`) sit outside that surface; see [`PLAN.md`](PLAN.md). Only `/healthz` skips proxy auth, and none may return a credential.
-- Non-OpenAI capability data goes on `GET /v1/pi/models`, never on the standard model objects; non-standard routes live under `/v1/pi/`. See [`PLAN.md`](PLAN.md).
+- Non-OpenAI capability data goes on `GET /v1/switchboard/models`, never on the standard model objects; non-standard routes live under `/v1/switchboard/`. See [`PLAN.md`](PLAN.md).
 - Canonical internal model IDs use `provider/model-id`.
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.

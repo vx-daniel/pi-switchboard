@@ -1,20 +1,22 @@
 <!--
 Sync Impact Report
-Version change: 1.2.0 → 1.3.0 (MINOR)
-Rationale: proxy auth that is set but cannot be applied (an empty `--auth-token` or
-`PI_PROXY_AUTH_TOKEN`, #99; an `authToken` in the config file that is not a string, #82) did not
-follow principle II as written, which ignores an invalid env var and repairs an invalid config
-field. Doing either turns auth off. The proxy had started and refused every authenticated request
-instead. The maintainer decided it should fail at once: such auth now refuses to start, from any
-source, and principle II names it as the one exception to its operator-config rules.
+Version change: 1.3.0 → 2.0.0 (MAJOR)
+Rationale: the maintainer chose `/v1/switchboard/` as the prefix for non-standard routes, after the
+project's planned name (#65). The prefix replaces `/v1/pi/`, so `GET /v1/pi/models` moves to
+`GET /v1/switchboard/models` with no alias. MAJOR because a route the old principle I required is
+now outside it: a client of `/v1/pi/models` breaks.
 Modified sections:
-- II. Validate at Boundaries: an exception for proxy auth that cannot be applied
+- I. Stable OpenAI Contract: non-standard routes live under `/v1/switchboard/`
+- API Compatibility and Security Boundaries: names `/v1/switchboard/` routes
 Templates requiring updates:
-- ✅ PLAN.md: proxy auth has two states, `off` and `token`; unusable auth refuses to start
-- ✅ README.md: proxy authentication and the config-file repair rule say the proxy refuses to start
-- ✅ AGENTS.md: no change; it defers to the constitution and says nothing on operator config
+- ✅ PLAN.md: the capability endpoint, the non-standard route rule, the source tree
+- ✅ README.md: the endpoint table and the model discovery section
+- ✅ AGENTS.md: core constraints name `/v1/switchboard/`
 Follow-up TODOs:
 - None.
+
+1.3.0 (2026-10-19): proxy auth that is set but cannot be applied refuses to start, from any source
+(#82, #99); principle II names it as the one exception to its operator-config rules.
 
 1.2.0 (2026-10-19): principle I lists its two exceptions, Codex `temperature` (#49, #80) and
 passthrough fields a provider has no equivalent for (#81); any other silent drop needs an amendment.
@@ -43,7 +45,7 @@ Exceptions: a request field MAY be dropped instead of rejected only where it is 
 
 Two kinds of route sit outside the stable surface, and only these:
 - Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`. Only `/healthz` may skip proxy authentication, and none may return a credential.
-- Non-standard pi routes, which MUST live under `/v1/pi/` (today `GET /v1/pi/models`). Non-OpenAI capability data goes there, never onto the standard model objects.
+- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`). Non-OpenAI capability data goes there, never onto the standard model objects.
 
 Adding a route to either group, or to the stable surface, requires an explicit decision recorded in `PLAN.md`.
 
@@ -89,7 +91,7 @@ Rationale: the proxy's public contract is documentation-heavy. If behavior chang
 
 ## API Compatibility and Security Boundaries
 
-- Stable support is limited to the documented chat-completions and models routes; operational and `/v1/pi/` routes are governed by principle I.
+- Stable support is limited to the documented chat-completions and models routes; operational and `/v1/switchboard/` routes are governed by principle I.
 - Unsupported fields and endpoints MUST fail explicitly; silent downgrades are not acceptable, except the drops principle I lists.
 - Model exposure policy MUST be derived from configured credentials and the active exposure mode, not from ad hoc request-time guessing.
 - Experimental capabilities MUST be separated from the stable contract and require explicit opt-in before they can affect user traffic.
@@ -127,4 +129,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 1.3.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-19
+**Version**: 2.0.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-19
