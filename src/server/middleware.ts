@@ -6,7 +6,7 @@
  */
 
 import { withContext } from '@logtape/logtape'
-import type { ServerConfig } from '@proxy/config/env'
+import type { InvalidAuthCause, ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
 import { authenticationError, invalidRequest } from '@proxy/server/errors'
 import {
@@ -103,6 +103,15 @@ export const EMPTY_OVERRIDE_AUTH_MESSAGE =
   'Proxy auth is misconfigured: the proxy token set by flag or environment variable is empty. Set a token, or unset it to use the config file.'
 
 /**
+ * The 401 message for each reason proxy auth cannot be applied. A `Record` over every cause, so a
+ * cause added without a message fails the type check.
+ */
+const INVALID_AUTH_MESSAGES: Readonly<Record<InvalidAuthCause['cause'], string>> = {
+  'file-token-not-string': MISCONFIGURED_AUTH_MESSAGE,
+  'empty-override': EMPTY_OVERRIDE_AUTH_MESSAGE
+}
+
+/**
  * Creates the proxy auth middleware for `config.proxyAuth`.
  *
  * @remarks
@@ -128,11 +137,10 @@ export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<Pro
         path: context.req.path,
         cause: proxyAuth.cause
       })
-      const message =
-        proxyAuth.cause === 'empty-override'
-          ? EMPTY_OVERRIDE_AUTH_MESSAGE
-          : MISCONFIGURED_AUTH_MESSAGE
-      return context.json(authenticationError(message), HTTP_UNAUTHORIZED)
+      return context.json(
+        authenticationError(INVALID_AUTH_MESSAGES[proxyAuth.cause]),
+        HTTP_UNAUTHORIZED
+      )
     }
 
     const authHeader = context.req.header('authorization')
