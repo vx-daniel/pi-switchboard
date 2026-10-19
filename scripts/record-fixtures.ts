@@ -198,7 +198,6 @@ async function recordScenario(
   }
   const captured = recorder.exchanges.at(-1)
   if (captured === undefined) fail(`${scenario.name}: the recorder saw no request`)
-  // Saved under PI_PROXY_RECORD_OUT_DIR when set, else into the committed fixtures (#95).
   const outDir = process.env.PI_PROXY_RECORD_OUT_DIR
   return saveRecording(
     {
