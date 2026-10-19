@@ -176,7 +176,7 @@ Supported exposure modes:
 - `scoped` (default) — expose the models pi's global `enabledModels` setting selects; with none
   set, every available model
 - `custom` — expose only an allowlist of canonical model IDs, matched exactly; an empty list
-  currently exposes every available model ([#88](https://github.com/vx-daniel/pi-openai-proxy/issues/88))
+  exposes no model (#88): the operator chose to pick models, so nothing picked fails closed
 
 Persist custom-model selections as canonical IDs, not public IDs.
 That keeps configuration stable when public ID mode or prefix labels change.

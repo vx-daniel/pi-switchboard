@@ -253,7 +253,7 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 |---|---|---|
 | `publicModelIdMode` | `collision-prefixed` | Public ID format: `collision-prefixed`, `universal`, `always-prefixed` |
 | `modelExposureMode` | `scoped` | Which models to expose: `all`, `scoped`, `custom` |
-| `customModels` | `[]` | Canonical model IDs for `custom` mode. An empty list currently exposes every model ([#88](https://github.com/vx-daniel/pi-openai-proxy/issues/88)) |
+| `customModels` | `[]` | Canonical model IDs for `custom` mode. An empty list exposes no model |
 | `providerPrefixes` | `{}` | Provider key -> custom prefix label overrides |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.

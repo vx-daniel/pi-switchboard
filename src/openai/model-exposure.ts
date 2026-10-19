@@ -17,7 +17,8 @@
  *     its patterns (`@proxy/pi/model-scope`): exact IDs, bare IDs, globs, `:level` suffixes, fuzzy
  *   - "custom": the proxy's own `customModels` config, as exact canonical IDs
  *
- * In "scoped" and "custom" an empty or missing list exposes every available model.
+ * In "scoped" an empty or missing `enabledModels` exposes every available model, as in pi. In
+ * "custom" an empty `customModels` exposes none: the operator chose to pick models (#88).
  *
  * @packageDocumentation
  */
@@ -57,6 +58,7 @@ export interface ModelExposureConfig {
    * Used only when modelExposureMode is "scoped".
    */
   readonly enabledModels: readonly string[] | undefined
+  /** The proxy's own canonical IDs, used when modelExposureMode is "custom"; empty exposes none. */
   readonly customModels: readonly string[]
   readonly providerPrefixes: Readonly<Record<string, string>>
 }
@@ -109,7 +111,13 @@ function filterExposedModels(
     return { models: [...available], scopeDiagnostics: [] }
   }
 
-  // When no filter is configured, all available models are exposed.
+  // "custom" with nothing selected exposes nothing: the operator chose to pick models (#88).
+  if (config.modelExposureMode === 'custom' && config.customModels.length === 0) {
+    exposureLogger.debug('No custom models selected; exposing none')
+    return { models: [], scopeDiagnostics: [] }
+  }
+
+  // "scoped" without patterns exposes every model, as pi treats no enabledModels.
   const filter = config.modelExposureMode === 'scoped' ? config.enabledModels : config.customModels
   if (filter === undefined || filter.length === 0) {
     exposureLogger.debug('No {modelExposureMode} model filter configured; exposing every model', {

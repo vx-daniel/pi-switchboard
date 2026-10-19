@@ -137,12 +137,13 @@ describe('with models on two providers', () => {
       )
     })
 
-    // Catches custom mode with no models printing a "models: 0 custom" field.
+    // Catches custom mode with no models printing a "models: 0 custom" field, or showing every
+    // model as exposed when none is (#88).
     test('custom mode with no models', async () => {
       const state = stateWith(agentDir, { modelExposureMode: 'custom', customModels: [] })
       const report = await buildConfigReport(state)
       expect(report).toEqual(
-        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: custom | exposed: ${ALL_EXPOSED_PREVIEW}`
+        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: custom | exposed: none`
       )
     })
 
