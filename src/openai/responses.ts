@@ -6,6 +6,8 @@
  * - No synthesized finish reasons pi cannot distinguish (e.g. content_filter)
  * - Usage maps pi Usage to OpenAI usage, cache reads/writes in `prompt_tokens_details`; cost and
  *   cache counts also go under `x_pi`
+ * - Each choice carries `logprobs: null`, which OpenAI's spec requires; there is no
+ *   `system_fingerprint`, which the spec types as a string and pi has no value for (#132)
  *
  * @packageDocumentation
  */
@@ -42,7 +44,6 @@ export interface OpenAIChatCompletion {
   readonly object: 'chat.completion'
   readonly created: number
   readonly model: string
-  readonly system_fingerprint: string | null
   readonly choices: OpenAIChatCompletionChoice[]
   readonly usage: OpenAIUsage
   readonly x_pi?: {
@@ -61,6 +62,8 @@ export interface OpenAIChatCompletionChoice {
     readonly tool_calls?: OpenAIToolCall[] | undefined
   }
   readonly finish_reason: string
+  /** Always `null`: pi returns no token probabilities, and `logprobs` requests are rejected. */
+  readonly logprobs: null
 }
 
 /** An OpenAI function tool call in an assistant message. */
@@ -189,12 +192,12 @@ export function buildChatCompletion(
     object: 'chat.completion',
     created: Math.floor(Date.now() / MS_PER_SECOND),
     model: canonicalModelId,
-    system_fingerprint: null,
     choices: [
       {
         index: 0,
         message: messageBody,
-        finish_reason: finishReason
+        finish_reason: finishReason,
+        logprobs: null
       }
     ],
     usage,
