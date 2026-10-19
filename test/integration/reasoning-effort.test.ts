@@ -2,8 +2,8 @@
  * `reasoning_effort` end to end: what each provider receives through pi's real clients. "none" is
  * pi's "off"; on a model whose reasoning cannot be turned off it is the lowest level the model
  * supports, never the provider's default effort (#41). Any other effort the model does not support
- * is clamped with pi's `clampThinkingLevel`, reported at debug, and `/v1/pi/models` lists the
- * efforts each model supports (#43).
+ * is clamped with pi's `clampThinkingLevel`, reported at debug, and `/v1/switchboard/models` lists
+ * the efforts each model supports (#43).
  */
 
 import { resetSync } from '@logtape/logtape'
@@ -264,7 +264,7 @@ describe('an effort the model does not support is clamped (#43)', () => {
   })
 })
 
-describe('GET /v1/pi/models', () => {
+describe('GET /v1/switchboard/models', () => {
   // Catches a model's efforts listed from its reasoning flag alone, ignoring the levels its
   // definition maps or forbids: a client would pick an effort that then gets clamped.
   test('lists the efforts each exposed model supports', async () => {
@@ -284,7 +284,7 @@ describe('GET /v1/pi/models', () => {
       'gpt-reasoning': upToHigh
     }
 
-    const response = await testApp().request('/v1/pi/models')
+    const response = await testApp().request('/v1/switchboard/models')
 
     expect(response.status).toBe(200)
     const body = await jsonBody(response)
@@ -300,7 +300,7 @@ describe('GET /v1/pi/models', () => {
 /**
  * Reads a model list entry's `id`.
  *
- * @param entry - one element of a `/v1/pi/models` `data` array
+ * @param entry - one element of a `/v1/switchboard/models` `data` array
  * @returns the entry's `id`, or '' when it has none
  */
 function entryId(entry: unknown): string {

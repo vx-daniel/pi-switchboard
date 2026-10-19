@@ -114,7 +114,7 @@ describe('model resolution with exposure configs', () => {
   })
 })
 
-describe('GET /v1/pi/models', () => {
+describe('GET /v1/switchboard/models', () => {
   // Catches the capability list built from every model pi has instead of the exposed set: it
   // would name models /v1/models hides, under IDs no route resolves.
   test('lists the same public IDs as /v1/models', async () => {
@@ -124,7 +124,7 @@ describe('GET /v1/pi/models', () => {
       customModels: ['alpha/a1', 'beta/b1'],
       publicModelIdMode: 'always-prefixed'
     }
-    const response = await testApp(config).request('/v1/pi/models')
+    const response = await testApp(config).request('/v1/switchboard/models')
     const body = await jsonBody(response)
     const data: unknown[] = isRecord(body) && Array.isArray(body['data']) ? body['data'] : []
     const ids = data.map((model) =>
@@ -144,8 +144,8 @@ describe('GET /v1/pi/models', () => {
       proxyAuth: { kind: 'token', token: 'notarealsecret-proxy-token' }
     })
 
-    const without = await app.request('/v1/pi/models')
-    const withToken = await app.request('/v1/pi/models', {
+    const without = await app.request('/v1/switchboard/models')
+    const withToken = await app.request('/v1/switchboard/models', {
       headers: { Authorization: 'Bearer notarealsecret-proxy-token' }
     })
 

@@ -5,7 +5,7 @@
  * Endpoints:
  * - `GET  /v1/models`
  * - `GET  /v1/models/{model}` (URL-encoded IDs with slashes work)
- * - `GET  /v1/pi/models` (not OpenAI's: pi's capabilities for each exposed model)
+ * - `GET  /v1/switchboard/models` (not OpenAI's: pi's capabilities for each exposed model)
  * - `POST /v1/chat/completions`
  * - a fixed list of OpenAI endpoints the proxy does not implement, answered with 404
  *
@@ -648,9 +648,9 @@ export function createRoutes(
     return context.json(buildModelList(exposure.models))
   })
 
-  // --- GET /v1/pi/models ---
+  // --- GET /v1/switchboard/models ---
   // Not OpenAI's: pi's capabilities for each exposed model, which PLAN keeps off /v1/models.
-  routes.get('/v1/pi/models', async (context) => {
+  routes.get('/v1/switchboard/models', async (context) => {
     const exposure = await getExposure(configReader)
     chatLogger.debug('Listing capabilities of {modelCount} models', {
       modelCount: exposure.models.length
