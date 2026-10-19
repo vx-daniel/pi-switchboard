@@ -4,6 +4,9 @@
  * @packageDocumentation
  */
 
+/** HTTP 200 OK, the first success status. */
+export const HTTP_OK = 200
+
 /** The first status that is not a success (2xx). */
 export const HTTP_MULTIPLE_CHOICES = 300
 

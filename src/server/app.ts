@@ -6,6 +6,7 @@
 
 import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
+import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
 import { createHealthRoutes } from '@proxy/server/health'
 import {
   bodySizeLimitMiddleware,
@@ -28,14 +29,18 @@ const lifecycleLogger = proxyLogger('server')
  * @remarks
  * Only `GET /healthz` skips proxy auth, so liveness probes need no token.
  *
- * @param config - the server config: proxy auth mode, body size limit, upstream timeout
+ * @param config - the server config: proxy auth mode, body size limit, upstream timeout, remote
+ *   images
  * @param configReader - where the model exposure config comes from; `undefined` reads the config
  *   file and pi's settings on each request ({@link fileConfigReader})
+ * @param remoteImageFetch - how remote images are fetched when `remoteImagesEnabled` is on;
+ *   `undefined` is the strict production policy. Only tests pass another, to reach a local server
  * @returns the assembled app, ready to serve
  */
 export function createApp(
   config: ServerConfig,
-  configReader?: ExposureConfigReader
+  configReader?: ExposureConfigReader,
+  remoteImageFetch?: RemoteImageFetchOptions
 ): Hono<ProxyEnv> {
   const app = new Hono<ProxyEnv>()
 
@@ -50,7 +55,7 @@ export function createApp(
 
   // Routes
   app.route('/', createHealthRoutes(configReader ?? fileConfigReader))
-  app.route('/', createRoutes(config, configReader))
+  app.route('/', createRoutes(config, configReader, remoteImageFetch))
 
   lifecycleLogger.debug('App wired: proxy auth {authMode}, exposure config from {exposureSource}', {
     authMode: config.proxyAuth.kind,

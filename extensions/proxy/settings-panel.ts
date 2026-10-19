@@ -229,7 +229,8 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
     {
       id: 'remoteImages',
       label: 'Remote images',
-      description: 'Allow remote image URL fetching (security risk if exposed)',
+      description:
+        'Fetch remote image URLs server-side and inline them; public hosts only (the proxy makes requests for its clients)',
       currentValue: config.remoteImages ? 'on' : 'off',
       values: ['off', 'on']
     },

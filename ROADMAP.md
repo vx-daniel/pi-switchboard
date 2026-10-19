@@ -36,11 +36,11 @@ Add the supported compatibility surface deliberately.
 - [x] Support OpenAI function tools subset (JSON Schema -> TypeBox)
 - [x] Support assistant `tool_calls` and `tool` role messages
 - [x] Support `stream_options.include_usage`
-- [x] Support base64 image inputs (remote URLs always rejected; the remote-images setting has no effect, [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [x] Support base64 image inputs
 - [x] Support `reasoning_effort` (mapped to pi ThinkingLevel)
 - [x] Add passthrough parameters: `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`
 - [x] Add JSON Schema conversion and tool acceptance/rejection tests
-- [ ] Remote image URL support (deferred — requires SSRF protections; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [x] Remote image URL support, behind the remote-images setting (off by default) with SSRF protections ([#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
 
 ## Phase 3 — Hardening and packaging [DONE]
 

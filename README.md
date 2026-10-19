@@ -128,6 +128,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `model` | Public ID, canonical (`provider/model-id`), or collision-prefixed shorthand |
 | `messages` (text) | `system`, `developer`, `user`, `assistant`, `tool` roles. `system` and `developer` before the first turn form the system prompt; a later one stays in place on models that accept mid-conversation instructions (pi's `supportsMidConvoSystemMessages`; Anthropic: just before the next answer) and is merged into the system prompt on others |
 | `messages` (base64 images) | Base64 data URI image content parts (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) |
+| `messages` (remote images) | Only with the remote-images setting on (off by default): the proxy downloads each `http`/`https` image URL and sends it to the provider as base64. Public hosts only, at most 8 per request and 15 MiB in all, 10 seconds each, 3 redirects; see [Security defaults](#security-defaults). Off, a remote URL is rejected with `400` |
 | `stream` | SSE with `text_delta` and `toolcall_delta` mapping |
 | `temperature` | Direct passthrough, except Codex models (`openai-codex-responses`): the Codex backend rejects it, so it is dropped there; the first drop per model is logged at `info`, later ones at `debug` |
 | `max_completion_tokens` | Preferred; `max_tokens` accepted as deprecated fallback |
@@ -148,7 +149,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `metadata` | OpenAI passthrough; arbitrary keys silently skipped for other providers |
 | `prediction` | OpenAI passthrough only (speculative decoding) |
 
-**Not supported:** `n` (any value), `logprobs`, `top_logprobs`, `logit_bias`, and the deprecated `functions` / `function_call`, each rejected with `422`; remote image URLs, always rejected (the remote-images setting currently has no effect, see [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109)).
+**Not supported:** `n` (any value), `logprobs`, `top_logprobs`, `logit_bias`, and the deprecated `functions` / `function_call`, each rejected with `422`; remote image URLs while the remote-images setting is off, rejected with `400`.
 
 ### Provider-aware field translation
 
@@ -221,7 +222,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 | Bind address | `PI_PROXY_HOST` | `127.0.0.1` | Network interface (`127.0.0.1` = local only, `0.0.0.0` = all) (`--host`, `host` in the config file) |
 | Port | `PI_PROXY_PORT` | `4141` | HTTP listen port (`--port`, `port`) |
 | Auth token | `PI_PROXY_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication (`--auth-token`, `authToken`) |
-| Remote images | `PI_PROXY_REMOTE_IMAGES` | `false` | Meant to allow remote image URLs; currently has no effect, remote URLs are always rejected ([#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109)) (`--remote-images`, `remoteImages`) |
+| Remote images | `PI_PROXY_REMOTE_IMAGES` | `false` | Fetch remote image URLs server-side and inline them as base64; off, they are rejected with `400`. The proxy then makes requests for its clients, so only public `http`/`https` hosts are allowed (see [Security defaults](#security-defaults)) (`--remote-images`, `remoteImages`) |
 | Max body size | `PI_PROXY_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
 | Upstream timeout | `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds (`upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
 | Log level | `PI_PROXY_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
@@ -397,7 +398,19 @@ Requires Pi 1.x (`^1.3.0`). Pi 1.0 is the first release whose Anthropic client i
 ## Security defaults
 
 - Binds to `127.0.0.1` (localhost only) by default
-- Remote image URLs always rejected
+- Remote image URLs rejected unless the remote-images setting is on. When it is on, each fetch:
+  - uses `http` or `https` only;
+  - refuses a host when any address it resolves to is loopback, private, link-local (including the cloud metadata address `169.254.169.254`), carrier-grade NAT, unspecified, multicast or reserved, IPv4-mapped IPv6 forms included, and connects only to the address it checked (no DNS rebinding);
+  - follows at most 3 redirects, checking each target the same way;
+  - gives up after 5 seconds connecting or 10 seconds in all;
+  - stops reading past 15 MiB (the base64 data URI limit);
+  - accepts only an `image/png`, `image/jpeg`, `image/gif` or `image/webp` response;
+  - sends a plain GET: no client header, cookie or credential;
+  - and a request may carry at most 8 remote images, of 15 MiB in all.
+
+  Images are fetched only after the provider credential is checked, so a request that would get `401` fetches nothing.
+
+  A refused image fails the request with `400` at that part's `param`, with a fixed message that never quotes the remote server.
 - Request body size limited to 50 MB by default
 - Upstream calls aborted after 120 seconds without any data from the provider
 - Secrets are never included in error responses

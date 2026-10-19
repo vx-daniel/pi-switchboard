@@ -39,8 +39,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 ### Security policy
 
-- [x] Decide whether remote image URLs are enabled in the stable proxy (no: always rejected; the remote-images setting has no effect, [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
-- [x] If enabled, document SSRF protections and size limits (not applicable: fetching is not implemented)
+- [x] Decide whether remote image URLs are enabled in the stable proxy (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [x] If enabled, document SSRF protections and size limits (PLAN.md, "Image URL fetching"; README, "Security defaults")
 - [x] Document bind-host defaults
 - [x] Document any future remote exposure guidance
 - [x] Mark agentic mode experimental and disabled by default
@@ -181,8 +181,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Images
 
 - [x] Support base64 image data in user message parts
-- [x] Decide whether remote image URL fetching is enabled (no; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
-- [ ] If enabled, implement SSRF protections, timeout, redirect, and size limits (not implemented: remote URLs are always rejected)
+- [x] Decide whether remote image URL fetching is enabled (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [x] If enabled, implement SSRF protections, timeout, redirect, and size limits (`src/openai/remote-image-fetch.ts`: public addresses only with pinned DNS, 3 redirects, 5 s connect and 10 s total, 15 MiB streamed cap, image content types, 8 per request)
 - [x] Validate image MIME types and payload sizes
 
 ### Phase 2 tests
