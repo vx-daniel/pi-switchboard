@@ -20,7 +20,7 @@ import {
   buildModelsReport,
   buildVerifyReport
 } from '../../extensions/proxy/reports'
-import type { ProxyState } from '../../extensions/proxy/state'
+import { type ProxyState, tokenPreview } from '../../extensions/proxy/state'
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
 
 vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
@@ -301,5 +301,20 @@ describe('with no models', () => {
         'Custom mode with empty model list will expose 0 models.',
       level: 'warning'
     })
+  })
+})
+
+describe('tokenPreview', () => {
+  // Catches a preview that shows the whole token (#90): at most a quarter of it, and never more
+  // than 8 characters, so a short token shows nothing and a long one its first 8.
+  test.each([
+    ['', '...'],
+    ['abc', '...'],
+    ['abcd', 'a...'],
+    ['notarealsecret-token', 'notar...'],
+    ['0123456789abcdef0123456789abcdef', '01234567...'],
+    ['0123456789abcdef0123456789abcdef0123456789abcdef', '01234567...']
+  ])('%j shows %j', (token, preview) => {
+    expect(tokenPreview(token)).toBe(preview)
   })
 })

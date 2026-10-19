@@ -340,6 +340,8 @@ pi install npm:@vx-daniel/pi-openai-proxy
 /proxy help          Show usage
 ```
 
+`/proxy token` prints the whole secret into the pi session, where it stays in the scrollback; `/proxy show` and the settings panel only ever show a short preview.
+
 ### Settings panel
 
 `/proxy` (or `/proxy config`) opens an interactive settings panel where you can configure proxy auth, lifetime (detached or session), bind address, port, remote images, body size limit, upstream timeout, log level, model ID format, exposure mode, the `custom` model selection, and Zed sync. Changes are saved to `~/.pi/agent/proxy-config.json` immediately. Restart the proxy to apply changes.
