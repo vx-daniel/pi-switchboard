@@ -338,14 +338,15 @@ describe('getConfigPath', () => {
 
   // Catches the path built from HOME's text, which made a relative `./~/.pi/agent` with HOME unset
   // and the working directory with an empty PI_CODING_AGENT_DIR (#111): pi's own agent dir is
-  // used, which falls back to the user's home directory.
+  // used, which falls back to the user's home directory and expands a leading `~`.
   test.each([
-    { case: 'HOME unset', agentDir: undefined, home: undefined },
-    { case: 'PI_CODING_AGENT_DIR empty', agentDir: '', home: undefined }
-  ])('$case: in the home directory', ({ agentDir, home }) => {
+    { case: 'HOME unset', agentDir: undefined, under: ['.pi', 'agent'] },
+    { case: 'PI_CODING_AGENT_DIR empty', agentDir: '', under: ['.pi', 'agent'] },
+    { case: 'PI_CODING_AGENT_DIR with ~', agentDir: '~/custom-agent', under: ['custom-agent'] }
+  ])('$case: in the home directory', ({ agentDir, under }) => {
     vi.stubEnv('PI_CODING_AGENT_DIR', agentDir)
-    vi.stubEnv('HOME', home)
+    vi.stubEnv('HOME', undefined)
 
-    expect(getConfigPath()).toBe(join(homedir(), '.pi', 'agent', 'proxy-config.json'))
+    expect(getConfigPath()).toBe(join(homedir(), ...under, 'proxy-config.json'))
   })
 })
