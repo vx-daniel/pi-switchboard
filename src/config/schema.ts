@@ -58,10 +58,11 @@ export type PublicModelIdMode = z.infer<typeof PublicModelIdModeSchema>
  * Which models are exposed on the public HTTP API, in the order the settings panel offers them.
  * All modes only expose auth-configured models (pi's getAvailable()).
  *
- * - "scoped": delegates to pi's global `enabledModels` setting (from `/scoped-models` Ctrl+S)
+ * - "scoped": delegates to pi's global `enabledModels` setting (from `/scoped-models` Ctrl+S); with
+ *   none set, every available model, as in pi
  * - "all": every available model, no filter
- * - "custom": same per-model filtering as "scoped" but independently managed
- *   via the proxy's own `customModels` config
+ * - "custom": only the canonical IDs in the proxy's own `customModels`, matched exactly; an empty
+ *   list exposes none (#88)
  */
 export const ModelExposureModeSchema = z.enum(['scoped', 'all', 'custom'])
 /** Which models are exposed; see {@link ModelExposureModeSchema}. */

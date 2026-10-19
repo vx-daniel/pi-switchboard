@@ -61,12 +61,10 @@ describe('modelExposureMode through HTTP', () => {
     ).toEqual(['a1', 'b1'])
   })
 
-  test('custom with an empty list exposes every available model', async () => {
-    expect(await listedIds({ modelExposureMode: 'custom', customModels: [] })).toEqual([
-      'a1',
-      'a2',
-      'b1'
-    ])
+  // Catches custom mode with nothing selected falling back to every model (#88): the operator chose
+  // to pick models, so an empty selection exposes none.
+  test('custom with an empty list exposes no model', async () => {
+    expect(await listedIds({ modelExposureMode: 'custom', customModels: [] })).toEqual([])
   })
 
   test('all exposes every available model', async () => {

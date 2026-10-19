@@ -150,17 +150,12 @@ describe('exposure filtering', () => {
     expect(ids).toContain('anthropic/claude-sonnet-4-20250514')
   })
 
-  test('custom mode with empty list exposes all available models', () => {
-    const result = expose(
-      models,
-      defaultConfig({
-        modelExposureMode: 'custom',
-        customModels: []
-      })
-    )
+  // Catches an empty custom selection falling back to every model (#88).
+  test('custom mode with empty list exposes no model', () => {
+    const result = expose(models, defaultConfig({ modelExposureMode: 'custom', customModels: [] }))
     expect(result.ok).toBe(true)
     if (!result.ok) return
-    expect(result.models.length).toBe(4)
+    expect(result.models).toEqual([])
   })
 
   test('custom mode ignores non-existent canonical IDs', () => {
