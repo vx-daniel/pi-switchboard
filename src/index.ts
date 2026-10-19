@@ -255,7 +255,7 @@ const main = defineCommand({
     'docs-ui': {
       type: 'boolean',
       description:
-        'Serve the Swagger UI docs page at /v1/switchboard/docs (off by default; its scripts load from a CDN)'
+        'Serve the Swagger UI docs page at /docs (off by default; its scripts load from a CDN)'
     },
     'max-body-size': {
       type: 'string',

@@ -30,8 +30,8 @@ import type * as z from 'zod'
 export const SWITCHBOARD_PREFIX = '/v1/switchboard'
 /** Where the OpenAPI document is served. */
 export const OPENAPI_PATH = `${SWITCHBOARD_PREFIX}/openapi.json`
-/** Where the opt-in docs UI is served. */
-export const DOCS_PATH = `${SWITCHBOARD_PREFIX}/docs`
+/** Where the opt-in docs UI is served: outside `/v1`, at the root, for a browser. */
+export const DOCS_PATH = '/docs'
 /**
  * The `swagger-ui-dist` version the docs page loads from the jsDelivr CDN. Pinned, so a new
  * release is never loaded unreviewed; not bundled, because the package depends on an install-time
@@ -43,11 +43,39 @@ export const SWAGGER_UI_VERSION = '5.34.0'
 const OPENAI_TAG = 'OpenAI-compatible'
 /** Tag of the `/v1/switchboard/` routes. */
 const SWITCHBOARD_TAG = 'Switchboard'
+/** Tag of the health endpoints. */
+export const OPERATIONAL_TAG = 'Operational'
+/** Tag of this document and the docs page. */
+const DOCUMENTATION_TAG = 'Documentation'
+/** Tag of the OpenAI endpoints the proxy answers with 404. */
+const NOT_SUPPORTED_TAG = 'Not supported'
 /** The name the bearer scheme is registered under. */
 const PROXY_AUTH_SCHEME = 'proxyAuth'
+/** The shared response the unsupported endpoints reference. */
+const NOT_SUPPORTED_RESPONSE = 'NotSupported'
+
+/**
+ * OpenAI endpoints the proxy does not implement; each answers 404 with a clear message, whatever
+ * the method. A trailing `/*` covers the path and everything under it.
+ */
+export const UNSUPPORTED_ENDPOINTS = [
+  '/v1/completions',
+  '/v1/embeddings',
+  '/v1/audio/*',
+  '/v1/images/*',
+  '/v1/assistants',
+  '/v1/assistants/*',
+  '/v1/threads',
+  '/v1/threads/*',
+  '/v1/files',
+  '/v1/files/*',
+  '/v1/batches',
+  '/v1/batches/*',
+  '/v1/fine_tuning/*'
+] as const
 
 /** A documented response: a description and a JSON body. */
-type DocumentedResponse = NonNullable<DescribeRouteOptions['responses']>[string]
+export type DocumentedResponse = NonNullable<DescribeRouteOptions['responses']>[string]
 
 /**
  * Documents a JSON response.
@@ -56,7 +84,7 @@ type DocumentedResponse = NonNullable<DescribeRouteOptions['responses']>[string]
  * @param schema - the body's schema
  * @returns the response object
  */
-function jsonResponse(description: string, schema: z.ZodType): DocumentedResponse {
+export function jsonResponse(description: string, schema: z.ZodType): DocumentedResponse {
   return { description, content: { 'application/json': { schema: resolver(schema) } } }
 }
 
@@ -70,8 +98,8 @@ function errorResponse(description: string): DocumentedResponse {
   return jsonResponse(description, openAIErrorSchema)
 }
 
-/** The 401 every `/v1/*` route can answer. */
-const UNAUTHORIZED = errorResponse(
+/** The 401 every `/v1/*` route and every `/healthz/<check>` can answer. */
+export const UNAUTHORIZED = errorResponse(
   'Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.'
 )
 
@@ -174,8 +202,76 @@ export const listModelCapabilitiesDescription: DescribeRouteOptions = {
   }
 }
 
+/** `GET /v1/switchboard/openapi.json`. */
+export const openAPIDocumentDescription: DescribeRouteOptions = {
+  operationId: 'getOpenAPIDocument',
+  tags: [DOCUMENTATION_TAG],
+  summary: 'This document',
+  description: 'Built from the routes; committed as `openapi.json`. Needs no token.',
+  security: [],
+  responses: {
+    200: {
+      description: 'The OpenAPI 3.1 document.',
+      content: { 'application/json': { schema: { type: 'object' } } }
+    }
+  }
+}
+
+/** `GET /docs`. */
+export const docsPageDescription: DescribeRouteOptions = {
+  operationId: 'getDocsPage',
+  tags: [DOCUMENTATION_TAG],
+  summary: 'The Swagger UI page for this document',
+  description:
+    'Only when `docsUi` is on (`--docs-ui`, `PI_PROXY_DOCS_UI`); it loads Swagger UI from the ' +
+    'jsDelivr CDN. Needs no token: a browser cannot send one to open it.',
+  security: [],
+  responses: {
+    200: { description: 'The page.', content: { 'text/html': { schema: { type: 'string' } } } },
+    404: errorResponse('`docsUi` is off.')
+  }
+}
+
+/**
+ * Documents the unsupported endpoints by hand: hono-openapi leaves wildcard routes out, and an
+ * `ALL` route has no method to document. Each gets `GET` and `POST`, marked deprecated.
+ *
+ * @returns the path items, keyed by OpenAPI path (`/*` as a `{path}` parameter)
+ */
+function unsupportedPaths(): Record<string, Record<string, unknown>> {
+  const entries = UNSUPPORTED_ENDPOINTS.map((endpoint): [string, Record<string, unknown>] => {
+    const wildcard = endpoint.endsWith('/*')
+    const path = wildcard ? `${endpoint.slice(0, -'/*'.length)}/{path}` : endpoint
+    // `/v1/fine_tuning/{path}` → `V1FineTuningPath`, for unique operation IDs.
+    const pathName = path
+      .split(/[^a-z\d]+/i)
+      .filter((segment) => segment.length > 0)
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join('')
+    const operations = Object.fromEntries(
+      ['get', 'post'].map((method) => [
+        method,
+        {
+          operationId: `notSupported${method === 'get' ? 'Get' : 'Post'}${pathName}`,
+          tags: [NOT_SUPPORTED_TAG],
+          summary: 'Not supported by this proxy',
+          description:
+            'Any method answers 404 `invalid_request_error`; nothing reaches a provider.',
+          deprecated: true,
+          responses: { 404: { $ref: `#/components/responses/${NOT_SUPPORTED_RESPONSE}` } }
+        }
+      ])
+    )
+    const parameters = [{ name: 'path', in: 'path', required: true, schema: { type: 'string' } }]
+    return [path, wildcard ? { parameters, ...operations } : operations]
+  })
+  return Object.fromEntries(entries)
+}
+
 /** The document-level parts of the OpenAPI document: info, tags and the proxy auth scheme. */
 export const OPENAPI_OPTIONS: Partial<GenerateSpecOptions> = {
+  // `openapi.json` ends in a file extension, which hono-openapi skips by default as a static file.
+  excludeStaticFile: false,
   documentation: {
     info: {
       title: 'pi-openai-proxy',
@@ -189,7 +285,16 @@ export const OPENAPI_OPTIONS: Partial<GenerateSpecOptions> = {
     },
     tags: [
       { name: OPENAI_TAG, description: "OpenAI's routes, as the proxy implements them." },
-      { name: SWITCHBOARD_TAG, description: "The proxy's own routes." }
+      { name: SWITCHBOARD_TAG, description: "The proxy's own routes." },
+      {
+        name: OPERATIONAL_TAG,
+        description: 'Health checks, outside the OpenAI-compatible surface. Not shaped like OpenAI.'
+      },
+      { name: DOCUMENTATION_TAG, description: 'This document and its docs page.' },
+      {
+        name: NOT_SUPPORTED_TAG,
+        description: 'OpenAI endpoints the proxy does not implement. Each answers 404.'
+      }
     ],
     components: {
       securitySchemes: {
@@ -200,8 +305,14 @@ export const OPENAPI_OPTIONS: Partial<GenerateSpecOptions> = {
             'Only when proxy auth is on (`--auth-token`, `PI_PROXY_AUTH_TOKEN` or `authToken`); ' +
             'otherwise any or no token is accepted.'
         }
+      },
+      responses: {
+        [NOT_SUPPORTED_RESPONSE]: errorResponse(
+          'The endpoint is not supported by this proxy (`invalid_request_error`).'
+        )
       }
     },
+    paths: unsupportedPaths(),
     security: [{ [PROXY_AUTH_SCHEME]: [] }]
   }
 }

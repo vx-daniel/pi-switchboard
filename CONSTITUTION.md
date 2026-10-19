@@ -1,20 +1,23 @@
 <!--
 Sync Impact Report
-Version change: 2.0.0 → 2.1.0 (MINOR)
-Rationale: the maintainer chose to publish an OpenAPI description of the API (#129), at
-`GET /v1/switchboard/openapi.json`, with an opt-in Swagger UI page at `GET /v1/switchboard/docs`,
-and to serve both without proxy authentication: a browser cannot send the token to open the page,
-and the page cannot load the document before the token is entered. Both name routes and schemas,
-never a model, provider or credential. MINOR: two routes join the non-standard group, and the
-rule on which routes may skip proxy authentication grows by those two.
+Version change: 2.1.0 → 2.2.0 (MINOR)
+Rationale: the maintainer moved the docs page to `GET /docs`, at the root where a browser goes,
+and asked for every route in the OpenAPI document, the health endpoints and the unsupported
+OpenAI endpoints included. `/docs` is outside `/v1`, so it joins the operational endpoints; it
+still skips proxy authentication and names no model, provider or credential. MINOR: one route
+moves between the two groups.
 Modified sections:
-- I. Stable OpenAI Contract: the two documentation routes, and that they may skip proxy auth
+- I. Stable OpenAI Contract: `GET /docs` is an operational endpoint; the document stays under
+  `/v1/switchboard/`
 Templates requiring updates:
-- ✅ PLAN.md: the documentation routes, their auth, and the committed `openapi.json`
-- ✅ README.md: the endpoint table, the docs UI setting, the configuration table
-- ✅ AGENTS.md: core constraints name the routes that skip proxy auth
+- ✅ PLAN.md: the docs route and what the document covers
+- ✅ README.md: the endpoint table, the API documentation section, the configuration table
+- ✅ AGENTS.md: the routes that skip proxy auth
 Follow-up TODOs:
 - None.
+
+2.1.0 (2026-10-19): the OpenAPI document (`GET /v1/switchboard/openapi.json`) and an opt-in
+Swagger UI page join the non-standard routes, and both may skip proxy authentication (#129).
 
 2.0.0 (2026-10-19): non-standard routes live under `/v1/switchboard/`, which replaces `/v1/pi/`;
 `GET /v1/pi/models` moved to `GET /v1/switchboard/models` with no alias.
@@ -48,8 +51,8 @@ Exceptions: a request field MAY be dropped instead of rejected only where it is 
 - Passthrough fields a provider has no equivalent for (#81): `stop`, `user`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`, `tool_choice`, `parallel_tool_calls`, `metadata` and `prediction` reach each API verbatim or translated where it has an equivalent, and are dropped where it has none. Clients commonly send one parameter set to every model, and rejecting per API would break them. The per-API tables in `PLAN.md` ("API-aware payload translation") list exactly what each API receives, and `README.md` says fields without an equivalent are skipped; a change to what an API receives updates those tables.
 
 Two kinds of route sit outside the stable surface, and only these:
-- Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`. Only `/healthz` may skip proxy authentication, and none may return a credential.
-- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`, and the API's OpenAPI document at `GET /v1/switchboard/openapi.json` with its opt-in docs page at `GET /v1/switchboard/docs`). Non-OpenAI capability data goes there, never onto the standard model objects. Of these, only the document and the docs page may skip proxy authentication, and they MUST name no model, provider or credential.
+- Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs` (Swagger UI for the OpenAPI document). Only `/healthz` and `/docs` may skip proxy authentication; none may return a credential, and `/docs` MUST name no model or provider.
+- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`, and the API's OpenAPI document at `GET /v1/switchboard/openapi.json`). Non-OpenAI capability data goes there, never onto the standard model objects. Of these, only the document may skip proxy authentication, and it MUST name no model, provider or credential.
 
 Adding a route to either group, or to the stable surface, requires an explicit decision recorded in `PLAN.md`.
 
@@ -133,4 +136,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 2.1.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-19
+**Version**: 2.2.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-19

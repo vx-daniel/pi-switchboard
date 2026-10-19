@@ -13,6 +13,7 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
+import * as z from 'zod'
 
 /** Logger for runtime setup and credential lookups. */
 const registryLogger = proxyLogger('pi', 'registry')
@@ -298,21 +299,32 @@ export function getModelsJsonError(): string | undefined {
   return error === undefined ? undefined : describeModelsJsonError(error)
 }
 
+/**
+ * How one provider is authenticated, for the health endpoint. Never the credential itself. The
+ * schema documents `/healthz/creds` and is never parsed.
+ */
+export const providerCredentialStatusSchema = z.object({
+  provider: z.string().trim(),
+  type: z
+    .enum(['oauth', 'api_key'])
+    .meta({ description: '`oauth` for a subscription login, `api_key` otherwise.' }),
+  source: z.string().trim().optional().meta({
+    description: 'Where pi found the credential: `stored`, `environment`, `models_json_key`, …'
+  }),
+  availableModelCount: z.int(),
+  verified: z
+    .boolean()
+    .optional()
+    .meta({
+      description:
+        'Only with `?verify=true`: whether pi resolved a usable credential just now, which may ' +
+        'refresh an OAuth token over the network. `error` says why not.'
+    }),
+  error: z.string().trim().optional()
+})
+
 /** How one provider is authenticated, for the health endpoint. Never the credential itself. */
-export interface ProviderCredentialStatus {
-  readonly provider: string
-  /** `oauth` for a subscription login, `api_key` otherwise. */
-  readonly type: 'oauth' | 'api_key'
-  /** Where pi found the credential: `stored`, `environment`, `models_json_key`, … */
-  readonly source: string | undefined
-  readonly availableModelCount: number
-  /**
-   * Only when verification was asked for: whether pi resolved a usable credential just now, which
-   * may refresh an OAuth token over the network. `error` says why not.
-   */
-  readonly verified?: boolean
-  readonly error?: string
-}
+export type ProviderCredentialStatus = z.infer<typeof providerCredentialStatusSchema>
 
 /**
  * Resolves one provider's credential now, which may refresh an OAuth token over the network.

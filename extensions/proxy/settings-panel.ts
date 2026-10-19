@@ -239,7 +239,7 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
       id: 'docsUi',
       label: 'Docs UI',
       description:
-        'Serve the Swagger UI docs page at /v1/switchboard/docs, without proxy auth; its scripts load from a CDN',
+        'Serve the Swagger UI docs page at /docs, without proxy auth; its scripts load from a CDN',
       currentValue: config.docsUi ? 'on' : 'off',
       values: ['off', 'on']
     },
