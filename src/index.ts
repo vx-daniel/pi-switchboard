@@ -245,8 +245,8 @@ const main = defineCommand({
     },
     'remote-images': {
       type: 'boolean',
-      // Read but unused until #109 is decided; update this text with it.
-      description: 'Allow remote image URLs (currently has no effect: they are always rejected)'
+      description:
+        'Fetch remote image URLs and inline them (off by default; public http/https hosts only, size, time and redirect limits)'
     },
     'max-body-size': {
       type: 'string',

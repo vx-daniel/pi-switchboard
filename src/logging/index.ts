@@ -16,7 +16,7 @@
  *   openai.messages    message conversion          openai.tools       tool conversion
  *   openai.sse         streaming responses         openai.responses   non-streaming responses
  *   openai.exposure    model exposure and IDs      openai.validate    request validation
- *   openai.schema      JSON Schema → TypeBox
+ *   openai.schema      JSON Schema → TypeBox       openai.images      remote image fetches
  *   pi.registry        pi's model runtime          pi.complete        upstream calls
  *   sync.zed           Zed settings sync
  *   extension          the pi extension's command handler (extensions/proxy/index.ts)

@@ -312,7 +312,7 @@ Reason:
 - `parallel_tool_calls`
 - `metadata`
 - `prediction`
-- image content parts (base64 data URIs only; remote URLs are always rejected, see "Image URL fetching")
+- image content parts (base64 data URIs; remote `http`/`https` URLs only with `remoteImages` on, which is off by default, see "Image URL fetching")
 
 Compatibility preference:
 
@@ -367,11 +367,15 @@ Supported:
 
 - text
 - image content parts using base64 data URIs
+- image content parts with an `http` or `https` URL, only while `remoteImages` is on (off by
+  default): the chat route downloads each one and replaces it with a data URI before message
+  conversion, under the limits in [Image URL fetching](#image-url-fetching). A refused image fails
+  the request with `400` `invalid_request_error` at `messages[i].content[j].image_url.url`
 
 Rejected:
 
-- remote image URLs: always rejected with `400`, whatever `remoteImages` says (the setting has no
-  effect; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- remote image URLs while `remoteImages` is off: `400` at
+  `messages[i].content[j].image_url.url`, naming the setting
 - input audio
 - file parts
 - unsupported structured content variants
@@ -788,7 +792,7 @@ Use an OpenAI-style shape:
 ### Error mapping
 
 - `400` invalid JSON, invalid request shape or value, unsupported or invalid content part
-  (remote image URL, audio, file, bad data URI); or the conversation is longer than the model's
+  (remote image URL while `remoteImages` is off, or one it refused; audio, file, bad data URI); or the conversation is longer than the model's
   context window (`invalid_request_error`, `param: "messages"`, `context_length_exceeded`, as
   OpenAI answers it)
 - `401` proxy auth failure or no upstream credential for target provider
@@ -843,18 +847,43 @@ Error rules:
 
 ### Image URL fetching
 
-Today remote image URLs are always rejected with `400`: only base64 data URIs are accepted. The
-`remoteImages` setting (`PI_PROXY_REMOTE_IMAGES`, `--remote-images`) is read but has no effect
-([#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109)). No fetching is built.
+Off by default. With `remoteImages` on (`PI_PROXY_REMOTE_IMAGES`, `--remote-images`, the
+settings panel), the chat route downloads each remote `image_url` before message conversion
+(`src/openai/remote-images.ts`) and puts it back as a base64 data URI, because pi accepts images
+only as data. Off, a remote URL is rejected with `400`. The fetch (`src/openai/remote-image-fetch.ts`)
+is a request the proxy's host makes for a client, so every hop is held to:
 
-If remote image URLs are supported later:
+- **Scheme:** `http` and `https` only.
+- **Addresses:** the host is resolved to all its addresses (a literal IP is taken as is), and one
+  address that is not public refuses the host: loopback (`127.0.0.0/8`, `::1`), private
+  (`10/8`, `172.16/12`, `192.168/16`, `fc00::/7`), link-local (`169.254/16` with the
+  `169.254.169.254` metadata address, `fe80::/10`), carrier-grade NAT (`100.64/10`), unspecified
+  (`0.0.0.0`, `::`), multicast, and reserved ranges (`0/8`, the documentation and benchmarking
+  ranges, `240/4` with broadcast). IPv4-mapped IPv6 addresses are checked as the IPv4 address they
+  carry; the transition prefixes that embed one another way (IPv4-compatible `::/96`, NAT64,
+  6to4, Teredo) are refused outright.
+- **No DNS rebinding:** the socket's `lookup` returns only the addresses that were checked, so a
+  second DNS answer cannot redirect the connection; the Host header and the TLS server name and
+  certificate check stay on the URL's host name. Each fetch opens a fresh connection (no pooled
+  socket).
+- **Redirects:** followed by hand, at most 3; each target is checked again (scheme and addresses).
+- **Time:** 5 seconds to connect, 10 seconds for the whole fetch with its redirects.
+- **Size:** at most 15 MiB, the most whose base64 fits the 20 MiB data URI limit; counted while the
+  body streams, and the connection is dropped as soon as it passes (a declared `content-length`
+  over the cap is refused before reading).
+- **Type:** the response `content-type`, without parameters, must be `image/png`, `image/jpeg`,
+  `image/gif` or `image/webp`; an empty body is refused.
+- **Count:** at most 8 remote images per request, checked before any fetch. A request's images are
+  fetched together; the first refusal cancels the rest, and so does the client disconnecting.
+- **Credentials:** a plain GET with the proxy's user agent; no client header, cookie or
+  `Authorization` is forwarded.
 
-- allow only `http` and `https`
-- block localhost and private IP ranges
-- set strict timeout and size limits
-- validate content type
-- limit redirects
-- disable by default unless explicitly enabled
+A refusal answers `400` `invalid_request_error` at that part's `param` with a fixed message per
+reason; it never quotes the remote server's response. Each fetch logs one line under
+`openai.images` (host, status, bytes, duration; never the full URL, whose query can carry a
+token), and a refusal logs a warning naming the reason. The address policy and resolver are
+parameters of the fetch (`createApp`'s `remoteImageFetch`) so tests can reach a local server; no
+setting loosens them.
 
 ### Agentic mode
 
@@ -895,6 +924,8 @@ src/
 │   ├── schemas.ts              -- Zod v4 request schemas
 │   ├── validate.ts             -- request validation with rejected-field checks
 │   ├── messages.ts             -- OpenAI messages -> pi Context
+│   ├── remote-images.ts        -- remote image URLs -> data URIs, before conversion (remoteImages on)
+│   ├── remote-image-fetch.ts   -- one SSRF-safe image fetch: address policy, pinned DNS, limits
 │   ├── model-exposure.ts       -- exposure engine: filtering, public IDs, resolution (exported via ./exposure)
 │   ├── models.ts               -- ExposedModel -> OpenAI model object
 │   ├── reasoning-effort.ts     -- reasoning_effort -> pi thinking level
@@ -919,7 +950,7 @@ removed.
 
 ### Scaling notes
 
-`routes.ts` is the sole composition root (572 lines, 18 imports). The chat completions work is split across helpers (`parseChatRequest`, `buildPiContext`, `checkRequestAuth`, `streamChat`, `completeChat`) driven by `handleChatCompletion`. This is manageable for the current four-endpoint surface but should be decomposed further if new endpoints or complex middleware (agentic mode) are added.
+`routes.ts` is the sole composition root. The chat completions work is split across helpers (`parseChatRequest`, `inlineImages`, `buildPiContext`, `checkRequestAuth`, `streamChat`, `completeChat`) driven by `handleChatCompletion`. This is manageable for the current four-endpoint surface but should be decomposed further if new endpoints or complex middleware (agentic mode) are added.
 
 The pi extension lives in `extensions/proxy/`, isolated from the core proxy. pi loads `index.ts` (the `/proxy` command family and lifecycle hooks) as the single extension; the sibling modules split the rest: `state.ts` (shared config/registry state), `process.ts` (PID file, probe, start/stop/status), `reports.ts` (show/models/verify), `zed-sync.ts`, `settings-panel.ts`, and `model-selector.ts`. Add new extension modules there rather than as top-level files in `extensions/`, which pi would load as separate extensions.
 
@@ -1195,9 +1226,15 @@ Skip gracefully when no credentials are available (CI without auth).
 
 ### Security tests (no credentials)
 
-- every remote image URL (localhost, private range, public) rejected with `400` before any
-  upstream call (`test/unit/security.test.ts`)
+- with `remoteImages` off, every remote image URL (localhost, private range, public) rejected
+  with `400` before any upstream call (`test/unit/security.test.ts`)
 - oversized base64 payload, unsupported image MIME type, malformed data URI rejected
+- the remote image address policy (allowed and blocked IPv4/IPv6, IPv4-mapped forms), and each
+  fetch safeguard against a local server: size cap while streaming, content type, redirects to a
+  blocked address, redirect count, deadline, scheme, pinned DNS, no client headers
+  (`test/unit/remote-image-fetch.test.ts`)
+- through the chat route: off by default, a loopback URL blocked with nothing fetched, a fetched
+  image reaching the provider as base64, the per-request cap (`test/integration/remote-images.test.ts`)
 
 ### Integration tests
 

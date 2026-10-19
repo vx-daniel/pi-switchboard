@@ -230,7 +230,7 @@ describe('convertMessages: tool calls and results', () => {
 })
 
 describe('convertMessages: images', () => {
-  test('rejects remote image URLs', () => {
+  test('rejects remote image URLs, which the chat route inlines only when remoteImages is on', () => {
     const messages: OpenAIMessage[] = [
       {
         role: 'user',
@@ -243,7 +243,7 @@ describe('convertMessages: images', () => {
     const result = convertMessages(messages)
     expect(result.ok).toBe(false)
     if (result.ok) return
-    expect(result.message).toContain('Remote image URLs are not supported')
+    expect(result.message).toContain('Remote image URLs are disabled')
   })
 
   test('accepts base64 data URI images', () => {
@@ -352,7 +352,7 @@ describe('convertMessages: rejection contract', () => {
     [
       'a remote image URL',
       'https://example.com/image.png',
-      'Remote image URLs are not supported. Use base64 data URIs instead.'
+      'Remote image URLs are disabled on this proxy (the remoteImages setting is off). Use base64 data URIs instead.'
     ],
     [
       'a malformed data URI',
@@ -403,7 +403,8 @@ describe('convertMessages: rejection contract', () => {
 
     expect(result).toEqual({
       ok: false,
-      message: 'Remote image URLs are not supported. Use base64 data URIs instead.',
+      message:
+        'Remote image URLs are disabled on this proxy (the remoteImages setting is off). Use base64 data URIs instead.',
       param: 'messages[2].content[0].image_url.url'
     })
   })

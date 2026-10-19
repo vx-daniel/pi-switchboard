@@ -27,6 +27,11 @@ import {
   resolveExposedModel
 } from '@proxy/openai/model-exposure'
 import { buildModelList, buildPiModelList, toOpenAIModel } from '@proxy/openai/models'
+import {
+  type RemoteImageFetchOptions,
+  STRICT_REMOTE_IMAGE_FETCH
+} from '@proxy/openai/remote-image-fetch'
+import { inlineRemoteImages } from '@proxy/openai/remote-images'
 import { buildChatCompletion } from '@proxy/openai/responses'
 import { streamToSSE } from '@proxy/openai/sse'
 import { convertTools } from '@proxy/openai/tools'
@@ -231,6 +236,42 @@ async function parseChatRequest(context: ProxyContext): Promise<Step<ChatRequest
       invalidRequest(validation.message, validation.param ?? undefined),
       HTTP_BAD_REQUEST
     )
+  }
+}
+
+/**
+ * Downloads the request's remote images and puts them in as data URIs, when `remoteImages` is on.
+ *
+ * @remarks
+ * With the setting off the request is unchanged, and message conversion rejects any remote URL.
+ *
+ * @param honoContext - the request's Hono context: the error response, and the client's disconnect
+ *   signal, which cancels the fetches
+ * @param request - the validated chat request
+ * @param config - the server config; `remoteImagesEnabled` is read
+ * @param remoteImageFetch - the address policy, resolver and limits of each fetch
+ * @returns the request with data URIs, or a 400 at the first remote image refused
+ */
+async function inlineImages(
+  honoContext: ProxyContext,
+  request: ChatRequest,
+  config: ServerConfig,
+  remoteImageFetch: RemoteImageFetchOptions
+): Promise<Step<ChatRequest>> {
+  if (!config.remoteImagesEnabled) return { ok: true, value: request }
+  const inlined = await inlineRemoteImages(
+    request.messages,
+    remoteImageFetch,
+    honoContext.get('abortController').signal
+  )
+  if (inlined.ok) return { ok: true, value: { ...request, messages: inlined.messages } }
+  chatLogger.warn('Rejected chat request: remote image refused at {param}', {
+    param: inlined.param,
+    messageCount: request.messages.length
+  })
+  return {
+    ok: false,
+    response: honoContext.json(invalidRequest(inlined.message, inlined.param), HTTP_BAD_REQUEST)
   }
 }
 
@@ -486,19 +527,21 @@ async function completeChat(honoContext: ProxyContext, job: CompletionJob): Prom
 }
 
 /**
- * Handles `POST /v1/chat/completions`: parses, resolves the model, builds the pi context, checks
- * upstream auth, then streams or completes.
+ * Handles `POST /v1/chat/completions`: parses, resolves the model, inlines remote images, builds
+ * the pi context, checks upstream auth, then streams or completes.
  *
  * @param context - the request's Hono context
- * @param config - the server config; `upstreamTimeoutMs` is read
+ * @param config - the server config; `upstreamTimeoutMs` and `remoteImagesEnabled` are read
  * @param configReader - where the exposure config comes from
+ * @param remoteImageFetch - how remote images are fetched, when `remoteImagesEnabled` is on
  * @returns the completion, or the first error response a step produces
  * @throws Error when the exposure config is invalid (from {@link getExposure})
  */
 async function handleChatCompletion(
   context: ProxyContext,
   config: ServerConfig,
-  configReader: ExposureConfigReader
+  configReader: ExposureConfigReader,
+  remoteImageFetch: RemoteImageFetchOptions
 ): Promise<Response> {
   const requestId = context.get('requestId')
   const upstreamApiKey = context.get('upstreamApiKey')
@@ -530,7 +573,10 @@ async function handleChatCompletion(
     stream: request.stream === true
   })
 
-  const built = buildPiContext(context, request)
+  const prepared = await inlineImages(context, request, config, remoteImageFetch)
+  if (!prepared.ok) return prepared.response
+
+  const built = buildPiContext(context, prepared.value)
   if (!built.ok) return built.response
 
   const authFailure = await checkRequestAuth(context, model, upstreamApiKey)
@@ -582,11 +628,14 @@ const unsupportedEndpoints = [
  * @param config - the server config, passed to the chat handler
  * @param configReader - where the exposure config comes from; defaults to
  *   {@link fileConfigReader}
+ * @param remoteImageFetch - how remote images are fetched when `remoteImagesEnabled` is on;
+ *   defaults to {@link STRICT_REMOTE_IMAGE_FETCH}. Only tests pass another, to reach a local server
  * @returns a Hono app to mount at `/`
  */
 export function createRoutes(
   config: ServerConfig,
-  configReader: ExposureConfigReader = fileConfigReader
+  configReader: ExposureConfigReader = fileConfigReader,
+  remoteImageFetch: RemoteImageFetchOptions = STRICT_REMOTE_IMAGE_FETCH
 ): Hono<ProxyEnv> {
   const routes = new Hono<ProxyEnv>()
 
@@ -642,7 +691,9 @@ export function createRoutes(
   })
 
   // --- POST /v1/chat/completions ---
-  routes.post(CHAT_PATH, (context) => handleChatCompletion(context, config, configReader))
+  routes.post(CHAT_PATH, (context) =>
+    handleChatCompletion(context, config, configReader, remoteImageFetch)
+  )
 
   // --- Unsupported endpoints: clear errors ---
   for (const path of unsupportedEndpoints) {

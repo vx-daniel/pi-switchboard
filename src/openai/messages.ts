@@ -7,7 +7,9 @@
  * - `user` text, or text and base64 image parts: pi UserMessage
  * - `assistant` text and tool calls: pi AssistantMessage history
  * - `tool`: pi ToolResultMessage
- * - unsupported content parts and remote image URLs are rejected with a param path
+ * - unsupported content parts are rejected with a param path, and so are remote image URLs: with
+ *   `remoteImages` on, the chat route has already replaced them with data URIs
+ *   (`@proxy/openai/remote-images`), so any left mean the setting is off
  *
  * @packageDocumentation
  */
@@ -267,9 +269,9 @@ function convertContentPart(
 /**
  * Converts an image part's URL into a pi image part.
  *
- * @remarks
- * Only base64 data URIs are accepted; every other URL is rejected. The `remoteImages` config
- * setting does not change this.
+ * Only base64 data URIs are accepted. A remote URL reaching this point is rejected: with the
+ * `remoteImages` setting on, the chat route has already downloaded each one and put a data URI in
+ * its place, so a remote URL here means the setting is off.
  *
  * @param url - the `image_url.url` value
  * @param messageIndex - the message's index in `messages`
@@ -284,12 +286,13 @@ function convertImagePart(
   const param = `messages[${String(messageIndex)}].content[${String(partIndex)}].image_url.url`
   if (!url.startsWith('data:')) {
     messagesLogger.warn(
-      'Blocked remote image from {host} at messages[{messageIndex}].content[{partIndex}]',
+      'Blocked remote image from {host} at messages[{messageIndex}].content[{partIndex}]: remote images are disabled',
       { host: imageUrlHost(url), messageIndex, partIndex }
     )
     return {
       ok: false,
-      message: 'Remote image URLs are not supported. Use base64 data URIs instead.',
+      message:
+        'Remote image URLs are disabled on this proxy (the remoteImages setting is off). Use base64 data URIs instead.',
       param
     }
   }
@@ -434,12 +437,17 @@ function convertToolMessage(
  * @param url - the image URL
  * @returns the host, or `(unparseable URL)`
  */
-function imageUrlHost(url: string): string {
+export function imageUrlHost(url: string): string {
   return URL.canParse(url) ? new URL(url).host : '(unparseable URL)'
 }
 
-/** Supported image MIME types for base64 data URIs. */
-const SUPPORTED_IMAGE_MIME_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp'])
+/** Supported image MIME types, for base64 data URIs and fetched remote images. */
+export const SUPPORTED_IMAGE_MIME_TYPES: ReadonlySet<string> = new Set([
+  'image/png',
+  'image/jpeg',
+  'image/gif',
+  'image/webp'
+])
 
 /** Bytes per kilobyte. */
 const BYTES_PER_KILOBYTE = 1024
@@ -448,7 +456,7 @@ const BYTES_PER_MEGABYTE = BYTES_PER_KILOBYTE * BYTES_PER_KILOBYTE
 /** Maximum base64 payload size in megabytes. */
 const MAX_BASE64_PAYLOAD_MEGABYTES = 20
 /** Maximum base64 payload length in characters (20 MiB of base64 text, about 15 MiB decoded). */
-const MAX_BASE64_PAYLOAD_SIZE = MAX_BASE64_PAYLOAD_MEGABYTES * BYTES_PER_MEGABYTE
+export const MAX_BASE64_PAYLOAD_SIZE = MAX_BASE64_PAYLOAD_MEGABYTES * BYTES_PER_MEGABYTE
 
 /** The MIME type and base64 payload of a data URI. */
 interface ParsedDataUri {

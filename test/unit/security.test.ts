@@ -1,6 +1,7 @@
 /**
- * Security tests for image URL handling: remote URLs are blocked, oversized payloads are rejected,
- * and only supported MIME types are accepted.
+ * Security tests for image URL handling with the default config: remote URLs are blocked (the
+ * `remoteImages` setting is off; `test/integration/remote-images.test.ts` covers it on), oversized
+ * payloads are rejected, and only supported MIME types are accepted.
  *
  * The model is served by a local mock provider (`startMockProvider`): the rejected requests are
  * refused before any upstream call, the accepted one reaches only the mock, and no login is needed.
@@ -77,10 +78,10 @@ describe('image URL security', () => {
   // proxy would have to fetch, server-side), a payload over the size limit, a type the providers do
   // not take, or a malformed data URI.
   test.each([
-    ['a remote HTTP URL', 'http://example.com/image.png', 'Remote image URLs are not supported'],
-    ['a remote HTTPS URL', 'https://example.com/image.png', 'Remote image URLs are not supported'],
-    ['a localhost URL', 'http://localhost:8080/image.png', 'Remote image URLs are not supported'],
-    ['a private-range URL', 'http://192.168.1.1/image.png', 'Remote image URLs are not supported'],
+    ['a remote HTTP URL', 'http://example.com/image.png', 'Remote image URLs are disabled'],
+    ['a remote HTTPS URL', 'https://example.com/image.png', 'Remote image URLs are disabled'],
+    ['a localhost URL', 'http://localhost:8080/image.png', 'Remote image URLs are disabled'],
+    ['a private-range URL', 'http://192.168.1.1/image.png', 'Remote image URLs are disabled'],
     [
       'an oversized base64 payload',
       `data:image/png;base64,${OVERSIZED_BASE64}`,
