@@ -39,10 +39,11 @@ const TEST_MODEL_MATRIX: readonly TestModel[] = [
   { id: 'anthropic/claude-sonnet-4-5', category: 'mid' },
   { id: 'anthropic/claude-sonnet-4-6', category: 'reasoning' },
 
-  // Google Gemini
-  { id: 'google-gemini-cli/gemini-2.0-flash', category: 'fast' },
-  { id: 'google-gemini-cli/gemini-2.5-flash', category: 'mid' },
-  { id: 'google-gemini-cli/gemini-2.5-pro', category: 'reasoning' },
+  // Google Gemini: pi's `google` provider (API google-generative-ai). pi 1.3.0 has no
+  // `google-gemini-cli` provider, so the IDs that named it never resolved.
+  { id: 'google/gemini-2.5-flash-lite', category: 'fast' },
+  { id: 'google/gemini-2.5-flash', category: 'mid' },
+  { id: 'google/gemini-2.5-pro', category: 'reasoning' },
 
   // OpenAI / Codex
   { id: 'openai-codex/gpt-5.4-mini', category: 'fast' },
