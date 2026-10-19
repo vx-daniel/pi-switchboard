@@ -137,7 +137,7 @@ interface ReadResult {
 
 Proposed: add `x_pi` to `GET /v1/models` and `GET /v1/models/{model}` responses. Not built:
 `/v1/models` keeps the plain OpenAI model object, and what pi knows beyond it goes on
-`GET /v1/pi/models` (`src/openai/models.ts`). The proposal was:
+`GET /v1/switchboard/models` (`src/openai/models.ts`). The proposal was:
 
 ```json
 {
