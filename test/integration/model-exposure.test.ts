@@ -151,4 +151,11 @@ describe('GET /v1/switchboard/models', () => {
 
     expect([without.status, withToken.status]).toEqual([401, 200])
   })
+
+  // Catches /v1/pi/models brought back as an alias: constitution 2.0.0 moved it with none.
+  test('the old /v1/pi/models path is gone', async () => {
+    const response = await testApp().request('/v1/pi/models')
+
+    expect(response.status).toBe(404)
+  })
 })
