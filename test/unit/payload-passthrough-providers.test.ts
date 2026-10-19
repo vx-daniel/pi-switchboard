@@ -213,6 +213,16 @@ describe('patchGooglePayload', () => {
     expect(payload['config']).toEqual({ temperature: 0.7, maxOutputTokens: 1024, topP: 0.9 })
   })
 
+  // Catches pi's value winning over the client's for the same key: the client asked for that
+  // value, so the request field overrides one pi set (none does in pi 1.3.0).
+  test('a request field overrides the same key set by pi', () => {
+    const payload = googlePayload({ topP: 0.1, seed: 1 })
+
+    patchGooglePayload(payload, minimalRequest({ top_p: 0.9, seed: 42 }))
+
+    expect(payload['config']).toEqual({ topP: 0.9, seed: 42 })
+  })
+
   // Catches a request without Google fields reported as patched, or the payload changed.
   test('returns false and changes nothing when no field is set', () => {
     const payload = googlePayload({ temperature: 0.7 })
