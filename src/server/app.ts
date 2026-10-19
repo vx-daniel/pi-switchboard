@@ -32,11 +32,13 @@ import { describeRoute, openAPIRouteHandler } from 'hono-openapi'
 
 /** Logger for server lifecycle events. */
 const lifecycleLogger = proxyLogger('server')
+/** Logger for requests no route matches. */
+const httpLogger = proxyLogger('server', 'http')
 
 /**
  * Builds the proxy's Hono app: request ID, disconnect and body size middleware on every path,
  * the OpenAPI document and the docs page, proxy auth on `/v1/*` and the `/healthz/<check>` detail
- * endpoints, then the health and OpenAI routes.
+ * endpoints, then the health and OpenAI routes, and an OpenAI-style 404 for anything else.
  *
  * @remarks
  * Three paths skip proxy auth: `GET /healthz`, so liveness probes need no token, and the OpenAPI
@@ -96,6 +98,15 @@ export function createApp(
   // Routes
   app.route('/', createHealthRoutes(configReader ?? fileConfigReader))
   app.route('/', createRoutes(config, configReader, remoteImageFetch))
+
+  // Anything no route matches, a known path with another method included: OpenAI's error shape
+  // and its "Invalid URL" wording, not Hono's plain text (#133). At debug: the request log line
+  // already records the 404, and scanners would flood a warning.
+  app.notFound((context) => {
+    const { method, path } = context.req
+    httpLogger.debug('No route for {method} {path}', { method, path })
+    return context.json(invalidRequest(`Invalid URL (${method} ${path})`), HTTP_NOT_FOUND)
+  })
 
   lifecycleLogger.debug(
     'App wired: proxy auth {authMode}, exposure config from {exposureSource}, docs UI {docsUi}',

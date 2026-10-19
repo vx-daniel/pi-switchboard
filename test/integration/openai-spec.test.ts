@@ -288,6 +288,11 @@ describe('responses validate against OpenAI schemas', () => {
       status: HTTP_NOT_FOUND
     },
     {
+      label: 'a route the proxy does not have',
+      send: () => testApp().request('/v1/responses', { method: 'POST' }),
+      status: HTTP_NOT_FOUND
+    },
+    {
       label: 'a missing proxy token',
       send: () => proxyAuthApp.request('/v1/models'),
       status: HTTP_UNAUTHORIZED

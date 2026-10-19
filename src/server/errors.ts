@@ -8,7 +8,7 @@
  * Statuses the proxy answers with:
  * - 400: invalid JSON or request field, failed message conversion, context overflow
  * - 401: proxy auth failure, no upstream credential for the model
- * - 404: model not found, unsupported endpoint
+ * - 404: model not found, unsupported endpoint, any other route (`Invalid URL (<method> <path>)`)
  * - 413: request body over the size limit
  * - 422: unsupported or unknown request field, unsupported tool
  * - 429: upstream rate limit
