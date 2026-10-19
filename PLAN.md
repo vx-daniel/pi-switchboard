@@ -174,6 +174,11 @@ Return OpenAI-style errors for:
 - `POST /v1/images/*`
 - assistants, threads, runs, files, batches, fine-tuning
 
+Any other request no route matches, a known path with another method included, answers 404 too,
+in OpenAI's error shape and wording: `Invalid URL (<METHOD> <path>)`, `invalid_request_error`
+(`app.notFound` in `createApp`, #133). Under `/v1`, proxy auth runs first, so without the token an
+unknown `/v1` path answers 401 and does not reveal which paths exist.
+
 ## Public and canonical model IDs
 
 Internal canonical model IDs remain:
@@ -872,7 +877,8 @@ Use an OpenAI-style shape:
   context window (`invalid_request_error`, `param: "messages"`, `context_length_exceeded`, as
   OpenAI answers it)
 - `401` proxy auth failure or no upstream credential for target provider
-- `404` model not found (`model_not_found`), or an unsupported endpoint
+- `404` model not found (`model_not_found`), an unsupported endpoint, or any other route
+  (`Invalid URL (<METHOD> <path>)`)
 - `413` request body larger than `maxBodySize`
 - `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
 - `429` upstream rate limit (`rate_limit`)
