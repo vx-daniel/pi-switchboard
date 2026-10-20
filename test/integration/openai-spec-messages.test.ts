@@ -18,12 +18,16 @@ import {
   proxyRequestSchema
 } from '../fixtures/openai-spec/schema'
 
-/** OpenAI message fields the proxy does not accept, by role, with what it does instead (#146). */
+/**
+ * OpenAI message fields the proxy does not accept, by role, with what it does instead (#146).
+ * Empty now: the proxy takes every OpenAI message field, the ones pi has nowhere to put only when
+ * empty (`refusal`, `audio`, `function_call`).
+ */
 const MESSAGE_FIELDS_NOT_ACCEPTED: Readonly<Record<string, Readonly<Record<string, string>>>> = {}
 
 /**
  * Message fields the proxy accepts that OpenAI's request does not define, by role, with why: each
- * is a response-message field an OpenAI SDK echoes back in history (#155 review).
+ * is a response-message field an OpenAI SDK echoes back in history (#146).
  */
 const ECHOED_RESPONSE_FIELDS: Readonly<Record<string, Readonly<Record<string, string>>>> = {
   'role: assistant': {

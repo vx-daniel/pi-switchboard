@@ -113,9 +113,10 @@ const userMessageSchema = z
  * @remarks
  * The fields an OpenAI SDK puts on a reply it echoes back in history are accepted when empty, as
  * it sends them: `refusal`, `audio`, the deprecated `function_call` and `tool_calls` as `null`, and
- * the response-only `annotations` as `null` or `[]` (the Python SDK's `model_dump()` of a proxy
- * reply; #155 review). A value in any but `tool_calls` is refused with a named 422
- * (`chatRequestRejection`), as pi has nowhere to put it.
+ * the response-only `annotations` as `null` or `[]` (#146). openai-python's `ChatCompletionMessage`
+ * (`types/chat/chat_completion_message.py`) declares each as optional, `None` by default, and
+ * `model_dump()` writes them all out; a proxy reply never sets them. A value in any but
+ * `tool_calls` is refused with a named 422 (`chatRequestRejection`), as pi has nowhere to put it.
  */
 const assistantMessageSchema = z
   .object({

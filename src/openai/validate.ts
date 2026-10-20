@@ -144,6 +144,7 @@ const MESSAGE_FIELD_DEPTH = 3
  * user message's parts are a union of a string and an array, so an unknown key on a part would
  * otherwise read as "invalid input" at `messages.0.content`. The branch whose issue has the
  * longest path is the one the input matched the shape of; its issue is reported, at the full path.
+ * On a tie the first branch's issue wins: `toSorted` is stable, as the language requires.
  *
  * @param issue - a Zod issue
  * @returns the issue to report

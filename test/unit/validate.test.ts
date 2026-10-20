@@ -59,6 +59,20 @@ describe('validateChatRequest', () => {
       'messages.0.content.0.image_url.extra'
     ],
     [
+      'a tool call function field OpenAI does not define',
+      [
+        { role: 'user', content: 'hi' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            { id: 'c1', type: 'function', function: { name: 'f', arguments: '{}', strict: true } }
+          ]
+        }
+      ],
+      'messages.1.tool_calls.0.function.strict'
+    ],
+    [
       'a deprecated assistant function_call',
       [
         { role: 'user', content: 'hi' },
@@ -147,6 +161,18 @@ describe('validateChatRequest', () => {
     })
 
     expect(result).toMatchObject({ ok: false, status: 400, param })
+  })
+
+  // Catches a message with a role the proxy does not take reported at the message, or as a
+  // mismatch with some other role's fields: messages are told apart by `role`, so the error names
+  // it. The deprecated `function` role is the one clients still send.
+  test.each(['function', 'robot'])('reports role %s as a 400 at the role', (role) => {
+    const result = validateChatRequest({
+      model: 'gpt-6.1-sol',
+      messages: [{ role, content: 'x', name: 'f' }]
+    })
+
+    expect(result).toMatchObject({ ok: false, status: 400, param: 'messages.0.role' })
   })
 
   // Catches the new shape letting through what a system message cannot carry: no parts at all,
