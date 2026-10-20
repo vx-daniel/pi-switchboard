@@ -168,6 +168,59 @@ describe('OpenAI at api.openai.com gets the breakpoints', () => {
       expect.not.objectContaining({ prompt_cache_breakpoint: expect.anything() as unknown })
     ])
   })
+
+  // Catches a breakpoint on an image part lost (its URL is rewritten on the way, so it cannot be
+  // matched by value), on both APIs' part types.
+  test.each<[PayloadApi, 'messages' | 'input', string, string]>([
+    ['openai-completions', 'messages', 'text', 'image_url'],
+    ['openai-responses', 'input', 'input_text', 'input_image']
+  ])(
+    '%s: user text and image parts keep their breakpoints',
+    async (api, field, textType, imageType) => {
+      const payload = await sentPayload(api, OPENAI_BASE_URL, [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'Describe this.' },
+            {
+              type: 'image_url',
+              image_url: { url: 'data:image/png;base64,iVBORw0KGgo=' },
+              prompt_cache_breakpoint: BREAKPOINT
+            }
+          ]
+        }
+      ])
+
+      expect(firstContent(payload, field)).toEqual([
+        expect.not.objectContaining({ prompt_cache_breakpoint: expect.anything() as unknown }),
+        expect.objectContaining({ type: imageType, prompt_cache_breakpoint: BREAKPOINT })
+      ])
+      expect(firstContent(payload, field)).toEqual([
+        expect.objectContaining({ type: textType, text: 'Describe this.' }),
+        expect.anything()
+      ])
+    }
+  )
+})
+
+describe('a malformed breakpoint', () => {
+  // Catches any object accepted as a breakpoint and then forwarded to OpenAI, which defines one
+  // mode only. The message schema is a union, so the error names the message, as it does for any
+  // invalid field inside one.
+  test('is rejected with 400 at the message', () => {
+    const result = validateChatRequest({
+      model: 'gpt-test',
+      messages: [
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'Rules.', prompt_cache_breakpoint: { mode: 'implicit' } }]
+        },
+        { role: 'user', content: 'Hi' }
+      ]
+    })
+
+    expect(result).toMatchObject({ ok: false, status: 400, param: 'messages.0' })
+  })
 })
 
 describe('any other host gets pi payload unchanged', () => {

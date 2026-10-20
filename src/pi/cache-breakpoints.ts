@@ -184,6 +184,9 @@ function samePart(
 ): payloadPart is Record<string, unknown> {
   if (!isRecord(payloadPart)) return false
   const type = payloadPart['type']
+  // An image is matched by kind alone: its URL is rewritten on the way (a remote one inlined as
+  // base64), so it cannot be compared. The caller has already lined up the message and its part
+  // count, so the position identifies it.
   if (planned.kind === 'image') return type === 'image_url' || type === 'input_image'
   return (type === 'text' || type === 'input_text') && payloadPart['text'] === planned.text
 }
@@ -252,10 +255,19 @@ export function breakpointPatch(
         ? 0
         : placeInstructions(payloadMessages, plan.instructions, textType)) +
       placeUserBreakpoints(payloadMessages, plan.users)
-    breakpointLogger.debug('Placed {placed} of {count} prompt_cache_breakpoint(s) for {modelId}', {
-      placed,
-      count: plan.count,
-      modelId: model.id
-    })
+    const properties = { placed, count: plan.count, modelId: model.id }
+    // None placed on an API that takes them means pi built a payload this code does not recognize
+    // (a pi change): the client's caching hints are lost, so it is a warning, not a debug line.
+    if (placed === 0) {
+      breakpointLogger.warn(
+        'Placed none of {count} prompt_cache_breakpoint(s) for {modelId}: the upstream payload did not match the request',
+        properties
+      )
+      return
+    }
+    breakpointLogger.debug(
+      'Placed {placed} of {count} prompt_cache_breakpoint(s) for {modelId}',
+      properties
+    )
   }
 }
