@@ -21,9 +21,9 @@ import { buildModelSelectorSubmenu } from '../../extensions/proxy/model-selector
 import type { ProxyState } from '../../extensions/proxy/state'
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
 
-vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
-vi.mock('@vx-daniel/pi-openai-proxy/exposure', () => import('@proxy/openai/model-exposure'))
-vi.mock('@vx-daniel/pi-openai-proxy/logging', () => import('@proxy/logging'))
+vi.mock('@vx-daniel/pi-switchboard/config', () => import('@proxy/config/schema'))
+vi.mock('@vx-daniel/pi-switchboard/exposure', () => import('@proxy/openai/model-exposure'))
+vi.mock('@vx-daniel/pi-switchboard/logging', () => import('@proxy/logging'))
 
 const LEFT = '\x1B[D'
 const RIGHT = '\x1B[C'

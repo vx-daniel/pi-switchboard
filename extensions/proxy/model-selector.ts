@@ -11,8 +11,8 @@ import {
   getConfigPath,
   loadConfigFromFile,
   saveConfigToFile
-} from '@vx-daniel/pi-openai-proxy/config'
-import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
+} from '@vx-daniel/pi-switchboard/config'
+import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 
 import { getSessionAvailableModels, type ProxyState } from './state'
 

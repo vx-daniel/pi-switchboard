@@ -3,8 +3,9 @@
  *
  * Library-first: every module asks for a logger with `proxyLogger(...)` and logs; nothing is
  * written until an entry point configures LogTape. The proxy's CLI calls `configureLogging()`
- * (stderr); the extension calls `configureFileLogging()` only when `PI_PROXY_EXTENSION_LOG_FILE`
- * names a file, because console output would corrupt pi's terminal UI.
+ * (stderr); the extension calls `configureFileLogging()` only when
+ * `PI_SWITCHBOARD_EXTENSION_LOG_FILE` names a file, because console output would corrupt pi's
+ * terminal UI.
  *
  * CATEGORIES — every logger sits under `ROOT_CATEGORY`, so one `lowestLevel` governs them all:
  *   server             lifecycle: startup, shutdown
@@ -55,13 +56,13 @@ import { redactByField } from '@logtape/redaction'
 import * as z from 'zod'
 
 /** The category every logger in this package sits under. */
-export const ROOT_CATEGORY = 'pi-openai-proxy'
+export const ROOT_CATEGORY = 'pi-switchboard'
 
 /**
  * Returns a logger in this package's category tree, e.g. `proxyLogger('server', 'http')`.
  *
  * @param subcategories - Category segments under {@link ROOT_CATEGORY}, outermost first.
- * @returns The LogTape logger for `pi-openai-proxy.<subcategories…>`.
+ * @returns The LogTape logger for `pi-switchboard.<subcategories…>`.
  */
 export function proxyLogger(...subcategories: readonly string[]): Logger {
   return getLogger([ROOT_CATEGORY, ...subcategories])
@@ -115,14 +116,14 @@ export function defaultLogFormat(): LogFormat {
 }
 
 /**
- * Resolves the format to log in: the `--log-format` flag, then `PI_PROXY_LOG_FORMAT`, then
+ * Resolves the format to log in: the `--log-format` flag, then `PI_SWITCHBOARD_LOG_FORMAT`, then
  * `fallback`.
  *
  * @remarks
  * A value that names no format is skipped; the caller reports it.
  *
  * @param flagFormat - The `--log-format` value, or `undefined` when the flag is absent.
- * @param envFormat - The `PI_PROXY_LOG_FORMAT` value, or `undefined` when unset.
+ * @param envFormat - The `PI_SWITCHBOARD_LOG_FORMAT` value, or `undefined` when unset.
  * @param fallback - Called when neither names a format; defaults to {@link defaultLogFormat}.
  * @returns The first valid format.
  */

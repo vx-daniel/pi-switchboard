@@ -12,8 +12,8 @@ import {
   type ModelRegistry,
   SettingsManager
 } from '@earendil-works/pi-coding-agent'
-import { loadConfigFromFile, type ProxyConfig } from '@vx-daniel/pi-openai-proxy/config'
-import type { ModelExposureConfig } from '@vx-daniel/pi-openai-proxy/exposure'
+import { loadConfigFromFile, type ProxyConfig } from '@vx-daniel/pi-switchboard/config'
+import type { ModelExposureConfig } from '@vx-daniel/pi-switchboard/exposure'
 
 /** Mutable state shared by every /proxy handler for the lifetime of the extension. */
 export interface ProxyState {

@@ -9,7 +9,7 @@
  * system prompt included), and the response is saved as it arrived, minus every credential. A
  * recording that still contains one is refused, not redacted.
  *
- * LOGIN: set PI_PROXY_RECORD_AGENT_DIR to a pi agent dir holding a login made for recording
+ * LOGIN: set PI_SWITCHBOARD_RECORD_AGENT_DIR to a pi agent dir holding a login made for recording
  * (`PI_CODING_AGENT_DIR=<dir> pi`, then `/login`). pi reads and refreshes its `auth.json` in place.
  * Never point it at a copy of a login another pi or proxy uses: refreshing an expired OAuth token
  * rotates the refresh token, and every other copy stops working.
@@ -17,7 +17,7 @@
  * Runs under Node directly (`node scripts/record-fixtures.ts`), so imports are relative with `.ts`.
  *
  * OUTPUT: recordings go to `test/fixtures/recordings`, to be committed; set
- * PI_PROXY_RECORD_OUT_DIR to save them somewhere else (the offline test of this script does).
+ * PI_SWITCHBOARD_RECORD_OUT_DIR to save them somewhere else (the offline test of this script does).
  *
  * @packageDocumentation
  */
@@ -41,7 +41,7 @@ import { type Recorder, saveRecording, startRecorder } from '../test/fixtures/re
 const API = 'anthropic-messages'
 /** The pi model each scenario starts from (a scenario may override only its id). */
 const MODEL_ID = 'claude-haiku-5-5'
-/** Upstream the recorder forwards to unless PI_PROXY_RECORD_UPSTREAM is set. */
+/** Upstream the recorder forwards to unless PI_SWITCHBOARD_RECORD_UPSTREAM is set. */
 const DEFAULT_UPSTREAM = 'https://api.anthropic.com'
 
 /** One recorded exchange: what pi is asked, and with which options. */
@@ -144,7 +144,7 @@ function fail(message: string): never {
 }
 
 /**
- * Resolves the agent dir holding the recording login from PI_PROXY_RECORD_AGENT_DIR.
+ * Resolves the agent dir holding the recording login from PI_SWITCHBOARD_RECORD_AGENT_DIR.
  *
  * @remarks
  * Exits via {@link fail} when the variable is unset or empty, or when it names the everyday
@@ -153,17 +153,17 @@ function fail(message: string): never {
  * @returns the absolute agent dir path
  */
 function recordingAgentDir(): string {
-  const configured = process.env.PI_PROXY_RECORD_AGENT_DIR
+  const configured = process.env.PI_SWITCHBOARD_RECORD_AGENT_DIR
   if (configured === undefined || configured === '') {
     fail(
-      'Set PI_PROXY_RECORD_AGENT_DIR to a pi agent dir with a login made for recording ' +
+      'Set PI_SWITCHBOARD_RECORD_AGENT_DIR to a pi agent dir with a login made for recording ' +
         '(PI_CODING_AGENT_DIR=<dir> pi, then /login). See the header of scripts/record-fixtures.ts.'
     )
   }
   const agentDir = resolve(configured)
   if (agentDir === join(homedir(), '.pi', 'agent')) {
     fail(
-      'PI_PROXY_RECORD_AGENT_DIR is your everyday pi agent dir. Record with a separate login, so a ' +
+      'PI_SWITCHBOARD_RECORD_AGENT_DIR is your everyday pi agent dir. Record with a separate login, so a ' +
         'refresh during recording cannot disturb the one you use.'
     )
   }
@@ -198,7 +198,7 @@ async function recordScenario(
   }
   const captured = recorder.exchanges.at(-1)
   if (captured === undefined) fail(`${scenario.name}: the recorder saw no request`)
-  const outDir = process.env.PI_PROXY_RECORD_OUT_DIR
+  const outDir = process.env.PI_SWITCHBOARD_RECORD_OUT_DIR
   return saveRecording(
     {
       version: 1,
@@ -216,17 +216,19 @@ async function recordScenario(
 }
 
 /**
- * Records every scenario against the login in PI_PROXY_RECORD_AGENT_DIR.
+ * Records every scenario against the login in PI_SWITCHBOARD_RECORD_AGENT_DIR.
  *
  * @remarks
- * Starts the recorder (upstream: PI_PROXY_RECORD_UPSTREAM, default {@link DEFAULT_UPSTREAM}),
+ * Starts the recorder (upstream: PI_SWITCHBOARD_RECORD_UPSTREAM, default {@link DEFAULT_UPSTREAM}),
  * writes a temporary `models.json` that points pi's `anthropic` provider at it, and removes that
  * file and stops the recorder when done. Exits via {@link fail} when the dir has no Anthropic
  * login.
  */
 async function main(): Promise<void> {
   const agentDir = recordingAgentDir()
-  const recorder = await startRecorder(process.env.PI_PROXY_RECORD_UPSTREAM ?? DEFAULT_UPSTREAM)
+  const recorder = await startRecorder(
+    process.env.PI_SWITCHBOARD_RECORD_UPSTREAM ?? DEFAULT_UPSTREAM
+  )
   const modelsDir = mkdtempSync(join(tmpdir(), 'pi-proxy-record-'))
   try {
     const modelsPath = join(modelsDir, 'models.json')

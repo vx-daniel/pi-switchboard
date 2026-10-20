@@ -421,7 +421,7 @@ function passthroughStrategy(api: string): 'openai' | 'codex' | 'anthropic' | 'g
 
 /** Per-request options for an upstream call, beyond the parsed request itself. */
 export interface CompletionOptions {
-  /** Per-request upstream API key override via X-Pi-Upstream-Api-Key header. */
+  /** Per-request upstream API key override via the X-Switchboard-Upstream-Api-Key header. */
   readonly upstreamApiKey?: string | undefined
   /**
    * The client's disconnect, and nothing else: the route tells a client that left from an upstream
@@ -602,9 +602,9 @@ async function buildStreamOptions(
     opts.signal = signal
   }
 
-  // A per-request upstream key (X-Pi-Upstream-Api-Key) overrides everything. Without one, leave
-  // apiKey unset: the ModelRuntime resolves request auth itself for the chosen model (API keys,
-  // OAuth with refresh, model-specific headers, dynamic models.json headers).
+  // A per-request upstream key (X-Switchboard-Upstream-Api-Key) overrides everything. Without
+  // one, leave apiKey unset: the ModelRuntime resolves request auth itself for the chosen model
+  // (API keys, OAuth with refresh, model-specific headers, dynamic models.json headers).
   if (options.upstreamApiKey !== undefined) {
     opts.apiKey = options.upstreamApiKey
   }

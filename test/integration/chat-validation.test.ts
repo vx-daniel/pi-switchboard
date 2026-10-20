@@ -362,11 +362,14 @@ describe('POST /v1/chat/completions - body size limit', () => {
 describe('POST /v1/chat/completions - upstream API key override', () => {
   // Catches the header ignored (the provider's configured key sent instead), or the request
   // refused because of it.
-  test('sends the X-Pi-Upstream-Api-Key value to the provider instead of its configured key', async () => {
+  test('sends the X-Switchboard-Upstream-Api-Key value to the provider instead of its configured key', async () => {
     const upstreamKey = 'notarealsecret-per-request-upstream-key'
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Pi-Upstream-Api-Key': upstreamKey },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Switchboard-Upstream-Api-Key': upstreamKey
+      },
       body: JSON.stringify({
         model: MOCK_MODEL,
         messages: [{ role: 'user', content: 'Hello' }]

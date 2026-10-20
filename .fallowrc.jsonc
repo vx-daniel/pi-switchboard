@@ -11,7 +11,7 @@
     // pi loads the extension through the package manifest (`"pi": { "extensions": ["./extensions"] }`).
     "extensions/proxy/index.ts",
     // The package's published entry points (`pack.entry` in `vite.config.ts`). The extension imports them through
-    // the package's own subpaths (`@vx-daniel/pi-openai-proxy/config`), which resolve to `dist/`, not to these.
+    // the package's own subpaths (`@vx-daniel/pi-switchboard/config`), which resolve to `dist/`, not to these.
     "src/index.ts",
     "src/config/schema.ts",
     "src/openai/model-exposure.ts",

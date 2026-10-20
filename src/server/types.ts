@@ -11,7 +11,7 @@ export interface ProxyEnv {
     requestId: string
     clientRequestId: string | undefined
     abortController: AbortController
-    /** Per-request upstream API key override via X-Pi-Upstream-Api-Key header. */
+    /** Per-request upstream API key override via the X-Switchboard-Upstream-Api-Key header. */
     upstreamApiKey: string | undefined
   }
 }

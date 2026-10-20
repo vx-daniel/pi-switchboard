@@ -1,6 +1,6 @@
 # TODO
 
-Actionable implementation checklist for `pi-openai-proxy`.
+Actionable implementation checklist for `pi-switchboard`.
 
 Read `PLAN.md` first. This file should track concrete work items and decisions needed to implement that plan.
 
@@ -17,7 +17,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Authentication and headers
 
 - [x] Reserve `Authorization` for proxy authentication compatibility
-- [x] Choose the upstream override header name: `X-Pi-Upstream-Api-Key` (implemented)
+- [x] Choose the upstream override header name: `X-Switchboard-Upstream-Api-Key` (implemented)
 - [x] Decide whether proxy auth exists in v1 or stays disabled by default
 - [x] Decide whether to accept and return `X-Client-Request-Id` / `X-Request-Id`
 
@@ -39,7 +39,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 ### Security policy
 
-- [x] Decide whether remote image URLs are enabled in the stable proxy (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [x] Decide whether remote image URLs are enabled in the stable proxy (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-switchboard/issues/109))
 - [x] If enabled, document SSRF protections and size limits (PLAN.md, "Image URL fetching"; README, "Security defaults")
 - [x] Document bind-host defaults
 - [x] Document any future remote exposure guidance
@@ -181,7 +181,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Images
 
 - [x] Support base64 image data in user message parts
-- [x] Decide whether remote image URL fetching is enabled (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [x] Decide whether remote image URL fetching is enabled (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-switchboard/issues/109))
 - [x] If enabled, implement SSRF protections, timeout, redirect, and size limits (`src/openai/remote-image-fetch.ts`: public addresses only with pinned DNS, 3 redirects, 5 s connect and 10 s total, 15 MiB streamed cap, image content types, 8 per request)
 - [x] Validate image MIME types and payload sizes
 
@@ -385,6 +385,16 @@ Analysis document: `docs/engineering/phase-3d-analysis.md`
 - [x] Copy the Viaanix oxc-config v4.0.0 rules into `vite.config.ts` and make the code pass them (extension split into `extensions/proxy/`)
 - [x] Run the proxy on Node (`@hono/node-server`); the extension spawns it with pi's own runtime
 - [x] Remove stale `.specify/` scaffolding and `NEXT.md`
+
+## Rename to pi-switchboard [DONE]
+
+- [x] Leave the fork network (issues and PRs kept) and rename the repo to `vx-daniel/pi-switchboard` (#65)
+- [x] Package `@vx-daniel/pi-switchboard`, bin `pi-switchboard`, log root category `pi-switchboard`
+- [x] Env vars `PI_PROXY_*` → `PI_SWITCHBOARD_*`; an old one still set is warned about, an old auth token refuses to start
+- [x] Header `X-Pi-Upstream-Api-Key` → `X-Switchboard-Upstream-Api-Key`; the old one answers 400
+- [x] README "Attribution" and "Coming from pi-openai-proxy"; LICENSE keeps the original copyright
+- [x] Versions restart at 0.1.0: `pi-switchboard-v${version}` tags, baseline tag on `main`, breaking → minor while 0.x
+- [ ] Publish to npm under the new name (#59; `npmPublish` is off until then)
 
 ## Phase 4 — Experimental agentic mode
 

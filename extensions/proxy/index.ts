@@ -18,8 +18,8 @@
  *   /proxy reset      Restore default settings
  *   /proxy help       Usage line
  *
- * Config schema imported from @vx-daniel/pi-openai-proxy/config (SSOT).
- * Model-exposure engine imported from @vx-daniel/pi-openai-proxy/exposure.
+ * Config schema imported from @vx-daniel/pi-switchboard/config (SSOT).
+ * Model-exposure engine imported from @vx-daniel/pi-switchboard/exposure.
  *
  * pi loads this directory as one extension through its index.ts; the sibling modules are
  * imported here and are not discovered as separate extensions.
@@ -36,8 +36,8 @@ import {
   getConfigPath,
   loadConfigFromFile,
   saveConfigToFile
-} from '@vx-daniel/pi-openai-proxy/config'
-import { configureFileLogging, proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
+} from '@vx-daniel/pi-switchboard/config'
+import { configureFileLogging, proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 
 import {
   refreshStatus,
@@ -138,9 +138,9 @@ async function openSettingsPanelIfInteractive(
  * @param pi - the pi extension API (only `on` and `registerCommand` are used)
  */
 export default function proxyExtension(pi: Pick<ExtensionAPI, 'on' | 'registerCommand'>): void {
-  // Opt-in logging: the extension writes nothing unless PI_PROXY_EXTENSION_LOG_FILE names a file,
-  // because console output would corrupt pi's terminal UI.
-  const logFile = process.env.PI_PROXY_EXTENSION_LOG_FILE
+  // Opt-in logging: the extension writes nothing unless PI_SWITCHBOARD_EXTENSION_LOG_FILE names a
+  // file, because console output would corrupt pi's terminal UI.
+  const logFile = process.env.PI_SWITCHBOARD_EXTENSION_LOG_FILE
   if (logFile !== undefined && logFile.length > 0) {
     const level = loadConfigFromFile().logLevel
     configureFileLogging(logFile, level)

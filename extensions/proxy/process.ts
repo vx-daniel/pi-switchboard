@@ -15,8 +15,8 @@ import {
   configToEnv,
   loadConfigFromFile,
   type ProxyConfig
-} from '@vx-daniel/pi-openai-proxy/config'
-import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
+} from '@vx-daniel/pi-switchboard/config'
+import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 import * as z from 'zod'
 
 import { type ProxyState, proxyUrl } from './state'
@@ -44,7 +44,7 @@ const ProbeBodySchema = z.object({ data: z.array(z.unknown()) })
 
 /**
  * Resolves the proxy entry point: the built `dist/index.mjs` this package ships beside the
- * extension, or failing that the package's `pi-openai-proxy` bin on PATH.
+ * extension, or failing that the package's `pi-switchboard` bin on PATH.
  *
  * @param packageRoot - the package root holding `dist/`
  * @returns the absolute path of the built entry, or the bare bin name
@@ -57,9 +57,9 @@ function findProxyBinary(packageRoot: string): string {
   }
   processLogger.debug('No built entry at {localBin}; using {bin} from PATH', {
     localBin,
-    bin: 'pi-openai-proxy'
+    bin: 'pi-switchboard'
   })
-  return 'pi-openai-proxy'
+  return 'pi-switchboard'
 }
 
 /**
@@ -490,16 +490,21 @@ async function spawnProxy(state: ProxyState, context: ExtensionContext): Promise
  * The proxy refuses to start when its auth is set but cannot be applied (`UnusableProxyAuthError`).
  * Its output is discarded, so without this check the reason would be lost and `/proxy start`
  * would only report a proxy that never answered. Mirrors what the child sees: the token
- * {@link configToEnv} passes wins over pi's own `PI_PROXY_AUTH_TOKEN`, which the child inherits,
- * and either wins over the file.
+ * {@link configToEnv} passes wins over pi's own `PI_SWITCHBOARD_AUTH_TOKEN`, which the child
+ * inherits, and either wins over the file. pi's environment may still hold the old
+ * `PI_PROXY_AUTH_TOKEN` (#65): with no new token, the child refuses to start over it.
  *
  * @param config - the config the proxy would be spawned with
  * @returns why it would refuse, or `undefined` when it would start
  */
 function startRefusal(config: ProxyConfig): string | undefined {
-  const token = configToEnv(config)['PI_PROXY_AUTH_TOKEN'] ?? process.env.PI_PROXY_AUTH_TOKEN
+  const token =
+    configToEnv(config)['PI_SWITCHBOARD_AUTH_TOKEN'] ?? process.env.PI_SWITCHBOARD_AUTH_TOKEN
   if (token === '') {
-    return "PI_PROXY_AUTH_TOKEN is set but empty in pi's environment, and the proxy refuses to start with an empty token. Unset it, or set a token in /proxy config."
+    return "PI_SWITCHBOARD_AUTH_TOKEN is set but empty in pi's environment, and the proxy refuses to start with an empty token. Unset it, or set a token in /proxy config."
+  }
+  if (token === undefined && process.env['PI_PROXY_AUTH_TOKEN'] !== undefined) {
+    return "PI_PROXY_AUTH_TOKEN is set in pi's environment but no longer read, and the proxy refuses to start over it. Rename it PI_SWITCHBOARD_AUTH_TOKEN, or set a token in /proxy config."
   }
   if (token === undefined && configFileAuthTokenInvalid()) {
     return 'authToken in proxy-config.json is not a string, and the proxy refuses to start with it. Set a new token in /proxy config.'

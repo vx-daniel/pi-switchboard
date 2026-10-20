@@ -255,7 +255,7 @@ export type FetchImageResult = FetchedImage | FetchRefusal
 
 /** The request headers of every image fetch: nothing from the client. */
 const REQUEST_HEADERS = {
-  'user-agent': 'pi-openai-proxy (remote image fetch)',
+  'user-agent': 'pi-switchboard (remote image fetch)',
   'accept': [...SUPPORTED_IMAGE_MIME_TYPES].join(', ')
 }
 

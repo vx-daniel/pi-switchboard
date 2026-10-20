@@ -6,7 +6,7 @@
 > exposure computes, not over HTTP. The "Target: Zed" and "Extension commands" sections describe
 > that code.
 
-Design for a modular sync system that pushes pi-openai-proxy's exposed models
+Design for a modular sync system that pushes pi-switchboard's exposed models
 into editor/tool configuration files. Follows pi-maestro's monorepo patterns:
 contracts for plugin boundaries, per-client adapters, thin extension wiring.
 
@@ -46,7 +46,7 @@ packages/
 
 ### Comparison with pi-maestro
 
-| pi-maestro | pi-openai-proxy sync |
+| pi-maestro | pi-switchboard sync |
 |---|---|
 | `core/contracts` (ProviderAdapter, SecretBackend) | `sync/contracts` (SyncTarget) |
 | `core/engine` (AccountManager, selection) | `sync/engine` (fetch, diff, orchestrate) |

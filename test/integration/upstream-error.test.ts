@@ -79,8 +79,8 @@ describe('a failed non-streaming upstream call', () => {
     // The upstream call's own warning (complete.ts) and the route's error line (routes.ts).
     expect(atDefaultLevel.map((record) => [record.logger, record.level])).toEqual(
       expect.arrayContaining([
-        ['pi-openai-proxy.pi.complete', 'WARN'],
-        ['pi-openai-proxy.server.chat', 'ERROR']
+        ['pi-switchboard.pi.complete', 'WARN'],
+        ['pi-switchboard.server.chat', 'ERROR']
       ])
     )
     for (const record of atDefaultLevel) expect(record.line).not.toContain(QUOTED)

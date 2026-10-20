@@ -1,6 +1,6 @@
 # Plan
 
-This document is the implementation source of truth for `pi-openai-proxy`.
+This document is the implementation source of truth for `pi-switchboard`.
 
 Use this file for architecture, API compatibility policy, security boundaries, phase gates, and acceptance criteria. Use `TODO.md` for the actionable checklist. Use `ROADMAP.md` for a short phase summary.
 
@@ -125,7 +125,7 @@ The proxy describes its own API in OpenAPI 3.1 (#129), built with
 - `GET /v1/switchboard/openapi.json`: the document. Always on.
 - `GET /docs`: [Swagger UI](https://github.com/honojs/middleware/tree/main/packages/swagger-ui)
   for it, with "Try it out", at the root where a browser goes (an operational endpoint). Off
-  unless `docsUi` (`--docs-ui`, `PI_PROXY_DOCS_UI`, the settings panel) is on, because the page
+  unless `docsUi` (`--docs-ui`, `PI_SWITCHBOARD_DOCS_UI`, the settings panel) is on, because the page
   loads `swagger-ui-dist`, pinned to `SWAGGER_UI_VERSION`, from the jsDelivr CDN; off, it answers
   an OpenAI-style 404. It is not bundled: `swagger-ui-dist` depends on `@scarf/scarf`, whose
   install script reports installs to an analytics service.
@@ -331,7 +331,7 @@ final message, as `completeSimple()` would), which resolves
 request auth themselves on every request: API keys, OAuth with refresh, model-specific headers,
 provider environment and an auth-resolved base URL (`ModelRuntime.prepareRequest`). The proxy
 only pre-checks that auth resolves (`getRequestAuth()`), so a route can answer 401 before a
-response starts. A per-request `X-Pi-Upstream-Api-Key` overrides the resolved key.
+response starts. A per-request `X-Switchboard-Upstream-Api-Key` overrides the resolved key.
 
 When resolution fails, the 401 and the warning carry only pi's summary of the failure
 (`summarizeAuthError`): pi's OAuth errors go on to quote the token endpoint's response and a stack
@@ -347,7 +347,7 @@ Do not use the standard `Authorization: Bearer ...` header for upstream provider
 
 Use a proxy-specific header instead, for example:
 
-- `X-Pi-Upstream-Api-Key`
+- `X-Switchboard-Upstream-Api-Key`
 
 Reason:
 
@@ -357,9 +357,9 @@ Reason:
 ### Proxy auth
 
 - incoming `Authorization: Bearer <proxy-key>` protects the proxy itself; off by default for local use
-- the token comes from `--auth-token`, `PI_PROXY_AUTH_TOKEN` or `authToken` in the config file, in that order; `"authToken": ""` turns it off
-- two states (`ServerConfig.proxyAuth`): `off` and `token`. Auth that is set but cannot be applied refuses to start (`UnusableProxyAuthError` from `loadConfig`, CONSTITUTION principle II's exception): a file `authToken` that is not a string (`null` included, #82), or a `--auth-token` or `PI_PROXY_AUTH_TOKEN` that is set but empty (#99). The file's token is not used in place of an empty override, since that would ignore what was set. The CLI logs why at `fatal` (no log level filters it out), naming the field or the flag/variable and never the value, and exits `1`. It never falls back to `off`, which would turn a requested token into an open proxy, and it does not start to refuse every request, which would hide the mistake behind a running process
-- the pi extension discards the proxy's output, so `/proxy start` checks the same two causes before spawning (`startRefusal` in `extensions/proxy/process.ts`: the token it passes wins over pi's own `PI_PROXY_AUTH_TOKEN`, which the child inherits, and either wins over the file) and refuses with the reason instead of reporting a proxy that never answered
+- the token comes from `--auth-token`, `PI_SWITCHBOARD_AUTH_TOKEN` or `authToken` in the config file, in that order; `"authToken": ""` turns it off
+- two states (`ServerConfig.proxyAuth`): `off` and `token`. Auth that is set but cannot be applied refuses to start (`UnusableProxyAuthError` from `loadConfig`, CONSTITUTION principle II's exception): a file `authToken` that is not a string (`null` included, #82), or a `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN` that is set but empty (#99). The file's token is not used in place of an empty override, since that would ignore what was set. The CLI logs why at `fatal` (no log level filters it out), naming the field or the flag/variable and never the value, and exits `1`. It never falls back to `off`, which would turn a requested token into an open proxy, and it does not start to refuse every request, which would hide the mistake behind a running process
+- the pi extension discards the proxy's output, so `/proxy start` checks the same two causes before spawning (`startRefusal` in `extensions/proxy/process.ts`: the token it passes wins over pi's own `PI_SWITCHBOARD_AUTH_TOKEN`, which the child inherits, and either wins over the file) and refuses with the reason instead of reporting a proxy that never answered
 - saving the config (the extension's settings panel, the model selector) writes such a value back unchanged; only an explicit choice on the auth row or `/proxy reset` replaces it
 
 ## Request contract for `POST /v1/chat/completions`
@@ -929,7 +929,7 @@ Error rules:
 
 ### Image URL fetching
 
-Off by default. With `remoteImages` on (`PI_PROXY_REMOTE_IMAGES`, `--remote-images`, the
+Off by default. With `remoteImages` on (`PI_SWITCHBOARD_REMOTE_IMAGES`, `--remote-images`, the
 settings panel), the chat route downloads each remote `image_url` before message conversion
 (`src/openai/remote-images.ts`) and puts it back as a base64 data URI, because pi accepts images
 only as data. Off, a remote URL is rejected with `400`. The fetch (`src/openai/remote-image-fetch.ts`)
@@ -979,7 +979,7 @@ no setting loosens them.
 
 ### Agentic mode
 
-Agentic mode is experimental and not built. `PI_PROXY_AGENTIC=true` sets a flag that only the
+Agentic mode is experimental and not built. `PI_SWITCHBOARD_AGENTIC=true` sets a flag that only the
 startup log reads.
 
 Security defaults for any future agentic mode:
@@ -1075,7 +1075,7 @@ Deliverable:
 
 Build:
 
-- project scaffolding (Bun, Hono, Zod v4, tsdown, Biome, oxlint, lefthook, commitlint)
+- project scaffolding (Bun, Hono, Zod v4, tsdown, Biome, oxlint, lefthook, commitlint); Bun, Biome and lefthook since replaced by Node and Vite+ (see "Tooling and type safety")
 - `ModelRuntime` integration
 - model resolution (canonical + shorthand with ambiguity detection)
 - `GET /v1/models`
@@ -1091,7 +1091,7 @@ Release gate:
 - unit tests for mapping logic
 - integration tests for models and validation
 - no unsupported parameters silently accepted, beyond the exceptions `CONSTITUTION.md` principle I lists
-- zero oxlint errors, zero biome errors
+- zero oxlint errors, zero biome errors (today: `pnpm run check:all` with zero lint warnings; Biome is gone)
 - typecheck passes with ultra-strict tsconfig
 
 ### Phase 2 — Tools and richer compatibility [DONE]
@@ -1265,11 +1265,11 @@ Recommendation:
 ## Observability
 
 Logging is LogTape (`src/logging/index.ts`, whose header defines the categories, the level guide and
-what must never be logged). The CLI writes to stderr at `--log-level` / `PI_PROXY_LOG_LEVEL` /
+what must never be logged). The CLI writes to stderr at `--log-level` / `PI_SWITCHBOARD_LOG_LEVEL` /
 `logLevel` (default `info`), as pretty lines in local time (the system zone, `TZ` in a container)
-on a TTY and JSON Lines with a UTC `@timestamp` otherwise; `--log-format` / `PI_PROXY_LOG_FORMAT`
+on a TTY and JSON Lines with a UTC `@timestamp` otherwise; `--log-format` / `PI_SWITCHBOARD_LOG_FORMAT`
 (`pretty`, `json`) overrides that choice. Passing `/healthz` checks log at `debug`. The pi
-extension logs to a file only when `PI_PROXY_EXTENSION_LOG_FILE` is set.
+extension logs to a file only when `PI_SWITCHBOARD_EXTENSION_LOG_FILE` is set.
 
 Minimum production observability:
 

@@ -15,6 +15,7 @@ import {
   bodySizeLimitMiddleware,
   disconnectMiddleware,
   proxyAuthMiddleware,
+  renamedHeaderMiddleware,
   requestIdMiddleware
 } from '@proxy/server/middleware'
 import {
@@ -84,13 +85,16 @@ export function createApp(
     // Still registered and described, so the document does not depend on the config.
     app.get(DOCS_PATH, describeRoute(docsPageDescription), (context) =>
       context.json(
-        invalidRequest('The docs page is off; turn on docsUi (--docs-ui, PI_PROXY_DOCS_UI)'),
+        invalidRequest('The docs page is off; turn on docsUi (--docs-ui, PI_SWITCHBOARD_DOCS_UI)'),
         HTTP_NOT_FOUND
       )
     )
   }
 
   app.use('/v1/*', proxyAuthMiddleware(config))
+  // The old upstream key header (#65), on the one route that reads the key, after proxy auth: an
+  // unauthenticated caller gets the 401 first, and probes of the open paths are not affected.
+  app.use('/v1/chat/completions', renamedHeaderMiddleware())
   // `/healthz` itself stays open for liveness probes; its detail endpoints name providers and
   // models. Not `/healthz/*`: Hono's wildcard also matches the bare `/healthz`.
   app.use('/healthz/:check{.+}', proxyAuthMiddleware(config))

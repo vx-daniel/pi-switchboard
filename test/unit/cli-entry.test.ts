@@ -1,5 +1,5 @@
 /**
- * The CLI entry (src/index.ts), run in-process the way `pi-openai-proxy` runs it: argv in, then
+ * The CLI entry (src/index.ts), run in-process the way `pi-switchboard` runs it: argv in, then
  * what the user sees (stdout, stderr, exit code) and what the started server answers on loopback.
  */
 
@@ -16,19 +16,19 @@ import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../f
 import { listenOnLoopback } from '../fixtures/local-server'
 
 /**
- * Every `PI_PROXY_*` variable the CLI entry reads (`loadConfig`'s, plus `PI_PROXY_LOG_FORMAT`):
+ * Every `PI_SWITCHBOARD_*` variable the CLI entry reads (`loadConfig`'s, plus `PI_SWITCHBOARD_LOG_FORMAT`):
  * the developer's own settings must not reach a test.
  */
 const PROXY_ENV_VARIABLES = [
-  'PI_PROXY_HOST',
-  'PI_PROXY_PORT',
-  'PI_PROXY_AUTH_TOKEN',
-  'PI_PROXY_REMOTE_IMAGES',
-  'PI_PROXY_MAX_BODY_SIZE',
-  'PI_PROXY_UPSTREAM_TIMEOUT_MS',
-  'PI_PROXY_AGENTIC',
-  'PI_PROXY_LOG_LEVEL',
-  'PI_PROXY_LOG_FORMAT'
+  'PI_SWITCHBOARD_HOST',
+  'PI_SWITCHBOARD_PORT',
+  'PI_SWITCHBOARD_AUTH_TOKEN',
+  'PI_SWITCHBOARD_REMOTE_IMAGES',
+  'PI_SWITCHBOARD_MAX_BODY_SIZE',
+  'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
+  'PI_SWITCHBOARD_AGENTIC',
+  'PI_SWITCHBOARD_LOG_LEVEL',
+  'PI_SWITCHBOARD_LOG_FORMAT'
 ]
 
 const FIXTURE_TOKEN = 'notarealsecret-cli-entry-token'
@@ -74,12 +74,12 @@ function writeConfigFile(contents: Record<string, unknown>): void {
 }
 
 /**
- * Runs the CLI entry with these arguments, as `pi-openai-proxy <args>` would.
+ * Runs the CLI entry with these arguments, as `pi-switchboard <args>` would.
  *
  * @param args - the command-line arguments after the program name
  */
 async function runCli(args: readonly string[]): Promise<void> {
-  process.argv = [process.execPath, 'pi-openai-proxy', ...args]
+  process.argv = [process.execPath, 'pi-switchboard', ...args]
   vi.resetModules()
   // Dynamic and fresh each time: evaluating the entry module is what runs the CLI on process.argv.
   await import('@proxy/index')
@@ -326,8 +326,8 @@ describe('starting the server', () => {
   test('invalid env vars and numeric flags are ignored with a warning', async () => {
     const port = await freePort()
     writeConfigFile({ port })
-    vi.stubEnv('PI_PROXY_LOG_FORMAT', 'xml')
-    vi.stubEnv('PI_PROXY_LOG_LEVEL', 'loud')
+    vi.stubEnv('PI_SWITCHBOARD_LOG_FORMAT', 'xml')
+    vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'loud')
 
     await runCli(['--port', 'abc', '--max-body-size', '0', '--log-format', 'json'])
     await waitForListening(`http://127.0.0.1:${String(port)}`)
@@ -341,8 +341,8 @@ describe('starting the server', () => {
     ).toEqual([
       'Ignoring --"port"="abc": not a positive integer',
       'Ignoring --"max-body-size"="0": not a positive integer',
-      'Ignoring PI_PROXY_LOG_LEVEL="loud": not one of ["trace","debug","info","warning","error","fatal"]; using "info"',
-      'Ignoring PI_PROXY_LOG_FORMAT="xml": not one of ["pretty","json"]'
+      'Ignoring PI_SWITCHBOARD_LOG_LEVEL="loud": not one of ["trace","debug","info","warning","error","fatal"]; using "info"',
+      'Ignoring PI_SWITCHBOARD_LOG_FORMAT="xml": not one of ["pretty","json"]'
     ])
     expect(process.exitCode).toBeUndefined()
   })
@@ -384,7 +384,7 @@ describe('starting the server', () => {
     ).toEqual([
       {
         level: 'FATAL',
-        message: `Refusing to start: authToken in "${configFile}" is not a string. Fix it, or set a token with --auth-token or PI_PROXY_AUTH_TOKEN`
+        message: `Refusing to start: authToken in "${configFile}" is not a string. Fix it, or set a token with --auth-token or PI_SWITCHBOARD_AUTH_TOKEN`
       }
     ])
     expect(JSON.stringify(logRecords())).not.toContain('987654321')

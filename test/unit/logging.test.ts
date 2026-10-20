@@ -63,7 +63,7 @@ describe('JSON Lines output', () => {
     expect(lines[0]?.endsWith('\n')).toBe(true)
     expect(records()[0]).toMatchObject({
       level: 'INFO',
-      logger: 'pi-openai-proxy.server.http',
+      logger: 'pi-switchboard.server.http',
       // The rendered message quotes string values, so a value can never pose as message text.
       message: '"GET" "/v1/models" received',
       properties: { method: 'GET', path: '/v1/models' }
@@ -143,7 +143,7 @@ describe('redaction', () => {
     expect(records()[0]?.['properties']).toEqual(expectedProperties)
   })
 
-  // Catches the extension's file log (PI_PROXY_EXTENSION_LOG_FILE) skipping the redaction stderr
+  // Catches the extension's file log (PI_SWITCHBOARD_EXTENSION_LOG_FILE) skipping the redaction stderr
   // gets: it is a separate sink, configured separately.
   test('file sink: every listed property is replaced there too', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'pi-proxy-log-file-'))

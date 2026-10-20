@@ -1,5 +1,5 @@
 /**
- * Where the proxy's log level comes from: `--log-level` over `PI_PROXY_LOG_LEVEL` over
+ * Where the proxy's log level comes from: `--log-level` over `PI_SWITCHBOARD_LOG_LEVEL` over
  * `logLevel` in the config file over the `info` default, and what an invalid value in the
  * environment or the config file does.
  */
@@ -28,7 +28,7 @@ function writeConfigFile(contents: Record<string, unknown>): void {
 beforeEach(() => {
   agentDir = mkdtempSync(join(tmpdir(), 'pi-proxy-log-level-'))
   vi.stubEnv('PI_CODING_AGENT_DIR', agentDir)
-  vi.stubEnv('PI_PROXY_LOG_LEVEL', undefined)
+  vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', undefined)
   lines = []
   configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
 })
@@ -49,27 +49,27 @@ describe('log level precedence', () => {
     expect(loadConfig().logLevel).toBe('debug')
   })
 
-  test('PI_PROXY_LOG_LEVEL overrides the config file', () => {
+  test('PI_SWITCHBOARD_LOG_LEVEL overrides the config file', () => {
     writeConfigFile({ logLevel: 'debug' })
-    vi.stubEnv('PI_PROXY_LOG_LEVEL', 'error')
+    vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'error')
     expect(loadConfig().logLevel).toBe('error')
   })
 
   test('--log-level overrides the env var and the config file', () => {
     writeConfigFile({ logLevel: 'debug' })
-    vi.stubEnv('PI_PROXY_LOG_LEVEL', 'error')
+    vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'error')
     expect(loadConfig({ logLevel: 'trace' }).logLevel).toBe('trace')
   })
 })
 
 describe('invalid values', () => {
   // Catches a typo in the environment silently changing the level, or stopping the proxy.
-  test('an invalid PI_PROXY_LOG_LEVEL falls back to the config file, with a warning', () => {
+  test('an invalid PI_SWITCHBOARD_LOG_LEVEL falls back to the config file, with a warning', () => {
     writeConfigFile({ logLevel: 'debug' })
-    vi.stubEnv('PI_PROXY_LOG_LEVEL', 'loud')
+    vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'loud')
 
     expect(loadConfig().logLevel).toBe('debug')
-    expect(lines.join('')).toContain('PI_PROXY_LOG_LEVEL')
+    expect(lines.join('')).toContain('PI_SWITCHBOARD_LOG_LEVEL')
   })
 
   test('an invalid logLevel in the config file falls back to info', () => {

@@ -530,7 +530,7 @@ export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions
  * @remarks
  * Covers host, port, auth token (only when non-empty), remote images, the docs UI, body size,
  * upstream timeout and log level. Not `lifetime` or `zed` (extension-only). Not
- * `PI_PROXY_AGENTIC` either, on
+ * `PI_SWITCHBOARD_AGENTIC` either, on
  * purpose: agentic mode is not built, the variable only reaches the startup log, and the
  * extension has no setting for it.
  *
@@ -539,16 +539,16 @@ export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions
  */
 export function configToEnv(config: ProxyConfig): Record<string, string> {
   const env: Record<string, string> = {}
-  env['PI_PROXY_HOST'] = config.host
-  env['PI_PROXY_PORT'] = String(config.port)
+  env['PI_SWITCHBOARD_HOST'] = config.host
+  env['PI_SWITCHBOARD_PORT'] = String(config.port)
   if (config.authToken.length > 0) {
-    env['PI_PROXY_AUTH_TOKEN'] = config.authToken
+    env['PI_SWITCHBOARD_AUTH_TOKEN'] = config.authToken
   }
-  env['PI_PROXY_REMOTE_IMAGES'] = String(config.remoteImages)
-  env['PI_PROXY_DOCS_UI'] = String(config.docsUi)
-  env['PI_PROXY_MAX_BODY_SIZE'] = String(config.maxBodySizeMb * BYTES_PER_MB)
-  env['PI_PROXY_UPSTREAM_TIMEOUT_MS'] = String(config.upstreamTimeoutSec * MS_PER_SECOND)
-  env['PI_PROXY_LOG_LEVEL'] = config.logLevel
+  env['PI_SWITCHBOARD_REMOTE_IMAGES'] = String(config.remoteImages)
+  env['PI_SWITCHBOARD_DOCS_UI'] = String(config.docsUi)
+  env['PI_SWITCHBOARD_MAX_BODY_SIZE'] = String(config.maxBodySizeMb * BYTES_PER_MB)
+  env['PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS'] = String(config.upstreamTimeoutSec * MS_PER_SECOND)
+  env['PI_SWITCHBOARD_LOG_LEVEL'] = config.logLevel
   // Model exposure settings are not passed: the proxy reads them from the shared JSON config file,
   // at startup and again on every request (`fileConfigReader` in src/server/routes.ts).
   return env

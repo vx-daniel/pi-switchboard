@@ -83,7 +83,7 @@ describe('chat request with a credential that fails to resolve', () => {
     // The failure is still reported where a default deployment sees it, as a warning.
     expect(
       atInfoOrAbove.some(
-        (record) => record.level === 'WARN' && record.logger === 'pi-openai-proxy.pi.registry'
+        (record) => record.level === 'WARN' && record.logger === 'pi-switchboard.pi.registry'
       )
     ).toBe(true)
     for (const record of atInfoOrAbove) {

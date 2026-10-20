@@ -23,9 +23,9 @@ import {
 import { type ProxyState, tokenPreview } from '../../extensions/proxy/state'
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
 
-vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
-vi.mock('@vx-daniel/pi-openai-proxy/exposure', () => import('@proxy/openai/model-exposure'))
-vi.mock('@vx-daniel/pi-openai-proxy/logging', () => import('@proxy/logging'))
+vi.mock('@vx-daniel/pi-switchboard/config', () => import('@proxy/config/schema'))
+vi.mock('@vx-daniel/pi-switchboard/exposure', () => import('@proxy/openai/model-exposure'))
+vi.mock('@vx-daniel/pi-switchboard/logging', () => import('@proxy/logging'))
 
 /** The server line of `/proxy show` for the default config. */
 const DEFAULT_SERVER_LINE =

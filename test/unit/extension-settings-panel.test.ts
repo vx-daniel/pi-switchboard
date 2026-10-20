@@ -28,9 +28,9 @@ import { maybeAutoSyncZed } from '../../extensions/proxy/zed-sync'
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import { fakeCommandContext } from '../fixtures/extension-context'
 
-vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
-vi.mock('@vx-daniel/pi-openai-proxy/exposure', () => import('@proxy/openai/model-exposure'))
-vi.mock('@vx-daniel/pi-openai-proxy/logging', () => import('@proxy/logging'))
+vi.mock('@vx-daniel/pi-switchboard/config', () => import('@proxy/config/schema'))
+vi.mock('@vx-daniel/pi-switchboard/exposure', () => import('@proxy/openai/model-exposure'))
+vi.mock('@vx-daniel/pi-switchboard/logging', () => import('@proxy/logging'))
 
 /** A generated token: 16 random bytes as lowercase hex. */
 const GENERATED_TOKEN = /^[0-9a-f]{32}$/u

@@ -34,10 +34,10 @@ import proxyExtension from '../../extensions/proxy/index'
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
 import { fakeCommandContext, type Notification } from '../fixtures/extension-context'
 
-vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
-vi.mock('@vx-daniel/pi-openai-proxy/exposure', () => import('@proxy/openai/model-exposure'))
-vi.mock('@vx-daniel/pi-openai-proxy/logging', () => import('@proxy/logging'))
-vi.mock('@vx-daniel/pi-openai-proxy/sync/zed', () => import('@proxy/sync/zed'))
+vi.mock('@vx-daniel/pi-switchboard/config', () => import('@proxy/config/schema'))
+vi.mock('@vx-daniel/pi-switchboard/exposure', () => import('@proxy/openai/model-exposure'))
+vi.mock('@vx-daniel/pi-switchboard/logging', () => import('@proxy/logging'))
+vi.mock('@vx-daniel/pi-switchboard/sync/zed', () => import('@proxy/sync/zed'))
 
 const USAGE =
   '/proxy [start|stop|restart|status|verify|models|zed-sync|config|show|token|path|reset|help]'
@@ -114,7 +114,7 @@ describe('/proxy with models on two providers', () => {
     vi.stubEnv('CUSTOM_DATA_DIR', zedDir)
     vi.stubEnv('HOME', zedRoot)
     vi.stubEnv('XDG_CONFIG_HOME', zedRoot)
-    vi.stubEnv('PI_PROXY_EXTENSION_LOG_FILE', '')
+    vi.stubEnv('PI_SWITCHBOARD_EXTENSION_LOG_FILE', '')
     writeProxyConfig({ modelExposureMode: 'all' })
   })
 
@@ -264,7 +264,7 @@ describe('/proxy zed-sync with no models', () => {
     vi.stubEnv('CUSTOM_DATA_DIR', zedRoot)
     vi.stubEnv('HOME', zedRoot)
     vi.stubEnv('XDG_CONFIG_HOME', zedRoot)
-    vi.stubEnv('PI_PROXY_EXTENSION_LOG_FILE', '')
+    vi.stubEnv('PI_SWITCHBOARD_EXTENSION_LOG_FILE', '')
   })
 
   afterAll(() => {
