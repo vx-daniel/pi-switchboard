@@ -21,6 +21,7 @@ import {
 import { proxyLogger } from '@proxy/logging'
 import { supportedReasoningEfforts, thinkingLevelFor } from '@proxy/openai/reasoning-effort'
 import type { ChatCompletionRequest, ReasoningEffort } from '@proxy/openai/schemas'
+import { breakpointPatch } from '@proxy/pi/cache-breakpoints'
 import { getRuntime } from '@proxy/pi/registry'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
 import { isRecord } from '@proxy/utils/guards'
@@ -510,7 +511,9 @@ function upstreamTemperature(model: Model<Api>, temperature: number): number | u
 }
 
 /**
- * Builds the `onPayload` hook that injects the request's passthrough fields for `model.api`.
+ * Builds the `onPayload` hook that injects the request's passthrough fields for `model.api`, and
+ * puts the client's `prompt_cache_breakpoint`s back where the API takes them
+ * (`@proxy/pi/cache-breakpoints`).
  *
  * @remarks
  * Tool `strict` is not patched here: convertTools maps it to pi's constrainedSampling, which each
@@ -518,8 +521,8 @@ function upstreamTemperature(model: Model<Api>, temperature: number): number | u
  *
  * @param model - the pi model; its `api` picks the strategy
  * @param request - the validated chat request
- * @returns the hook, or `undefined` when there is nothing to inject: the API gets no passthrough,
- *   or (for a non-Google API) the request sets none of its fields
+ * @returns the hook, or `undefined` when there is nothing to inject: the API gets no passthrough
+ *   and no breakpoints, or (for a non-Google API) the request sets none of its fields
  */
 function passthroughHook(
   model: Model<Api>,
@@ -527,6 +530,7 @@ function passthroughHook(
 ): SimpleStreamOptions['onPayload'] {
   const payloadFields = collectPayloadFields(request, model.api)
   const needsGooglePatch = isGoogleApi(model.api)
+  const placeBreakpoints = breakpointPatch(model, request.messages)
   const payloadFieldNames = payloadFields === undefined ? [] : Object.keys(payloadFields)
 
   completeLogger.debug('Payload passthrough for {api}: {passthrough}', {
@@ -536,7 +540,9 @@ function passthroughHook(
     googlePatch: needsGooglePatch
   })
 
-  if (payloadFields === undefined && !needsGooglePatch) return undefined
+  if (payloadFields === undefined && !needsGooglePatch && placeBreakpoints === undefined) {
+    return undefined
+  }
   return (payload: unknown) => {
     if (!isRecord(payload)) {
       completeLogger.warn('Upstream payload for {api} is not an object; passthrough not applied', {
@@ -549,6 +555,7 @@ function passthroughHook(
     if (payloadFields !== undefined) Object.assign(payload, payloadFields)
     // Google: fields set on the payload's `config` object
     const googlePatched = needsGooglePatch && patchGooglePayload(payload, request)
+    placeBreakpoints?.(payload)
     completeLogger.debug('Patched upstream payload for {api}', {
       api: model.api,
       patchedFields: payloadFieldNames,

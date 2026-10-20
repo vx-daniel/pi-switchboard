@@ -1,26 +1,24 @@
 <!--
 Sync Impact Report
-Version change: 2.3.0 → 3.0.0 (MAJOR)
-Rationale: the project is no longer a fork that only mirrors three OpenAI routes. It stays
-OpenAI-compatible on the client side and grows in two directions: more of OpenAI's API (the
-Responses API, #140) and routing across pi's logins (#66–#70). Naming the exact stable routes
-here made every new route an amendment and kept the same list in four files. The constitution now
-says what a stable route must meet, and the list lives once, in `PLAN.md`. Principle I is renamed
-for what it protects, and a new principle VI states the routing rules before routing is built.
-MAJOR: principle I's governance changes (the route list leaves the constitution).
+Version change: 3.0.0 → 3.1.0 (MINOR)
+Rationale: OpenAI's `prompt_cache_breakpoint` on content parts marks where a reusable prompt prefix
+ends. docker-agent sends it on every system part for `gpt-*` models (#149). The proxy forwards it
+where the API has a slot for it, OpenAI's own chat completions and Responses, and nowhere else:
+pi rebuilds every provider's request, Codex's system prompt is a plain `instructions` string, and
+an OpenAI-compatible server may refuse a field it does not know. Rejecting it would break
+docker-agent, so the drop elsewhere is listed, logged and documented.
+MINOR: one exception added to principle I; no principle changes.
 Modified sections:
-- Scope (new): what pi-switchboard is and is not
-- I. OpenAI Compatibility (was Stable OpenAI Contract): criteria for a stable route; the list
-  moves to `PLAN.md`
-- VI. Routing Transparency (new)
-- API Compatibility and Security Boundaries: refers to the list in `PLAN.md`
+- I. OpenAI Compatibility: exceptions list gains `prompt_cache_breakpoint`
 Templates requiring updates:
-- ✅ PLAN.md: "Stable surface" is the list, with the criteria; goals and non-goals rewritten
-- ✅ AGENTS.md: links to the list instead of repeating it
-- ✅ ROADMAP.md, TODO.md: forward phases rewritten
-- ✅ README.md: project description
+- ✅ PLAN.md: "Prompt cache breakpoints" says where it goes and where it is dropped
+- ✅ README.md: the field in the supported-features table
+- ✅ docs/reference/claude-openai-compatibility.md: the content-part rows
 Follow-up TODOs:
 - None.
+
+3.0.0 (2026-10-20): a Scope section; principle I ("OpenAI Compatibility") states what a stable
+route must meet, and the route list moves to `PLAN.md`; a new principle VI, Routing Transparency.
 
 2.3.0 (2026-10-20): the env vars become `PI_SWITCHBOARD_*` and the upstream key header
 `X-Switchboard-Upstream-Api-Key` (#65); the old `PI_PROXY_AUTH_TOKEN` refuses to start.
@@ -71,6 +69,7 @@ A route can start as experimental, opt-in and outside the stable surface, and be
 Exceptions: a request field MAY be dropped instead of rejected only where it is listed here, with its reason, and documented where operators read the contract. Any other silent drop is a violation, and a new one needs an amendment.
 - Codex `temperature` (`openai-codex-responses`): the Codex backend refuses any request that carries it, and widely used clients send one on every request, so a `422` would make every Codex model unusable from them (#49, #80). Each drop is logged (the first per model at `info`, later ones at `debug`) and documented in `PLAN.md`'s Codex table and in `README.md`.
 - Passthrough fields a provider has no equivalent for (#81): `stop`, `user`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`, `tool_choice`, `parallel_tool_calls`, `metadata` and `prediction` reach each API verbatim or translated where it has an equivalent, and are dropped where it has none. Clients commonly send one parameter set to every model, and rejecting per API would break them. The per-API tables in `PLAN.md` ("API-aware payload translation") list exactly what each API receives, and `README.md` says fields without an equivalent are skipped; a change to what an API receives updates those tables.
+- `prompt_cache_breakpoint` on content parts (#149): forwarded to OpenAI's own chat completions and Responses (`api.openai.com`), which use it, and dropped for every other API. pi rebuilds each provider's request: Codex's system prompt is a plain `instructions` string with no part to carry it, and an OpenAI-compatible server may refuse a field it does not know. It only affects caching, never the answer, and docker-agent sends it on every `gpt-*` request, so a `422` would break it. Each drop is logged at `debug`, and `PLAN.md` ("Prompt cache breakpoints") and `README.md` document where it goes.
 
 Two kinds of route sit outside the stable surface, and only these:
 - Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs` (Swagger UI for the OpenAPI document). Only `/healthz` and `/docs` may skip proxy authentication; none may return a credential, and `/docs` MUST name no model or provider.
@@ -167,4 +166,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.0.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20
+**Version**: 3.1.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20
