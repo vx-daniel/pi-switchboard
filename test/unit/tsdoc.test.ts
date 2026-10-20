@@ -27,6 +27,36 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url))
  */
 const WHOLE_REPOSITORY_TIMEOUT_MS = 30_000
 
+/**
+ * Each sample check builds a program that loads TypeScript's library and the dependency types:
+ * about 0.3 s alone for the first one, which parses them, and over 5 s (vitest's default) under the
+ * gate's coverage and parallel load. Later samples reuse the parsed files ({@link LIBRARY_FILES}).
+ */
+const SAMPLE_PROGRAM_TIMEOUT_MS = 30_000
+
+/**
+ * Library and dependency source files parsed once and shared by every sample program: they never
+ * change between samples, and parsing them is most of a sample's cost. Keyed by the parse's target
+ * and module format as well as the file name ({@link libraryFileKey}), so a sample with other
+ * options gets its own parse. A file the host cannot find is cached as `undefined`.
+ */
+const LIBRARY_FILES = new Map<string, typescript.SourceFile | undefined>()
+
+/**
+ * The {@link LIBRARY_FILES} key for one parse of a file.
+ *
+ * @param fileName - the file's path
+ * @param languageVersion - the target, or the source-file options holding it, as the host gets it
+ * @returns the file name with the target and module format it is parsed for
+ */
+function libraryFileKey(
+  fileName: string,
+  languageVersion: typescript.ScriptTarget | typescript.CreateSourceFileOptions
+): string {
+  if (typeof languageVersion !== 'object') return `${languageVersion}:${fileName}`
+  return `${languageVersion.languageVersion}:${languageVersion.impliedNodeFormat ?? ''}:${fileName}`
+}
+
 /** Files whose every declaration is in scope: the code, and every non-test file under `test/`. */
 const FULL_SCOPE =
   /^(?:(?:src|extensions|scripts|lint|test)\/(?!.*\.test\.ts$).+|vite\.config\.ts)$/u
@@ -463,9 +493,14 @@ function inMemoryProgram(files: Readonly<Record<string, string>>): typescript.Pr
     readFile: (fileName) => virtual.get(fileName) ?? host.readFile(fileName),
     getSourceFile: (fileName, languageVersion, onError) => {
       const text = virtual.get(fileName)
-      return text === undefined
-        ? host.getSourceFile(fileName, languageVersion, onError)
-        : typescript.createSourceFile(fileName, text, languageVersion, true)
+      if (text !== undefined) {
+        return typescript.createSourceFile(fileName, text, languageVersion, true)
+      }
+      const key = libraryFileKey(fileName, languageVersion)
+      if (!LIBRARY_FILES.has(key)) {
+        LIBRARY_FILES.set(key, host.getSourceFile(fileName, languageVersion, onError))
+      }
+      return LIBRARY_FILES.get(key)
     }
   })
 }
@@ -500,150 +535,162 @@ function filesInScope(): string[] {
 
 // Catches a checker that finds nothing, which would let the repository-wide test pass whatever the
 // code says: one sample per rule, each reported once.
-test('reports each kind of TSDoc problem', () => {
-  const source = [
-    '/** A file comment without the package tag. */',
-    "import { join } from 'node:path'",
-    '',
-    'export const UNDOCUMENTED = 1',
-    '',
-    '/**',
-    ' * Joins badly.',
-    ' * @param {string} left the left',
-    ' * @param gone - not a parameter',
-    ' * @return the path',
-    ' */',
-    'export function badTags(left: string): string {',
-    '  return join(left)',
-    '}',
-    '',
-    '/**',
-    ' * @returns nothing',
-    ' */',
-    'export function noSummary(): void {}',
-    '',
-    '/** Identity, untagged. */',
-    'export const identity = <T,>(value: T): T => value',
-    '',
-    '/**',
-    ' * A guard with a bare remarks tag.',
-    ' * @remarks',
-    ' */',
-    'export function isText(value: unknown): value is string {',
-    "  return typeof value === 'string'",
-    '}',
-    '',
-    'export interface Shape { readonly side: number }',
-    '',
-    '/** A class. */',
-    'export class Box {',
-    '  method(size: number): number {',
-    '    return size',
-    '  }',
-    '}'
-  ].join('\n')
+test(
+  'reports each kind of TSDoc problem',
+  () => {
+    const source = [
+      '/** A file comment without the package tag. */',
+      "import { join } from 'node:path'",
+      '',
+      'export const UNDOCUMENTED = 1',
+      '',
+      '/**',
+      ' * Joins badly.',
+      ' * @param {string} left the left',
+      ' * @param gone - not a parameter',
+      ' * @return the path',
+      ' */',
+      'export function badTags(left: string): string {',
+      '  return join(left)',
+      '}',
+      '',
+      '/**',
+      ' * @returns nothing',
+      ' */',
+      'export function noSummary(): void {}',
+      '',
+      '/** Identity, untagged. */',
+      'export const identity = <T,>(value: T): T => value',
+      '',
+      '/**',
+      ' * A guard with a bare remarks tag.',
+      ' * @remarks',
+      ' */',
+      'export function isText(value: unknown): value is string {',
+      "  return typeof value === 'string'",
+      '}',
+      '',
+      'export interface Shape { readonly side: number }',
+      '',
+      '/** A class. */',
+      'export class Box {',
+      '  method(size: number): number {',
+      '    return size',
+      '  }',
+      '}'
+    ].join('\n')
 
-  expect(sampleProblems({ 'src/sample.ts': source })).toEqual([
-    'src/sample.ts:1 (file): file comment needs @packageDocumentation',
-    'src/sample.ts:4 UNDOCUMENTED: no doc comment',
-    'src/sample.ts:12 badTags: @param must read "@param name - description": {string} left the left',
-    'src/sample.ts:12 badTags: @param carries a {type}; TSDoc takes types from the signature',
-    'src/sample.ts:12 badTags: @return is not a TSDoc tag',
-    'src/sample.ts:12 badTags: no @param for left',
-    'src/sample.ts:12 badTags: @param {string} names no parameter',
-    'src/sample.ts:12 badTags: @param gone names no parameter',
-    'src/sample.ts:12 badTags: no @returns',
-    'src/sample.ts:19 noSummary: no summary before the first tag',
-    'src/sample.ts:19 noSummary: @returns on a function that returns nothing',
-    'src/sample.ts:22 identity: no @param for value',
-    'src/sample.ts:22 identity: no @typeParam for T',
-    'src/sample.ts:22 identity: no @returns',
-    'src/sample.ts:28 isText: @remarks is empty',
-    'src/sample.ts:28 isText: no @param for value',
-    'src/sample.ts:28 isText: no @returns',
-    'src/sample.ts:32 Shape: no doc comment',
-    'src/sample.ts:36 Box.method: no doc comment'
-  ])
-})
+    expect(sampleProblems({ 'src/sample.ts': source })).toEqual([
+      'src/sample.ts:1 (file): file comment needs @packageDocumentation',
+      'src/sample.ts:4 UNDOCUMENTED: no doc comment',
+      'src/sample.ts:12 badTags: @param must read "@param name - description": {string} left the left',
+      'src/sample.ts:12 badTags: @param carries a {type}; TSDoc takes types from the signature',
+      'src/sample.ts:12 badTags: @return is not a TSDoc tag',
+      'src/sample.ts:12 badTags: no @param for left',
+      'src/sample.ts:12 badTags: @param {string} names no parameter',
+      'src/sample.ts:12 badTags: @param gone names no parameter',
+      'src/sample.ts:12 badTags: no @returns',
+      'src/sample.ts:19 noSummary: no summary before the first tag',
+      'src/sample.ts:19 noSummary: @returns on a function that returns nothing',
+      'src/sample.ts:22 identity: no @param for value',
+      'src/sample.ts:22 identity: no @typeParam for T',
+      'src/sample.ts:22 identity: no @returns',
+      'src/sample.ts:28 isText: @remarks is empty',
+      'src/sample.ts:28 isText: no @param for value',
+      'src/sample.ts:28 isText: no @returns',
+      'src/sample.ts:32 Shape: no doc comment',
+      'src/sample.ts:36 Box.method: no doc comment'
+    ])
+  },
+  SAMPLE_PROGRAM_TIMEOUT_MS
+)
 
 // Catches false positives that would demand meaningless tags: no `@returns` for void, async void
 // or a void call's result, one `@param` for a destructured parameter, and nothing for object-literal
 // members, callbacks and local lambdas.
-test('accepts complete TSDoc and leaves out-of-scope functions alone', () => {
-  const source = [
-    '/**',
-    ' * A sample module.',
-    ' *',
-    ' * @packageDocumentation',
-    ' */',
-    '',
-    'declare function done(value: string): void',
-    '',
-    '/**',
-    ' * Finishes.',
-    ' *',
-    ' * @param value - the value',
-    ' */',
-    'export const finish = (value: string): void => done(value)',
-    '',
-    '/**',
-    ' * Waits.',
-    ' *',
-    ' * @param count - how many',
-    ' */',
-    'export async function wait(count: number): Promise<void> {',
-    '  await Promise.resolve(count)',
-    '}',
-    '',
-    '/**',
-    ' * Reads options.',
-    ' *',
-    ' * @remarks',
-    ' * An `@param` inside a fence is text:',
-    ' * ```ts',
-    ' * @param nothing',
-    ' * ```',
-    ' * @param options - the options',
-    ' * @returns the size',
-    ' */',
-    'export function size({ width }: { width: number }): number {',
-    '  const double = (value: number): number => value * 2',
-    '  return double(width)',
-    '}',
-    '',
-    '/** Handlers by name. */',
-    'export const HANDLERS = {',
-    '  go: (value: string): number => value.length',
-    '}'
-  ].join('\n')
+test(
+  'accepts complete TSDoc and leaves out-of-scope functions alone',
+  () => {
+    const source = [
+      '/**',
+      ' * A sample module.',
+      ' *',
+      ' * @packageDocumentation',
+      ' */',
+      '',
+      'declare function done(value: string): void',
+      '',
+      '/**',
+      ' * Finishes.',
+      ' *',
+      ' * @param value - the value',
+      ' */',
+      'export const finish = (value: string): void => done(value)',
+      '',
+      '/**',
+      ' * Waits.',
+      ' *',
+      ' * @param count - how many',
+      ' */',
+      'export async function wait(count: number): Promise<void> {',
+      '  await Promise.resolve(count)',
+      '}',
+      '',
+      '/**',
+      ' * Reads options.',
+      ' *',
+      ' * @remarks',
+      ' * An `@param` inside a fence is text:',
+      ' * ```ts',
+      ' * @param nothing',
+      ' * ```',
+      ' * @param options - the options',
+      ' * @returns the size',
+      ' */',
+      'export function size({ width }: { width: number }): number {',
+      '  const double = (value: number): number => value * 2',
+      '  return double(width)',
+      '}',
+      '',
+      '/** Handlers by name. */',
+      'export const HANDLERS = {',
+      '  go: (value: string): number => value.length',
+      '}'
+    ].join('\n')
 
-  expect(sampleProblems({ 'src/sample.ts': source })).toEqual([])
-})
+    expect(sampleProblems({ 'src/sample.ts': source })).toEqual([])
+  },
+  SAMPLE_PROGRAM_TIMEOUT_MS
+)
 
 // Catches the test-file scope drifting: constants and the file comment are free, helper functions,
 // at any depth, are not.
-test('in a test file, only helper functions are in scope', () => {
-  const source = [
-    '/** A test file comment needs no package tag. */',
-    'const LIMIT = 3',
-    'let current = 0',
-    '',
-    'function helper(value: number): number {',
-    '  return value + LIMIT + current',
-    '}',
-    '',
-    'export const run = (): void => {',
-    '  function nested(): void {}',
-    '  nested()',
-    '}'
-  ].join('\n')
+test(
+  'in a test file, only helper functions are in scope',
+  () => {
+    const source = [
+      '/** A test file comment needs no package tag. */',
+      'const LIMIT = 3',
+      'let current = 0',
+      '',
+      'function helper(value: number): number {',
+      '  return value + LIMIT + current',
+      '}',
+      '',
+      'export const run = (): void => {',
+      '  function nested(): void {}',
+      '  nested()',
+      '}'
+    ].join('\n')
 
-  expect(sampleProblems({ 'test/unit/sample.test.ts': source })).toEqual([
-    'test/unit/sample.test.ts:5 helper: no doc comment',
-    'test/unit/sample.test.ts:9 run: no doc comment',
-    'test/unit/sample.test.ts:10 nested: no doc comment'
-  ])
-})
+    expect(sampleProblems({ 'test/unit/sample.test.ts': source })).toEqual([
+      'test/unit/sample.test.ts:5 helper: no doc comment',
+      'test/unit/sample.test.ts:9 run: no doc comment',
+      'test/unit/sample.test.ts:10 nested: no doc comment'
+    ])
+  },
+  SAMPLE_PROGRAM_TIMEOUT_MS
+)
 
 // Catches a declaration in scope without a valid TSDoc comment, anywhere in the repository.
 test(
