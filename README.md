@@ -8,7 +8,9 @@ A local OpenAI-compatible HTTP API built on [pi](https://github.com/badlogic/pi-
 - **No duplicate config** — reuses pi's `~/.pi/agent/auth.json` and `models.json` for credentials and model definitions
 - **Self-hosted** — runs locally, no third-party proxy services
 - **Streaming** — full SSE streaming with token usage and cost tracking
-- **Strict validation** — unsupported parameters are rejected clearly, not silently ignored
+- **Strict validation** — unsupported parameters are rejected clearly, not silently ignored, and every response is checked against OpenAI's published spec
+
+Where it's going (see [`ROADMAP.md`](ROADMAP.md)): routing across your pi logins — aliases, fallback chains, cooldowns and quota awareness (#66–#70) — and more of OpenAI's API, starting with the Responses API (#140). It stays OpenAI-compatible on the client side; it doesn't run logins of its own, keep conversation state, or speak other vendors' client protocols.
 
 ## Prerequisites
 
@@ -109,6 +111,8 @@ curl http://localhost:4141/v1/chat/completions \
 ```
 
 ## Supported Endpoints
+
+The stable routes are the first three rows. [`PLAN.md`](PLAN.md) "Stable surface" is the authoritative list, and says what a route must meet to join it.
 
 | Endpoint | Description |
 |---|---|

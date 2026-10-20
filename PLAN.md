@@ -6,34 +6,37 @@ Use this file for architecture, API compatibility policy, security boundaries, p
 
 ## Goals
 
-Build a local OpenAI-compatible HTTP proxy on top of pi's SDK and model registry.
+pi-switchboard is a local HTTP API over pi's models, logins and providers that speaks OpenAI's API
+to its clients (constitution, "Scope").
 
 Primary goals:
 
-- Expose `GET /v1/models`
-- Expose `GET /v1/models/{model}`
-- Expose `POST /v1/chat/completions`
-- Reuse pi's configured auth and model definitions
-- Support streaming and non-streaming chat completions
+- Serve OpenAI's API where pi can back it: models and chat completions today, the Responses API
+  next (#140)
+- Reuse pi's configured auth and model definitions; run no logins of its own
+- Route requests across pi's logins: aliases, fallback chains, cooldowns, quota awareness, usage by
+  route (#66–#70), under constitution principle VI
 - Support OpenAI function tools where they can be translated safely
+- Stay checked against OpenAI's published spec (#132) and describe itself in OpenAPI (#129)
 
 Secondary goals:
 
 - Preserve request and usage observability
 - Be safe by default for local usage
-- Provide a path for optional experimental agentic mode later
+- Distribution: npm and `pi install` (#59), a Docker image (#60), a standalone binary (#61)
+- Later, not planned: an experimental agentic mode ("Agentic mode" below)
 
 ## Non-goals
 
-Out of scope for the stable proxy:
-
-- `POST /v1/completions`
-- `POST /v1/embeddings`
-- `POST /v1/audio/*`
-- `POST /v1/images/*`
-- assistants, threads, runs, files, batches, fine-tuning
-- full OpenAI platform parity
-- exposing unrestricted agent tool execution under the standard chat-completions contract
+- OpenAI endpoints pi cannot back: embeddings, audio, image and video generation (pi-ai 1.3 has
+  image generation for OpenRouter only), realtime
+- OpenAI's stateful platform services: stored chat completions and responses, assistants,
+  threads, files, batches, fine-tuning, conversations. The proxy keeps no conversation state
+- Other vendors' client protocols (Anthropic `/v1/messages`, Gemini `/v1beta`): clients speak
+  OpenAI's API to the proxy, and pi speaks each provider's to the provider
+- Logins, token refresh or credential storage of its own: pi owns them
+- Legacy `POST /v1/completions`
+- Exposing unrestricted agent tool execution under an OpenAI-compatible route
 
 ## Production defaults
 
@@ -67,11 +70,21 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 
 ## API compatibility policy
 
-### Stable endpoints
+### Stable surface
 
-- `GET /v1/models`
-- `GET /v1/models/{model}`
-- `POST /v1/chat/completions`
+The routes covered by constitution principle I, the one list of them (AGENTS.md and README link
+here). Each one meets principle I's criteria: an OpenAI-defined route, checked against the pinned
+spec, described in `openapi.json`, documented in README and here.
+
+| Route | Since | Decision |
+|---|---|---|
+| `GET /v1/models` | Phase 1 | original contract |
+| `GET /v1/models/{model}` | Phase 1 | original contract |
+| `POST /v1/chat/completions` | Phase 1 | original contract |
+
+Planned: `POST /v1/responses` (#140), experimental first, then promoted here once it meets the
+criteria. Adding or removing a row is a decision recorded in this table, with its issue, and a
+`feat` (or breaking) change; it is not a constitution amendment.
 
 ### Reference spec
 
@@ -979,8 +992,8 @@ no setting loosens them.
 
 ### Agentic mode
 
-Agentic mode is experimental and not built. `PI_SWITCHBOARD_AGENTIC=true` sets a flag that only the
-startup log reads.
+Later, not planned (ROADMAP "Later, not planned"). Agentic mode is experimental and not built.
+`PI_SWITCHBOARD_AGENTIC=true` sets a flag that only the startup log reads.
 
 Security defaults for any future agentic mode:
 
@@ -1042,7 +1055,7 @@ removed.
 
 ### Scaling notes
 
-`routes.ts` is the sole composition root. The chat completions work is split across helpers (`parseChatRequest`, `inlineImages`, `buildPiContext`, `checkRequestAuth`, `streamChat`, `completeChat`) driven by `handleChatCompletion`. This is manageable for the current four-endpoint surface but should be decomposed further if new endpoints or complex middleware (agentic mode) are added.
+`routes.ts` is the sole composition root. The chat completions work is split across helpers (`parseChatRequest`, `inlineImages`, `buildPiContext`, `checkRequestAuth`, `streamChat`, `completeChat`) driven by `handleChatCompletion`. This is manageable for the current surface but should be decomposed before a second completion route (the Responses API, #140) or routing middleware (#66–#70) is added.
 
 The pi extension lives in `extensions/proxy/`, isolated from the core proxy. pi loads `index.ts` (the `/proxy` command family and lifecycle hooks) as the single extension; the sibling modules split the rest: `state.ts` (shared config/registry state), `process.ts` (PID file, probe, start/stop/status), `reports.ts` (show/models/verify), `zed-sync.ts`, `settings-panel.ts`, and `model-selector.ts`. Add new extension modules there rather than as top-level files in `extensions/`, which pi would load as separate extensions.
 
@@ -1248,9 +1261,10 @@ Release gate:
 - the `openai` Node SDK with `_strict_response_validation: true` parses every response without errors
 - typecheck, lint, and tests pass
 
-### Phase 4 — Experimental agentic mode
+### Later, not planned — experimental agentic mode
 
-Only after stable proxy behavior is complete:
+Kept as a design note. The phases after the rename (Distribution, Routing, More of OpenAI's API)
+are in `ROADMAP.md`; if agentic mode is picked up, it needs:
 
 - explicit agentic endpoint or explicit opt-in header
 - `AgentSession` event bridge
