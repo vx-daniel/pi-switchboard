@@ -15,6 +15,7 @@ import {
   bodySizeLimitMiddleware,
   disconnectMiddleware,
   proxyAuthMiddleware,
+  renamedHeaderMiddleware,
   requestIdMiddleware
 } from '@proxy/server/middleware'
 import {
@@ -65,6 +66,7 @@ export function createApp(
   // Global middleware
   app.use('*', requestIdMiddleware())
   app.use('*', disconnectMiddleware())
+  app.use('*', renamedHeaderMiddleware())
   app.use('*', bodySizeLimitMiddleware(config))
 
   // The OpenAPI document and the docs page, open like `/healthz`: registered before proxy auth.
@@ -84,7 +86,7 @@ export function createApp(
     // Still registered and described, so the document does not depend on the config.
     app.get(DOCS_PATH, describeRoute(docsPageDescription), (context) =>
       context.json(
-        invalidRequest('The docs page is off; turn on docsUi (--docs-ui, PI_PROXY_DOCS_UI)'),
+        invalidRequest('The docs page is off; turn on docsUi (--docs-ui, PI_SWITCHBOARD_DOCS_UI)'),
         HTTP_NOT_FOUND
       )
     )

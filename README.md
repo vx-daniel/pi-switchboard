@@ -26,6 +26,22 @@ pnpm add -g @vx-daniel/pi-switchboard
 pnpm dlx @vx-daniel/pi-switchboard
 ```
 
+### Coming from pi-openai-proxy
+
+Version 0.1.0 renamed everything that carried the old name, with no aliases:
+
+| Before | Now |
+|---|---|
+| package `@vx-daniel/pi-openai-proxy`, command `pi-openai-proxy` | `@vx-daniel/pi-switchboard`, `pi-switchboard` |
+| env vars `PI_PROXY_*` (e.g. `PI_PROXY_AUTH_TOKEN`, `PI_PROXY_PORT`) | `PI_SWITCHBOARD_*` (`PI_SWITCHBOARD_AUTH_TOKEN`, `PI_SWITCHBOARD_PORT`, same suffixes) |
+| header `X-Pi-Upstream-Api-Key` | `X-Switchboard-Upstream-Api-Key` |
+| log categories `pi-openai-proxy.*` | `pi-switchboard.*` |
+
+- **A `PI_PROXY_*` variable that is still set is not read.** The proxy warns about it at startup and names the replacement.
+- **An old `PI_PROXY_AUTH_TOKEN` stops the proxy from starting** unless `PI_SWITCHBOARD_AUTH_TOKEN` or `--auth-token` is set. Ignoring it would quietly turn auth off.
+- **A request with the old header gets a 400** that names the new one.
+- **Unchanged:** `proxy-config.json` in pi's agent directory, the `/proxy` command and `x_pi`.
+
 ## Quickstart
 
 ```bash
@@ -107,7 +123,7 @@ curl http://localhost:4141/v1/chat/completions \
 
 `GET /v1/switchboard/openapi.json` describes every route the proxy serves: each request and response schema, every error status, and the bearer token. It includes the health checks below and the OpenAI endpoints the proxy answers with 404 ("Not supported"). Point any OpenAPI tool at it, such as a client generator, Postman or an API diff. The same document is committed as [`openapi.json`](openapi.json), so a change to the API shows up in a pull request.
 
-Turn on `docsUi` (`--docs-ui`, `PI_PROXY_DOCS_UI=true`, or the settings panel) and open `http://localhost:4141/docs` in a browser to browse the API and send requests with "Try it out". With proxy auth on, click **Authorize** and enter the token first. The page loads Swagger UI 5.34.0 from the jsDelivr CDN, so it needs internet access; that is why it is off by default. While it is off, `/docs` answers 404.
+Turn on `docsUi` (`--docs-ui`, `PI_SWITCHBOARD_DOCS_UI=true`, or the settings panel) and open `http://localhost:4141/docs` in a browser to browse the API and send requests with "Try it out". With proxy auth on, click **Authorize** and enter the token first. The page loads Swagger UI 5.34.0 from the jsDelivr CDN, so it needs internet access; that is why it is off by default. While it is off, `/docs` answers 404.
 
 Neither route needs the proxy token, even with proxy auth on: a browser cannot send one to open a page. Both name routes and schemas only, never a model, provider or credential, and every route they describe still needs the token.
 
@@ -124,11 +140,11 @@ Operational endpoints, outside the OpenAI-compatible `/v1` surface:
 None of them returns a credential. `/healthz` proves the process is up, not that a provider will accept a request: `GET /healthz/creds?verify=true` is the closest check to that without spending a completion.
 
 - **`verify=true` costs what a real request's credential lookup costs.** pi refreshes an OAuth token only when it is about to expire and caches the output of a `models.json` key command, so polling it mostly stays local; the network call it can make is the refresh the next real request would have made. A failed verification reports pi's summary, the token URL and the upstream HTTP status; the upstream response body goes to the `debug` log only.
-- **Without `PI_PROXY_AUTH_TOKEN`, the detail endpoints are open**, like `/v1/*`. Bound to `127.0.0.1` (the default) that is local only; on `0.0.0.0` set a token, or anyone who can reach the port sees your provider names and model counts.
+- **Without `PI_SWITCHBOARD_AUTH_TOKEN`, the detail endpoints are open**, like `/v1/*`. Bound to `127.0.0.1` (the default) that is local only; on `0.0.0.0` set a token, or anyone who can reach the port sees your provider names and model counts.
 
 ```bash
 curl -fsS http://localhost:4141/healthz
-curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bearer $PI_PROXY_AUTH_TOKEN"
+curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN"
 ```
 
 ## Supported Chat Completions Features
@@ -229,15 +245,15 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 
 | Setting | Env variable | Default | Description |
 |---|---|---|---|
-| Bind address | `PI_PROXY_HOST` | `127.0.0.1` | Network interface (`127.0.0.1` = local only, `0.0.0.0` = all) (`--host`, `host` in the config file) |
-| Port | `PI_PROXY_PORT` | `4141` | HTTP listen port (`--port`, `port`) |
-| Auth token | `PI_PROXY_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication (`--auth-token`, `authToken`) |
-| Remote images | `PI_PROXY_REMOTE_IMAGES` | `false` | Fetch remote image URLs server-side and inline them as base64; off, they are rejected with `400`. The proxy then makes requests for its clients, so only public `http`/`https` hosts are allowed (see [Security defaults](#security-defaults)) (`--remote-images`, `remoteImages`) |
-| Docs UI | `PI_PROXY_DOCS_UI` | `false` | Serve Swagger UI at `/docs` ([API documentation](#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
-| Max body size | `PI_PROXY_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
-| Upstream timeout | `PI_PROXY_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds (`upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
-| Log level | `PI_PROXY_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
-| Log format | `PI_PROXY_LOG_FORMAT` | pretty on a terminal, `json` otherwise | `pretty` or `json` (also `--log-format`; no config-file key) |
+| Bind address | `PI_SWITCHBOARD_HOST` | `127.0.0.1` | Network interface (`127.0.0.1` = local only, `0.0.0.0` = all) (`--host`, `host` in the config file) |
+| Port | `PI_SWITCHBOARD_PORT` | `4141` | HTTP listen port (`--port`, `port`) |
+| Auth token | `PI_SWITCHBOARD_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication (`--auth-token`, `authToken`) |
+| Remote images | `PI_SWITCHBOARD_REMOTE_IMAGES` | `false` | Fetch remote image URLs server-side and inline them as base64; off, they are rejected with `400`. The proxy then makes requests for its clients, so only public `http`/`https` hosts are allowed (see [Security defaults](#security-defaults)) (`--remote-images`, `remoteImages`) |
+| Docs UI | `PI_SWITCHBOARD_DOCS_UI` | `false` | Serve Swagger UI at `/docs` ([API documentation](#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
+| Max body size | `PI_SWITCHBOARD_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
+| Upstream timeout | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds (`upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
+| Log level | `PI_SWITCHBOARD_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
+| Log format | `PI_SWITCHBOARD_LOG_FORMAT` | pretty on a terminal, `json` otherwise | `pretty` or `json` (also `--log-format`; no config-file key) |
 
 ### Logging
 
@@ -245,11 +261,11 @@ The proxy logs with [LogTape](https://logtape.org) to stderr:
 - **Pretty** ([@logtape/pretty](https://jsr.io/@logtape/pretty)): readable, colored lines stamped with the local date, time and UTC offset (in a container, set `TZ`, e.g. `TZ=America/Chicago`). The default on a terminal.
 - **JSON** ([JSON Lines](https://jsonlines.org)): one object per record with `@timestamp` (UTC), `level`, `logger` (the category, e.g. `pi-switchboard.server.http`), `message` and `properties`. The default when stderr is piped or redirected, as in `docker logs`.
 
-`PI_PROXY_LOG_FORMAT` (or `--log-format`) picks one regardless of the terminal, for example `pretty` for reading `docker compose logs` directly.
+`PI_SWITCHBOARD_LOG_FORMAT` (or `--log-format`) picks one regardless of the terminal, for example `pretty` for reading `docker compose logs` directly.
 
 Passing `/healthz` checks are logged at `debug`; a failed one stays at `info`.
 
-An invalid `--log-level` or `--log-format` stops the proxy from starting and lists the valid values. An invalid `PI_PROXY_LOG_LEVEL` or `PI_PROXY_LOG_FORMAT` is ignored with a warning, and an invalid `logLevel` in the config file falls back to `info`, so a bad value in either never keeps a background proxy from starting.
+An invalid `--log-level` or `--log-format` stops the proxy from starting and lists the valid values. An invalid `PI_SWITCHBOARD_LOG_LEVEL` or `PI_SWITCHBOARD_LOG_FORMAT` is ignored with a warning, and an invalid `logLevel` in the config file falls back to `info`, so a bad value in either never keeps a background proxy from starting.
 
 If proxy auth is off and the proxy binds to anything other than a loopback address, it logs a warning at startup: any client that can reach the port can use your provider credentials.
 
@@ -257,7 +273,7 @@ Every line a request causes carries its `requestId` (and `clientRequestId` when 
 
 Message content and credentials are never logged. Credential-named properties are redacted as a backstop.
 
-The pi extension logs nothing by default, because output would corrupt pi's terminal UI. To capture its logs, set `PI_PROXY_EXTENSION_LOG_FILE=/path/to/extension.log` before starting pi; the extension then appends JSON Lines there at the configured log level.
+The pi extension logs nothing by default, because output would corrupt pi's terminal UI. To capture its logs, set `PI_SWITCHBOARD_EXTENSION_LOG_FILE=/path/to/extension.log` before starting pi; the extension then appends JSON Lines there at the configured log level.
 
 Model exposure settings are configured via the JSON config file (`~/.pi/agent/proxy-config.json`):
 
@@ -290,30 +306,30 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
 
 ### Per-request API key override
 
-The `X-Pi-Upstream-Api-Key` header overrides the registry-resolved API key for a single request. This keeps `Authorization` available for proxy authentication:
+The `X-Switchboard-Upstream-Api-Key` header overrides the registry-resolved API key for a single request. This keeps `Authorization` available for proxy authentication:
 
 ```bash
 curl http://localhost:4141/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -H "X-Pi-Upstream-Api-Key: sk-your-key-here" \
+  -H "X-Switchboard-Upstream-Api-Key: sk-your-key-here" \
   -d '{"model": "openai/gpt-4o", "messages": [{"role": "user", "content": "Hi"}]}'
 ```
 
 ### Proxy authentication
 
-Set `PI_PROXY_AUTH_TOKEN` to require a bearer token for every request except the `GET /healthz` liveness check:
+Set `PI_SWITCHBOARD_AUTH_TOKEN` to require a bearer token for every request except the `GET /healthz` liveness check:
 
 ```bash
-PI_PROXY_AUTH_TOKEN=my-secret-token pi-switchboard
+PI_SWITCHBOARD_AUTH_TOKEN=my-secret-token pi-switchboard
 
 # Clients must include the token
 curl http://localhost:4141/v1/models \
   -H "Authorization: Bearer my-secret-token"
 ```
 
-The token can also live in the config file (`"authToken": "…"`); a flag or `PI_PROXY_AUTH_TOKEN` wins over it, and `"authToken": ""` (the default) turns auth off. An `authToken` that is set but is not a string (`12345`, `true`, `null`, an object) does **not** turn auth off: the proxy refuses to start, logging why (naming the field, never its value) and exiting with status `1`, until the file is fixed or a token is set by flag or environment. `/proxy start` refuses too, with the reason. The settings panel and `/proxy show` say "invalid"; saving another setting from the panel keeps the file's value, and only a choice on the auth row (or `/proxy reset`) replaces it.
+The token can also live in the config file (`"authToken": "…"`); a flag or `PI_SWITCHBOARD_AUTH_TOKEN` wins over it, and `"authToken": ""` (the default) turns auth off. An `authToken` that is set but is not a string (`12345`, `true`, `null`, an object) does **not** turn auth off: the proxy refuses to start, logging why (naming the field, never its value) and exiting with status `1`, until the file is fixed or a token is set by flag or environment. `/proxy start` refuses too, with the reason. The settings panel and `/proxy show` say "invalid"; saving another setting from the panel keeps the file's value, and only a choice on the auth row (or `/proxy reset`) replaces it.
 
-An empty override (`--auth-token ''` or `PI_PROXY_AUTH_TOKEN=`) refuses to start the same way, naming the flag or variable. The config file's token is not used instead; unset the variable to use it. An empty `PI_PROXY_AUTH_TOKEN` in pi's own environment reaches a proxy the extension starts, so `/proxy start` refuses then as well, unless a token is set in `/proxy config`.
+An empty override (`--auth-token ''` or `PI_SWITCHBOARD_AUTH_TOKEN=`) refuses to start the same way, naming the flag or variable. The config file's token is not used instead; unset the variable to use it. An empty `PI_SWITCHBOARD_AUTH_TOKEN` in pi's own environment reaches a proxy the extension starts, so `/proxy start` refuses then as well, unless a token is set in `/proxy config`.
 
 ### API compatibility
 
@@ -321,7 +337,7 @@ The proxy implements a subset of the [OpenAI Chat Completions API](https://platf
 
 Upstream failures before a response starts get an HTTP status, streamed or not, as OpenAI answers them: `400` `context_length_exceeded` when the conversation is longer than the model's context window (agent clients compact on it), `429` `rate_limit`, `502`, `503`, `504` `timeout`, each with a fixed message that never quotes the provider. A stream that already started ends with an error event carrying the same body. See [Error mapping](PLAN.md#error-mapping).
 
-So a streaming response sends nothing, headers included, until the provider has accepted the request: as with OpenAI itself, the first byte takes the provider's own response time. A client or reverse proxy in front of the proxy needs a header timeout longer than that; the proxy's upstream timeout (`PI_PROXY_UPSTREAM_TIMEOUT_MS`, 120 s) caps the wait.
+So a streaming response sends nothing, headers included, until the provider has accepted the request: as with OpenAI itself, the first byte takes the provider's own response time. A client or reverse proxy in front of the proxy needs a header timeout longer than that; the proxy's upstream timeout (`PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS`, 120 s) caps the wait.
 
 There is no OpenAPI/Swagger spec for the proxy itself. Use the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat/create) as the primary documentation, noting the supported subset listed in this README.
 
@@ -370,7 +386,7 @@ pi-switchboard
 pi-switchboard &
 
 # With custom port
-PI_PROXY_PORT=8080 pi-switchboard &
+PI_SWITCHBOARD_PORT=8080 pi-switchboard &
 ```
 
 The extension detects externally running instances and shows their status via `/proxy status` without trying to manage them.
@@ -433,7 +449,7 @@ The toolchain is [Vite+](https://viteplus.dev) (`vp`); all config lives in `vite
 
 ```bash
 vp install            # Install dependencies (pnpm); also installs the Git hooks
-vp run dev            # Rebuild on change and restart the proxy on port 4142 (PI_PROXY_DEV_PORT to change)
+vp run dev            # Rebuild on change and restart the proxy on port 4142 (PI_SWITCHBOARD_DEV_PORT to change)
 pnpm run check:all    # The gate: format, lint + type check, tests with coverage, fallow, build
 vp check --fix        # Format and apply lint fixes
 vp test               # Offline tests (unit + integration): no real login, no network beyond 127.0.0.1
@@ -445,7 +461,7 @@ vp pack               # Build for npm (ESM + .d.ts)
 
 `check:all` (`scripts/gate.ts`) is the one definition of "green": the pre-commit hook, CI, and the release workflow all run it.
 
-Offline tests run with pi pointed at an empty agent directory and credential env vars removed (`test/setup/offline.ts`). Tests that need models or an upstream build them with `test/fixtures/agent-dir.ts` and the local mock provider in `test/fixtures/mock-provider.ts`, which serves scripted replies or replays real provider traffic recorded by `test:live:record` (`test/fixtures/recording.ts`, `test/fixtures/recordings/`). Recording forwards pi's real requests to the provider through a local recorder and saves the responses without credentials; it refuses to save one that contains a credential. Set `PI_PROXY_RECORD_AGENT_DIR` to a pi agent directory with a login made for recording: never a copy of a login another pi or proxy uses, because refreshing an expired token rotates it under every copy. Recordings go to `test/fixtures/recordings/` unless `PI_PROXY_RECORD_OUT_DIR` names another directory (a relative path is taken from the working directory).
+Offline tests run with pi pointed at an empty agent directory and credential env vars removed (`test/setup/offline.ts`). Tests that need models or an upstream build them with `test/fixtures/agent-dir.ts` and the local mock provider in `test/fixtures/mock-provider.ts`, which serves scripted replies or replays real provider traffic recorded by `test:live:record` (`test/fixtures/recording.ts`, `test/fixtures/recordings/`). Recording forwards pi's real requests to the provider through a local recorder and saves the responses without credentials; it refuses to save one that contains a credential. Set `PI_SWITCHBOARD_RECORD_AGENT_DIR` to a pi agent directory with a login made for recording: never a copy of a login another pi or proxy uses, because refreshing an expired token rotates it under every copy. Recordings go to `test/fixtures/recordings/` unless `PI_SWITCHBOARD_RECORD_OUT_DIR` names another directory (a relative path is taken from the working directory).
 
 `test/integration/openai-spec.test.ts` checks the stable surface against OpenAI's published OpenAPI spec, pinned to one commit of [`openai/openai-openapi`](https://github.com/openai/openai-openapi) in `test/fixtures/openai-spec/openapi-subset.json`. Every response body, stream chunk and error body has to validate against OpenAI's schema for it. Every request field and enum value the proxy accepts has to exist in OpenAI's request, and every one OpenAI has that the proxy doesn't accept is listed in the test with the reason. To move the pin, run `openai-spec:update` with the new commit. If OpenAI added a field or value, the test fails until you accept it or list it.
 

@@ -84,7 +84,7 @@ pnpm run check:all  # the gate: format → lint + type check → tests with cove
 vp check --fix      # apply formatting and lint fixes
 vp test             # offline tests: unit + integration, no real login (test:ci runs them with coverage, for fallow)
 pnpm run test:live  # live provider conformance tests: real login, spends quota; on demand only
-pnpm run test:live:record  # re-record replay fixtures (PI_PROXY_RECORD_AGENT_DIR = a login made for recording)
+pnpm run test:live:record  # re-record replay fixtures (PI_SWITCHBOARD_RECORD_AGENT_DIR = a login made for recording)
 pnpm run openai-spec:update <sha>  # re-pin OpenAI's OpenAPI spec subset (test/integration/openai-spec.test.ts)
 vp pack             # build
 ```

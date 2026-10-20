@@ -17,7 +17,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Authentication and headers
 
 - [x] Reserve `Authorization` for proxy authentication compatibility
-- [x] Choose the upstream override header name: `X-Pi-Upstream-Api-Key` (implemented)
+- [x] Choose the upstream override header name: `X-Switchboard-Upstream-Api-Key` (implemented)
 - [x] Decide whether proxy auth exists in v1 or stays disabled by default
 - [x] Decide whether to accept and return `X-Client-Request-Id` / `X-Request-Id`
 

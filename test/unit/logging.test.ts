@@ -143,7 +143,7 @@ describe('redaction', () => {
     expect(records()[0]?.['properties']).toEqual(expectedProperties)
   })
 
-  // Catches the extension's file log (PI_PROXY_EXTENSION_LOG_FILE) skipping the redaction stderr
+  // Catches the extension's file log (PI_SWITCHBOARD_EXTENSION_LOG_FILE) skipping the redaction stderr
   // gets: it is a separate sink, configured separately.
   test('file sink: every listed property is replaced there too', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'pi-proxy-log-file-'))

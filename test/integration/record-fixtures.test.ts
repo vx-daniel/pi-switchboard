@@ -1,8 +1,8 @@
 /**
  * `scripts/record-fixtures.ts`, run offline: its recorder forwards to the mock provider (standing
- * in for Anthropic, `PI_PROXY_RECORD_UPSTREAM`), its login is a fixture agent dir with a fake API
- * key (`PI_PROXY_RECORD_AGENT_DIR`), and its recordings go to a temp dir
- * (`PI_PROXY_RECORD_OUT_DIR`) instead of the committed `test/fixtures/recordings`. The script runs
+ * in for Anthropic, `PI_SWITCHBOARD_RECORD_UPSTREAM`), its login is a fixture agent dir with a fake API
+ * key (`PI_SWITCHBOARD_RECORD_AGENT_DIR`), and its recordings go to a temp dir
+ * (`PI_SWITCHBOARD_RECORD_OUT_DIR`) instead of the committed `test/fixtures/recordings`. The script runs
  * `main()` on import, so each test imports it afresh.
  */
 
@@ -42,7 +42,7 @@ class ExitCalled extends Error {
 }
 
 let upstream: MockProvider
-/** Where the script saves recordings in these tests (PI_PROXY_RECORD_OUT_DIR), never the fixtures. */
+/** Where the script saves recordings in these tests (PI_SWITCHBOARD_RECORD_OUT_DIR), never the fixtures. */
 let saveDir = ''
 const tempDirs: string[] = []
 const agentDirs: FixtureAgentDir[] = []
@@ -173,9 +173,9 @@ describe('recording every scenario', () => {
   let run: ScriptRun
 
   beforeAll(async () => {
-    vi.stubEnv('PI_PROXY_RECORD_AGENT_DIR', await recordingAgentDir(true))
-    vi.stubEnv('PI_PROXY_RECORD_UPSTREAM', upstream.origin)
-    vi.stubEnv('PI_PROXY_RECORD_OUT_DIR', saveDir)
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir(true))
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_OUT_DIR', saveDir)
     run = await runScript()
   })
 
@@ -217,9 +217,9 @@ describe('recording every scenario', () => {
 
 describe('refusing to record', () => {
   // Catches a run without a dedicated login falling back to the developer's everyday pi login.
-  test.each(['', undefined])('without PI_PROXY_RECORD_AGENT_DIR (%j)', async (configured) => {
-    vi.stubEnv('PI_PROXY_RECORD_AGENT_DIR', configured)
-    vi.stubEnv('PI_PROXY_RECORD_UPSTREAM', upstream.origin)
+  test.each(['', undefined])('without PI_SWITCHBOARD_RECORD_AGENT_DIR (%j)', async (configured) => {
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', configured)
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     const requestsBefore = upstream.requests.length
 
     const run = await runScript()
@@ -228,7 +228,7 @@ describe('refusing to record', () => {
       exitCode: EXIT_FAILURE,
       stdout: '',
       stderr:
-        'Set PI_PROXY_RECORD_AGENT_DIR to a pi agent dir with a login made for recording ' +
+        'Set PI_SWITCHBOARD_RECORD_AGENT_DIR to a pi agent dir with a login made for recording ' +
         '(PI_CODING_AGENT_DIR=<dir> pi, then /login). See the header of scripts/record-fixtures.ts.\n',
       requests: 0
     })
@@ -238,8 +238,8 @@ describe('refusing to record', () => {
   test('with the everyday pi agent dir', async () => {
     const home = tempDir('pi-proxy-record-home-')
     vi.stubEnv('HOME', home)
-    vi.stubEnv('PI_PROXY_RECORD_AGENT_DIR', join(home, '.pi', 'agent'))
-    vi.stubEnv('PI_PROXY_RECORD_UPSTREAM', upstream.origin)
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', join(home, '.pi', 'agent'))
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     const requestsBefore = upstream.requests.length
 
     const run = await runScript()
@@ -248,7 +248,7 @@ describe('refusing to record', () => {
       exitCode: EXIT_FAILURE,
       stdout: '',
       stderr:
-        'PI_PROXY_RECORD_AGENT_DIR is your everyday pi agent dir. Record with a separate login, ' +
+        'PI_SWITCHBOARD_RECORD_AGENT_DIR is your everyday pi agent dir. Record with a separate login, ' +
         'so a refresh during recording cannot disturb the one you use.\n',
       requests: 0
     })
@@ -257,8 +257,8 @@ describe('refusing to record', () => {
   // Catches a run with no login sending unauthenticated requests and recording the 401s.
   test('with no Anthropic login in the agent dir', async () => {
     const agentDir = await recordingAgentDir(false)
-    vi.stubEnv('PI_PROXY_RECORD_AGENT_DIR', agentDir)
-    vi.stubEnv('PI_PROXY_RECORD_UPSTREAM', upstream.origin)
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', agentDir)
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     const requestsBefore = upstream.requests.length
 
     const run = await runScript()
@@ -277,7 +277,7 @@ describe('refusing to record', () => {
   test('under plain Node, as pnpm runs it', () => {
     // The child inherits this worker's environment, so the stub reaches the script: the run stops
     // at its first check, before any recorder or network use.
-    vi.stubEnv('PI_PROXY_RECORD_AGENT_DIR', '')
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', '')
 
     const run = spawnSync(process.execPath, [RECORD_SCRIPT], { encoding: 'utf8' })
 
@@ -285,7 +285,7 @@ describe('refusing to record', () => {
       status: EXIT_FAILURE,
       stdout: '',
       stderr:
-        'Set PI_PROXY_RECORD_AGENT_DIR to a pi agent dir with a login made for recording ' +
+        'Set PI_SWITCHBOARD_RECORD_AGENT_DIR to a pi agent dir with a login made for recording ' +
         '(PI_CODING_AGENT_DIR=<dir> pi, then /login). See the header of scripts/record-fixtures.ts.\n'
     })
   })

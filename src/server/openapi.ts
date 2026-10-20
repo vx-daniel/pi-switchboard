@@ -148,6 +148,17 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
   description:
     'Runs the request on the model through pi. Unsupported fields are rejected, not ignored: ' +
     '422 for a field the proxy does not accept, 400 for an invalid value.',
+  parameters: [
+    {
+      name: 'X-Switchboard-Upstream-Api-Key',
+      in: 'header',
+      required: false,
+      description:
+        "An API key for the model's provider, used instead of pi's stored credential for this " +
+        'request. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.',
+      schema: { type: 'string' }
+    }
+  ],
   requestBody: {
     required: true,
     content: {
@@ -171,12 +182,12 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
       }
     },
     400: errorResponse(
-      'Invalid JSON, an invalid field value or message, or a conversation longer than the ' +
-        'model takes.'
+      'Invalid JSON, an invalid field value or message, a conversation longer than the model ' +
+        'takes, or the old `X-Pi-Upstream-Api-Key` header.'
     ),
     401: errorResponse(
       'Proxy auth failed, or pi has no credential for the model and no ' +
-        '`X-Pi-Upstream-Api-Key` was sent.'
+        '`X-Switchboard-Upstream-Api-Key` was sent.'
     ),
     404: errorResponse('No exposed model has this ID (`model_not_found`).'),
     413: errorResponse('The body is over the size limit.'),
@@ -223,7 +234,7 @@ export const docsPageDescription: DescribeRouteOptions = {
   tags: [DOCUMENTATION_TAG],
   summary: 'The Swagger UI page for this document',
   description:
-    'Only when `docsUi` is on (`--docs-ui`, `PI_PROXY_DOCS_UI`); it loads Swagger UI from the ' +
+    'Only when `docsUi` is on (`--docs-ui`, `PI_SWITCHBOARD_DOCS_UI`); it loads Swagger UI from the ' +
     'jsDelivr CDN. Needs no token: a browser cannot send one to open it.',
   security: [],
   responses: {
@@ -302,7 +313,7 @@ export const OPENAPI_OPTIONS: Partial<GenerateSpecOptions> = {
           type: 'http',
           scheme: 'bearer',
           description:
-            'Only when proxy auth is on (`--auth-token`, `PI_PROXY_AUTH_TOKEN` or `authToken`); ' +
+            'Only when proxy auth is on (`--auth-token`, `PI_SWITCHBOARD_AUTH_TOKEN` or `authToken`); ' +
             'otherwise any or no token is accepted.'
         }
       },

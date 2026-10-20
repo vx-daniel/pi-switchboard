@@ -55,14 +55,14 @@
     "registry": "https://npm.pkg.github.com"
   },
   "scripts": {
-    "dev": "vp pack --watch --on-success \"node dist/index.mjs --port ${PI_PROXY_DEV_PORT:-4142}\"",
+    "dev": "vp pack --watch --on-success \"node dist/index.mjs --port ${PI_SWITCHBOARD_DEV_PORT:-4142}\"",
     "start": "node dist/index.mjs",
     "check:all": "node scripts/gate.ts",
     "format:check": "vp fmt --check",
     "lint": "vp lint",
     "test:ci": "vp test --project offline --coverage",
     "fallow": "fallow --coverage coverage/coverage-final.json --fail-on-issues",
-    "test:live": "PI_PROXY_LIVE_TESTS=1 vp test --project live",
+    "test:live": "PI_SWITCHBOARD_LIVE_TESTS=1 vp test --project live",
     "test:live:record": "node scripts/record-fixtures.ts",
     "openai-spec:update": "node scripts/update-openai-spec.ts",
     "build": "vp pack",

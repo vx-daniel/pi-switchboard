@@ -1,6 +1,6 @@
 /**
  * Proxy auth that cannot be applied: `authToken` in proxy-config.json is not a string (#82), or
- * `--auth-token` / `PI_PROXY_AUTH_TOKEN` is set but empty (#99). Repairing either to "auth off"
+ * `--auth-token` / `PI_SWITCHBOARD_AUTH_TOKEN` is set but empty (#99). Repairing either to "auth off"
  * would turn a requested token into an open proxy, and starting to refuse every request hides the
  * mistake behind a running process. So loading the config refuses, and the proxy does not start.
  * Only '' in the file (or no authToken) turns auth off.
@@ -97,7 +97,7 @@ describe('a non-string authToken refuses to start', () => {
   // with no way to run the proxy short of editing the file.
   test('a token from the environment wins, and works', async () => {
     writeProxyConfig({ authToken: 12345 })
-    vi.stubEnv('PI_PROXY_AUTH_TOKEN', ENV_TOKEN)
+    vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', ENV_TOKEN)
 
     expect((await ask('/v1/models', ENV_TOKEN)).status).toBe(HTTP_OK)
     expect((await ask('/v1/models')).status).toBe(HTTP_UNAUTHORIZED)
@@ -123,23 +123,50 @@ describe('an empty token override refuses to start (#99)', () => {
   // (which would ignore what was set), or turning auth off: loading the config refuses, naming
   // which override was empty.
   test.each([
-    { label: 'PI_PROXY_AUTH_TOKEN=""', env: '', cli: {}, source: 'PI_PROXY_AUTH_TOKEN' },
+    {
+      label: 'PI_SWITCHBOARD_AUTH_TOKEN=""',
+      env: '',
+      cli: {},
+      source: 'PI_SWITCHBOARD_AUTH_TOKEN'
+    },
     { label: "--auth-token ''", env: undefined, cli: { authToken: '' }, source: '--auth-token' }
   ])('$label refuses, the file token unused', ({ env, cli, source }) => {
     writeProxyConfig({ authToken: 'notarealsecret-file-token' })
-    vi.stubEnv('PI_PROXY_AUTH_TOKEN', env)
+    vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', env)
 
     expect(refusal(cli)).toEqual({ cause: 'empty-override', source })
   })
 
   // Catches the flag not winning over an empty env var, which would refuse a proxy the operator
   // gave a usable token on the command line.
-  test('--auth-token wins over an empty PI_PROXY_AUTH_TOKEN', () => {
-    vi.stubEnv('PI_PROXY_AUTH_TOKEN', '')
+  test('--auth-token wins over an empty PI_SWITCHBOARD_AUTH_TOKEN', () => {
+    vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', '')
 
     expect(loadConfig({ authToken: ENV_TOKEN }).proxyAuth).toEqual({
       kind: 'token',
       token: ENV_TOKEN
+    })
+  })
+})
+
+describe('the pre-rename PI_PROXY_AUTH_TOKEN (#65)', () => {
+  // Catches the old variable ignored silently: a proxy its operator meant to protect would start
+  // with auth off, open to anyone who reaches the port.
+  test('set alone, it refuses to start', () => {
+    vi.stubEnv('PI_PROXY_AUTH_TOKEN', ENV_TOKEN)
+
+    expect(refusal()).toEqual({ cause: 'renamed-env-var' })
+  })
+
+  // Catches the old variable still read: it would win over, or stand in for, the new one.
+  test('with PI_SWITCHBOARD_AUTH_TOKEN or --auth-token set, only the new token counts', () => {
+    vi.stubEnv('PI_PROXY_AUTH_TOKEN', 'notarealsecret-old-token')
+    vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', ENV_TOKEN)
+
+    expect(loadConfig().proxyAuth).toEqual({ kind: 'token', token: ENV_TOKEN })
+    expect(loadConfig({ authToken: 'notarealsecret-flag-token' }).proxyAuth).toEqual({
+      kind: 'token',
+      token: 'notarealsecret-flag-token'
     })
   })
 })

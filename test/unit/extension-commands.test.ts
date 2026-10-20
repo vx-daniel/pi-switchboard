@@ -114,7 +114,7 @@ describe('/proxy with models on two providers', () => {
     vi.stubEnv('CUSTOM_DATA_DIR', zedDir)
     vi.stubEnv('HOME', zedRoot)
     vi.stubEnv('XDG_CONFIG_HOME', zedRoot)
-    vi.stubEnv('PI_PROXY_EXTENSION_LOG_FILE', '')
+    vi.stubEnv('PI_SWITCHBOARD_EXTENSION_LOG_FILE', '')
     writeProxyConfig({ modelExposureMode: 'all' })
   })
 
@@ -264,7 +264,7 @@ describe('/proxy zed-sync with no models', () => {
     vi.stubEnv('CUSTOM_DATA_DIR', zedRoot)
     vi.stubEnv('HOME', zedRoot)
     vi.stubEnv('XDG_CONFIG_HOME', zedRoot)
-    vi.stubEnv('PI_PROXY_EXTENSION_LOG_FILE', '')
+    vi.stubEnv('PI_SWITCHBOARD_EXTENSION_LOG_FILE', '')
   })
 
   afterAll(() => {

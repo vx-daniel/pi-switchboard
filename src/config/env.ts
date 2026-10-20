@@ -3,8 +3,12 @@
  *
  * @remarks
  * Priority: CLI args > env vars > JSON config file > defaults. Not every setting has every
- * source: agentic mode is env-only (`PI_PROXY_AGENTIC`), and model exposure, public model IDs,
- * custom models and provider prefixes come from the config file only.
+ * source: agentic mode is env-only (`PI_SWITCHBOARD_AGENTIC`), and model exposure, public model
+ * IDs, custom models and provider prefixes come from the config file only.
+ *
+ * The env vars were `PI_PROXY_*` before the rename to pi-switchboard (#65). The old names are not
+ * read; one that is still set is warned about, and an old auth token refuses to start
+ * ({@link UnusableProxyAuthError}), since ignoring it would quietly turn auth off.
  *
  * The JSON config file (`proxy-config.json` in `$PI_CODING_AGENT_DIR`, default `~/.pi/agent`) is
  * the shared config written by the pi extension's /proxy config panel. Env vars and CLI args
@@ -27,7 +31,7 @@ import { proxyLogger } from '@proxy/logging'
 const configLogger = proxyLogger('config')
 
 /** Where an override token came from: the flag wins over the env var. */
-type OverrideSource = '--auth-token' | 'PI_PROXY_AUTH_TOKEN'
+type OverrideSource = '--auth-token' | 'PI_SWITCHBOARD_AUTH_TOKEN'
 
 /** A token set by flag or env var, which wins over the config file's. */
 interface TokenOverride {
@@ -38,12 +42,15 @@ interface TokenOverride {
 /**
  * Why proxy auth is set but cannot be applied:
  * - `file-token-not-string`: `authToken` in proxy-config.json is not a string (#82);
- * - `empty-override`: `--auth-token` or `PI_PROXY_AUTH_TOKEN` is set but empty, a token nothing
- *   can match (#99). The file's token is not used instead: that would ignore what was set.
+ * - `empty-override`: `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN` is set but empty, a token
+ *   nothing can match (#99). The file's token is not used instead: that would ignore what was set;
+ * - `renamed-env-var`: the old `PI_PROXY_AUTH_TOKEN` is set and neither the flag nor
+ *   `PI_SWITCHBOARD_AUTH_TOKEN` is (#65). It is no longer read, so starting would drop the token.
  */
 export type InvalidAuthCause =
   | { readonly cause: 'file-token-not-string' }
   | { readonly cause: 'empty-override'; readonly source: OverrideSource }
+  | { readonly cause: 'renamed-env-var' }
 
 /**
  * Thrown by {@link loadConfig} when proxy auth is set but cannot be applied. The proxy refuses to
@@ -79,7 +86,7 @@ export type ProxyAuth =
  * Picks the override token, if any: the flag's, else the env var's.
  *
  * @param flagToken - the `--auth-token` value, or `undefined` when not given
- * @param envToken - `PI_PROXY_AUTH_TOKEN`, or `undefined` when unset
+ * @param envToken - `PI_SWITCHBOARD_AUTH_TOKEN`, or `undefined` when unset
  * @returns the override with its source, or `undefined` when neither is set
  */
 function tokenOverride(
@@ -87,7 +94,7 @@ function tokenOverride(
   envToken: string | undefined
 ): TokenOverride | undefined {
   if (flagToken !== undefined) return { source: '--auth-token', value: flagToken }
-  if (envToken !== undefined) return { source: 'PI_PROXY_AUTH_TOKEN', value: envToken }
+  if (envToken !== undefined) return { source: 'PI_SWITCHBOARD_AUTH_TOKEN', value: envToken }
   return undefined
 }
 
@@ -148,32 +155,73 @@ export interface ServerConfig {
 
 /** Env vars `loadConfig` reads. Only their names are logged, never their values. */
 const CONFIG_ENV_VARS = [
-  'PI_PROXY_HOST',
-  'PI_PROXY_PORT',
-  'PI_PROXY_AUTH_TOKEN',
-  'PI_PROXY_REMOTE_IMAGES',
-  'PI_PROXY_DOCS_UI',
-  'PI_PROXY_MAX_BODY_SIZE',
-  'PI_PROXY_UPSTREAM_TIMEOUT_MS',
-  'PI_PROXY_AGENTIC',
-  'PI_PROXY_LOG_LEVEL'
+  'PI_SWITCHBOARD_HOST',
+  'PI_SWITCHBOARD_PORT',
+  'PI_SWITCHBOARD_AUTH_TOKEN',
+  'PI_SWITCHBOARD_REMOTE_IMAGES',
+  'PI_SWITCHBOARD_DOCS_UI',
+  'PI_SWITCHBOARD_MAX_BODY_SIZE',
+  'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
+  'PI_SWITCHBOARD_AGENTIC',
+  'PI_SWITCHBOARD_LOG_LEVEL'
+] as const
+
+/** The prefix the env vars had before the rename to pi-switchboard (#65). */
+const OLD_ENV_PREFIX = 'PI_PROXY_'
+/** The prefix they have now. */
+const ENV_PREFIX = 'PI_SWITCHBOARD_'
+/** The proxy's runtime env vars, by the name after the prefix, old and new alike. */
+const RENAMED_ENV_SUFFIXES = [
+  'HOST',
+  'PORT',
+  'AUTH_TOKEN',
+  'REMOTE_IMAGES',
+  'DOCS_UI',
+  'MAX_BODY_SIZE',
+  'UPSTREAM_TIMEOUT_MS',
+  'AGENTIC',
+  'LOG_LEVEL',
+  'LOG_FORMAT',
+  'EXTENSION_LOG_FILE'
 ] as const
 
 /**
- * Resolves the log level from `PI_PROXY_LOG_LEVEL`, warning when the variable names no level.
+ * Warns about each old `PI_PROXY_*` env var that is still set: it is not read, so the setting it
+ * meant does not apply. Names only, never values (an old auth token is a secret).
+ */
+function warnAboutRenamedEnvVars(): void {
+  for (const suffix of RENAMED_ENV_SUFFIXES) {
+    const oldName = `${OLD_ENV_PREFIX}${suffix}`
+    if (process.env[oldName] === undefined) continue
+    configLogger.warn(
+      '{oldName} is set but no longer read: it is {newName} since the rename (#65)',
+      {
+        oldName,
+        newName: `${ENV_PREFIX}${suffix}`
+      }
+    )
+  }
+}
+
+/**
+ * Resolves the log level from `PI_SWITCHBOARD_LOG_LEVEL`, warning when the variable names no
+ * level.
  *
- * @param raw - The `PI_PROXY_LOG_LEVEL` value, or `undefined` when unset.
+ * @param raw - The `PI_SWITCHBOARD_LOG_LEVEL` value, or `undefined` when unset.
  * @param fallback - The level from the config file.
  * @returns `raw` when it names a LogTape level, otherwise `fallback`.
  */
 function envLogLevel(raw: string | undefined, fallback: LogLevel): LogLevel {
   if (raw === undefined) return fallback
   if (isLogLevel(raw)) return raw
-  configLogger.warn('Ignoring PI_PROXY_LOG_LEVEL={value}: not one of {levels}; using {fallback}', {
-    value: raw,
-    levels: getLogLevels(),
-    fallback
-  })
+  configLogger.warn(
+    'Ignoring PI_SWITCHBOARD_LOG_LEVEL={value}: not one of {levels}; using {fallback}',
+    {
+      value: raw,
+      levels: getLogLevels(),
+      fallback
+    }
+  )
   return fallback
 }
 
@@ -243,6 +291,7 @@ export interface CliOverrides {
  */
 export function loadConfig(cli: CliOverrides = {}): ServerConfig {
   const file = loadConfigFromFile()
+  warnAboutRenamedEnvVars()
 
   configLogger.debug('Config overrides: CLI {cliOverrides}, env {envOverrides}', {
     cliOverrides: Object.entries(cli)
@@ -251,26 +300,36 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     envOverrides: CONFIG_ENV_VARS.filter((envVar) => process.env[envVar] !== undefined)
   })
 
-  const host = cli.host ?? process.env.PI_PROXY_HOST ?? file.host
-  const port = cli.port ?? parsePositiveInt('PI_PROXY_PORT', process.env.PI_PROXY_PORT, file.port)
+  const host = cli.host ?? process.env.PI_SWITCHBOARD_HOST ?? file.host
+  const port =
+    cli.port ?? parsePositiveInt('PI_SWITCHBOARD_PORT', process.env.PI_SWITCHBOARD_PORT, file.port)
 
-  // Auth: CLI > env > file. A file token that is not a string, or an override that is set but
-  // empty, refuses to start rather than run with auth off (#82, #99).
-  const override = tokenOverride(cli.authToken, process.env.PI_PROXY_AUTH_TOKEN)
+  // Auth: CLI > env > file. A file token that is not a string, an override that is set but empty,
+  // or a token left in the old env var refuses to start rather than run with auth off (#82, #99,
+  // #65).
+  const override = tokenOverride(cli.authToken, process.env.PI_SWITCHBOARD_AUTH_TOKEN)
+  if (override === undefined && process.env[`${OLD_ENV_PREFIX}AUTH_TOKEN`] !== undefined) {
+    throw new UnusableProxyAuthError({ cause: 'renamed-env-var' })
+  }
   const proxyAuth = resolveProxyAuth(override, file.authToken)
 
   const remoteImagesEnabled =
     cli.remoteImages ??
-    parseBoolean('PI_PROXY_REMOTE_IMAGES', process.env.PI_PROXY_REMOTE_IMAGES, file.remoteImages)
+    parseBoolean(
+      'PI_SWITCHBOARD_REMOTE_IMAGES',
+      process.env.PI_SWITCHBOARD_REMOTE_IMAGES,
+      file.remoteImages
+    )
 
   const docsUiEnabled =
-    cli.docsUi ?? parseBoolean('PI_PROXY_DOCS_UI', process.env.PI_PROXY_DOCS_UI, file.docsUi)
+    cli.docsUi ??
+    parseBoolean('PI_SWITCHBOARD_DOCS_UI', process.env.PI_SWITCHBOARD_DOCS_UI, file.docsUi)
 
   const maxBodySize =
     cli.maxBodySizeMb === undefined
       ? parsePositiveInt(
-          'PI_PROXY_MAX_BODY_SIZE',
-          process.env.PI_PROXY_MAX_BODY_SIZE,
+          'PI_SWITCHBOARD_MAX_BODY_SIZE',
+          process.env.PI_SWITCHBOARD_MAX_BODY_SIZE,
           file.maxBodySizeMb * BYTES_PER_MB
         )
       : cli.maxBodySizeMb * BYTES_PER_MB
@@ -278,13 +337,13 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
   const upstreamTimeoutMs =
     cli.upstreamTimeoutSec === undefined
       ? parsePositiveInt(
-          'PI_PROXY_UPSTREAM_TIMEOUT_MS',
-          process.env.PI_PROXY_UPSTREAM_TIMEOUT_MS,
+          'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
+          process.env.PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS,
           file.upstreamTimeoutSec * MS_PER_SECOND
         )
       : cli.upstreamTimeoutSec * MS_PER_SECOND
 
-  const agenticEnabled = process.env.PI_PROXY_AGENTIC === 'true'
+  const agenticEnabled = process.env.PI_SWITCHBOARD_AGENTIC === 'true'
 
   return {
     host,
@@ -299,6 +358,6 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     modelExposureMode: file.modelExposureMode,
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
-    logLevel: cli.logLevel ?? envLogLevel(process.env.PI_PROXY_LOG_LEVEL, file.logLevel)
+    logLevel: cli.logLevel ?? envLogLevel(process.env.PI_SWITCHBOARD_LOG_LEVEL, file.logLevel)
   }
 }

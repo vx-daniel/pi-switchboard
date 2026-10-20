@@ -492,25 +492,36 @@ describe('startProxy', () => {
       label: 'a non-string authToken in the file',
       authToken: 12345,
       inherited: undefined,
+      old: undefined,
       message:
         'Proxy not started: authToken in proxy-config.json is not a string, and the proxy refuses to start with it. Set a new token in /proxy config.'
     },
     {
-      label: "an empty PI_PROXY_AUTH_TOKEN in pi's environment",
+      label: "an empty PI_SWITCHBOARD_AUTH_TOKEN in pi's environment",
       authToken: '',
       inherited: '',
+      old: undefined,
       message:
-        "Proxy not started: PI_PROXY_AUTH_TOKEN is set but empty in pi's environment, and the proxy refuses to start with an empty token. Unset it, or set a token in /proxy config."
+        "Proxy not started: PI_SWITCHBOARD_AUTH_TOKEN is set but empty in pi's environment, and the proxy refuses to start with an empty token. Unset it, or set a token in /proxy config."
+    },
+    {
+      label: "the pre-rename PI_PROXY_AUTH_TOKEN in pi's environment (#65)",
+      authToken: '',
+      inherited: undefined,
+      old: 'notarealsecret-old-token',
+      message:
+        "Proxy not started: PI_PROXY_AUTH_TOKEN is set in pi's environment but no longer read, and the proxy refuses to start over it. Rename it PI_SWITCHBOARD_AUTH_TOKEN, or set a token in /proxy config."
     }
   ])(
     '$label: refused with the reason, nothing spawned',
-    async ({ authToken, inherited, message }) => {
+    async ({ authToken, inherited, old, message }) => {
       const freePort = await closedPort()
       writeFileSync(
         join(agentDir, 'proxy-config.json'),
         JSON.stringify({ host: '127.0.0.1', port: freePort, authToken })
       )
-      vi.stubEnv('PI_PROXY_AUTH_TOKEN', inherited)
+      vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', inherited)
+      vi.stubEnv('PI_PROXY_AUTH_TOKEN', old)
       writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
       const { context, notifications, statuses } = fakeCommandContext({})
 

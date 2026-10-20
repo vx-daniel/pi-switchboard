@@ -199,11 +199,14 @@ describe('chat request logging', () => {
   // Catches the per-request upstream key reaching any log line, at any level: it rides the request
   // through the middleware, model resolution, the auth pre-check and the upstream call (which
   // fails here, at an address nothing listens on, so the error path logs too).
-  test('never logs the X-Pi-Upstream-Api-Key value, at any level', async () => {
+  test('never logs the X-Switchboard-Upstream-Api-Key value, at any level', async () => {
     const upstreamKey = 'notarealsecret-per-request-upstream-key'
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'X-Pi-Upstream-Api-Key': upstreamKey },
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Switchboard-Upstream-Api-Key': upstreamKey
+      },
       body: JSON.stringify({ model: FIXTURE_MODEL, messages: [{ role: 'user', content: 'Hi' }] })
     })
 

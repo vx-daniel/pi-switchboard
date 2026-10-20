@@ -345,7 +345,7 @@ function buildPiContext(honoContext: ProxyContext, request: ChatRequest): Step<P
  *
  * @param context - the request's Hono context
  * @param model - the resolved pi model
- * @param upstreamApiKey - the `X-Pi-Upstream-Api-Key` value, or `undefined` when not sent
+ * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined` when not sent
  * @returns a 401 response when no upstream auth is available, else `undefined`
  */
 async function checkRequestAuth(
@@ -372,7 +372,7 @@ async function checkRequestAuth(
   return context.json(
     authenticationError(
       `Could not resolve request auth for provider '${model.provider}'. ${requestAuth.error}. ` +
-        "Configure credentials via 'pi /login' or pass X-Pi-Upstream-Api-Key header."
+        "Configure credentials via 'pi /login' or pass X-Switchboard-Upstream-Api-Key header."
     ),
     HTTP_UNAUTHORIZED
   )

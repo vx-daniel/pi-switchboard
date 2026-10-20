@@ -32,7 +32,7 @@
       "proxyAuth": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Only when proxy auth is on (`--auth-token`, `PI_PROXY_AUTH_TOKEN` or `authToken`); otherwise any or no token is accepted."
+        "description": "Only when proxy auth is on (`--auth-token`, `PI_SWITCHBOARD_AUTH_TOKEN` or `authToken`); otherwise any or no token is accepted."
       }
     },
     "responses": {
@@ -458,7 +458,7 @@
           "Documentation"
         ],
         "summary": "The Swagger UI page for this document",
-        "description": "Only when `docsUi` is on (`--docs-ui`, `PI_PROXY_DOCS_UI`); it loads Swagger UI from the jsDelivr CDN. Needs no token: a browser cannot send one to open it.",
+        "description": "Only when `docsUi` is on (`--docs-ui`, `PI_SWITCHBOARD_DOCS_UI`); it loads Swagger UI from the jsDelivr CDN. Needs no token: a browser cannot send one to open it.",
         "security": [],
         "responses": {
           "200": {
@@ -1318,6 +1318,17 @@
         ],
         "summary": "Create a chat completion",
         "description": "Runs the request on the model through pi. Unsupported fields are rejected, not ignored: 422 for a field the proxy does not accept, 400 for an invalid value.",
+        "parameters": [
+          {
+            "name": "X-Switchboard-Upstream-Api-Key",
+            "in": "header",
+            "required": false,
+            "description": "An API key for the model's provider, used instead of pi's stored credential for this request. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -2134,7 +2145,7 @@
             }
           },
           "400": {
-            "description": "Invalid JSON, an invalid field value or message, or a conversation longer than the model takes.",
+            "description": "Invalid JSON, an invalid field value or message, a conversation longer than the model takes, or the old `X-Pi-Upstream-Api-Key` header.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2193,7 +2204,7 @@
             }
           },
           "401": {
-            "description": "Proxy auth failed, or pi has no credential for the model and no `X-Pi-Upstream-Api-Key` was sent.",
+            "description": "Proxy auth failed, or pi has no credential for the model and no `X-Switchboard-Upstream-Api-Key` was sent.",
             "content": {
               "application/json": {
                 "schema": {

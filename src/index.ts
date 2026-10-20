@@ -152,9 +152,9 @@ function buildCliOverrides(args: CliArgs): CliOverrides {
  * @throws whatever loading the config throws, other than {@link UnusableProxyAuthError}
  */
 function loadConfigWithLogging(args: CliArgs): ServerConfig | undefined {
-  const format = resolveLogFormat(args['log-format'], process.env.PI_PROXY_LOG_FORMAT)
+  const format = resolveLogFormat(args['log-format'], process.env.PI_SWITCHBOARD_LOG_FORMAT)
   const earlyLogLevel =
-    [args['log-level'], process.env.PI_PROXY_LOG_LEVEL].find(
+    [args['log-level'], process.env.PI_SWITCHBOARD_LOG_LEVEL].find(
       (candidate): candidate is LogLevel => candidate !== undefined && isLogLevel(candidate)
     ) ?? 'info'
   configureLogging({ level: earlyLogLevel, format })
@@ -168,9 +168,9 @@ function loadConfigWithLogging(args: CliArgs): ServerConfig | undefined {
     return undefined
   }
   configureLogging({ level: config.logLevel, format })
-  const envFormat = process.env.PI_PROXY_LOG_FORMAT
+  const envFormat = process.env.PI_SWITCHBOARD_LOG_FORMAT
   if (envFormat !== undefined && !isLogFormat(envFormat)) {
-    lifecycleLogger.warn('Ignoring PI_PROXY_LOG_FORMAT={value}: not one of {formats}', {
+    lifecycleLogger.warn('Ignoring PI_SWITCHBOARD_LOG_FORMAT={value}: not one of {formats}', {
       value: envFormat,
       formats: LOG_FORMATS
     })
@@ -199,8 +199,13 @@ function logUnusableProxyAuth(invalid: InvalidAuthCause): void {
       break
     case 'file-token-not-string':
       lifecycleLogger.fatal(
-        'Refusing to start: authToken in {configPath} is not a string. Fix it, or set a token with --auth-token or PI_PROXY_AUTH_TOKEN',
+        'Refusing to start: authToken in {configPath} is not a string. Fix it, or set a token with --auth-token or PI_SWITCHBOARD_AUTH_TOKEN',
         { configPath: getConfigPath() }
+      )
+      break
+    case 'renamed-env-var':
+      lifecycleLogger.fatal(
+        'Refusing to start: PI_PROXY_AUTH_TOKEN is set but no longer read; rename it PI_SWITCHBOARD_AUTH_TOKEN (#65), or unset it'
       )
       break
   }

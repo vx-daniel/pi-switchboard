@@ -49,7 +49,7 @@ Prepare the stable proxy for release.
 - [x] Add request size limits (50 MB default, configurable)
 - [x] Add upstream timeout defaults (120s, configurable)
 - [x] Add graceful shutdown (SIGTERM/SIGINT with 10s drain)
-- [x] Add per-request upstream API key override (`X-Pi-Upstream-Api-Key`)
+- [x] Add per-request upstream API key override (`X-Switchboard-Upstream-Api-Key`)
 - [x] Add image MIME type and payload size validation
 - [x] Add CI gates (GitHub Actions: typecheck, lint, test, build, package)
 - [x] Package for npm release (`@victor-software-house/pi-openai-proxy` upstream; `@vx-daniel/pi-switchboard` in this fork)

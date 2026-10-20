@@ -10,6 +10,7 @@ import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
 import { authenticationError, invalidRequest } from '@proxy/server/errors'
 import {
+  HTTP_BAD_REQUEST,
   HTTP_MULTIPLE_CHOICES,
   HTTP_PAYLOAD_TOO_LARGE,
   HTTP_UNAUTHORIZED
@@ -27,6 +28,10 @@ const authLogger = proxyLogger('server', 'auth')
 const BEARER_PREFIX = 'Bearer '
 /** The liveness path; it and the paths below it are logged as polling. */
 const HEALTH_PATH = '/healthz'
+/** The per-request upstream key header. */
+const UPSTREAM_API_KEY_HEADER = 'X-Switchboard-Upstream-Api-Key'
+/** Its name before the rename to pi-switchboard (#65); rejected, not read. */
+const OLD_UPSTREAM_API_KEY_HEADER = 'X-Pi-Upstream-Api-Key'
 
 /**
  * Creates the middleware that sets the request's IDs and upstream API key, and logs the request
@@ -34,7 +39,8 @@ const HEALTH_PATH = '/healthz'
  *
  * @remarks
  * Sets `requestId` (new), `clientRequestId` (`X-Client-Request-Id`) and `upstreamApiKey`
- * (`X-Pi-Upstream-Api-Key`), and echoes `X-Request-Id` and `X-Client-Request-Id` on the response.
+ * (`X-Switchboard-Upstream-Api-Key`), and echoes `X-Request-Id` and `X-Client-Request-Id` on the
+ * response.
  * Everything downstream runs inside `withContext({ requestId, clientRequestId })`, so every log
  * line a request causes carries its IDs without passing them around.
  *
@@ -44,7 +50,7 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
   return async (context, next) => {
     const requestId = generateRequestId()
     const clientRequestId = context.req.header('x-client-request-id')
-    const upstreamApiKey = context.req.header('x-pi-upstream-api-key')
+    const upstreamApiKey = context.req.header(UPSTREAM_API_KEY_HEADER)
     const start = performance.now()
 
     context.set('requestId', requestId)
@@ -85,6 +91,30 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
       if (polling && status < HTTP_MULTIPLE_CHOICES) httpLogger.debug(message, answered)
       else httpLogger.info(message, answered)
     })
+  }
+}
+
+/**
+ * Creates the middleware that rejects the upstream key header by its old name (#65).
+ *
+ * @remarks
+ * Ignoring it would send the request with pi's stored credential instead of the key the client
+ * meant (principle I: rejected, not ignored). The header's value is never logged or echoed.
+ *
+ * @returns the middleware: a 400 naming the new header, or the next handler
+ */
+export function renamedHeaderMiddleware(): MiddlewareHandler<ProxyEnv> {
+  return async (context, next) => {
+    if (context.req.header(OLD_UPSTREAM_API_KEY_HEADER) === undefined) return next()
+    httpLogger.warn('Rejected a request with the old {header} header', {
+      header: OLD_UPSTREAM_API_KEY_HEADER
+    })
+    return context.json(
+      invalidRequest(
+        `The ${OLD_UPSTREAM_API_KEY_HEADER} header is not read any more: send the key as ${UPSTREAM_API_KEY_HEADER}`
+      ),
+      HTTP_BAD_REQUEST
+    )
   }
 }
 

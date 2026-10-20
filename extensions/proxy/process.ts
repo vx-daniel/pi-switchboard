@@ -490,16 +490,21 @@ async function spawnProxy(state: ProxyState, context: ExtensionContext): Promise
  * The proxy refuses to start when its auth is set but cannot be applied (`UnusableProxyAuthError`).
  * Its output is discarded, so without this check the reason would be lost and `/proxy start`
  * would only report a proxy that never answered. Mirrors what the child sees: the token
- * {@link configToEnv} passes wins over pi's own `PI_PROXY_AUTH_TOKEN`, which the child inherits,
- * and either wins over the file.
+ * {@link configToEnv} passes wins over pi's own `PI_SWITCHBOARD_AUTH_TOKEN`, which the child
+ * inherits, and either wins over the file. pi's environment may still hold the old
+ * `PI_PROXY_AUTH_TOKEN` (#65): with no new token, the child refuses to start over it.
  *
  * @param config - the config the proxy would be spawned with
  * @returns why it would refuse, or `undefined` when it would start
  */
 function startRefusal(config: ProxyConfig): string | undefined {
-  const token = configToEnv(config)['PI_PROXY_AUTH_TOKEN'] ?? process.env.PI_PROXY_AUTH_TOKEN
+  const token =
+    configToEnv(config)['PI_SWITCHBOARD_AUTH_TOKEN'] ?? process.env.PI_SWITCHBOARD_AUTH_TOKEN
   if (token === '') {
-    return "PI_PROXY_AUTH_TOKEN is set but empty in pi's environment, and the proxy refuses to start with an empty token. Unset it, or set a token in /proxy config."
+    return "PI_SWITCHBOARD_AUTH_TOKEN is set but empty in pi's environment, and the proxy refuses to start with an empty token. Unset it, or set a token in /proxy config."
+  }
+  if (token === undefined && process.env['PI_PROXY_AUTH_TOKEN'] !== undefined) {
+    return "PI_PROXY_AUTH_TOKEN is set in pi's environment but no longer read, and the proxy refuses to start over it. Rename it PI_SWITCHBOARD_AUTH_TOKEN, or set a token in /proxy config."
   }
   if (token === undefined && configFileAuthTokenInvalid()) {
     return 'authToken in proxy-config.json is not a string, and the proxy refuses to start with it. Set a new token in /proxy config.'

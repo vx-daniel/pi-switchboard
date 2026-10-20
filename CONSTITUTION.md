@@ -1,11 +1,16 @@
 <!--
 Sync Impact Report
-Version change: 2.2.0 → 2.2.1 (PATCH)
-Rationale: the project is renamed pi-switchboard (#65); the title follows. No principle changes.
+Version change: 2.2.0 → 2.3.0 (MINOR)
+Rationale: the project is renamed pi-switchboard (#65), and with it the env vars (`PI_PROXY_*` →
+`PI_SWITCHBOARD_*`) and the upstream key header (`X-Pi-Upstream-Api-Key` →
+`X-Switchboard-Upstream-Api-Key`). The old names are not read. An old auth token still set would
+silently turn auth off, so principle II's auth exception grows by that case: it refuses to start.
+The old header is rejected with 400 rather than ignored (principle I).
 Modified sections:
 - Title
+- II. Validate at Boundaries: the auth exception names the old `PI_PROXY_AUTH_TOKEN`
 Templates requiring updates:
-- ✅ AGENTS.md, README.md, PLAN.md, ROADMAP.md, TODO.md: the new name
+- ✅ AGENTS.md, README.md, PLAN.md, ROADMAP.md, TODO.md: the new names
 Follow-up TODOs:
 - None.
 
@@ -63,7 +68,7 @@ All untrusted input MUST be validated at the edge before use, with Zod schemas p
   - an invalid environment variable is ignored with a warning;
   - an invalid field in the config file is repaired (a number clamped to its schema's bounds, a list or map keeping its valid entries, anything else its default), and every repaired field is named in a warning, by path only.
 
-  Exception: proxy auth that is set but cannot be applied refuses to start, whatever its source: an empty `--auth-token` or `PI_PROXY_AUTH_TOKEN`, or an `authToken` in the config file that is not a string. Ignoring or repairing it would turn a token the operator asked for into an open proxy (principle III), and starting to refuse every request hides the mistake behind a running process. The proxy logs why at `fatal`, and the pi extension refuses to spawn such a proxy and says why, since the proxy's own output is discarded.
+  Exception: proxy auth that is set but cannot be applied refuses to start, whatever its source: an empty `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN`, an `authToken` in the config file that is not a string, or the pre-rename `PI_PROXY_AUTH_TOKEN` still set with neither the flag nor `PI_SWITCHBOARD_AUTH_TOKEN` (#65). Ignoring or repairing it would turn a token the operator asked for into an open proxy (principle III), and starting to refuse every request hides the mistake behind a running process. The proxy logs why at `fatal`, and the pi extension refuses to spawn such a proxy and says why, since the proxy's own output is discarded. Every other pre-rename `PI_PROXY_*` variable is ignored with a warning naming its replacement.
 
 Type safety is part of the contract: no `any`, no `@ts-ignore`, no unsafe `as` casts, and no inline directives (`oxlint-disable…`, `eslint-disable…`, fallow's `fallow-ignore…` and its `@expected-unused` tag), which `test/unit/lint-directives.test.ts` enforces. Narrow with repository type guards or schemas. When a lint rule's premise does not fit a line, express the code differently and say why in an ordinary comment; a deliberate fallow exception goes in `.fallowrc.jsonc` with its reason.
 
@@ -132,4 +137,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 2.2.1 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20
+**Version**: 2.3.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20
