@@ -136,8 +136,31 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
       roleCounts
     }
   )
-
+  logDroppedMessageFields(messages)
   return { ok: true, context }
+}
+
+/**
+ * Logs, at debug, the message fields pi has no equivalent for and so never reach the provider:
+ * `name` on a message and `image_url.detail` on an image part. Constitution principle I lists
+ * both as drops (#146). Only the counts are logged, never the values.
+ *
+ * @param messages - the request's messages
+ */
+function logDroppedMessageFields(messages: readonly OpenAIMessage[]): void {
+  const nameCount = messages.filter(
+    (message) => 'name' in message && message.name !== undefined
+  ).length
+  const detailCount = messages
+    .flatMap((message) =>
+      message.role === 'user' && Array.isArray(message.content) ? message.content : []
+    )
+    .filter((part) => part.type === 'image_url' && part.image_url.detail !== undefined).length
+  if (nameCount === 0 && detailCount === 0) return
+  messagesLogger.debug(
+    'Dropped {nameCount} message name(s) and {detailCount} image detail(s): pi has no equivalent',
+    { nameCount, detailCount }
+  )
 }
 
 /**
@@ -191,7 +214,7 @@ function convertConversationMessage(
   if (message.role === 'assistant') {
     return {
       ok: true,
-      message: convertAssistantMessage(message.content ?? null, message.tool_calls)
+      message: convertAssistantMessage(message.content ?? null, message.tool_calls ?? undefined)
     }
   }
   const toolName = toolCallNames.get(message.tool_call_id)

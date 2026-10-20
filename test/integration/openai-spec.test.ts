@@ -14,13 +14,10 @@
  * OpenAI's schemas leave `additionalProperties` open; a spec that closes one fails here.
  */
 
-import { readFileSync } from 'node:fs'
-
 import { chatCompletionRequestSchema, rejectedFields } from '@proxy/openai/schemas'
 import { isRecord } from '@proxy/utils/guards'
 import { Ajv2020 } from 'ajv/dist/2020'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
-import * as z from 'zod'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
@@ -34,6 +31,15 @@ import {
   textChunks,
   toolCallChunks
 } from '../fixtures/mock-provider'
+import {
+  alternatives,
+  fieldSchema,
+  openaiRequestSchema,
+  propertiesOf,
+  proxyRequestSchema,
+  requiredOf,
+  subset
+} from '../fixtures/openai-spec/schema'
 import { jsonBody, testApp, testConfig } from '../helpers'
 
 const HTTP_OK = 200
@@ -57,18 +63,6 @@ const REJECTED_FIELD = rejectedFields[0]
 /** The `$id` the pinned subset is registered under. */
 const SPEC_ID = 'openai'
 const USAGE = { prompt_tokens: 3, completion_tokens: 2 }
-
-/** The part of the pinned subset the checks read. */
-const subsetSchema = z.object({
-  'x-source': z.object({ commit: z.string().trim() }),
-  'components': z.object({ schemas: z.record(z.string(), z.unknown()) })
-})
-const subset = subsetSchema.parse(
-  JSON.parse(
-    readFileSync(new URL('../fixtures/openai-spec/openapi-subset.json', import.meta.url), 'utf8')
-  )
-)
-const openaiSchemas = subset.components.schemas
 
 // `strict: false`: the spec carries OpenAPI keywords that are not JSON Schema (`discriminator`).
 // Formats are not checked: no format plugin is installed, and none of the checked shapes depends
@@ -344,111 +338,6 @@ describe('responses validate against OpenAI schemas', () => {
 })
 
 // --- Requests ---
-
-/** The proxy's request schema, as JSON Schema, in the shape a client sends it. */
-const proxyRequestSchema: unknown = z.toJSONSchema(chatCompletionRequestSchema, { io: 'input' })
-/** How a schema reference to another OpenAI schema starts. */
-const SCHEMA_REF_PREFIX = '#/components/schemas/'
-
-/**
- * Follows a `$ref` to an OpenAI schema; any other node is returned as is.
- *
- * @param node - a schema node
- * @returns the node, or the schema it references
- */
-function resolve(node: unknown): Record<string, unknown> {
-  if (!isRecord(node)) return {}
-  const ref = node['$ref']
-  if (typeof ref !== 'string' || !ref.startsWith(SCHEMA_REF_PREFIX)) return node
-  return resolve(openaiSchemas[ref.slice(SCHEMA_REF_PREFIX.length)])
-}
-
-/**
- * Lists the array items of a schema node's `key`, or nothing.
- *
- * @param node - a schema node
- * @param key - `allOf`, `anyOf` or `oneOf`
- * @returns the branches
- */
-function branches(node: Record<string, unknown>, key: string): unknown[] {
-  const value = node[key]
-  return Array.isArray(value) ? value : []
-}
-
-/**
- * Collects an object schema's properties, through `$ref` and `allOf`.
- *
- * @param node - an object schema
- * @returns every property schema, by name
- */
-function propertiesOf(node: unknown): Record<string, unknown> {
-  const schema = resolve(node)
-  const own = isRecord(schema['properties']) ? schema['properties'] : {}
-  const inherited: Record<string, unknown> = {}
-  for (const branch of branches(schema, 'allOf')) Object.assign(inherited, propertiesOf(branch))
-  return { ...inherited, ...own }
-}
-
-/**
- * Collects an object schema's required property names, through `$ref` and `allOf`.
- *
- * @param node - an object schema
- * @returns the required names
- */
-function requiredOf(node: unknown): string[] {
-  const schema = resolve(node)
-  const own = Array.isArray(schema['required']) ? schema['required'] : []
-  return [
-    ...branches(schema, 'allOf').flatMap(requiredOf),
-    ...own.filter((requiredName): requiredName is string => typeof requiredName === 'string')
-  ]
-}
-
-/**
- * Lists the string literals a schema node allows directly: its `enum` strings and `const`.
- *
- * @param node - a resolved schema node
- * @returns the literals
- */
-function literalsOf(node: Record<string, unknown>): string[] {
-  const values = [...branches(node, 'enum'), node['const']]
-  return values.filter((literal): literal is string => typeof literal === 'string')
-}
-
-/**
- * Lists the alternatives a schema allows: string literals, and for object branches the value of
- * their discriminator property, as `<discriminator>: <value>`.
- *
- * @param node - the schema
- * @param discriminator - the property that tells object branches apart (`type`, `role`)
- * @returns the alternatives, sorted and without repeats
- */
-function alternatives(node: unknown, discriminator: string): string[] {
-  const schema = resolve(node)
-  const unionBranches = [...branches(schema, 'anyOf'), ...branches(schema, 'oneOf')]
-  const found =
-    unionBranches.length > 0
-      ? unionBranches.flatMap((branch) => alternatives(branch, discriminator))
-      : literalsOf(schema)
-  if (found.length > 0 || unionBranches.length > 0) return [...new Set(found)].toSorted()
-  const tag = propertiesOf(schema)[discriminator]
-  return literalsOf(resolve(tag)).map((literal) => `${discriminator}: ${literal}`)
-}
-
-/**
- * The schema of one request field, or of its array items.
- *
- * @param request - the request schema
- * @param field - the top-level field
- * @param items - whether to take the field's `items`
- * @returns the field's (or its items') schema
- */
-function fieldSchema(request: unknown, field: string, items: boolean): unknown {
-  const schema = resolve(propertiesOf(request)[field])
-  return items ? schema['items'] : schema
-}
-
-const openaiRequestSchema = openaiSchemas['CreateChatCompletionRequest']
 
 /** Why the proxy rejects a field OpenAI defines. */
 const NAMED_REJECTION = 'rejected with a named 422 (`rejectedFields`)'

@@ -26,30 +26,41 @@ import * as z from 'zod'
  * exact end of a reusable prompt prefix. Forwarded where the API has a slot for it (OpenAI's own
  * chat completions and Responses); dropped, and logged, everywhere else (`src/pi/cache-breakpoints.ts`).
  */
-const promptCacheBreakpointSchema = z.object({ mode: z.literal('explicit') })
+const promptCacheBreakpointSchema = z.object({ mode: z.literal('explicit') }).strict()
 
 /** A parsed `prompt_cache_breakpoint`. */
 export type PromptCacheBreakpoint = z.infer<typeof promptCacheBreakpointSchema>
+
+// Every message and part schema is strict, as the request is (#146): a field OpenAI defines that
+// the proxy does not take, or one OpenAI does not define, gets a named 422 instead of being
+// dropped. The two OpenAI fields pi has no equivalent for, `name` on a message and
+// `image_url.detail`, are accepted and dropped, as constitution principle I lists them.
 
 /**
  * A `text` content part of a user, system or developer message. docker-agent puts a
  * `prompt_cache_breakpoint` on each system part it sends a `gpt-*` model.
  */
-const textContentPartSchema = z.object({
-  type: z.literal('text'),
-  text: textSchema,
-  prompt_cache_breakpoint: promptCacheBreakpointSchema.optional()
-})
+const textContentPartSchema = z
+  .object({
+    type: z.literal('text'),
+    text: textSchema,
+    prompt_cache_breakpoint: promptCacheBreakpointSchema.optional()
+  })
+  .strict()
 
-/** An `image_url` content part of a user message, with optional `detail`. */
-const imageUrlContentPartSchema = z.object({
-  type: z.literal('image_url'),
-  image_url: z.object({
-    url: z.string().trim(),
-    detail: z.enum(['auto', 'low', 'high']).optional()
-  }),
-  prompt_cache_breakpoint: promptCacheBreakpointSchema.optional()
-})
+/** An `image_url` content part of a user message; `detail` is accepted and dropped. */
+const imageUrlContentPartSchema = z
+  .object({
+    type: z.literal('image_url'),
+    image_url: z
+      .object({
+        url: z.string().trim(),
+        detail: z.enum(['auto', 'low', 'high']).optional()
+      })
+      .strict(),
+    prompt_cache_breakpoint: promptCacheBreakpointSchema.optional()
+  })
+  .strict()
 
 /** A user-message content part: text or image URL. */
 const contentPartSchema = z.discriminatedUnion('type', [
@@ -66,66 +77,88 @@ const contentPartSchema = z.discriminatedUnion('type', [
  */
 const instructionContentSchema = z.union([textSchema, z.array(textContentPartSchema).min(1)])
 
+/** A message's `name`: OpenAI's participant name. Accepted and dropped, as pi has no equivalent. */
+const participantNameSchema = z.string().trim().optional()
+
 /** A `system` message with string or text-part content. */
-const systemMessageSchema = z.object({
-  role: z.literal('system'),
-  content: instructionContentSchema,
-  name: z.string().trim().optional()
-})
+const systemMessageSchema = z
+  .object({
+    role: z.literal('system'),
+    content: instructionContentSchema,
+    name: participantNameSchema
+  })
+  .strict()
 
 /** A `developer` message with string or text-part content. */
-const developerMessageSchema = z.object({
-  role: z.literal('developer'),
-  content: instructionContentSchema,
-  name: z.string().trim().optional()
-})
+const developerMessageSchema = z
+  .object({
+    role: z.literal('developer'),
+    content: instructionContentSchema,
+    name: participantNameSchema
+  })
+  .strict()
 
-/** A `user` message with string content. */
-const userMessageTextSchema = z.object({
-  role: z.literal('user'),
-  content: textSchema,
-  name: z.string().trim().optional()
-})
+/** A `user` message: string content, or an array of text and image parts. */
+const userMessageSchema = z
+  .object({
+    role: z.literal('user'),
+    content: z.union([textSchema, z.array(contentPartSchema)]),
+    name: participantNameSchema
+  })
+  .strict()
 
-/** A `user` message with an array of content parts. */
-const userMessagePartsSchema = z.object({
-  role: z.literal('user'),
-  content: z.array(contentPartSchema),
-  name: z.string().trim().optional()
-})
-
-/** An `assistant` message: optional (nullable) text content and optional function tool calls. */
-const assistantMessageSchema = z.object({
-  role: z.literal('assistant'),
-  content: textSchema.nullable().optional(),
-  name: z.string().trim().optional(),
-  tool_calls: z
-    .array(
-      z.object({
-        id: z.string().trim(),
-        type: z.literal('function'),
-        function: z.object({
-          name: z.string().trim(),
-          arguments: z.string().trim()
-        })
-      })
-    )
-    .optional()
-})
+/**
+ * An `assistant` message: optional (nullable) text content and optional function tool calls.
+ *
+ * @remarks
+ * The fields an OpenAI SDK puts on a reply it echoes back in history are accepted when empty, as
+ * it sends them: `refusal`, `audio`, the deprecated `function_call` and `tool_calls` as `null`, and
+ * the response-only `annotations` as `null` or `[]` (#146). openai-python's `ChatCompletionMessage`
+ * (`types/chat/chat_completion_message.py`) declares each as optional, `None` by default, and
+ * `model_dump()` writes them all out; a proxy reply never sets them. A value in any but
+ * `tool_calls` is refused with a named 422 (`chatRequestRejection`), as pi has nowhere to put it.
+ */
+const assistantMessageSchema = z
+  .object({
+    role: z.literal('assistant'),
+    content: textSchema.nullable().optional(),
+    name: participantNameSchema,
+    refusal: z.null().optional(),
+    audio: z.null().optional(),
+    function_call: z.null().optional(),
+    annotations: z.tuple([]).nullable().optional(),
+    tool_calls: z
+      .array(
+        z
+          .object({
+            id: z.string().trim(),
+            type: z.literal('function'),
+            function: z.object({ name: z.string().trim(), arguments: z.string().trim() }).strict()
+          })
+          .strict()
+      )
+      .nullable()
+      .optional()
+  })
+  .strict()
 
 /** A `tool` message carrying the result for one `tool_call_id`. */
-const toolMessageSchema = z.object({
-  role: z.literal('tool'),
-  content: textSchema,
-  tool_call_id: z.string().trim()
-})
+const toolMessageSchema = z
+  .object({
+    role: z.literal('tool'),
+    content: textSchema,
+    tool_call_id: z.string().trim()
+  })
+  .strict()
 
-/** Any accepted chat message. */
-const messageSchema = z.union([
+/**
+ * Any accepted chat message, told apart by `role`, so an invalid field is reported at its own
+ * path (`messages.2.refusal`) rather than at the message.
+ */
+const messageSchema = z.discriminatedUnion('role', [
   systemMessageSchema,
   developerMessageSchema,
-  userMessageTextSchema,
-  userMessagePartsSchema,
+  userMessageSchema,
   assistantMessageSchema,
   toolMessageSchema
 ])

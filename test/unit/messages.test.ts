@@ -160,6 +160,31 @@ describe('convertMessages', () => {
     const assistant = result.context.messages[1]
     expect(assistant?.role).toBe('assistant')
   })
+
+  // Catches the empty fields an SDK echoes back reaching pi as something: `tool_calls: null` as
+  // a call, or the text lost next to them. The reply must convert to its text alone.
+  test('converts an SDK-echoed reply, its empty fields included, to its text alone', () => {
+    const messages: OpenAIMessage[] = [
+      { role: 'user', content: 'Hi' },
+      {
+        role: 'assistant',
+        content: 'Hello!',
+        refusal: null,
+        audio: null,
+        function_call: null,
+        annotations: null,
+        tool_calls: null
+      },
+      { role: 'user', content: 'Again' }
+    ]
+    const result = convertMessages(messages)
+    assert(result.ok)
+
+    expect(result.context.messages[1]).toMatchObject({
+      role: 'assistant',
+      content: [{ type: 'text', text: 'Hello!' }]
+    })
+  })
 })
 
 /**
