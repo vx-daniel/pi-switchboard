@@ -12,8 +12,8 @@ How each proxy-side claim is backed:
 - **test:** an offline test asserts it;
 - **code:** read from the source named;
 - **probe:** observed on 2026-10-20 with a throwaway test against the mock provider;
-- **unverified:** not checked live. A live check on 2026-10-20 never reached Claude, because the
-  `anthropic` login failed its OAuth refresh.
+- **live:** observed on 2026-10-20 through the proxy with the maintainer's OAuth login, each
+  request capped at one output token.
 
 ## The differences that matter
 
@@ -33,12 +33,12 @@ How each proxy-side claim is backed:
 | `model` | Claude model names | the proxy's public model ID or canonical `provider/model-id`; only exposed models (test) |
 | `max_tokens`, `max_completion_tokens` | supported | supported; `max_completion_tokens` wins (test) |
 | `stream`, `stream_options` | supported | supported; `include_usage` adds the final usage chunk (test) |
-| `temperature` | 0–1, above 1 capped at 1; below 1 is a 400 on Claude 4.7+ and Mythos Preview | 0–2 accepted and sent unchanged (probe). Claude's rule applies to the proxy's traffic too, and its 400 becomes a 502 (#147; unverified live) |
-| `top_p` | passed through; anything but `0.99` is a 400 on Claude 4.7+, as is sending it with `temperature` | sent as `top_p` (probe: `0.5` reached the body); same outcome as `temperature` (#147; unverified live) |
+| `temperature` | 0–1, above 1 capped at 1; below 1 is a 400 on Claude 4.7+ and Mythos Preview | 0–2 accepted. **pi drops it, silently,** for models whose pi catalog entry says `compat.supportsTemperature: false` (Opus 4.7, Opus 5.5, Sonnet 5.5, Haiku 5.5 in `models-store.json`), and whenever thinking is on (pi-ai `anthropic-messages.js:957-963`). So `temperature: 0.5` on Haiku 5.5 and Opus 4.7 answered 200 (live). Older models get it as sent: Opus 4.6 answered 200 with 0.5 (live). The proxy doesn't report pi's drop (#147) |
+| `top_p` | passed through; anything but `0.99` is a 400 on Claude 4.7+, as is sending it with `temperature` | sent as `top_p` (probe). Claude's 400 answers **502** `upstream_error`: `top_p: 0.5` on Haiku 5.5, and `temperature` 0.5 with `top_p` 0.9 on Haiku 4.5 (live). `top_p: 0.99` on Haiku 5.5 answered 200 (live) (#147) |
 | `stop` | non-whitespace sequences work | sent as `stop_sequences`, **but each sequence is trimmed first**, so `"\n"` becomes `""` (probe; #145) |
 | `n` | must be 1 | any `n` is rejected with 422 (test) |
 | `parallel_tool_calls` | supported | `false` becomes `disable_parallel_tool_use: true` on `tool_choice` (PLAN, Anthropic table) |
-| `tool_choice` | supported; forced (`required` or named) is an error on Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 | translated: `auto`/`none` → `{type}`, `required` → `{type: "any"}`, named → `{type: "tool", name}` (PLAN). The forced-use error on those models is answered 502 (#147; unverified live) |
+| `tool_choice` | supported; forced (`required` or named) is an error on Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 | translated: `auto`/`none` → `{type}`, `required` → `{type: "any"}`, named → `{type: "tool", name}` (PLAN). On Opus 5.5 `required` and a named function answer **502** `upstream_error`, and `auto` answers 200; on Haiku 4.5 `required` answers 200 (live) (#147) |
 | `reasoning_effort` | ignored | pi's thinking level, clamped (#43, test) |
 | `response_format` | ignored | accepted; skipped for Anthropic (PLAN, listed drop) |
 | `metadata` | ignored | accepted; skipped for Anthropic, which takes only `user_id` (PLAN, listed drop) |
@@ -104,6 +104,7 @@ How each proxy-side claim is backed:
 - #145: request strings are trimmed, so stop sequences and message whitespace change.
 - #146: `name`, `image_url.detail`, and an assistant message's `refusal` and `audio` are dropped
   silently.
-- #147: a provider 400 caused by the client's own field answers 502. This covers Claude 4.7+
-  `temperature` and `top_p`, and forced `tool_choice` on the Claude 5.x models listed above. The
-  Claude rows marked unverified need one live request each once the `anthropic` login works.
+- #147: a provider 400 caused by the client's own field answers 502: `top_p` on Claude 4.7+,
+  `temperature` with `top_p`, and forced `tool_choice` on the Claude 5.x models listed above
+  (live). `temperature` itself never reaches Claude 4.7+, because pi drops it without telling the
+  proxy.
