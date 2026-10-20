@@ -1019,7 +1019,11 @@ invalid_request_error`, code `upstream_invalid_request`, with fixed text ("The p
 the request as invalid. Check the fields this model accepts."), so a client does not retry a
 request that cannot succeed. The provider's own message stays out of the response, as it can quote
 the request, and reaches the log at `debug` only; the route's line for it is a warning, not an
-error. An upstream 401 or 403 is still `upstream_auth_error` (#128 item 3 decides it).
+error. An upstream 401 or 403 is still `upstream_auth_error` (#128 item 3 decides it), and so is a
+400 whose wording is about credentials (an API key, authentication, an access token): Google
+answers a bad API key with `400 INVALID_ARGUMENT`, which the client cannot fix. The wording check
+reads the provider's whole message, which can quote the request, so a refusal that quotes a prompt
+mentioning an API key would answer `502 upstream_auth_error` too; that errs toward the operator.
 
 A streaming request is not answered until pi's first event. pi's adapters emit `start` only once the
 provider has accepted the request, so a failure before it (an overflow, a rate limit, bad
