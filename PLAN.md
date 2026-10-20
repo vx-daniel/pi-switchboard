@@ -182,7 +182,15 @@ documents it, so no parameter or request body is described by hand:
   its declared type, and `curl -d` sends form-urlencoded.
 - **Malformed JSON.** The validator throws Hono's `HTTPException` (400, "Malformed JSON in request
   body"), which `app.onError` answers in OpenAI's error shape.
-- **`?verify=`** stays as before: only `true` verifies, and any other value is the same as none.
+- **`?verify=`**: only `true` verifies, and any other value is the same as none. A repeated
+  `verify` counts by its first value, as before; the schema accepts the array the validator
+  builds for it, so it never fails into hono-openapi's own error shape. Surrounding spaces are
+  trimmed, so `%20true` now verifies.
+- **Model IDs from the path are trimmed,** as the chat body's `model` already was (the repo's Zod
+  lint rule requires `.trim()`): `/v1/models/%20gpt-x` finds `gpt-x`. The exposure config is
+  still matched exactly as written (constitution, principle IV).
+- **No failure hooks besides the chat body's.** The path, header and query schemas accept any value
+  the request can carry, so their validators never fail.
 - **No default 400.** `defaultValidationErrorResponse` is off: hono-openapi's default documents a
   400 in its own `{ success, error, data }` shape, which the proxy never sends.
 

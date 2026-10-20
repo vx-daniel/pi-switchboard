@@ -220,6 +220,10 @@ const JSON_MEDIA_TYPE = /^application\/([a-z-.]+\+)?json/i
  * request's `Content-Type` to `application/json` when it is anything else. A body that is not
  * JSON still fails, as invalid JSON.
  *
+ * The rewrite is deliberate and local: only the chat route mounts this, after the request line is
+ * logged and auth has run, and nothing after it reads the declared type. Both `app.request` (the
+ * tests) and `@hono/node-server` (production) give a Request whose headers can be set.
+ *
  * @returns the middleware
  */
 export function jsonBodyMiddleware(): MiddlewareHandler<ProxyEnv> {

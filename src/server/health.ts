@@ -269,8 +269,11 @@ export function createHealthRoutes(configReader: ExposureConfigReader): Hono<Pro
     describeRoute(credentialsHealthDescription),
     validator('query', credentialsQuerySchema),
     async (context) => {
+      const { verify } = context.req.valid('query')
+      // A repeated `verify` counts by its first value (`credentialsQuerySchema`).
+      const verifyValue = Array.isArray(verify) ? verify[0] : verify
       try {
-        return await checkCredentials(context, context.req.valid('query').verify === 'true')
+        return await checkCredentials(context, verifyValue === 'true')
       } catch (error) {
         return failedCheck(context, 'credentials', error)
       }

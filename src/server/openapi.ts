@@ -31,9 +31,16 @@ import * as z from 'zod'
 
 // --- What the routes read from a request, validated with hono-openapi's `validator()` ---
 // The validators both check the request and put these into the document, so a parameter is
-// described where it is read and nowhere else.
+// described where it is read and nowhere else. The path, header and query schemas accept any
+// value the request can carry (a path parameter and a header are always one string, a query may
+// repeat), so their validators never fail and need no hook: hono-openapi's own failure answer is
+// not in OpenAI's error shape. Only the chat body can fail, and its hook answers in OpenAI's.
 
-/** The model detail route's path: the model ID, which may span slashes. */
+/**
+ * The model detail route's path: the model ID, which may span slashes. Surrounding spaces are
+ * trimmed, as the chat body's `model` is (the repo's Zod lint rule), so ` gpt-x` finds `gpt-x`
+ * on both routes. The exposure config itself is never normalized (constitution, principle IV).
+ */
 export const modelPathSchema = z.object({
   model: z
     .string()
@@ -67,11 +74,16 @@ export const chatHeadersSchema = z.object({
     })
 })
 
-/** `GET /healthz/creds`'s query. Only `true` verifies; any other value is the same as none. */
+/**
+ * `GET /healthz/creds`'s query. Only `true` verifies; any other value is the same as none. A
+ * repeated `verify` reaches the validator as an array, and its first value counts, as
+ * `c.req.query()` read it before validation; rejecting it would answer in hono-openapi's error
+ * shape, not OpenAI's. Surrounding spaces are trimmed (the repo's Zod lint rule), so `%20true`
+ * verifies too.
+ */
 export const credentialsQuerySchema = z.object({
   verify: z
-    .string()
-    .trim()
+    .union([z.string().trim(), z.array(z.string().trim())])
     .optional()
     .meta({ description: '`true` asks pi to resolve each credential now.' })
 })

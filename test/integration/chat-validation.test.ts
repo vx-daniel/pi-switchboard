@@ -80,17 +80,24 @@ function okCompletion(response: Response): Record<string, unknown> {
 }
 
 describe('POST /v1/chat/completions - validation', () => {
+  // Catches the validator's thrown 400 escaping as Hono's plain text, or the error quoting the
+  // body (parser messages in newer engines do).
   test('rejects invalid JSON', async () => {
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: 'not json'
     })
+
     expect(response.status).toBe(400)
-    const body = await jsonBody(response)
-    expect(isErrorBody(body)).toBe(true)
-    if (!isErrorBody(body)) return
-    expect(body.error.type).toBe('invalid_request_error')
+    expect(await jsonBody(response)).toEqual({
+      error: {
+        message: 'Malformed JSON in request body',
+        type: 'invalid_request_error',
+        param: null,
+        code: null
+      }
+    })
   })
 
   // Catches `validator('json')` skipping a body not sent as JSON and validating `{}` instead:

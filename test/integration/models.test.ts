@@ -102,6 +102,15 @@ describe('GET /v1/models/:model', () => {
     expect(body).toMatchObject({ object: 'model', owned_by: 'gamma' })
   })
 
+  // Catches the detail route and the chat body disagreeing on an ID with surrounding spaces: the
+  // chat body's `model` is trimmed, so the same ID must resolve here too.
+  test('trims spaces around the requested ID, as the chat body does', async () => {
+    const { status, body } = await getJson(`/v1/models/${encodeURIComponent(' org/model-x ')}`)
+
+    expect(status).toBe(200)
+    expect(body).toMatchObject({ id: 'org/model-x', object: 'model' })
+  })
+
   test('returns 404 model_not_found for an unknown model', async () => {
     const { status, body } = await getJson('/v1/models/nonexistent%2Fmodel')
 

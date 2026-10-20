@@ -922,7 +922,17 @@
             "in": "query",
             "name": "verify",
             "schema": {
-              "type": "string"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
             },
             "description": "`true` asks pi to resolve each credential now."
           }
