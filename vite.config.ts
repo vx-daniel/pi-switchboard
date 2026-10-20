@@ -432,6 +432,15 @@ export default defineConfig({
           'typescript/no-unnecessary-type-assertion': 'off',
           'typescript/no-unsafe-type-assertion': 'off'
         }
+      },
+      {
+        // Request text whose whitespace is data (message content, stop sequences, tool results):
+        // trimming it changed what the client sent (#145). This one file holds that schema and
+        // nothing else; every other string stays `z.string().trim()`.
+        files: ['src/openai/text-schemas.ts'],
+        rules: {
+          'zod/prefer-string-schema-with-trim': 'off'
+        }
       }
     ]
   },

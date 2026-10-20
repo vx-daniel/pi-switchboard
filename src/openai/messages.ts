@@ -76,6 +76,9 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
     roleCounts[message.role]++
 
     if (message.role === 'system' || message.role === 'developer') {
+      // Content is kept as sent (#145), so a blank instruction is now "  " rather than the trimmed
+      // "". It says nothing, and Anthropic refuses a blank system prompt, so it is skipped.
+      if (message.content.trim().length === 0) continue
       if (piMessages.length === 0) {
         systemParts.push(message.content)
       } else {
