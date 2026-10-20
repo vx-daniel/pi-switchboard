@@ -57,7 +57,8 @@ beforeAll(async () => {
     'codex-mock': answer,
     'chat-mock': answer,
     'claude-no-temperature': answer,
-    'claude-plain': answer
+    'claude-plain': answer,
+    'claude-no-reasoning': answer
   })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
@@ -75,7 +76,8 @@ beforeAll(async () => {
           apiKey: 'notarealsecret-anthropic-key',
           models: [
             { id: 'claude-no-temperature', compat: { supportsTemperature: false } },
-            { id: 'claude-plain', reasoning: true }
+            { id: 'claude-plain', reasoning: true },
+            { id: 'claude-no-reasoning', reasoning: false }
           ]
         }
       }
@@ -207,5 +209,25 @@ describe('temperature on Claude (#147)', () => {
         }) as unknown
       }
     ])
+  })
+
+  // Catches thinking assumed from the request alone: a `reasoning_effort` on a model without
+  // reasoning turns nothing on, so pi sends the temperature and the log must not claim a drop.
+  test('is sent, unlogged, when reasoning_effort meets a model without reasoning', async () => {
+    const before = mock.requests.length
+    await testApp().request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'anthropic/claude-no-reasoning',
+        temperature: TEMPERATURE,
+        reasoning_effort: 'low',
+        messages: [{ role: 'user', content: 'Hi' }]
+      })
+    })
+    const sent = mock.requests.at(before)?.body
+
+    expect(isRecord(sent) ? sent['temperature'] : 'no body').toBe(TEMPERATURE)
+    expect(dropRecords).toEqual([])
   })
 })

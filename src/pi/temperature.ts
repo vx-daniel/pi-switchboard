@@ -21,7 +21,10 @@ import { proxyLogger } from '@proxy/logging'
 /** Logger for upstream calls. */
 const completeLogger = proxyLogger('pi', 'complete')
 
-/** Models a dropped temperature has been logged for in this process; each is logged at info once. */
+/**
+ * Models, as `provider/id`, a dropped temperature has been logged for in this process; each is
+ * logged at info once. Two providers can serve the same model ID.
+ */
 const modelsWithDroppedTemperature = new Set<string>()
 
 /**
@@ -68,8 +71,9 @@ function anthropicTemperatureDropReason(model: Model<Api>, thinking: boolean): s
  * @param reason - why it does not reach the provider
  */
 function logDroppedTemperature(model: Model<Api>, temperature: number, reason: string): void {
-  const firstForModel = !modelsWithDroppedTemperature.has(model.id)
-  modelsWithDroppedTemperature.add(model.id)
+  const key = `${model.provider}/${model.id}`
+  const firstForModel = !modelsWithDroppedTemperature.has(key)
+  modelsWithDroppedTemperature.add(key)
   const dropped = 'Dropped temperature {temperature} for {modelId}: {reason}'
   const properties = { temperature, modelId: model.id, api: model.api, reason }
   if (firstForModel) completeLogger.info(dropped, properties)

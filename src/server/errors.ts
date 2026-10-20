@@ -314,6 +314,15 @@ const BY_WORDING: readonly (readonly [RegExp, MappedUpstreamError])[] = [
 ]
 
 /**
+ * Wording that marks a provider's 400 as a credential problem, not the client's request: Google
+ * answers a bad API key with `400 INVALID_ARGUMENT` "API key not valid" (#154 review). The
+ * client cannot fix it, so it stays {@link AUTH_FAILED}, a server-side error, not the 400 that
+ * tells the client to check its fields.
+ */
+const CREDENTIAL_WORDING =
+  /\bapi[\s_-]?key\b|\bunauthori[sz]ed\b|\bauthenticat\w*|\bcredentials?\b|\baccess[\s_-]?token\b/i
+
+/**
  * Maps an upstream failure to the status and fixed body the client gets.
  *
  * @remarks
@@ -327,6 +336,7 @@ const BY_WORDING: readonly (readonly [RegExp, MappedUpstreamError])[] = [
 export function mapUpstreamError(err: unknown): MappedUpstreamError {
   const message = err instanceof Error ? err.message : ''
   const status = upstreamStatusIn(message)
+  if (status === HTTP_BAD_REQUEST && CREDENTIAL_WORDING.test(message)) return AUTH_FAILED
   if (status !== undefined) {
     return BY_STATUS.get(status) ?? PROVIDER_FAILED
   }

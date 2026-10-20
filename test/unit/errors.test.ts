@@ -140,6 +140,25 @@ describe('mapUpstreamError', () => {
     body: upstreamBody('Upstream provider error', 'upstream_error')
   }
 
+  // Catches a credential problem a provider reports with a 400 (Google's bad API key is
+  // `400 INVALID_ARGUMENT`) blamed on the client's fields: the client cannot fix it, so it stays a
+  // server-side auth failure, logged as an error.
+  test.each([
+    [
+      'Google, bad API key',
+      `{"error":{"code":400,"message":"API key not valid. Please pass a valid API key. ${SECRET}","status":"INVALID_ARGUMENT"}}`
+    ],
+    [
+      'a labeled 400 about authentication',
+      `OpenAI API error (400): Authentication failed for ${SECRET}`
+    ]
+  ])('maps %s to 502 upstream_auth_error', (_case, upstreamMessage) => {
+    const mapped = mapUpstreamError(new Error(upstreamMessage))
+
+    expect(mapped).toEqual(AUTH_FAILED)
+    expect(JSON.stringify(mapped)).not.toContain(SECRET)
+  })
+
   // Catches the status read from the wrong place (#42): pi 1.3.0 reports it in fixed positions per
   // SDK, and those decide over the wording; a number elsewhere in the text, or a word inside
   // another word, must not.
