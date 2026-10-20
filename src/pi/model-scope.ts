@@ -271,6 +271,9 @@ function resolveReference(
   return trimmed.length === 0 ? NOT_FOUND : resolveText(trimmed, request, models)
 }
 
+/** Records that `pattern` matches models of several providers (pi's `ambiguous` diagnostic). */
+type AmbiguousReporter = (pattern: string, candidates: readonly Model<Api>[]) => void
+
 /**
  * Selects the models `enabledModels` patterns name from `models`, as pi selects them.
  *
@@ -316,9 +319,6 @@ export function resolveModelScope(
   }
   return { models: selected, diagnostics }
 }
-
-/** Records that `pattern` matches models of several providers (pi's `ambiguous` diagnostic). */
-type AmbiguousReporter = (pattern: string, candidates: readonly Model<Api>[]) => void
 
 /**
  * Says whether a pattern is a glob, as pi decides it: it has `*`, `?` or `[`.
