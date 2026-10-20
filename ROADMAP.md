@@ -157,7 +157,7 @@ Routes OpenAI defines that pi can back, each experimental first and then promote
 
 ## Open decisions
 
-- [ ] Proxy auth and upstream failure contract, 5 points (#128)
+- [ ] Proxy auth and upstream failure contract, 5 points (#128); point 5 done (#147)
 
 ## Later, not planned
 
