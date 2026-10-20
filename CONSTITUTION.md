@@ -1,19 +1,24 @@
 <!--
 Sync Impact Report
-Version change: 3.1.0 → 3.2.0 (MINOR)
-Rationale: pi's Anthropic adapter leaves `temperature` out itself on Claude models whose catalog
-entry clears `supportsTemperature` (Claude 4.7 and later, which refuse a temperature below 1), and
-whenever thinking is on (#147). The client was never told. Rejecting the field would break every
-client that sends it by default, as with Codex, so the drop is listed and logged instead.
+Version change: 3.2.0 → 3.3.0 (MINOR)
+Rationale: fields inside messages were dropped without a word (#146): `name`, `image_url.detail`,
+and an assistant message's `refusal` and `audio`, and any key OpenAI does not define, because the
+message and part schemas were not strict like the request. They are now strict, so an unknown or
+unsupported field inside a message gets a named 422 at its path. `name` and `image_url.detail`
+are the exceptions: clients send them routinely and pi has no equivalent, so rejecting them would
+break those clients, and they are listed and logged instead. A null `refusal` or `audio`, which
+OpenAI SDKs send when they echo a reply back, is accepted; a value is refused.
 MINOR: one exception added to principle I; no principle changes.
 Modified sections:
-- I. OpenAI Compatibility: the `temperature` exception covers Claude as well as Codex
+- I. OpenAI Compatibility: exceptions list gains `name` on messages and `image_url.detail`
 Templates requiring updates:
-- ✅ PLAN.md: the Anthropic table and "Error mapping"
-- ✅ README.md: the `temperature` row
-- ✅ docs/reference/claude-openai-compatibility.md: the `temperature` row
+- ✅ PLAN.md: "Rejected" and "Unknown field policy" cover fields inside messages
+- ✅ README.md: the messages rows and "Not supported"
+- ✅ docs/reference/claude-openai-compatibility.md: the message rows
 Follow-up TODOs:
 - None.
+
+3.2.0 (2026-10-20): `temperature` where pi leaves it out for Claude, listed and logged (#147).
 
 3.1.0 (2026-10-20): `prompt_cache_breakpoint` on content parts, forwarded to OpenAI's own APIs and
 dropped, logged, everywhere else (#149).
@@ -73,6 +78,7 @@ Exceptions: a request field MAY be dropped instead of rejected only where it is 
   - Claude (`anthropic-messages`): pi's adapter leaves it out on models whose pi catalog entry clears `supportsTemperature` or sets `supportsMidConvoEffort` (Claude 4.7 and later, which refuse a temperature below 1), and whenever thinking is on (#147). The proxy still passes it to pi and logs that it does not reach Claude. Documented in `PLAN.md`'s Anthropic table and in `README.md`.
 - Passthrough fields a provider has no equivalent for (#81): `stop`, `user`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`, `tool_choice`, `parallel_tool_calls`, `metadata` and `prediction` reach each API verbatim or translated where it has an equivalent, and are dropped where it has none. Clients commonly send one parameter set to every model, and rejecting per API would break them. The per-API tables in `PLAN.md` ("API-aware payload translation") list exactly what each API receives, and `README.md` says fields without an equivalent are skipped; a change to what an API receives updates those tables.
 - `prompt_cache_breakpoint` on content parts (#149): forwarded to OpenAI's own chat completions and Responses (`api.openai.com`), which use it, and dropped for every other API. pi rebuilds each provider's request: Codex's system prompt is a plain `instructions` string with no part to carry it, and an OpenAI-compatible server may refuse a field it does not know. It only affects caching, never the answer, and docker-agent sends it on every `gpt-*` request, so a `422` would break it. Each drop is logged at `debug`, and `PLAN.md` ("Prompt cache breakpoints") and `README.md` document where it goes.
+- `name` on a message and `detail` on an `image_url` (#146): OpenAI fields pi has no equivalent for, a participant name and an image detail level. Clients send them routinely, so a `422` would break them. They are accepted and dropped, each drop logged at `debug` by count, and `README.md` and `PLAN.md` ("Unknown field policy") say so. Every other field inside a message is accepted only as declared, and any other key is refused with a named `422`.
 
 Two kinds of route sit outside the stable surface, and only these:
 - Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs` (Swagger UI for the OpenAPI document). Only `/healthz` and `/docs` may skip proxy authentication; none may return a credential, and `/docs` MUST name no model or provider.
@@ -169,4 +175,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.2.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20
+**Version**: 3.3.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20

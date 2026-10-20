@@ -39,7 +39,7 @@ Treat these as stable unless the user explicitly changes direction:
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.
 - Keep stable responses close to OpenAI's schema. If pi-specific metadata is exposed, namespace it under `x_pi`.
-- Reject unsupported parameters clearly. Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (`temperature` on Codex and where pi leaves it out for Claude; passthrough fields a provider has no equivalent for; `prompt_cache_breakpoint` where the API has no slot for it); any other needs an amendment.
+- Reject unsupported parameters clearly, top level and inside messages and parts (their schemas are strict). Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (`temperature` on Codex and where pi leaves it out for Claude; passthrough fields a provider has no equivalent for; `prompt_cache_breakpoint` where the API has no slot for it; `name` on messages and `image_url.detail`); any other needs an amendment.
 - Routing (aliases, fallback, cooldowns, quota; #66–#70) follows constitution principle VI: configured explicitly, never reaching a model the exposure config hides, and the serving model and login reported under `x_pi` and in the log.
 - Agentic mode is a "Later, not planned" idea. Do not build it under an OpenAI route.
 - Default network posture should remain local-first and safe by default.

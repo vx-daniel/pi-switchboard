@@ -469,14 +469,27 @@ Compatibility preference:
 
 ### Unknown field policy
 
-Default behavior:
+Default behavior, at the top level and inside messages and content parts alike (their schemas are
+strict, #146):
 
 - reject with `422`, naming every unknown field in the message (`Unknown parameter(s): …`) and
-  the first in `param`
+  the first in `param`, as its full dotted path inside a message
+  (`messages.0.content.0.cache_control`)
 
 The fields in "Rejected" above (`n`, `logprobs`, `top_logprobs`, `logit_bias`, `functions`,
 `function_call`) get `422` too, with `'<field>' is not supported in this version of the proxy`.
-A known field with an invalid value or shape (an unsupported content part included) gets `400`.
+So does an assistant message's `refusal` or `audio` with a value: both are accepted only as
+`null`, which OpenAI SDKs send when they echo a reply back in history, as pi has nowhere to put
+them. An assistant message's deprecated `function_call` is an unknown field. A known field with an
+invalid value or shape (an unsupported content part included) gets `400`, at the field's own path:
+messages are told apart by `role` and a user message's string or parts by shape, so an error
+inside one names the field, not the message.
+
+Two OpenAI message fields pi has no equivalent for are accepted and dropped instead, as
+constitution principle I lists them (#146): `name` on a message (a participant name) and `detail`
+on an `image_url`. Clients send both routinely. Each drop is logged at `debug`, by count, never the
+value. `test/integration/openai-spec-messages.test.ts` checks every role's and part's fields
+against OpenAI's spec, as `openai-spec.test.ts` does the top level.
 
 ### Text is kept as sent
 

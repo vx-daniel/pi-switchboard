@@ -2163,7 +2163,7 @@
                     "minItems": 1,
                     "type": "array",
                     "items": {
-                      "anyOf": [
+                      "oneOf": [
                         {
                           "type": "object",
                           "properties": {
@@ -2199,13 +2199,15 @@
                                         },
                                         "required": [
                                           "mode"
-                                        ]
+                                        ],
+                                        "additionalProperties": false
                                       }
                                     },
                                     "required": [
                                       "type",
                                       "text"
-                                    ]
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 }
                               ]
@@ -2217,7 +2219,8 @@
                           "required": [
                             "role",
                             "content"
-                          ]
+                          ],
+                          "additionalProperties": false
                         },
                         {
                           "type": "object",
@@ -2254,12 +2257,122 @@
                                         },
                                         "required": [
                                           "mode"
-                                        ]
+                                        ],
+                                        "additionalProperties": false
                                       }
                                     },
                                     "required": [
                                       "type",
                                       "text"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                }
+                              ]
+                            },
+                            "name": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "role",
+                            "content"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "object",
+                          "properties": {
+                            "role": {
+                              "type": "string",
+                              "const": "user"
+                            },
+                            "content": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "array",
+                                  "items": {
+                                    "oneOf": [
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "const": "text"
+                                          },
+                                          "text": {
+                                            "type": "string"
+                                          },
+                                          "prompt_cache_breakpoint": {
+                                            "type": "object",
+                                            "properties": {
+                                              "mode": {
+                                                "type": "string",
+                                                "const": "explicit"
+                                              }
+                                            },
+                                            "required": [
+                                              "mode"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "type",
+                                          "text"
+                                        ],
+                                        "additionalProperties": false
+                                      },
+                                      {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "const": "image_url"
+                                          },
+                                          "image_url": {
+                                            "type": "object",
+                                            "properties": {
+                                              "url": {
+                                                "type": "string"
+                                              },
+                                              "detail": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "auto",
+                                                  "low",
+                                                  "high"
+                                                ]
+                                              }
+                                            },
+                                            "required": [
+                                              "url"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          "prompt_cache_breakpoint": {
+                                            "type": "object",
+                                            "properties": {
+                                              "mode": {
+                                                "type": "string",
+                                                "const": "explicit"
+                                              }
+                                            },
+                                            "required": [
+                                              "mode"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "type",
+                                          "image_url"
+                                        ],
+                                        "additionalProperties": false
+                                      }
                                     ]
                                   }
                                 }
@@ -2272,121 +2385,8 @@
                           "required": [
                             "role",
                             "content"
-                          ]
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "role": {
-                              "type": "string",
-                              "const": "user"
-                            },
-                            "content": {
-                              "type": "string"
-                            },
-                            "name": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "role",
-                            "content"
-                          ]
-                        },
-                        {
-                          "type": "object",
-                          "properties": {
-                            "role": {
-                              "type": "string",
-                              "const": "user"
-                            },
-                            "content": {
-                              "type": "array",
-                              "items": {
-                                "oneOf": [
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "const": "text"
-                                      },
-                                      "text": {
-                                        "type": "string"
-                                      },
-                                      "prompt_cache_breakpoint": {
-                                        "type": "object",
-                                        "properties": {
-                                          "mode": {
-                                            "type": "string",
-                                            "const": "explicit"
-                                          }
-                                        },
-                                        "required": [
-                                          "mode"
-                                        ]
-                                      }
-                                    },
-                                    "required": [
-                                      "type",
-                                      "text"
-                                    ]
-                                  },
-                                  {
-                                    "type": "object",
-                                    "properties": {
-                                      "type": {
-                                        "type": "string",
-                                        "const": "image_url"
-                                      },
-                                      "image_url": {
-                                        "type": "object",
-                                        "properties": {
-                                          "url": {
-                                            "type": "string"
-                                          },
-                                          "detail": {
-                                            "type": "string",
-                                            "enum": [
-                                              "auto",
-                                              "low",
-                                              "high"
-                                            ]
-                                          }
-                                        },
-                                        "required": [
-                                          "url"
-                                        ]
-                                      },
-                                      "prompt_cache_breakpoint": {
-                                        "type": "object",
-                                        "properties": {
-                                          "mode": {
-                                            "type": "string",
-                                            "const": "explicit"
-                                          }
-                                        },
-                                        "required": [
-                                          "mode"
-                                        ]
-                                      }
-                                    },
-                                    "required": [
-                                      "type",
-                                      "image_url"
-                                    ]
-                                  }
-                                ]
-                              }
-                            },
-                            "name": {
-                              "type": "string"
-                            }
-                          },
-                          "required": [
-                            "role",
-                            "content"
-                          ]
+                          ],
+                          "additionalProperties": false
                         },
                         {
                           "type": "object",
@@ -2407,6 +2407,12 @@
                             },
                             "name": {
                               "type": "string"
+                            },
+                            "refusal": {
+                              "type": "null"
+                            },
+                            "audio": {
+                              "type": "null"
                             },
                             "tool_calls": {
                               "type": "array",
@@ -2433,20 +2439,23 @@
                                     "required": [
                                       "name",
                                       "arguments"
-                                    ]
+                                    ],
+                                    "additionalProperties": false
                                   }
                                 },
                                 "required": [
                                   "id",
                                   "type",
                                   "function"
-                                ]
+                                ],
+                                "additionalProperties": false
                               }
                             }
                           },
                           "required": [
                             "role"
-                          ]
+                          ],
+                          "additionalProperties": false
                         },
                         {
                           "type": "object",
@@ -2466,7 +2475,8 @@
                             "role",
                             "content",
                             "tool_call_id"
-                          ]
+                          ],
+                          "additionalProperties": false
                         }
                       ]
                     }

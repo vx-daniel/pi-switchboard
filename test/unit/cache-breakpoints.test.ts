@@ -205,9 +205,8 @@ describe('OpenAI at api.openai.com gets the breakpoints', () => {
 
 describe('a malformed breakpoint', () => {
   // Catches any object accepted as a breakpoint and then forwarded to OpenAI, which defines one
-  // mode only. The message schema is a union, so the error names the message, as it does for any
-  // invalid field inside one.
-  test('is rejected with 400 at the message', () => {
+  // mode only; and the error naming the whole message instead of the field (#146).
+  test('is rejected with 400 at the breakpoint mode', () => {
     const result = validateChatRequest({
       model: 'gpt-test',
       messages: [
@@ -219,7 +218,11 @@ describe('a malformed breakpoint', () => {
       ]
     })
 
-    expect(result).toMatchObject({ ok: false, status: 400, param: 'messages.0' })
+    expect(result).toMatchObject({
+      ok: false,
+      status: 400,
+      param: 'messages.0.content.0.prompt_cache_breakpoint.mode'
+    })
   })
 })
 

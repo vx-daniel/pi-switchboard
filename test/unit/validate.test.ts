@@ -16,22 +16,15 @@ describe('validateChatRequest', () => {
   })
 
   // Catches every docker-agent request to a gpt-* model failing with a 400 at messages.N: it sends
-  // system content as text parts, each with a prompt_cache_breakpoint (docker-agent v1.145.0). The
-  // breakpoint is kept for the APIs that take it; a field OpenAI does not define is not.
+  // system content as text parts, each with a prompt_cache_breakpoint (docker-agent v1.145.0),
+  // which is kept for the APIs that take it.
   test('accepts system and developer content as text parts, keeping prompt_cache_breakpoint', () => {
     const result = validateChatRequest({
       model: 'gpt-6.1-sol',
       messages: [
         {
           role: 'system',
-          content: [
-            {
-              type: 'text',
-              text: 'Rules.',
-              prompt_cache_breakpoint: { mode: 'explicit' },
-              not_an_openai_field: true
-            }
-          ]
+          content: [{ type: 'text', text: 'Rules.', prompt_cache_breakpoint: { mode: 'explicit' } }]
         },
         { role: 'developer', content: [{ type: 'text', text: 'Context.' }] },
         { role: 'user', content: 'Hello' }
@@ -43,6 +36,73 @@ describe('validateChatRequest', () => {
       role: 'system',
       content: [{ type: 'text', text: 'Rules.', prompt_cache_breakpoint: { mode: 'explicit' } }]
     })
+  })
+
+  // Catches a field inside a message or part dropped silently (#146), or refused at the message
+  // instead of at its own path: the client must see which field to remove.
+  test.each([
+    [
+      'a part field OpenAI does not define',
+      [{ role: 'system', content: [{ type: 'text', text: 'r', cache_control: {} }] }],
+      'messages.0.content.0.cache_control'
+    ],
+    [
+      'an image_url field OpenAI does not define',
+      [
+        {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: 'data:image/png;base64,AA==', extra: 1 } }
+          ]
+        }
+      ],
+      'messages.0.content.0.image_url.extra'
+    ],
+    [
+      'a deprecated assistant function_call',
+      [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: null, function_call: { name: 'f', arguments: '{}' } }
+      ],
+      'messages.1.function_call'
+    ],
+    [
+      'a non-null assistant refusal',
+      [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'x', refusal: 'I cannot' }
+      ],
+      'messages.1.refusal'
+    ],
+    [
+      'a non-null assistant audio',
+      [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'x', audio: { id: 'audio_1' } }
+      ],
+      'messages.1.audio'
+    ]
+  ])('refuses %s with a 422 at its path', (_label, messages, param) => {
+    expect(validateChatRequest({ model: 'gpt-6.1-sol', messages })).toMatchObject({
+      ok: false,
+      status: 422,
+      param
+    })
+  })
+
+  // Catches the null `refusal` and `audio` OpenAI SDKs put on every assistant message they echo
+  // back being refused, which would fail every multi-turn conversation from them.
+  test('accepts a null assistant refusal and audio', () => {
+    const result = validateChatRequest({
+      model: 'gpt-6.1-sol',
+      messages: [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'x', refusal: null, audio: null },
+        { role: 'user', content: 'again' }
+      ]
+    })
+
+    expect(result.ok).toBe(true)
   })
 
   // Catches the new shape letting through what a system message cannot carry: no parts at all,

@@ -97,7 +97,7 @@ export function chatRequestRejection(body: unknown): ValidationError {
   // Report only the first Zod issue, for a clean message
   const issues = result.success ? [] : result.error.issues
   const firstIssue = issues[0]
-  if (firstIssue !== undefined) return issueRejection(firstIssue, issues.length)
+  if (firstIssue !== undefined) return issueRejection(specificIssue(firstIssue), issues.length)
 
   validateLogger.warn('Rejected request body with no validation issue detail')
   return { ok: false, status: 400, message: 'Invalid request body', param: null }
@@ -122,35 +122,82 @@ function rejectedFieldRejection(body: unknown): ValidationError | undefined {
   }
 }
 
+/** Assistant fields accepted only as `null`: pi has nowhere to put a refusal or an audio reply. */
+const NULL_ONLY_FIELDS: ReadonlySet<string> = new Set(['refusal', 'audio'])
+
 /**
- * Turns the first schema issue into the client's error: a 422 for unknown fields, a 400 for
- * anything else.
+ * Picks the most specific issue inside a union's: the one the input got furthest into.
  *
- * @param issue - the first Zod issue
+ * @remarks
+ * A union reports one `invalid_union` issue at its own path, with each branch's issues inside. A
+ * user message's parts are a union of a string and an array, so an unknown key on a part would
+ * otherwise read as "invalid input" at `messages.0.content`. The branch whose issue has the
+ * longest path is the one the input matched the shape of; its issue is reported, at the full path.
+ *
+ * @param issue - a Zod issue
+ * @returns the issue to report
+ */
+function specificIssue(issue: z.core.$ZodIssue): z.core.$ZodIssue {
+  if (issue.code !== 'invalid_union') return issue
+  const deepest = issue.errors
+    .flat()
+    .toSorted((left, right) => right.path.length - left.path.length)[0]
+  if (deepest === undefined || deepest.path.length === 0) return issue
+  return specificIssue({ ...deepest, path: [...issue.path, ...deepest.path] })
+}
+
+/**
+ * Joins an issue path into the dotted `param` form.
+ *
+ * @param path - the issue path
+ * @param key - a key below it, when the issue names one
+ * @returns the dotted path, or `null` at the root
+ */
+function dottedPath(path: readonly PropertyKey[], key?: string): string | null {
+  const parts = [...path.map(String), ...(key === undefined ? [] : [key])]
+  return parts.length > 0 ? parts.join('.') : null
+}
+
+/**
+ * Turns the first schema issue into the client's error: a 422 for unknown fields and for a
+ * non-null assistant `refusal` or `audio`, a 400 for anything else.
+ *
+ * @param issue - the first Zod issue, made specific by {@link specificIssue}
  * @param issueCount - how many issues the body had, for the log
  * @returns the rejection
  */
 function issueRejection(issue: z.core.$ZodIssue, issueCount: number): ValidationError {
   if (issue.code === 'unrecognized_keys') {
-    validateLogger.warn('Rejected unknown fields {fields}', { fields: issue.keys })
+    const fields = issue.keys.map((key) => dottedPath(issue.path, key) ?? key)
+    validateLogger.warn('Rejected unknown fields {fields}', { fields })
     return {
       ok: false,
       status: 422,
-      message: `Unknown parameter(s): ${issue.keys.join(', ')}`,
-      param: issue.keys[0] ?? null
+      message: `Unknown parameter(s): ${fields.join(', ')}`,
+      param: fields[0] ?? null
     }
   }
-  const path = issue.path.join('.')
+  const path = dottedPath(issue.path)
+  const field = issue.path.at(-1)
+  if (issue.code === 'invalid_type' && typeof field === 'string' && NULL_ONLY_FIELDS.has(field)) {
+    validateLogger.warn('Rejected unsupported field {field}', { field: path })
+    return {
+      ok: false,
+      status: 422,
+      message: `'${path ?? field}' is not supported in this version of the proxy; only null is accepted`,
+      param: path
+    }
+  }
   // The issue code and path only: an issue message can quote the rejected value.
   validateLogger.warn('Rejected invalid value at {path} ({code})', {
-    path: path.length > 0 ? path : '(root)',
+    path: path ?? '(root)',
     code: issue.code,
     issueCount
   })
   return {
     ok: false,
     status: 400,
-    message: `Invalid value for '${path}': ${issue.message}`,
-    param: path.length > 0 ? path : null
+    message: `Invalid value for '${path ?? ''}': ${issue.message}`,
+    param: path
   }
 }
