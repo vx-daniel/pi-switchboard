@@ -475,6 +475,28 @@ The fields in "Rejected" above (`n`, `logprobs`, `top_logprobs`, `logit_bias`, `
 `function_call`) get `422` too, with `'<field>' is not supported in this version of the proxy`.
 A known field with an invalid value or shape (an unsupported content part included) gets `400`.
 
+### Text is kept as sent
+
+Request text whose whitespace is data reaches pi exactly as the client sent it (#145): message
+content of every role, `text` parts, tool results, `stop` sequences and `prediction` content. These
+use the one `textSchema` (`src/openai/text-schemas.ts`). Every other request string (`model`, tool
+and function names, call IDs, `user`, `prompt_cache_key`, image URLs, tool-call `arguments`) is
+trimmed, as the `zod/prefer-string-schema-with-trim` lint rule requires. That rule is off for
+`text-schemas.ts` alone (`vite.config.ts`, with the reason), so no other file can opt out by
+accident.
+
+Before #145, every string was trimmed: `stop: ["\n"]` went out as `[""]`, and leading indentation
+and trailing newlines were stripped from message text. A system or developer message that is only
+whitespace is skipped. It carries no instruction, and Anthropic refuses a blank system prompt; the
+trimmed `""` used to come out as no system prompt, and skipping it keeps that. A blank part of a
+system or developer message is left out when the parts are joined.
+
+Whitespace-only text elsewhere goes to pi as sent, and pi's adapters handle it. On Anthropic, pi
+drops a blank user message, user text part or assistant text block. A blank tool result goes as
+its text, which Claude accepts, as it did the trimmed `""` (checked live, 2026-10-20). A
+whitespace-only `stop` sequence is the exception: Claude refuses it, as it refused the trimmed
+`""`, and the client gets a 502 for its own field (#147).
+
 ## Message mapping policy
 
 ### Roles

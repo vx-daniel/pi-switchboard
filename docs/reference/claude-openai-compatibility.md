@@ -12,8 +12,8 @@ How each proxy-side claim is backed:
 - **test:** an offline test asserts it;
 - **code:** read from the source named;
 - **probe:** observed on 2026-10-20 with a throwaway test against the mock provider. The test was
-  not kept, so these rows can't be re-run from the repo; #145 and #146 add tests that cover them,
-  and their tag becomes **test** when those land;
+  not kept, so these rows can't be re-run from the repo; #146 adds tests that cover its rows, and
+  their tag becomes **test** when it lands;
 - **live:** observed on 2026-10-20 through the proxy with the maintainer's OAuth login, each
   request capped at one output token. These rows are a snapshot: which Claude models refuse a
   field, and which ones pi treats specially, change with Anthropic's models and pi's catalog.
@@ -39,7 +39,7 @@ How each proxy-side claim is backed:
 | `stream`, `stream_options` | supported | supported; `include_usage` adds the final usage chunk (test) |
 | `temperature` | 0–1, above 1 capped at 1; below 1 is a 400 on Claude 4.7+ and Mythos Preview | 0–2 accepted. **pi drops it, silently,** for models whose pi catalog entry says `compat.supportsTemperature: false` (Opus 4.7, Opus 5.5, Sonnet 5.5, Haiku 5.5 in `models-store.json`), and whenever thinking is on (pi-ai's `buildParams` in `api/anthropic-messages.js`). So `temperature: 0.5` on Haiku 5.5 and Opus 4.7 answered 200 (live). Older models get it as sent: Opus 4.6 answered 200 with 0.5 (live). The proxy doesn't report pi's drop (#147) |
 | `top_p` | passed through; anything but `0.99` is a 400 on Claude 4.7+, as is sending it with `temperature` | sent as `top_p` (probe). Claude's 400 answers **502** `upstream_error`: `top_p: 0.5` on Haiku 5.5, and `temperature` 0.5 with `top_p` 0.9 on Haiku 4.5 (live). `top_p: 0.99` on Haiku 5.5 answered 200 (live) (#147) |
-| `stop` | non-whitespace sequences work | sent as `stop_sequences`, **but each sequence is trimmed first**, so `"\n"` becomes `""` (probe; #145) |
+| `stop` | non-whitespace sequences work | sent as `stop_sequences`, exactly as sent: `"\n\nHuman:"` stays `"\n\nHuman:"` (#145, test), and `"\n2"` stopped Haiku 4.5 after `1` (live). A sequence that is only whitespace, such as `"\n"`, is Claude's 400 `each stop sequence must contain non-whitespace`, answered **502** (live; #147). Before #145 it was trimmed to `""`, which Claude refuses as well |
 | `n` | must be 1 | any `n` is rejected with 422 (test) |
 | `parallel_tool_calls` | supported | `false` becomes `disable_parallel_tool_use: true` on `tool_choice` (PLAN, Anthropic table) |
 | `tool_choice` | supported; forced (`required` or named) is an error on Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 | translated: `auto`/`none` → `{type}`, `required` → `{type: "any"}`, named → `{type: "tool", name}` (PLAN). On Opus 5.5 `required` and a named function answer **502** `upstream_error`, and `auto` answers 200; on Haiku 4.5 `required` answers 200 (live) (#147) |
@@ -66,15 +66,15 @@ How each proxy-side claim is backed:
 |---|---|---|
 | `system` / `developer` `content` | supported, moved to the top | string only; leading turns become the system prompt, later ones stay in place where compat allows (#45) |
 | `system` / `developer` / `user` / `assistant` `name` | ignored | accepted, then dropped silently (probe; #146) |
-| `user` `content` string, `text` parts | supported | supported, **but trimmed** (probe; #145) |
+| `user` `content` string, `text` parts | supported | supported, whitespace kept (#145, test). One that is only whitespace is dropped by pi, as the trimmed `""` was: a blank user turn before a real one answered 200 (live) |
 | `user` `image_url` `url` | supported | base64 data URIs; remote URLs only with the remote-images setting on (test) |
 | `user` `image_url` `detail` | ignored | accepted, then dropped silently (probe; #146) |
 | `user` `input_audio`, `file` parts | ignored and stripped | rejected with 400 (test) |
-| `assistant` `content` string | supported | supported (trimmed, #145) |
+| `assistant` `content` string | supported | supported, whitespace kept (#145) |
 | `assistant` `content` array (`text`, `refusal`) | text supported, refusal ignored | string or `null` only; an array is rejected with 400 (code: `schemas.ts`) |
 | `assistant` `tool_calls` | supported | supported (test) |
 | `assistant` `function_call`, `audio`, `refusal` | `function_call` supported, the others ignored | not declared: dropped silently by the message schema (probe; #146) |
-| `tool` `content` string | supported | supported (trimmed, #145) |
+| `tool` `content` string | supported | supported, whitespace kept (#145, test). A whitespace-only result is sent as is, and Claude accepts it, as it did `""` (live) |
 | `tool` `content` array of `text` | supported | rejected with 400: string only (code: `schemas.ts`) |
 | `tool` `tool_call_id` | supported | supported (test) |
 | `function` role (deprecated) | supported | rejected with 400 (code: not in the message union) |
@@ -105,7 +105,8 @@ How each proxy-side claim is backed:
 
 ## Follow-ups from this comparison
 
-- #145: request strings are trimmed, so stop sequences and message whitespace change.
+- #145 (fixed): request text was trimmed, so stop sequences and message whitespace changed. Text
+  is now kept as sent; a blank system or developer message is skipped.
 - #146: `name`, `image_url.detail`, and an assistant message's `refusal` and `audio` are dropped
   silently.
 - #147: a provider 400 caused by the client's own field answers 502: `top_p` on Claude 4.7+,

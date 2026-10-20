@@ -59,13 +59,18 @@ type InstructionContent = Extract<OpenAIMessage, { role: 'system' | 'developer' 
 /**
  * The text of a system or developer message. Its parts are joined with blank lines, the same
  * separator as between leading messages: a client that splits its instructions into parts (one per
- * block, as docker-agent does) means separate blocks, not one run-on paragraph.
+ * block, as docker-agent does) means separate blocks, not one run-on paragraph. A part that is
+ * only whitespace is left out, so it adds no stray blank lines (text is no longer trimmed, #145).
  *
  * @param content - the message's string or text parts
  * @returns the instruction text
  */
 function instructionText(content: InstructionContent): string {
-  return typeof content === 'string' ? content : content.map((part) => part.text).join('\n\n')
+  if (typeof content === 'string') return content
+  return content
+    .map((part) => part.text)
+    .filter((partText) => partText.trim().length > 0)
+    .join('\n\n')
 }
 
 /**
@@ -94,6 +99,10 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
 
     if (message.role === 'system' || message.role === 'developer') {
       const text = instructionText(message.content)
+      // Content is kept as sent (#145), so a blank instruction ("" or only whitespace) is no
+      // longer trimmed to "". It says nothing, and Anthropic refuses a blank system prompt, so it
+      // is skipped.
+      if (text.trim().length === 0) continue
       if (piMessages.length === 0) {
         systemParts.push(text)
       } else {

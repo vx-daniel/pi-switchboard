@@ -49,6 +49,38 @@ describe('convertMessages', () => {
     expect(result.context.messages.at(-1)).toMatchObject({ role: 'system', content: 'Later rule.' })
   })
 
+  // Catches a blank part (untrimmed since #145) adding stray blank lines between blocks, and a
+  // later developer message with parts not being joined the same way, or not kept in place.
+  test('leaves blank parts out, and joins a later developer message with parts in place', () => {
+    const result = convertMessages([
+      {
+        role: 'system',
+        content: [
+          { type: 'text', text: 'Rule one.' },
+          { type: 'text', text: '  \n' },
+          { type: 'text', text: '  Rule two, indented.' }
+        ]
+      },
+      { role: 'user', content: 'Hello' },
+      {
+        role: 'developer',
+        content: [
+          { type: 'text', text: 'Later rule.' },
+          { type: 'text', text: '' },
+          { type: 'text', text: 'Another.' }
+        ]
+      },
+      { role: 'developer', content: [{ type: 'text', text: '   ' }] }
+    ])
+    assert(result.ok, 'expected the conversation to convert')
+
+    expect(result.context.systemPrompt).toBe('Rule one.\n\n  Rule two, indented.')
+    expect(rolesAndText(result.context.messages)).toEqual([
+      { role: 'user', content: 'Hello' },
+      { role: 'system', content: 'Later rule.\n\nAnother.' }
+    ])
+  })
+
   /**
    * Reduces each pi message to its role and its text (system and user messages carry plain text
    * here).

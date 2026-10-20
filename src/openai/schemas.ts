@@ -16,6 +16,7 @@
  * @packageDocumentation
  */
 
+import { textSchema } from '@proxy/openai/text-schemas'
 import * as z from 'zod'
 
 // --- Message content parts ---
@@ -27,7 +28,7 @@ import * as z from 'zod'
  */
 const textContentPartSchema = z.object({
   type: z.literal('text'),
-  text: z.string().trim()
+  text: textSchema
 })
 
 /** An `image_url` content part of a user message, with optional `detail`. */
@@ -52,7 +53,7 @@ const contentPartSchema = z.discriminatedUnion('type', [
  * completions API accepts in place of one. docker-agent sends parts for `gpt-*` models and a
  * string for Claude ones.
  */
-const instructionContentSchema = z.union([z.string().trim(), z.array(textContentPartSchema).min(1)])
+const instructionContentSchema = z.union([textSchema, z.array(textContentPartSchema).min(1)])
 
 /** A `system` message with string or text-part content. */
 const systemMessageSchema = z.object({
@@ -71,7 +72,7 @@ const developerMessageSchema = z.object({
 /** A `user` message with string content. */
 const userMessageTextSchema = z.object({
   role: z.literal('user'),
-  content: z.string().trim(),
+  content: textSchema,
   name: z.string().trim().optional()
 })
 
@@ -85,7 +86,7 @@ const userMessagePartsSchema = z.object({
 /** An `assistant` message: optional (nullable) text content and optional function tool calls. */
 const assistantMessageSchema = z.object({
   role: z.literal('assistant'),
-  content: z.string().trim().nullable().optional(),
+  content: textSchema.nullable().optional(),
   name: z.string().trim().optional(),
   tool_calls: z
     .array(
@@ -104,7 +105,7 @@ const assistantMessageSchema = z.object({
 /** A `tool` message carrying the result for one `tool_call_id`. */
 const toolMessageSchema = z.object({
   role: z.literal('tool'),
-  content: z.string().trim(),
+  content: textSchema,
   tool_call_id: z.string().trim()
 })
 
@@ -222,9 +223,7 @@ export const chatCompletionRequestSchema = z
     temperature: z.number().min(0).max(MAX_TEMPERATURE).optional(),
     max_tokens: z.int().positive().optional(),
     max_completion_tokens: z.int().positive().optional(),
-    stop: z
-      .union([z.string().trim(), z.array(z.string().trim()).max(MAX_STOP_SEQUENCES)])
-      .optional(),
+    stop: z.union([textSchema, z.array(textSchema).max(MAX_STOP_SEQUENCES)]).optional(),
     user: z.string().trim().optional(),
     stream_options: streamOptionsSchema.nullable().optional(),
     // Tools and model control
@@ -253,8 +252,8 @@ export const chatCompletionRequestSchema = z
       .object({
         type: z.literal('content'),
         content: z.union([
-          z.string().trim(),
-          z.array(z.object({ type: z.literal('text'), text: z.string().trim() }))
+          textSchema,
+          z.array(z.object({ type: z.literal('text'), text: textSchema }))
         ])
       })
       .optional()
