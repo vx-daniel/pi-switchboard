@@ -1608,7 +1608,7 @@
             }
           },
           "400": {
-            "description": "Invalid JSON, an invalid field value or message, a conversation longer than the model takes, or the old `X-Pi-Upstream-Api-Key` header.",
+            "description": "Invalid JSON, an invalid field value or message, a conversation longer than the model takes (`context_length_exceeded`), a request the provider refused as invalid (`upstream_invalid_request`), or the old `X-Pi-Upstream-Api-Key` header.",
             "content": {
               "application/json": {
                 "schema": {

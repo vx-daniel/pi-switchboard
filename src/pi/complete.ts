@@ -23,14 +23,12 @@ import { supportedReasoningEfforts, thinkingLevelFor } from '@proxy/openai/reaso
 import type { ChatCompletionRequest, ReasoningEffort } from '@proxy/openai/schemas'
 import { breakpointPatch } from '@proxy/pi/cache-breakpoints'
 import { getRuntime } from '@proxy/pi/registry'
+import { upstreamTemperature } from '@proxy/pi/temperature'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
 import { isRecord } from '@proxy/utils/guards'
 
 /** Logger for upstream calls. */
 const completeLogger = proxyLogger('pi', 'complete')
-
-/** Codex models a temperature has been dropped for in this process; each is logged at info once. */
-const modelsWithDroppedTemperature = new Set<string>()
 
 /**
  * APIs that get every OpenAI passthrough field ({@link OPENAI_PASSTHROUGH_FIELDS}) verbatim, as
@@ -486,31 +484,6 @@ function reasoningLevel(
 }
 
 /**
- * Returns the temperature to send upstream for `model`.
- *
- * @remarks
- * The Codex backend rejects temperature ("Unsupported parameter: temperature"), though pi 1.3.0
- * forwards it. Dropped rather than refused, so clients that always send one keep working on
- * Codex models (#49). The first drop per model is logged at info so the operator sees it; the
- * rest at debug, as a client that always sends one would otherwise log a line per request.
- *
- * @param model - the pi model
- * @param temperature - the request's temperature
- * @returns `temperature`, or `undefined` when it must be dropped (Codex models)
- */
-function upstreamTemperature(model: Model<Api>, temperature: number): number | undefined {
-  if (model.api !== 'openai-codex-responses') return temperature
-  const firstForModel = !modelsWithDroppedTemperature.has(model.id)
-  modelsWithDroppedTemperature.add(model.id)
-  const dropped =
-    'Dropped temperature {temperature} for {modelId}: the Codex backend does not accept it'
-  const properties = { temperature, modelId: model.id, api: model.api }
-  if (firstForModel) completeLogger.info(dropped, properties)
-  else completeLogger.debug(dropped, properties)
-  return undefined
-}
-
-/**
  * Builds the `onPayload` hook that injects the request's passthrough fields for `model.api`, and
  * puts the client's `prompt_cache_breakpoint`s back where the API takes them
  * (`@proxy/pi/cache-breakpoints`).
@@ -582,8 +555,17 @@ async function buildStreamOptions(
 ): Promise<SimpleStreamOptions> {
   const opts: SimpleStreamOptions = {}
 
+  if (request.reasoning_effort !== undefined) {
+    const level = reasoningLevel(model, request.reasoning_effort)
+    if (level !== undefined) opts.reasoning = level
+  }
+
   if (request.temperature !== undefined) {
-    const temperature = upstreamTemperature(model, request.temperature)
+    const temperature = upstreamTemperature(
+      model,
+      request.temperature,
+      opts.reasoning !== undefined
+    )
     if (temperature !== undefined) opts.temperature = temperature
   }
 
@@ -591,11 +573,6 @@ async function buildStreamOptions(
   const maxTokens = request.max_completion_tokens ?? request.max_tokens
   if (maxTokens !== undefined) {
     opts.maxTokens = maxTokens
-  }
-
-  if (request.reasoning_effort !== undefined) {
-    const level = reasoningLevel(model, request.reasoning_effort)
-    if (level !== undefined) opts.reasoning = level
   }
 
   // Anthropic takes OpenAI's `user` as metadata.user_id, its only metadata key. pi's Anthropic

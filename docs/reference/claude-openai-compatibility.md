@@ -28,7 +28,7 @@ How each proxy-side claim is backed:
 | System and developer messages | all moved into `system`, joined with `\n`, wherever they appear | before the first turn they form the system prompt; later ones stay in place where the model's compat allows (#45, test) |
 | Prompt caching | not supported | pi marks the system prompt, the last user message and the last tool with `cache_control` on every request (code: pi-ai `anthropic-messages.js`); cache reads come back as `prompt_tokens_details.cached_tokens` |
 | Auth | Claude API key, plus `anthropic-workspace-id` for keys with access to several workspaces | pi's stored login (API key or OAuth, refreshed by pi), or a per-request key in `X-Switchboard-Upstream-Api-Key` |
-| Errors | OpenAI's format with Claude's messages | OpenAI's format with fixed messages that never quote the provider; a provider 400 that isn't a context overflow is `502` (#147, code) |
+| Errors | OpenAI's format with Claude's messages | OpenAI's format with fixed messages that never quote the provider; a provider 400 that isn't a context overflow is `400` `upstream_invalid_request` (#147, test) |
 
 ## Request fields
 
@@ -37,12 +37,12 @@ How each proxy-side claim is backed:
 | `model` | Claude model names | the proxy's public model ID or canonical `provider/model-id`; only exposed models (test) |
 | `max_tokens`, `max_completion_tokens` | supported | supported; `max_completion_tokens` wins (test) |
 | `stream`, `stream_options` | supported | supported; `include_usage` adds the final usage chunk (test) |
-| `temperature` | 0–1, above 1 capped at 1; below 1 is a 400 on Claude 4.7+ and Mythos Preview | 0–2 accepted. **pi drops it, silently,** for models whose pi catalog entry says `compat.supportsTemperature: false` (Opus 4.7, Opus 5.5, Sonnet 5.5, Haiku 5.5 in `models-store.json`), and whenever thinking is on (pi-ai's `buildParams` in `api/anthropic-messages.js`). So `temperature: 0.5` on Haiku 5.5 and Opus 4.7 answered 200 (live). Older models get it as sent: Opus 4.6 answered 200 with 0.5 (live). The proxy doesn't report pi's drop (#147) |
-| `top_p` | passed through; anything but `0.99` is a 400 on Claude 4.7+, as is sending it with `temperature` | sent as `top_p` (probe). Claude's 400 answers **502** `upstream_error`: `top_p: 0.5` on Haiku 5.5, and `temperature` 0.5 with `top_p` 0.9 on Haiku 4.5 (live). `top_p: 0.99` on Haiku 5.5 answered 200 (live) (#147) |
-| `stop` | non-whitespace sequences work | sent as `stop_sequences`, exactly as sent: `"\n\nHuman:"` stays `"\n\nHuman:"` (#145, test), and `"\n2"` stopped Haiku 4.5 after `1` (live). A sequence that is only whitespace, such as `"\n"`, is Claude's 400 `each stop sequence must contain non-whitespace`, answered **502** (live; #147). Before #145 it was trimmed to `""`, which Claude refuses as well |
+| `temperature` | 0–1, above 1 capped at 1; below 1 is a 400 on Claude 4.7+ and Mythos Preview | 0–2 accepted. **pi leaves it out** for models whose pi catalog entry says `compat.supportsTemperature: false` (Opus 4.7, Opus 5.5, Sonnet 5.5, Haiku 5.5 in `models-store.json`), and whenever thinking is on (pi-ai's `buildParams` in `api/anthropic-messages.js`). So `temperature: 0.5` on Haiku 5.5 and Opus 4.7 answered 200 (live). Older models get it as sent: Opus 4.6 answered 200 with 0.5 (live). The proxy logs pi's drop, the first per model at `info` (constitution 3.2.0, #147, test) |
+| `top_p` | passed through; anything but `0.99` is a 400 on Claude 4.7+, as is sending it with `temperature` | sent as `top_p` (probe). Claude's 400 answers **400** `upstream_invalid_request`: `top_p: 0.5` on Haiku 5.5, and `temperature` 0.5 with `top_p` 0.9 on Haiku 4.5 (live). `top_p: 0.99` on Haiku 5.5 answered 200 (live) (#147) |
+| `stop` | non-whitespace sequences work | sent as `stop_sequences`, exactly as sent: `"\n\nHuman:"` stays `"\n\nHuman:"` (#145, test), and `"\n2"` stopped Haiku 4.5 after `1` (live). A sequence that is only whitespace, such as `"\n"`, is Claude's 400 `each stop sequence must contain non-whitespace`, answered **400** `upstream_invalid_request` (live; #147). Before #145 it was trimmed to `""`, which Claude refuses as well |
 | `n` | must be 1 | any `n` is rejected with 422 (test) |
 | `parallel_tool_calls` | supported | `false` becomes `disable_parallel_tool_use: true` on `tool_choice` (PLAN, Anthropic table) |
-| `tool_choice` | supported; forced (`required` or named) is an error on Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 | translated: `auto`/`none` → `{type}`, `required` → `{type: "any"}`, named → `{type: "tool", name}` (PLAN). On Opus 5.5 `required` and a named function answer **502** `upstream_error`, and `auto` answers 200; on Haiku 4.5 `required` answers 200 (live) (#147) |
+| `tool_choice` | supported; forced (`required` or named) is an error on Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 | translated: `auto`/`none` → `{type}`, `required` → `{type: "any"}`, named → `{type: "tool", name}` (PLAN). On Opus 5.5 `required` and a named function answer **400** `upstream_invalid_request`, and `auto` answers 200; on Haiku 4.5 `required` answers 200 (live) (#147) |
 | `reasoning_effort` | ignored | pi's thinking level, clamped (#43, test) |
 | `response_format` | ignored | accepted; skipped for Anthropic (PLAN, listed drop) |
 | `metadata` | ignored | accepted; skipped for Anthropic, which takes only `user_id` (PLAN, listed drop) |
@@ -110,7 +110,7 @@ How each proxy-side claim is backed:
   is now kept as sent; a blank system or developer message is skipped.
 - #146: `name`, `image_url.detail`, and an assistant message's `refusal` and `audio` are dropped
   silently.
-- #147: a provider 400 caused by the client's own field answers 502: `top_p` on Claude 4.7+,
-  `temperature` with `top_p`, and forced `tool_choice` on the Claude 5.x models listed above
-  (live). `temperature` itself never reaches Claude 4.7+, because pi drops it without telling the
-  proxy.
+- #147 (fixed): a provider 400 caused by the client's own field answered 502. It is now `400`
+  `upstream_invalid_request`: `top_p` on Claude 4.7+, `temperature` with `top_p`, forced
+  `tool_choice` on the Claude 5.x models listed above, and a whitespace-only stop (live). pi's drop
+  of `temperature` on Claude 4.7+ is now listed (constitution 3.2.0) and logged.

@@ -1,7 +1,9 @@
 /**
- * `temperature` on the Codex backend (#49): it rejects the parameter ("Unsupported parameter:
- * temperature"), though pi 1.3.0 forwards it, so the proxy drops it for `openai-codex-responses`
- * and says so at info the first time per model, then at debug. Every other API gets it.
+ * `temperature` where it does not reach the provider. The Codex backend rejects the parameter
+ * ("Unsupported parameter: temperature") though pi 1.3.0 forwards it, so the proxy drops it for
+ * `openai-codex-responses` (#49). pi's Anthropic adapter leaves it out itself on Claude models
+ * whose catalog entry clears `supportsTemperature`, and whenever thinking is on (#147). Both say
+ * so at info the first time per model, then at debug. Every other model gets it.
  *
  * pi's Codex adapter reads the ChatGPT account ID from its key, a JWT, so the fixture key is an
  * unsigned one carrying a fake account ID. The mock answers in chat-completions format, which the
@@ -51,7 +53,14 @@ const dropRecords: { level: string; properties: unknown }[] = []
 
 beforeAll(async () => {
   const answer = sse([...textChunks('ok'), finishChunk('stop')])
-  mock = await startMockProvider({ 'codex-mock': answer, 'chat-mock': answer })
+  mock = await startMockProvider({
+    'codex-mock': answer,
+    'chat-mock': answer,
+    'claude-no-temperature': answer,
+    'claude-mid-effort': answer,
+    'claude-plain': answer,
+    'claude-no-reasoning': answer
+  })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
       providers: {
@@ -61,7 +70,18 @@ beforeAll(async () => {
           apiKey: FAKE_CODEX_TOKEN,
           models: [{ id: 'codex-mock' }]
         },
-        completions: { ...mock.provider(), models: [{ id: 'chat-mock' }] }
+        completions: { ...mock.provider(), models: [{ id: 'chat-mock' }] },
+        anthropic: {
+          baseUrl: mock.origin,
+          api: 'anthropic-messages',
+          apiKey: 'notarealsecret-anthropic-key',
+          models: [
+            { id: 'claude-no-temperature', compat: { supportsTemperature: false } },
+            { id: 'claude-mid-effort', compat: { supportsMidConvoEffort: true } },
+            { id: 'claude-plain', reasoning: true },
+            { id: 'claude-no-reasoning', reasoning: false }
+          ]
+        }
       }
     }
   })
@@ -137,6 +157,83 @@ describe('temperature', () => {
     const body = await sentBody('completions/chat-mock', temperature)
 
     expect(body['temperature']).toBe(temperature)
+    expect(dropRecords).toEqual([])
+  })
+})
+
+describe('temperature on Claude (#147)', () => {
+  // Catches pi's own drop going unreported: Claude 4.7 and later refuse a temperature below 1, so
+  // pi leaves it out on models whose catalog entry says so, by either compat flag, and the operator
+  // must see that it never reached the provider. The body is pi's real request, so a pi upgrade
+  // that changes its rule fails here, not only in the log.
+  test.each([
+    ['supportsTemperature: false', 'claude-no-temperature'],
+    ['supportsMidConvoEffort: true', 'claude-mid-effort']
+  ])('is left out by pi on a model with %s, and logged', async (_flag, modelId) => {
+    const first = await sentBody(`anthropic/${modelId}`, TEMPERATURE)
+    const second = await sentBody(`anthropic/${modelId}`, TEMPERATURE)
+
+    expect(first).not.toHaveProperty('temperature')
+    expect(second).not.toHaveProperty('temperature')
+    const properties = {
+      temperature: TEMPERATURE,
+      modelId,
+      reason: 'pi does not send it, as the model does not accept it'
+    }
+    expect(dropRecords).toEqual([
+      { level: 'INFO', properties: expect.objectContaining(properties) as unknown },
+      { level: 'DEBUG', properties: expect.objectContaining(properties) as unknown }
+    ])
+  })
+
+  // Catches the log claiming a drop that does not happen (thinking off, a model that takes it), or
+  // missing the one that does (thinking on, which pi never sends a temperature with).
+  test('is sent with thinking off, left out and logged with thinking on', async () => {
+    const plain = await sentBody('anthropic/claude-plain', TEMPERATURE)
+    expect(plain['temperature']).toBe(TEMPERATURE)
+    expect(dropRecords).toEqual([])
+
+    const before = mock.requests.length
+    await testApp().request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'anthropic/claude-plain',
+        temperature: TEMPERATURE,
+        reasoning_effort: 'low',
+        messages: [{ role: 'user', content: 'Hi' }]
+      })
+    })
+    const thinking = mock.requests.at(before)?.body
+
+    expect(isRecord(thinking) ? thinking['temperature'] : 'no body').toBeUndefined()
+    expect(dropRecords).toEqual([
+      {
+        level: 'INFO',
+        properties: expect.objectContaining({
+          reason: 'pi does not send it, as thinking is on'
+        }) as unknown
+      }
+    ])
+  })
+
+  // Catches thinking assumed from the request alone: a `reasoning_effort` on a model without
+  // reasoning turns nothing on, so pi sends the temperature and the log must not claim a drop.
+  test('is sent, unlogged, when reasoning_effort meets a model without reasoning', async () => {
+    const before = mock.requests.length
+    await testApp().request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'anthropic/claude-no-reasoning',
+        temperature: TEMPERATURE,
+        reasoning_effort: 'low',
+        messages: [{ role: 'user', content: 'Hi' }]
+      })
+    })
+    const sent = mock.requests.at(before)?.body
+
+    expect(isRecord(sent) ? sent['temperature'] : 'no body').toBe(TEMPERATURE)
     expect(dropRecords).toEqual([])
   })
 })
