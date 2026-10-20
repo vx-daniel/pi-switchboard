@@ -36,11 +36,26 @@ const SAMPLE_PROGRAM_TIMEOUT_MS = 30_000
 
 /**
  * Library and dependency source files parsed once and shared by every sample program: they never
- * change between samples, and parsing them is most of a sample's cost. Keyed by file name alone,
- * so it assumes every sample program parses with the same target: they all take the repository's
- * `tsconfig.json` ({@link compilerOptions}). A file the host cannot find is cached as `undefined`.
+ * change between samples, and parsing them is most of a sample's cost. Keyed by the parse's target
+ * and module format as well as the file name ({@link libraryFileKey}), so a sample with other
+ * options gets its own parse. A file the host cannot find is cached as `undefined`.
  */
 const LIBRARY_FILES = new Map<string, typescript.SourceFile | undefined>()
+
+/**
+ * The {@link LIBRARY_FILES} key for one parse of a file.
+ *
+ * @param fileName - the file's path
+ * @param languageVersion - the target, or the source-file options holding it, as the host gets it
+ * @returns the file name with the target and module format it is parsed for
+ */
+function libraryFileKey(
+  fileName: string,
+  languageVersion: typescript.ScriptTarget | typescript.CreateSourceFileOptions
+): string {
+  if (typeof languageVersion !== 'object') return `${languageVersion}:${fileName}`
+  return `${languageVersion.languageVersion}:${languageVersion.impliedNodeFormat ?? ''}:${fileName}`
+}
 
 /** Files whose every declaration is in scope: the code, and every non-test file under `test/`. */
 const FULL_SCOPE =
@@ -481,10 +496,11 @@ function inMemoryProgram(files: Readonly<Record<string, string>>): typescript.Pr
       if (text !== undefined) {
         return typescript.createSourceFile(fileName, text, languageVersion, true)
       }
-      if (!LIBRARY_FILES.has(fileName)) {
-        LIBRARY_FILES.set(fileName, host.getSourceFile(fileName, languageVersion, onError))
+      const key = libraryFileKey(fileName, languageVersion)
+      if (!LIBRARY_FILES.has(key)) {
+        LIBRARY_FILES.set(key, host.getSourceFile(fileName, languageVersion, onError))
       }
-      return LIBRARY_FILES.get(fileName)
+      return LIBRARY_FILES.get(key)
     }
   })
 }
