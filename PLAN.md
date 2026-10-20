@@ -358,7 +358,8 @@ store for every provider); its synchronous `resolveModelScopeFromModels` is not 
 available-model snapshot the proxy exposes. The port follows pi's loop step for step, with its
 glob and reference branches as one helper each (`globMatches`, `referenceMatches`), so it can be
 read against pi's source; `test/unit/model-scope.test.ts` checks it against pi's resolver.
-thinking level are listed in `/healthz/models` (`scopeDiagnostics`) and in `/proxy show`. pi's
+Patterns that match nothing, match several providers, or carry an invalid thinking level are
+listed in `/healthz/models` (`scopeDiagnostics`) and in `/proxy show`. pi's
 `--models` flag is per session and does not apply.
 
 Settings-panel requirements:
