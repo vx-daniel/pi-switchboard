@@ -135,3 +135,32 @@ describe('a blank system message', () => {
     expect(field(body, 'system')).toBeUndefined()
   })
 })
+
+describe('a blank assistant turn with tool calls', () => {
+  // Catches untrimmed "\n" assistant content reaching Anthropic as a whitespace-only text block,
+  // which it refuses (`text content blocks must contain non-whitespace text`). Clients echo such
+  // turns back in history all the time; pi's Anthropic adapter skips the blank block.
+  test('anthropic-messages: sends the tool call without a blank text block', async () => {
+    const body = await upstreamBody(CLAUDE_MODEL, {
+      messages: [
+        { role: 'user', content: 'run it' },
+        {
+          role: 'assistant',
+          content: '\n',
+          tool_calls: [
+            { id: 'call_1', type: 'function', function: { name: 'run', arguments: '{}' } }
+          ]
+        },
+        { role: 'tool', tool_call_id: 'call_1', content: 'done' }
+      ]
+    })
+    const messages = field(body, 'messages')
+    const assistant = Array.isArray(messages)
+      ? messages.find((message) => isRecord(message) && message['role'] === 'assistant')
+      : undefined
+
+    expect(isRecord(assistant) ? assistant['content'] : undefined).toEqual([
+      expect.objectContaining({ type: 'tool_use', id: 'call_1', name: 'run' })
+    ])
+  })
+})
