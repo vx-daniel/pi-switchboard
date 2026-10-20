@@ -81,6 +81,14 @@ describe('validateChatRequest', () => {
         { role: 'assistant', content: 'x', audio: { id: 'audio_1' } }
       ],
       'messages.1.audio'
+    ],
+    [
+      'a non-empty assistant annotations',
+      [
+        { role: 'user', content: 'hi' },
+        { role: 'assistant', content: 'x', annotations: [{ type: 'url_citation' }] }
+      ],
+      'messages.1.annotations'
     ]
   ])('refuses %s with a 422 at its path', (_label, messages, param) => {
     expect(validateChatRequest({ model: 'gpt-6.1-sol', messages })).toMatchObject({
@@ -90,19 +98,55 @@ describe('validateChatRequest', () => {
     })
   })
 
-  // Catches the null `refusal` and `audio` OpenAI SDKs put on every assistant message they echo
-  // back being refused, which would fail every multi-turn conversation from them.
-  test('accepts a null assistant refusal and audio', () => {
+  // Catches an assistant reply an OpenAI SDK echoes back in history being refused, which would
+  // fail every multi-turn conversation from it: the Python SDK's `model_dump()` of a proxy reply
+  // carries every response field, empty as `null`, and a dump can carry `annotations: []`.
+  test.each([
+    [
+      'the full model_dump() shape',
+      {
+        role: 'assistant',
+        content: 'x',
+        refusal: null,
+        audio: null,
+        function_call: null,
+        annotations: null,
+        tool_calls: null
+      }
+    ],
+    ['empty annotations', { role: 'assistant', content: 'x', annotations: [] }]
+  ])('accepts an echoed assistant reply: %s', (_label, echoed) => {
     const result = validateChatRequest({
       model: 'gpt-6.1-sol',
-      messages: [
-        { role: 'user', content: 'hi' },
-        { role: 'assistant', content: 'x', refusal: null, audio: null },
-        { role: 'user', content: 'again' }
-      ]
+      messages: [{ role: 'user', content: 'hi' }, echoed, { role: 'user', content: 'again' }]
     })
 
     expect(result.ok).toBe(true)
+  })
+
+  // Catches an error inside a union reported at the wrong field: a user message's content is a
+  // string or a part list, and its parts a union by type, so an error must name the field the
+  // input got into, and stay at the content itself when it matches neither shape. A Zod upgrade
+  // that changes how unions report their branches fails here.
+  test.each([
+    ['content that is neither a string nor parts', 42, 'messages.0.content'],
+    [
+      'a part type the proxy does not take',
+      [{ type: 'input_audio', input_audio: { data: 'AA', format: 'wav' } }],
+      'messages.0.content.0.type'
+    ],
+    [
+      'a text part whose text is not a string',
+      [{ type: 'text', text: 5 }],
+      'messages.0.content.0.text'
+    ]
+  ])('reports %s as a 400 at its own path', (_label, content, param) => {
+    const result = validateChatRequest({
+      model: 'gpt-6.1-sol',
+      messages: [{ role: 'user', content }]
+    })
+
+    expect(result).toMatchObject({ ok: false, status: 400, param })
   })
 
   // Catches the new shape letting through what a system message cannot carry: no parts at all,

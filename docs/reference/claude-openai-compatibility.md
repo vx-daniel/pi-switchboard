@@ -73,7 +73,7 @@ How each proxy-side claim is backed:
 | `assistant` `content` string | supported | supported, whitespace kept (#145) |
 | `assistant` `content` array (`text`, `refusal`) | text supported, refusal ignored | string or `null` only; an array is rejected with 400 (code: `schemas.ts`) |
 | `assistant` `tool_calls` | supported | supported (test) |
-| `assistant` `function_call`, `audio`, `refusal` | `function_call` supported, the others ignored | `refusal` and `audio` accepted as `null`, refused with a named 422 when set; `function_call` refused as an unknown field, 422 (#146, test) |
+| `assistant` `function_call`, `audio`, `refusal`, `annotations` | `function_call` supported, the others ignored | accepted empty, as an OpenAI SDK echoes a reply back: `null`, and `annotations` also `[]`; refused with a named 422 when set. `tool_calls: null` is no calls (#146, test) |
 | `tool` `content` string | supported | supported, whitespace kept (#145, test). A whitespace-only result is sent as is, and Claude accepts it, as it did `""` (live) |
 | `tool` `content` array of `text` | supported | rejected with 400: string only (code: `schemas.ts`) |
 | `tool` `tool_call_id` | supported | supported (test) |
@@ -108,8 +108,8 @@ How each proxy-side claim is backed:
 - #145 (fixed): request text was trimmed, so stop sequences and message whitespace changed. Text
   is now kept as sent; a blank system or developer message is skipped.
 - #146 (fixed): fields inside messages were dropped silently. Message and part schemas are now
-  strict; `name` and `image_url.detail` are listed drops, logged; a set `refusal` or `audio` is
-  refused.
+  strict; `name` and `image_url.detail` are listed drops, logged; the fields an SDK echoes back
+  empty are accepted empty and refused when set.
 - #147 (fixed): a provider 400 caused by the client's own field answered 502. It is now `400`
   `upstream_invalid_request`: `top_p` on Claude 4.7+, `temperature` with `top_p`, forced
   `tool_choice` on the Claude 5.x models listed above, and a whitespace-only stop (live). pi's drop

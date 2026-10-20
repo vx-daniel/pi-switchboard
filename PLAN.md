@@ -100,8 +100,9 @@ is checked against, and everything they reference:
 `test/integration/openai-spec.test.ts` validates every response body of the stable routes against
 it: models, chat completions streamed and not, and each error status. It also checks the request
 schema in both directions. Every field and enum value the proxy accepts must exist in OpenAI's
-request. Every OpenAI field or value the proxy does not accept must be listed in the test, with
-what the proxy does instead.
+request, with one listed kind of exception: a response-message field an OpenAI SDK echoes back in
+history (`annotations`, accepted only empty; see "Unknown field policy"). Every OpenAI field or
+value the proxy does not accept must be listed in the test, with what the proxy does instead.
 
 Moving the pin is deliberate: `pnpm run openai-spec:update <commit>` rewrites the subset, and a
 bump that adds a request field or enum value fails the test until it is accepted or listed. The
@@ -478,12 +479,13 @@ strict, #146):
 
 The fields in "Rejected" above (`n`, `logprobs`, `top_logprobs`, `logit_bias`, `functions`,
 `function_call`) get `422` too, with `'<field>' is not supported in this version of the proxy`.
-So does an assistant message's `refusal` or `audio` with a value: both are accepted only as
-`null`, which OpenAI SDKs send when they echo a reply back in history, as pi has nowhere to put
-them. An assistant message's deprecated `function_call` is an unknown field. A known field with an
-invalid value or shape (an unsupported content part included) gets `400`, at the field's own path:
-messages are told apart by `role` and a user message's string or parts by shape, so an error
-inside one names the field, not the message.
+So does a value in an assistant field an OpenAI SDK sends empty when it echoes a reply back in
+history (the Python SDK's `model_dump()` carries every response field), as pi has nowhere to put
+it: `refusal`, `audio` and the deprecated `function_call` are accepted only as `null`, and the
+response-only `annotations` only as `null` or `[]`. `tool_calls: null` means no calls. A known
+field with an invalid value or shape (an unsupported content part included) gets `400`, at the
+field's own path: messages are told apart by `role` and a user message's string or parts by shape,
+so an error inside one names the field, not the message.
 
 Two OpenAI message fields pi has no equivalent for are accepted and dropped instead, as
 constitution principle I lists them (#146): `name` on a message (a participant name) and `detail`

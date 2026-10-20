@@ -109,9 +109,13 @@ const userMessageSchema = z
 
 /**
  * An `assistant` message: optional (nullable) text content and optional function tool calls.
- * `refusal` and `audio` are accepted only as `null`, which SDKs send when they echo a reply back
- * in history; a value is refused with a named 422 (`chatRequestRejection`), as pi has nowhere to
- * put it.
+ *
+ * @remarks
+ * The fields an OpenAI SDK puts on a reply it echoes back in history are accepted when empty, as
+ * it sends them: `refusal`, `audio`, the deprecated `function_call` and `tool_calls` as `null`, and
+ * the response-only `annotations` as `null` or `[]` (the Python SDK's `model_dump()` of a proxy
+ * reply; #155 review). A value in any but `tool_calls` is refused with a named 422
+ * (`chatRequestRejection`), as pi has nowhere to put it.
  */
 const assistantMessageSchema = z
   .object({
@@ -120,6 +124,8 @@ const assistantMessageSchema = z
     name: participantNameSchema,
     refusal: z.null().optional(),
     audio: z.null().optional(),
+    function_call: z.null().optional(),
+    annotations: z.tuple([]).nullable().optional(),
     tool_calls: z
       .array(
         z
@@ -130,6 +136,7 @@ const assistantMessageSchema = z
           })
           .strict()
       )
+      .nullable()
       .optional()
   })
   .strict()

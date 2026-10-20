@@ -214,7 +214,7 @@ function convertConversationMessage(
   if (message.role === 'assistant') {
     return {
       ok: true,
-      message: convertAssistantMessage(message.content ?? null, message.tool_calls)
+      message: convertAssistantMessage(message.content ?? null, message.tool_calls ?? undefined)
     }
   }
   const toolName = toolCallNames.get(message.tool_call_id)

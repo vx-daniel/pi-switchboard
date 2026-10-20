@@ -122,8 +122,19 @@ function rejectedFieldRejection(body: unknown): ValidationError | undefined {
   }
 }
 
-/** Assistant fields accepted only as `null`: pi has nowhere to put a refusal or an audio reply. */
-const NULL_ONLY_FIELDS: ReadonlySet<string> = new Set(['refusal', 'audio'])
+/**
+ * Assistant fields accepted only empty, as SDKs echo them back, and what each accepts: pi has
+ * nowhere to put a refusal, an audio reply, a function call in the deprecated form, or annotations.
+ */
+const EMPTY_ONLY_FIELDS: ReadonlyMap<string, string> = new Map([
+  ['refusal', 'null'],
+  ['audio', 'null'],
+  ['function_call', 'null'],
+  ['annotations', 'null or []']
+])
+
+/** The path length of a field on a message: `messages`, its index, the field. */
+const MESSAGE_FIELD_DEPTH = 3
 
 /**
  * Picks the most specific issue inside a union's: the one the input got furthest into.
@@ -159,8 +170,8 @@ function dottedPath(path: readonly PropertyKey[], key?: string): string | null {
 }
 
 /**
- * Turns the first schema issue into the client's error: a 422 for unknown fields and for a
- * non-null assistant `refusal` or `audio`, a 400 for anything else.
+ * Turns the first schema issue into the client's error: a 422 for unknown fields and for a value
+ * in an assistant field accepted only empty ({@link EMPTY_ONLY_FIELDS}), a 400 for anything else.
  *
  * @param issue - the first Zod issue, made specific by {@link specificIssue}
  * @param issueCount - how many issues the body had, for the log
@@ -179,12 +190,14 @@ function issueRejection(issue: z.core.$ZodIssue, issueCount: number): Validation
   }
   const path = dottedPath(issue.path)
   const field = issue.path.at(-1)
-  if (issue.code === 'invalid_type' && typeof field === 'string' && NULL_ONLY_FIELDS.has(field)) {
+  const accepted = typeof field === 'string' ? EMPTY_ONLY_FIELDS.get(field) : undefined
+  const onMessage = issue.path[0] === 'messages' && issue.path.length === MESSAGE_FIELD_DEPTH
+  if (accepted !== undefined && onMessage) {
     validateLogger.warn('Rejected unsupported field {field}', { field: path })
     return {
       ok: false,
       status: 422,
-      message: `'${path ?? field}' is not supported in this version of the proxy; only null is accepted`,
+      message: `'${path ?? ''}' is not supported in this version of the proxy; only ${accepted} is accepted`,
       param: path
     }
   }
