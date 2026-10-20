@@ -33,22 +33,10 @@
   "health": {
     // Tests repeat setup on purpose, and coverage measures only the source trees (`test.coverage.include` in
     // `vite.config.ts`), so their CRAP scores would only be estimates.
-    "ignore": ["test/**"],
+    "ignore": ["test/**"]
 
     // CRAP weighs complexity by coverage: the gate runs fallow after the tests, with their coverage
-    // (`--coverage coverage/coverage-final.json`). Every function is under the limits but one, kept below with its
-    // reason. A ceiling is the score fallow 3.34.1 measured, so the function may not grow: a cognitive ceiling is
-    // the measured score (a score equal to it passes), a CRAP ceiling the next whole number above it (a score equal
-    // to it fails). The other limits still apply unchanged.
-    "thresholdOverrides": [
-      // A port of pi kept line-for-line: permanent.
-      // Measured cognitive 26.
-      {
-        "files": ["src/pi/model-scope.ts"],
-        "functions": ["resolveModelScope"],
-        "maxCognitive": 26,
-        "reason": "Line-for-line port of pi's resolveModelScopeFromModels (#46), parity-tested against pi; splitting it would drift from pi."
-      }
-    ]
+    // (`--coverage coverage/coverage-final.json`). Every function is under the limits, with no ceiling raised for
+    // any: a new function over them fails the gate.
   }
 }

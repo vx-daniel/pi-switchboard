@@ -62,7 +62,7 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 - **Import aliases**: `@proxy/*` -> `src/*`, no `.js` extensions, no relative imports
 - **Typed env**: `src/env.d.ts` for `process.env` dot notation
 - **Gate** (`scripts/gate.ts`, `pnpm run check:all`): format → lint + type check → tests with coverage → fallow → build; the single definition of green, run by the pre-commit hook, CI, and the release workflow
-- **fallow** (`.fallowrc.jsonc`, `fallow-plugin-oxlint-js.jsonc`): dead code, duplication and complexity, CRAP scored against the test coverage; adopted at zero findings (#83), so any new one fails the gate. Exceptions are config entries with reasons, never inline comments; the complexity ceilings set at adoption are tracked for refactoring in #85
+- **fallow** (`.fallowrc.jsonc`, `fallow-plugin-oxlint-js.jsonc`): dead code, duplication and complexity, CRAP scored against the test coverage; adopted at zero findings (#83), so any new one fails the gate. Exceptions are config entries with reasons, never inline comments. No complexity ceiling is raised: the ones set at adoption were refactored away (#85), the last being `resolveModelScope`
 - **Git hooks** (`.vite-hooks/`): pre-commit (`check:all`), commit-msg (commitlint), pre-push (lockfile sync)
 - **CI** (`.github/workflows/`): `ci.yml` (`gate` on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks, new commits only, every branch), `claude-pr-review.yml` (manual), `publish.yml` (release on `main`)
 - **commitlint**: conventional commits via `@commitlint/config-conventional`
@@ -353,10 +353,13 @@ or a hand-edited `settings.json`). No proxy-side config is needed: the proxy rea
 exact `provider/id` or bare IDs, globs over `provider/id` or the ID (`anthropic/*`, `*sonnet*`),
 `:level` thinking suffixes (the level is dropped; exposure is per model), and fuzzy matching of IDs
 and names. pi exports only an async resolver that refreshes availability (reading the credential
-store for every provider), so `src/pi/model-scope.ts` ports its synchronous one, run against the
-same available-model snapshot the proxy exposes; `test/unit/model-scope.test.ts` checks the port
-against pi's resolver. Patterns that match nothing, match several providers, or carry an invalid
-thinking level are listed in `/healthz/models` (`scopeDiagnostics`) and in `/proxy show`. pi's
+store for every provider); its synchronous `resolveModelScopeFromModels` is not in the package's
+`exports`. So `src/pi/model-scope.ts` ports the synchronous one, run against the same
+available-model snapshot the proxy exposes. The port follows pi's loop step for step, with its
+glob and reference branches as one helper each (`globMatches`, `referenceMatches`), so it can be
+read against pi's source; `test/unit/model-scope.test.ts` checks it against pi's resolver.
+Patterns that match nothing, match several providers, or carry an invalid thinking level are
+listed in `/healthz/models` (`scopeDiagnostics`) and in `/proxy show`. pi's
 `--models` flag is per session and does not apply.
 
 Settings-panel requirements:

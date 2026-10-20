@@ -28,7 +28,8 @@ beforeAll(async () => {
         beta: offlineProvider(
           { id: 'shared-id', name: 'Shared on beta' },
           { id: 'alpha/opus-mock', name: 'Gateway copy of opus' },
-          { id: 'gpt-mock', name: 'Gamma Turbo' }
+          { id: 'gpt-mock', name: 'Gamma Turbo' },
+          { id: 'big[1m]', name: 'Bracketed context on beta' }
         )
       }
     }
@@ -51,6 +52,7 @@ const PATTERNS: readonly (readonly [string, readonly string[]])[] = [
   ['ID glob', ['*mock*']],
   ['glob with a thinking suffix', ['alpha/*:high']],
   ['bracketed ID, not a glob', ['alpha/big[1m]']],
+  ['bracketed ID on two providers', ['big[1m]']],
   ['thinking suffix', ['alpha/opus-mock:high']],
   ['invalid thinking suffix', ['alpha/opus-mock:turbo']],
   ['fuzzy ID', ['opus']],
