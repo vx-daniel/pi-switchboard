@@ -73,6 +73,20 @@ describe('validateChatRequest', () => {
       'messages.1.tool_calls.0.function.strict'
     ],
     [
+      // OpenAI defines no `name` on a tool result; the call it answers names the tool.
+      'a name on a tool message',
+      [
+        { role: 'user', content: 'hi' },
+        {
+          role: 'assistant',
+          content: null,
+          tool_calls: [{ id: 'c1', type: 'function', function: { name: 'f', arguments: '{}' } }]
+        },
+        { role: 'tool', tool_call_id: 'c1', content: 'done', name: 'f' }
+      ],
+      'messages.2.name'
+    ],
+    [
       'a deprecated assistant function_call',
       [
         { role: 'user', content: 'hi' },

@@ -488,10 +488,13 @@ field's own path: messages are told apart by `role` and a user message's string 
 so an error inside one names the field, not the message.
 
 Two OpenAI message fields pi has no equivalent for are accepted and dropped instead, as
-constitution principle I lists them (#146): `name` on a message (a participant name) and `detail`
-on an `image_url`. Clients send both routinely. Each drop is logged at `debug`, by count, never the
-value. `test/integration/openai-spec-messages.test.ts` checks every role's and part's fields
-against OpenAI's spec, as `openai-spec.test.ts` does the top level.
+constitution principle I lists them (#146): `name` on a `system`, `developer`, `user` or
+`assistant` message (a participant name) and `detail` on an `image_url`. Clients send both
+routinely. Each drop is logged at `debug`, by count, never the value. `name` on a `tool` message is
+not one of them: OpenAI defines none there (the call a result answers names the tool), so it is
+an unknown field, `422` (a maintainer decision on the #155 review).
+`test/integration/openai-spec-messages.test.ts` checks every role's and part's fields against
+OpenAI's spec, as `openai-spec.test.ts` does the top level.
 
 ### Text is kept as sent
 
