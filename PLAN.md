@@ -497,6 +497,25 @@ its text, which Claude accepts, as it did the trimmed `""` (checked live, 2026-1
 whitespace-only `stop` sequence is the exception: Claude refuses it, as it refused the trimmed
 `""`, and the client gets a 502 for its own field (#147).
 
+### Prompt cache breakpoints
+
+OpenAI's `prompt_cache_breakpoint` (`{ "mode": "explicit" }`, `PromptCacheBreakpointParam`) on a
+text or image content part marks the exact end of a reusable prompt prefix. It affects caching
+only, never the answer. The proxy accepts it on every text and image part (system, developer and
+user), and sends it on only where the API takes it (constitution 3.1.0, principle I's exceptions):
+
+| API | What happens |
+|---|---|
+| OpenAI chat completions and Responses at `api.openai.com` | Forwarded. pi joins the leading system and developer text into one string; the proxy's `onPayload` (`src/pi/cache-breakpoints.ts`) puts the client's parts back in its place, joined with the same blank lines, each with its breakpoint (`text` or `input_text` parts). User parts get theirs back by position. Each change is made only when pi's text matches exactly, so a payload pi built differently is left alone. |
+| Codex (`openai-codex-responses`) | Dropped: pi sends the system prompt as the plain string `instructions`, which has no part to carry it. |
+| Every other API (OpenAI-compatible servers, Anthropic, Google, Bedrock, …) | Dropped: an OpenAI-compatible server may refuse a field it does not know, and the others have no such field. |
+
+A drop is logged at `debug` (`Dropped {count} prompt_cache_breakpoint(s) for {modelId}`), and a
+forward reports how many were placed. Rejecting the field instead would break docker-agent,
+which sends it on every system part to `gpt-*` models (#149). `test/unit/cache-breakpoints.test.ts`
+runs pi's real chat-completions and Responses builders, so a change in how pi builds the system
+message shows up there.
+
 ## Message mapping policy
 
 ### Roles

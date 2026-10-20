@@ -2188,6 +2188,18 @@
                                       },
                                       "text": {
                                         "type": "string"
+                                      },
+                                      "prompt_cache_breakpoint": {
+                                        "type": "object",
+                                        "properties": {
+                                          "mode": {
+                                            "type": "string",
+                                            "const": "explicit"
+                                          }
+                                        },
+                                        "required": [
+                                          "mode"
+                                        ]
                                       }
                                     },
                                     "required": [
@@ -2231,6 +2243,18 @@
                                       },
                                       "text": {
                                         "type": "string"
+                                      },
+                                      "prompt_cache_breakpoint": {
+                                        "type": "object",
+                                        "properties": {
+                                          "mode": {
+                                            "type": "string",
+                                            "const": "explicit"
+                                          }
+                                        },
+                                        "required": [
+                                          "mode"
+                                        ]
                                       }
                                     },
                                     "required": [
@@ -2289,6 +2313,18 @@
                                       },
                                       "text": {
                                         "type": "string"
+                                      },
+                                      "prompt_cache_breakpoint": {
+                                        "type": "object",
+                                        "properties": {
+                                          "mode": {
+                                            "type": "string",
+                                            "const": "explicit"
+                                          }
+                                        },
+                                        "required": [
+                                          "mode"
+                                        ]
                                       }
                                     },
                                     "required": [
@@ -2320,6 +2356,18 @@
                                         },
                                         "required": [
                                           "url"
+                                        ]
+                                      },
+                                      "prompt_cache_breakpoint": {
+                                        "type": "object",
+                                        "properties": {
+                                          "mode": {
+                                            "type": "string",
+                                            "const": "explicit"
+                                          }
+                                        },
+                                        "required": [
+                                          "mode"
                                         ]
                                       }
                                     },

@@ -69,6 +69,7 @@ How each proxy-side claim is backed:
 | `user` `content` string, `text` parts | supported | supported, whitespace kept (#145, test). One that is only whitespace is dropped by pi, as the trimmed `""` was: a blank user turn before a real one answered 200 (live) |
 | `user` `image_url` `url` | supported | base64 data URIs; remote URLs only with the remote-images setting on (test) |
 | `user` `image_url` `detail` | ignored | accepted, then dropped silently (probe; #146) |
+| `prompt_cache_breakpoint` on a part | not listed | accepted; Claude's API has no such field, so it is dropped and logged at debug (constitution 3.1.0; code: `src/pi/cache-breakpoints.ts`). pi marks Claude's cache points with `cache_control` itself (code: pi-ai `anthropic-messages.js`) |
 | `user` `input_audio`, `file` parts | ignored and stripped | rejected with 400 (test) |
 | `assistant` `content` string | supported | supported, whitespace kept (#145) |
 | `assistant` `content` array (`text`, `refusal`) | text supported, refusal ignored | string or `null` only; an array is rejected with 400 (code: `schemas.ts`) |

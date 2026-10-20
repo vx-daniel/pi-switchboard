@@ -22,13 +22,23 @@ import * as z from 'zod'
 // --- Message content parts ---
 
 /**
- * A `text` content part of a user, system or developer message. A client may add fields pi has no
- * use for (docker-agent puts a `prompt_cache_breakpoint` on each system part it sends a `gpt-*`
- * model); `z.object` drops them.
+ * OpenAI's `prompt_cache_breakpoint` on a content part (`PromptCacheBreakpointParam`): it marks the
+ * exact end of a reusable prompt prefix. Forwarded where the API has a slot for it (OpenAI's own
+ * chat completions and Responses); dropped, and logged, everywhere else (`src/pi/cache-breakpoints.ts`).
+ */
+const promptCacheBreakpointSchema = z.object({ mode: z.literal('explicit') })
+
+/** A parsed `prompt_cache_breakpoint`. */
+export type PromptCacheBreakpoint = z.infer<typeof promptCacheBreakpointSchema>
+
+/**
+ * A `text` content part of a user, system or developer message. docker-agent puts a
+ * `prompt_cache_breakpoint` on each system part it sends a `gpt-*` model.
  */
 const textContentPartSchema = z.object({
   type: z.literal('text'),
-  text: textSchema
+  text: textSchema,
+  prompt_cache_breakpoint: promptCacheBreakpointSchema.optional()
 })
 
 /** An `image_url` content part of a user message, with optional `detail`. */
@@ -37,7 +47,8 @@ const imageUrlContentPartSchema = z.object({
   image_url: z.object({
     url: z.string().trim(),
     detail: z.enum(['auto', 'low', 'high']).optional()
-  })
+  }),
+  prompt_cache_breakpoint: promptCacheBreakpointSchema.optional()
 })
 
 /** A user-message content part: text or image URL. */

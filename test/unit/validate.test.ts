@@ -16,14 +16,22 @@ describe('validateChatRequest', () => {
   })
 
   // Catches every docker-agent request to a gpt-* model failing with a 400 at messages.N: it sends
-  // system content as text parts, each with a prompt_cache_breakpoint (docker-agent v1.145.0).
-  test('accepts system and developer content as text parts, dropping fields pi does not use', () => {
+  // system content as text parts, each with a prompt_cache_breakpoint (docker-agent v1.145.0). The
+  // breakpoint is kept for the APIs that take it; a field OpenAI does not define is not.
+  test('accepts system and developer content as text parts, keeping prompt_cache_breakpoint', () => {
     const result = validateChatRequest({
       model: 'gpt-6.1-sol',
       messages: [
         {
           role: 'system',
-          content: [{ type: 'text', text: 'Rules.', prompt_cache_breakpoint: { mode: 'explicit' } }]
+          content: [
+            {
+              type: 'text',
+              text: 'Rules.',
+              prompt_cache_breakpoint: { mode: 'explicit' },
+              not_an_openai_field: true
+            }
+          ]
         },
         { role: 'developer', content: [{ type: 'text', text: 'Context.' }] },
         { role: 'user', content: 'Hello' }
@@ -33,7 +41,7 @@ describe('validateChatRequest', () => {
     if (!result.ok) return
     expect(result.data.messages[0]).toEqual({
       role: 'system',
-      content: [{ type: 'text', text: 'Rules.' }]
+      content: [{ type: 'text', text: 'Rules.', prompt_cache_breakpoint: { mode: 'explicit' } }]
     })
   })
 
