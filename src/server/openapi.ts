@@ -3,14 +3,17 @@
  * document they are assembled into.
  *
  * @remarks
- * The routes apply these with hono-openapi's `describeRoute`, which only marks a route for the
- * document; validation stays in each handler (`validateChatRequest`), whose 400/422 split and
- * error wording the document describes but does not drive. The schemas are the ones the handlers
- * type their bodies with, so the document cannot describe a field the code does not send.
+ * Two hono-openapi pieces feed the document. `describeRoute` takes the descriptions here: summary,
+ * tags and each status's response schema. `validator()` takes the request schemas here
+ * (`modelPathSchema`, `chatHeadersSchema`, `chatRequestBodySchema`, `credentialsQuerySchema`):
+ * it checks the request and documents the parameter or body from the same schema, so neither is
+ * written by hand. The chat body's 400/422 split and wording stay the proxy's: the route's
+ * validator hook answers a failed body with `chatRequestRejection`. The response schemas are the
+ * ones the handlers type their bodies with, so the document cannot describe a field the code does
+ * not send.
  *
- * Documented: the stable routes and the `/v1/switchboard/` routes. Not documented: the health
- * endpoints (operational, and their bodies are not shape-locked), the OpenAI endpoints the proxy
- * answers with 404, and the document and docs UI themselves.
+ * Documented: every route the proxy serves. The OpenAI endpoints it answers with 404 are written
+ * in by hand (`unsupportedPaths`), since hono-openapi leaves wildcard and `ALL` routes out.
  *
  * `openapi.json` at the repository root is this document as committed; a test fails when the
  * routes no longer produce it, so a contract change shows up in review.
@@ -24,7 +27,54 @@ import { chatCompletionRequestSchema } from '@proxy/openai/schemas'
 import { sseChunkSchema } from '@proxy/openai/sse'
 import { openAIErrorSchema } from '@proxy/server/errors'
 import { type DescribeRouteOptions, type GenerateSpecOptions, resolver } from 'hono-openapi'
-import type * as z from 'zod'
+import * as z from 'zod'
+
+// --- What the routes read from a request, validated with hono-openapi's `validator()` ---
+// The validators both check the request and put these into the document, so a parameter is
+// described where it is read and nowhere else.
+
+/** The model detail route's path: the model ID, which may span slashes. */
+export const modelPathSchema = z.object({
+  model: z
+    .string()
+    .trim()
+    .meta({
+      description:
+        'A public model ID, or a canonical `provider/model-id` of an exposed model. IDs may contain ' +
+        '`/`: send it URL-encoded (`%2F`) or as is.'
+    })
+})
+
+/**
+ * The chat route's body: the request schema, with the example "Try it out" starts from. The
+ * generated example lists every role and field, so sent as is it fails; this one only needs a
+ * model ID from `GET /v1/models`. `meta` changes nothing the schema accepts.
+ */
+export const chatRequestBodySchema = chatCompletionRequestSchema.meta({
+  examples: [{ model: 'MODEL_ID', messages: [{ role: 'user', content: 'Hello!' }] }]
+})
+
+/** The chat route's headers that the document names; every other header passes through. */
+export const chatHeadersSchema = z.object({
+  'x-switchboard-upstream-api-key': z
+    .string()
+    .trim()
+    .optional()
+    .meta({
+      description:
+        "An API key for the model's provider, used instead of pi's stored credential for this " +
+        'request. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.'
+    })
+})
+
+/** `GET /healthz/creds`'s query. Only `true` verifies; any other value is the same as none. */
+export const credentialsQuerySchema = z.object({
+  verify: z
+    .string()
+    .trim()
+    .optional()
+    .meta({ description: '`true` asks pi to resolve each credential now.' })
+})
 
 /** The prefix of the proxy's own routes, outside OpenAI's API (constitution, principle I). */
 export const SWITCHBOARD_PREFIX = '/v1/switchboard'
@@ -122,17 +172,6 @@ export const retrieveModelDescription: DescribeRouteOptions = {
   operationId: 'retrieveModel',
   tags: [OPENAI_TAG],
   summary: 'Retrieve an exposed model',
-  parameters: [
-    {
-      name: 'model',
-      in: 'path',
-      required: true,
-      description:
-        'A public model ID, or a canonical `provider/model-id` of an exposed model. IDs may ' +
-        'contain `/`: send it URL-encoded (`%2F`) or as is.',
-      schema: { type: 'string' }
-    }
-  ],
   responses: {
     200: jsonResponse('The model.', openAIModelSchema),
     401: UNAUTHORIZED,
@@ -148,28 +187,6 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
   description:
     'Runs the request on the model through pi. Unsupported fields are rejected, not ignored: ' +
     '422 for a field the proxy does not accept, 400 for an invalid value.',
-  parameters: [
-    {
-      name: 'X-Switchboard-Upstream-Api-Key',
-      in: 'header',
-      required: false,
-      description:
-        "An API key for the model's provider, used instead of pi's stored credential for this " +
-        'request. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.',
-      schema: { type: 'string' }
-    }
-  ],
-  requestBody: {
-    required: true,
-    content: {
-      'application/json': {
-        schema: resolver(chatCompletionRequestSchema),
-        // What "Try it out" starts from: the generated example lists every role and field, so
-        // sent as is it fails. Replace the model with an ID from `GET /v1/models`.
-        example: { model: 'MODEL_ID', messages: [{ role: 'user', content: 'Hello!' }] }
-      }
-    }
-  },
   responses: {
     200: {
       description:
@@ -283,6 +300,9 @@ function unsupportedPaths(): Record<string, Record<string, unknown>> {
 export const OPENAPI_OPTIONS: Partial<GenerateSpecOptions> = {
   // `openapi.json` ends in a file extension, which hono-openapi skips by default as a static file.
   excludeStaticFile: false,
+  // Each validated route documents its own 400 in OpenAI's error shape; the default would add one
+  // in hono-openapi's `{ success, error, data }` shape, which the proxy never sends.
+  defaultValidationErrorResponse: false,
   documentation: {
     info: {
       title: 'pi-switchboard',

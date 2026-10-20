@@ -93,6 +93,23 @@ describe('POST /v1/chat/completions - validation', () => {
     expect(body.error.type).toBe('invalid_request_error')
   })
 
+  // Catches `validator('json')` skipping a body not sent as JSON and validating `{}` instead:
+  // `curl -d '{…}'` sends form-urlencoded, and the request would fail as "messages: required".
+  test.each([
+    ['no Content-Type', {}],
+    ['form-urlencoded, as curl -d sends', { 'Content-Type': 'application/x-www-form-urlencoded' }],
+    ['text/plain', { 'Content-Type': 'text/plain' }]
+  ])('reads a JSON body sent with %s', async (_label, headers: Record<string, string>) => {
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ model: MOCK_MODEL, messages: [{ role: 'user', content: 'Hello' }] })
+    })
+
+    expect(response.status).toBe(HTTP_OK)
+    expect(await jsonBody(response)).toEqual(okCompletion(response))
+  })
+
   test('rejects missing model', async () => {
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',

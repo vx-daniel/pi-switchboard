@@ -1,9 +1,10 @@
 /**
- * A request no route matches gets OpenAI's error shape, not Hono's plain-text `404 Not Found`
- * (#133, constitution principle I): an unknown path, a removed one, or a known path with a method
- * it does not take. The body names the method and path as OpenAI's own "Invalid URL" error does.
+ * A request no route matches, or one the proxy fails on, gets OpenAI's error shape, not Hono's
+ * plain text (#133, constitution principle I). A 404 names the method and path as OpenAI's own
+ * "Invalid URL" error does; a failure inside the proxy answers 500 with fixed text.
  */
 
+import { createApp } from '@proxy/server/app'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { isErrorBody, jsonBody, testApp, testConfig } from '../helpers'
@@ -11,6 +12,9 @@ import { isErrorBody, jsonBody, testApp, testConfig } from '../helpers'
 const HTTP_UNAUTHORIZED = 401
 const HTTP_NOT_FOUND = 404
 const PROXY_TOKEN = 'notarealsecret-unknown-routes-token'
+const HTTP_INTERNAL_SERVER_ERROR = 500
+/** What the failing exposure reader throws: it must reach the log, never the client. */
+const THROWN_DETAIL = 'cannot read /home/someone/.pi/agent/proxy-config.json'
 
 describe('a request no route matches', () => {
   // Catches the plain-text fallback: a client parsing the body as JSON fails on it, and an
@@ -49,5 +53,41 @@ describe('a request no route matches', () => {
     })
 
     expect([without.status, withToken.status]).toEqual([HTTP_UNAUTHORIZED, HTTP_NOT_FOUND])
+  })
+})
+
+describe('a failure inside the proxy', () => {
+  // Catches Hono's plain-text `500 Internal Server Error` (which an OpenAI SDK reports as a parse
+  // error) and a handler that echoes the thrown message, which can quote a path or a config value.
+  test.each([
+    ['GET', '/v1/models'],
+    ['POST', '/v1/chat/completions']
+  ])('%s %s answers 500 with a fixed OpenAI error', async (method, path) => {
+    const app = createApp(testConfig(), () => {
+      throw new Error(THROWN_DETAIL)
+    })
+
+    const response = await app.request(path, {
+      method,
+      headers: { 'Content-Type': 'application/json' },
+      ...(method === 'POST'
+        ? {
+            body: JSON.stringify({
+              model: 'any/model',
+              messages: [{ role: 'user', content: 'hi' }]
+            })
+          }
+        : {})
+    })
+    const body = await jsonBody(response)
+
+    expect(response.status).toBe(HTTP_INTERNAL_SERVER_ERROR)
+    expect(isErrorBody(body) ? body.error : undefined).toEqual({
+      message: 'Internal proxy error; see the proxy log',
+      type: 'server_error',
+      param: null,
+      code: 'internal_error'
+    })
+    expect(JSON.stringify(body)).not.toContain(THROWN_DETAIL)
   })
 })

@@ -36,11 +36,16 @@ import {
   providerCredentialStatusSchema
 } from '@proxy/pi/registry'
 import { HTTP_SERVICE_UNAVAILABLE } from '@proxy/server/http-status'
-import { jsonResponse, OPERATIONAL_TAG, UNAUTHORIZED } from '@proxy/server/openapi'
+import {
+  credentialsQuerySchema,
+  jsonResponse,
+  OPERATIONAL_TAG,
+  UNAUTHORIZED
+} from '@proxy/server/openapi'
 import type { ExposureConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
-import { type DescribeRouteOptions, describeRoute } from 'hono-openapi'
+import { type DescribeRouteOptions, describeRoute, validator } from 'hono-openapi'
 import * as z from 'zod'
 
 /** Logger for health check failures. */
@@ -137,15 +142,6 @@ const credentialsHealthDescription: DescribeRouteOptions = {
   description:
     'Local state only, unless `verify=true` asks pi to resolve each credential now, which may ' +
     'refresh an OAuth token over the network. Never returns a credential.',
-  parameters: [
-    {
-      name: 'verify',
-      in: 'query',
-      required: false,
-      description: '`true` resolves each credential now.',
-      schema: { type: 'string', enum: ['true', 'false'] }
-    }
-  ],
   responses: {
     200: jsonResponse(
       'Every provider has a credential, verified when asked.',
@@ -221,11 +217,11 @@ async function checkModels(
  * Answers `GET /healthz/creds`: each provider's credential status, verified when `?verify=true`.
  *
  * @param context - the request's Hono context
+ * @param verify - whether `?verify=true` asked pi to resolve each credential now
  * @returns 200 with the provider list, or 503 with the same list when no provider has a credential
  *   or a verified one fails
  */
-async function checkCredentials(context: HealthContext): Promise<Response> {
-  const verify = context.req.query('verify') === 'true'
+async function checkCredentials(context: HealthContext, verify: boolean): Promise<Response> {
   const providers = await getCredentialStatuses(verify)
   const failed = providers.filter((provider) => provider.verified === false)
   const healthy = providers.length > 0 && failed.length === 0
@@ -268,13 +264,18 @@ export function createHealthRoutes(configReader: ExposureConfigReader): Hono<Pro
     }
   })
 
-  routes.get('/healthz/creds', describeRoute(credentialsHealthDescription), async (context) => {
-    try {
-      return await checkCredentials(context)
-    } catch (error) {
-      return failedCheck(context, 'credentials', error)
+  routes.get(
+    '/healthz/creds',
+    describeRoute(credentialsHealthDescription),
+    validator('query', credentialsQuerySchema),
+    async (context) => {
+      try {
+        return await checkCredentials(context, context.req.valid('query').verify === 'true')
+      } catch (error) {
+        return failedCheck(context, 'credentials', error)
+      }
     }
-  })
+  )
 
   return routes
 }

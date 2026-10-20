@@ -207,6 +207,30 @@ export function disconnectMiddleware(): MiddlewareHandler<ProxyEnv> {
   }
 }
 
+/** A JSON media type: `application/json`, or a `+json` one such as `application/merge-patch+json`. */
+const JSON_MEDIA_TYPE = /^application\/([a-z-.]+\+)?json/i
+
+/**
+ * Creates the middleware that has a route read its body as JSON whatever the `Content-Type`.
+ *
+ * @remarks
+ * hono-openapi's `validator('json')` parses only a body sent as JSON and validates `{}`
+ * otherwise, so `curl -d '{…}'` (sent as form-urlencoded) would fail as "messages: required".
+ * The proxy has always parsed the body as JSON regardless of its declared type, so this sets the
+ * request's `Content-Type` to `application/json` when it is anything else. A body that is not
+ * JSON still fails, as invalid JSON.
+ *
+ * @returns the middleware
+ */
+export function jsonBodyMiddleware(): MiddlewareHandler<ProxyEnv> {
+  return async (context, next) => {
+    if (!JSON_MEDIA_TYPE.test(context.req.header('content-type') ?? '')) {
+      context.req.raw.headers.set('content-type', 'application/json')
+    }
+    await next()
+  }
+}
+
 /**
  * Creates the middleware that rejects an oversized request body with 413.
  *

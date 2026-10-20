@@ -34,9 +34,10 @@ import {
 } from '@proxy/openai/remote-image-fetch'
 import { inlineRemoteImages } from '@proxy/openai/remote-images'
 import { buildChatCompletion } from '@proxy/openai/responses'
+import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
 import { convertTools } from '@proxy/openai/tools'
-import { type ValidationSuccess, validateChatRequest } from '@proxy/openai/validate'
+import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/validate'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
 import { getAvailableModels, getEnabledModels, getRequestAuth } from '@proxy/pi/registry'
 import {
@@ -56,17 +57,21 @@ import {
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE_ENTITY
 } from '@proxy/server/http-status'
+import { jsonBodyMiddleware } from '@proxy/server/middleware'
 import {
+  chatHeadersSchema,
+  chatRequestBodySchema,
   createChatCompletionDescription,
   listModelCapabilitiesDescription,
   listModelsDescription,
+  modelPathSchema,
   retrieveModelDescription,
   SWITCHBOARD_PREFIX,
   UNSUPPORTED_ENDPOINTS
 } from '@proxy/server/openapi'
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
-import { describeRoute } from 'hono-openapi'
+import { describeRoute, validator } from 'hono-openapi'
 import { stream as honoStream } from 'hono/streaming'
 
 /**
@@ -114,7 +119,7 @@ const CHAT_PATH = '/v1/chat/completions'
 /** The Hono context a route handler gets. */
 type ProxyContext = Context<ProxyEnv>
 /** A validated chat completion request body. */
-type ChatRequest = ValidationSuccess['data']
+type ChatRequest = ChatCompletionRequest
 /** A pi model, as the exposure engine resolves it. */
 type PiModel = ExposedModel['model']
 /** A pi `Context`: system prompt, messages and tools. */
@@ -199,52 +204,34 @@ function reportThrownFailure(err: unknown): MappedUpstreamError {
 }
 
 /**
- * Parses the JSON body and validates it as a chat completion request.
+ * Answers a chat request body that failed validation, as the chat route's `validator('json')`
+ * hook: a named 422 for an unsupported or unknown field, a 400 for any other invalid value.
+ *
+ * @remarks
+ * A body that is not JSON never gets here: the validator throws for it, and `app.onError`
+ * answers 400.
  *
  * @param context - the request's Hono context
- * @returns the validated request, or a 400 (invalid JSON or field) or 422 (unsupported or unknown
- *   field) response
+ * @param body - the parsed JSON body that failed the schema
+ * @returns the error response
  */
-async function parseChatRequest(context: ProxyContext): Promise<Step<ChatRequest>> {
-  let body: unknown
-  try {
-    body = await context.req.json()
-  } catch {
-    // Not the parser's message: newer engines quote a slice of the body in it.
-    chatLogger.warn('Rejected chat request: body is not valid JSON', {
-      contentLength: context.req.header('content-length')
-    })
-    return {
-      ok: false,
-      response: context.json(invalidRequest('Invalid JSON in request body'), HTTP_BAD_REQUEST)
-    }
-  }
-
-  const validation = validateChatRequest(body)
-  if (validation.ok) {
-    return { ok: true, value: validation.data }
-  }
+function rejectChatRequest(context: Context, body: unknown): Response {
+  const rejection = chatRequestRejection(body)
   // The field name only: validation messages can echo request values.
   chatLogger.warn('Rejected chat request: invalid field {param} ({status})', {
-    param: validation.param ?? 'unknown',
-    status: validation.status
+    param: rejection.param ?? 'unknown',
+    status: rejection.status
   })
-  if (validation.status === HTTP_UNPROCESSABLE_ENTITY) {
-    return {
-      ok: false,
-      response: context.json(
-        unsupportedParameter(validation.param ?? 'unknown', validation.message),
-        HTTP_UNPROCESSABLE_ENTITY
-      )
-    }
-  }
-  return {
-    ok: false,
-    response: context.json(
-      invalidRequest(validation.message, validation.param ?? undefined),
-      HTTP_BAD_REQUEST
+  if (rejection.status === HTTP_UNPROCESSABLE_ENTITY) {
+    return context.json(
+      unsupportedParameter(rejection.param ?? 'unknown', rejection.message),
+      HTTP_UNPROCESSABLE_ENTITY
     )
   }
+  return context.json(
+    invalidRequest(rejection.message, rejection.param ?? undefined),
+    HTTP_BAD_REQUEST
+  )
 }
 
 /**
@@ -534,29 +521,35 @@ async function completeChat(honoContext: ProxyContext, job: CompletionJob): Prom
   }
 }
 
+/** What the chat handler needs from the app beyond the request: set once when routes are built. */
+interface ChatRouteSettings {
+  /** The server config; `upstreamTimeoutMs` and `remoteImagesEnabled` are read. */
+  readonly config: ServerConfig
+  /** Where the exposure config comes from. */
+  readonly configReader: ExposureConfigReader
+  /** How remote images are fetched, when `remoteImagesEnabled` is on. */
+  readonly remoteImageFetch: RemoteImageFetchOptions
+}
+
 /**
- * Handles `POST /v1/chat/completions`: parses, resolves the model, inlines remote images, builds
- * the pi context, checks upstream auth, then streams or completes.
+ * Handles `POST /v1/chat/completions` for a validated request: resolves the model, inlines remote
+ * images, builds the pi context, checks upstream auth, then streams or completes.
  *
  * @param context - the request's Hono context
- * @param config - the server config; `upstreamTimeoutMs` and `remoteImagesEnabled` are read
- * @param configReader - where the exposure config comes from
- * @param remoteImageFetch - how remote images are fetched, when `remoteImagesEnabled` is on
+ * @param request - the request body, as the route's `validator('json')` parsed it
+ * @param settings - the server config, exposure config reader and remote image policy
  * @returns the completion, or the first error response a step produces
  * @throws Error when the exposure config is invalid (from {@link getExposure})
  */
 async function handleChatCompletion(
   context: ProxyContext,
-  config: ServerConfig,
-  configReader: ExposureConfigReader,
-  remoteImageFetch: RemoteImageFetchOptions
+  request: ChatRequest,
+  settings: ChatRouteSettings
 ): Promise<Response> {
+  const { config, configReader, remoteImageFetch } = settings
   const requestId = context.get('requestId')
   const upstreamApiKey = context.get('upstreamApiKey')
-
-  const parsed = await parseChatRequest(context)
-  if (!parsed.ok) return parsed.response
-  const request = parsed.value
+  logValidatedChatRequest(request)
 
   // Resolve model through the exposure engine
   const exposure = await getExposure(configReader)
@@ -661,29 +654,46 @@ export function createRoutes(
     chatLogger.debug('Model detail request without a model ID: {path}', { path: context.req.path })
     return context.json(modelNotFound(''), HTTP_NOT_FOUND)
   })
-  routes.get('/v1/models/:model{.+}', describeRoute(retrieveModelDescription), async (context) => {
-    const modelId = context.req.param('model')
+  routes.get(
+    '/v1/models/:model{.+}',
+    describeRoute(retrieveModelDescription),
+    validator('param', modelPathSchema),
+    async (context) => {
+      const modelId = context.req.valid('param').model
 
-    const exposure = await getExposure(configReader)
-    const resolved = resolveExposedModel(exposure, modelId)
-    if (resolved === undefined) {
-      chatLogger.debug('Model detail for {modelId}: not exposed', {
+      const exposure = await getExposure(configReader)
+      const resolved = resolveExposedModel(exposure, modelId)
+      if (resolved === undefined) {
+        chatLogger.debug('Model detail for {modelId}: not exposed', {
+          modelId,
+          exposedModelCount: exposure.models.length
+        })
+        return context.json(modelNotFound(modelId), HTTP_NOT_FOUND)
+      }
+
+      chatLogger.debug('Model detail for {modelId} resolved to {model}', {
         modelId,
-        exposedModelCount: exposure.models.length
+        model: resolved.canonicalId
       })
-      return context.json(modelNotFound(modelId), HTTP_NOT_FOUND)
+      return context.json(toOpenAIModel(resolved))
     }
-
-    chatLogger.debug('Model detail for {modelId} resolved to {model}', {
-      modelId,
-      model: resolved.canonicalId
-    })
-    return context.json(toOpenAIModel(resolved))
-  })
+  )
 
   // --- POST /v1/chat/completions ---
-  routes.post(CHAT_PATH, describeRoute(createChatCompletionDescription), (context) =>
-    handleChatCompletion(context, config, configReader, remoteImageFetch)
+  routes.post(
+    CHAT_PATH,
+    describeRoute(createChatCompletionDescription),
+    validator('header', chatHeadersSchema),
+    jsonBodyMiddleware(),
+    validator('json', chatRequestBodySchema, (result, context) =>
+      result.success ? undefined : rejectChatRequest(context, result.data)
+    ),
+    (context) =>
+      handleChatCompletion(context, context.req.valid('json'), {
+        config,
+        configReader,
+        remoteImageFetch
+      })
   )
 
   // --- Unsupported endpoints: clear errors (documented by hand in `@proxy/server/openapi`) ---

@@ -12,7 +12,8 @@
  * - 413: request body over the size limit
  * - 422: unsupported or unknown request field, unsupported tool
  * - 429: upstream rate limit
- * - 500: invalid model exposure config (thrown to Hono)
+ * - 500: anything thrown inside the proxy, an invalid model exposure config included
+ *   (`internalError`, answered by `app.onError`)
  * - 502: upstream authentication failure (401, 403), any other upstream error
  * - 503: upstream unavailable (503) or overloaded (529), failed health check
  * - 504: upstream timeout (408, 504, idle timeout)
@@ -110,6 +111,21 @@ export function unsupportedParameter(param: string, message?: string): OpenAIErr
  */
 export function authenticationError(message: string): OpenAIError {
   return makeError(message, 'authentication_error', null, null)
+}
+
+/**
+ * Builds the body for a failure inside the proxy itself: fixed text, never the thrown message,
+ * which can quote a path or a config value.
+ *
+ * @returns the `server_error` body with code `internal_error`
+ */
+export function internalError(): OpenAIError {
+  return makeError(
+    'Internal proxy error; see the proxy log',
+    'server_error',
+    null,
+    'internal_error'
+  )
 }
 
 /**
