@@ -11,9 +11,13 @@ login, OAuth included. This page compares the two field by field, for a Claude m
 How each proxy-side claim is backed:
 - **test:** an offline test asserts it;
 - **code:** read from the source named;
-- **probe:** observed on 2026-10-20 with a throwaway test against the mock provider;
+- **probe:** observed on 2026-10-20 with a throwaway test against the mock provider. The test was
+  not kept, so these rows can't be re-run from the repo; #145 and #146 add tests that cover them,
+  and their tag becomes **test** when those land;
 - **live:** observed on 2026-10-20 through the proxy with the maintainer's OAuth login, each
-  request capped at one output token.
+  request capped at one output token. These rows are a snapshot: which Claude models refuse a
+  field, and which ones pi treats specially, change with Anthropic's models and pi's catalog.
+  Re-check them when either moves.
 
 ## The differences that matter
 
