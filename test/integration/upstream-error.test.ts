@@ -1,8 +1,8 @@
 /**
- * A non-streaming request whose upstream call fails, through pi's real provider and the mock
- * provider: what the client and the logs get. Provider error text can quote the request back (a
- * prompt, a key, an account), so it reaches the log at debug only and the client never; the
- * streaming half of the same rule is in `test/unit/sse.test.ts`.
+ * A request whose upstream call fails, through pi's real provider and the mock provider: what the
+ * client and the logs get. Provider error text can quote the request back (a prompt, a key, an
+ * account), so it reaches the log at debug only and the client never; a failure after a stream has
+ * started is in `test/unit/sse.test.ts`.
  */
 
 import { resetSync } from '@logtape/logtape'
@@ -90,5 +90,28 @@ describe('a failed non-streaming upstream call', () => {
     expect(records.some((record) => record.level === 'DEBUG' && record.line.includes(QUOTED))).toBe(
       true
     )
+  })
+})
+
+describe('a failed streaming upstream call, before its first event', () => {
+  // Catches the streaming branch mapping the provider's refusal apart from the non-streaming one:
+  // a stream is not answered until pi's first event, so the refusal must get the same 400 and
+  // body, not a 502 or an SSE error frame, and never the provider's text (#147).
+  test('answers with the same 400 as a non-streaming request', async () => {
+    const response = await testApp().request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'mock/rejecting',
+        stream: true,
+        messages: [{ role: 'user', content: 'Hi' }]
+      })
+    })
+    const text = await response.text()
+
+    expect(response.status).toBe(400)
+    expect(response.headers.get('content-type')).toContain('application/json')
+    expect(JSON.parse(text)).toMatchObject({ error: { code: 'upstream_invalid_request' } })
+    expect(text).not.toContain(QUOTED)
   })
 })
