@@ -488,7 +488,14 @@ accident.
 Before #145, every string was trimmed: `stop: ["\n"]` went out as `[""]`, and leading indentation
 and trailing newlines were stripped from message text. A system or developer message that is only
 whitespace is skipped. It carries no instruction, and Anthropic refuses a blank system prompt; the
-trimmed `""` used to come out as no system prompt, and skipping it keeps that.
+trimmed `""` used to come out as no system prompt, and skipping it keeps that. A blank part of a
+system or developer message is left out when the parts are joined.
+
+Whitespace-only text elsewhere goes to pi as sent, and pi's adapters handle it. On Anthropic, pi
+drops a blank user message, user text part or assistant text block. A blank tool result goes as
+its text, which Claude accepts, as it did the trimmed `""` (checked live, 2026-10-20). A
+whitespace-only `stop` sequence is the exception: Claude refuses it, as it refused the trimmed
+`""`, and the client gets a 502 for its own field (#147).
 
 ## Message mapping policy
 

@@ -66,7 +66,7 @@ How each proxy-side claim is backed:
 |---|---|---|
 | `system` / `developer` `content` | supported, moved to the top | string only; leading turns become the system prompt, later ones stay in place where compat allows (#45) |
 | `system` / `developer` / `user` / `assistant` `name` | ignored | accepted, then dropped silently (probe; #146) |
-| `user` `content` string, `text` parts | supported | supported, whitespace kept (#145, test) |
+| `user` `content` string, `text` parts | supported | supported, whitespace kept (#145, test). One that is only whitespace is dropped by pi, as the trimmed `""` was: a blank user turn before a real one answered 200 (live) |
 | `user` `image_url` `url` | supported | base64 data URIs; remote URLs only with the remote-images setting on (test) |
 | `user` `image_url` `detail` | ignored | accepted, then dropped silently (probe; #146) |
 | `user` `input_audio`, `file` parts | ignored and stripped | rejected with 400 (test) |
@@ -74,7 +74,7 @@ How each proxy-side claim is backed:
 | `assistant` `content` array (`text`, `refusal`) | text supported, refusal ignored | string or `null` only; an array is rejected with 400 (code: `schemas.ts`) |
 | `assistant` `tool_calls` | supported | supported (test) |
 | `assistant` `function_call`, `audio`, `refusal` | `function_call` supported, the others ignored | not declared: dropped silently by the message schema (probe; #146) |
-| `tool` `content` string | supported | supported, whitespace kept (#145, test) |
+| `tool` `content` string | supported | supported, whitespace kept (#145, test). A whitespace-only result is sent as is, and Claude accepts it, as it did `""` (live) |
 | `tool` `content` array of `text` | supported | rejected with 400: string only (code: `schemas.ts`) |
 | `tool` `tool_call_id` | supported | supported (test) |
 | `function` role (deprecated) | supported | rejected with 400 (code: not in the message union) |
