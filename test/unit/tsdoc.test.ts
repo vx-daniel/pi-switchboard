@@ -36,7 +36,9 @@ const SAMPLE_PROGRAM_TIMEOUT_MS = 30_000
 
 /**
  * Library and dependency source files parsed once and shared by every sample program: they never
- * change between samples, and parsing them is most of a sample's cost.
+ * change between samples, and parsing them is most of a sample's cost. Keyed by file name alone,
+ * so it assumes every sample program parses with the same target: they all take the repository's
+ * `tsconfig.json` ({@link compilerOptions}). A file the host cannot find is cached as `undefined`.
  */
 const LIBRARY_FILES = new Map<string, typescript.SourceFile | undefined>()
 
