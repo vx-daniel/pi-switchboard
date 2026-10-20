@@ -457,9 +457,8 @@ const UNKNOWN_REJECTION = 'rejected as an unknown parameter (422)'
 /** OpenAI request fields the proxy does not accept, with what it does instead. */
 const FIELDS_NOT_ACCEPTED: Readonly<Record<string, string>> = {
   ...Object.fromEntries(rejectedFields.map((field) => [field, NAMED_REJECTION])),
-  prompt_cache_key: `${UNKNOWN_REJECTION}; accepting it is #39`,
-  prompt_cache_retention: `${UNKNOWN_REJECTION}; decided with #39`,
-  prompt_cache_options: `${UNKNOWN_REJECTION}; decided with #39`,
+  prompt_cache_retention: `${UNKNOWN_REJECTION}; deprecated by OpenAI for \`prompt_cache_options.ttl\` (#39)`,
+  prompt_cache_options: `${UNKNOWN_REJECTION}; pi has no equivalent: its \`ttl\` takes one value and \`mode: explicit\` has no pi counterpart (#39)`,
   safety_identifier: UNKNOWN_REJECTION,
   service_tier: UNKNOWN_REJECTION,
   store: UNKNOWN_REJECTION,

@@ -2615,6 +2615,18 @@
                       }
                     ]
                   },
+                  "prompt_cache_key": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "metadata": {
                     "type": "object",
                     "propertyNames": {

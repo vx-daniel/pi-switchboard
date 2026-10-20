@@ -153,7 +153,7 @@ Routes OpenAI defines that pi can back, each experimental first and then promote
 "Stable surface" once it meets principle I.
 
 - [ ] Responses API, stateless (`POST /v1/responses`, #140)
-- [ ] `prompt_cache_key` → pi's `sessionId` (#39)
+- [x] `prompt_cache_key` → pi's `sessionId` (#39)
 
 ## Open decisions
 
