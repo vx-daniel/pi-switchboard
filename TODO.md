@@ -419,7 +419,7 @@ serving model and login reported under `x_pi` and in the log.
 ## Phase 6 — More of OpenAI's API
 
 - [ ] Responses API, stateless (#140): experimental first, then added to PLAN's "Stable surface"
-- [ ] `prompt_cache_key` (#39)
+- [x] `prompt_cache_key` → pi's `sessionId`, 64-character limit, Zed capability on (#39)
 
 ## Open decisions
 

@@ -181,6 +181,12 @@ const MIN_PENALTY = -2
 /** Upper bound of `frequency_penalty` and `presence_penalty`. */
 const MAX_PENALTY = 2
 
+/**
+ * Longest `prompt_cache_key` accepted: pi-ai's `OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH` (1.3.0), which
+ * its root entry point does not export.
+ */
+const PROMPT_CACHE_KEY_MAX_LENGTH = 64
+
 /** OpenAI's `reasoning_effort` values, lowest first (OpenAI's `ReasoningEffort` schema, #132). */
 export const REASONING_EFFORTS = [
   'none',
@@ -220,6 +226,16 @@ export const chatCompletionRequestSchema = z
     presence_penalty: z.number().min(MIN_PENALTY).max(MAX_PENALTY).optional(),
     seed: z.int().optional(),
     response_format: responseFormatSchema.optional(),
+    // Prompt caching: becomes pi's `sessionId` (`buildStreamOptions`), which pi sends as the
+    // provider's cache or session key where it has one (#39). At most 64 characters because pi
+    // cuts a longer key to 64 itself, silently merging keys that share their first 64.
+    prompt_cache_key: z
+      .string()
+      .trim()
+      .min(1)
+      .max(PROMPT_CACHE_KEY_MAX_LENGTH)
+      .nullable()
+      .optional(),
     // Passthrough fields sent by real clients; accepted but not interpreted
     metadata: z.record(z.string().trim(), z.unknown()).optional(),
     prediction: z

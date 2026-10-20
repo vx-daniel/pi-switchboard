@@ -163,8 +163,10 @@ function checkedLocations(): string {
  * Maps an exposed model to Zed's `available_models` entry.
  *
  * @remarks
- * The public ID becomes `name`; tools, parallel tool calls and chat completions are always on,
- * images follow the model's input types, and `prompt_cache_key` is always off.
+ * The public ID becomes `name`; tools, parallel tool calls, chat completions and
+ * `prompt_cache_key` are always on, and images follow the model's input types. With
+ * `prompt_cache_key` on, Zed may send a key per thread, which the proxy passes to pi as its
+ * session ID (#39).
  *
  * @param exposed - the exposed model
  * @returns the Zed entry
@@ -180,7 +182,7 @@ export function toZedModel(exposed: ExposedModel): ZedAvailableModel {
       tools: true,
       images: model.input.includes('image'),
       parallel_tool_calls: true,
-      prompt_cache_key: false,
+      prompt_cache_key: true,
       chat_completions: true
     }
   }

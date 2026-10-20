@@ -597,6 +597,15 @@ async function buildStreamOptions(
     opts.metadata = { user_id: request.user }
   }
 
+  // pi sends the session ID as the provider's cache or session key where the API has one: OpenAI
+  // Responses and Codex as `prompt_cache_key` (Codex also reuses its WebSocket per session and
+  // sends only new input), chat completions on api.openai.com as `prompt_cache_key`, Anthropic as
+  // a session-affinity header only with `compat.sendSessionAffinityHeaders` and never for an OAuth
+  // login. Elsewhere it is unused. `null` is the same as no key (#39).
+  if (request.prompt_cache_key !== undefined && request.prompt_cache_key !== null) {
+    opts.sessionId = request.prompt_cache_key
+  }
+
   // The client disconnect signal combined with the upstream idle timeout
   if (signal !== undefined) {
     opts.signal = signal

@@ -119,7 +119,7 @@ const CLAUDE_ZED_MODEL = {
     tools: true,
     images: true,
     parallel_tool_calls: true,
-    prompt_cache_key: false,
+    prompt_cache_key: true,
     chat_completions: true
   }
 }
@@ -168,7 +168,7 @@ describe('toZedModel', () => {
     expect(result.capabilities.images).toBe(true)
     expect(result.capabilities.chat_completions).toBe(true)
     expect(result.capabilities.parallel_tool_calls).toBe(true)
-    expect(result.capabilities.prompt_cache_key).toBe(false)
+    expect(result.capabilities.prompt_cache_key).toBe(true)
   })
 
   test('sets images=false for text-only models', () => {
@@ -351,7 +351,7 @@ describe('syncToZed', () => {
             tools: true,
             images: false,
             parallel_tool_calls: true,
-            prompt_cache_key: false,
+            prompt_cache_key: true,
             chat_completions: true
           }
         }
