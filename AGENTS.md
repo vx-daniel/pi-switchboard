@@ -25,7 +25,7 @@ Before changing code:
 - `src/sync/` — external/editor sync integrations
 - `extensions/` — Pi extension surface for the package
 - `test/unit/`, `test/integration/`, `test/conformance/` — behavior checks
-- `docs/` — supporting analysis and client research, not the main source of truth; `docs/archive/` holds the March 2026 plans that were not carried out
+- `docs/` — supporting analysis and client research, not the main source of truth; `docs/reference/` compares the proxy with other implementations; `docs/archive/` holds the March 2026 plans that were not carried out
 
 ## Core constraints
 

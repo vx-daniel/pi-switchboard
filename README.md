@@ -340,6 +340,8 @@ An empty override (`--auth-token ''` or `PI_SWITCHBOARD_AUTH_TOKEN=`) refuses to
 
 The proxy implements a subset of the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat/create). Request and response shapes match the OpenAI specification for supported fields. Unsupported fields are rejected with `422` and an OpenAI-style error body naming the offending parameter.
 
+Coming from Anthropic's own OpenAI-compatible endpoint? [docs/reference/claude-openai-compatibility.md](docs/reference/claude-openai-compatibility.md) compares it with the proxy field by field. In short, the proxy goes through pi to Claude's native API, so prompt caching and `reasoning_effort` work, a system message later in the conversation stays where the client put it on models whose compat allows it, pi's OAuth logins work, and unsupported fields are rejected instead of ignored.
+
 Upstream failures before a response starts get an HTTP status, streamed or not, as OpenAI answers them: `400` `context_length_exceeded` when the conversation is longer than the model's context window (agent clients compact on it), `429` `rate_limit`, `502`, `503`, `504` `timeout`, each with a fixed message that never quotes the provider. A stream that already started ends with an error event carrying the same body. See [Error mapping](PLAN.md#error-mapping).
 
 So a streaming response sends nothing, headers included, until the provider has accepted the request: as with OpenAI itself, the first byte takes the provider's own response time. A client or reverse proxy in front of the proxy needs a header timeout longer than that; the proxy's upstream timeout (`PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS`, 120 s) caps the wait.
