@@ -296,7 +296,7 @@ export function resolveModelScope(
   const noMatch = (pattern: string): void => {
     diagnostics.push({ code: 'no-match', pattern, message: `No models match pattern "${pattern}"` })
   }
-  const ambiguous = (pattern: string, candidates: readonly Model<Api>[]): void => {
+  const ambiguous: AmbiguousReporter = (pattern, candidates) => {
     const providers = [...new Set(candidates.map((model) => model.provider))].toSorted(
       (left, right) => left.localeCompare(right)
     )
@@ -308,42 +308,82 @@ export function resolveModelScope(
   }
 
   for (const pattern of patterns) {
-    if (pattern.includes('*') || pattern.includes('?') || pattern.includes('[')) {
-      const globPattern = splitThinkingSuffix(pattern) ?? pattern
-      // IDs such as `bracketed-model[1m]` are not globs
-      const exact = resolveReference(globPattern, { thinkingSuffix: 'none', fuzzy: false }, models)
-      let matches: readonly Model<Api>[]
-      if (exact.status === 'resolved') {
-        matches = [exact.model]
-      } else if (exact.status === 'ambiguous') {
-        matches = exact.candidates
-        ambiguous(pattern, matches)
-      } else {
-        matches = models.filter(
-          (model) =>
-            minimatch(`${model.provider}/${model.id}`, globPattern, { nocase: true }) ||
-            minimatch(model.id, globPattern, { nocase: true })
-        )
-      }
-      if (matches.length === 0) noMatch(pattern)
-      for (const model of matches) add(model)
-      continue
-    }
-
-    const result = resolveReference(pattern, { thinkingSuffix: 'lenient', fuzzy: true }, models)
-    if (result.status === 'not-found') {
-      noMatch(pattern)
-      continue
-    }
-    if (result.warning !== undefined) {
-      diagnostics.push({ code: 'invalid-thinking-level', pattern, message: result.warning })
-    }
-    if (result.status === 'ambiguous') {
-      ambiguous(pattern, result.candidates)
-      for (const model of result.candidates) add(model)
-    } else {
-      add(result.model)
-    }
+    const matches = isGlob(pattern)
+      ? globMatches(pattern, models, ambiguous)
+      : referenceMatches(pattern, models, diagnostics, ambiguous)
+    if (matches.length === 0) noMatch(pattern)
+    for (const model of matches) add(model)
   }
   return { models: selected, diagnostics }
+}
+
+/** Records that `pattern` matches models of several providers (pi's `ambiguous` diagnostic). */
+type AmbiguousReporter = (pattern: string, candidates: readonly Model<Api>[]) => void
+
+/**
+ * Says whether a pattern is a glob, as pi decides it: it has `*`, `?` or `[`.
+ *
+ * @param pattern - an `enabledModels` pattern
+ * @returns whether it is matched as a glob
+ */
+function isGlob(pattern: string): boolean {
+  return pattern.includes('*') || pattern.includes('?') || pattern.includes('[')
+}
+
+/**
+ * The glob branch of pi's `resolveModelScopeFromModels` loop, in the same steps: an exact ID
+ * first (IDs such as `bracketed-model[1m]` are not globs), then the glob against
+ * `provider/id` and the bare ID.
+ *
+ * @param pattern - a glob pattern, with an optional `:level` suffix
+ * @param models - the models to select from
+ * @param ambiguous - records an exact ID several providers have
+ * @returns the matching models; empty when none match
+ */
+function globMatches(
+  pattern: string,
+  models: readonly Model<Api>[],
+  ambiguous: AmbiguousReporter
+): readonly Model<Api>[] {
+  const globPattern = splitThinkingSuffix(pattern) ?? pattern
+  const exact = resolveReference(globPattern, { thinkingSuffix: 'none', fuzzy: false }, models)
+  if (exact.status === 'resolved') return [exact.model]
+  if (exact.status === 'ambiguous') {
+    ambiguous(pattern, exact.candidates)
+    return exact.candidates
+  }
+  return models.filter(
+    (model) =>
+      minimatch(`${model.provider}/${model.id}`, globPattern, { nocase: true }) ||
+      minimatch(model.id, globPattern, { nocase: true })
+  )
+}
+
+/**
+ * The reference branch of pi's `resolveModelScopeFromModels` loop, in the same steps: a fuzzy,
+ * suffix-lenient lookup, an invalid thinking level reported, an ambiguous match selecting every
+ * candidate.
+ *
+ * @param pattern - a reference: an ID, `provider/id` or a fuzzy name, with an optional suffix
+ * @param models - the models to select from
+ * @param diagnostics - where an invalid thinking level is recorded
+ * @param ambiguous - records a reference that matches several providers
+ * @returns the matching models; empty when none match
+ */
+function referenceMatches(
+  pattern: string,
+  models: readonly Model<Api>[],
+  diagnostics: ScopeDiagnostic[],
+  ambiguous: AmbiguousReporter
+): readonly Model<Api>[] {
+  const result = resolveReference(pattern, { thinkingSuffix: 'lenient', fuzzy: true }, models)
+  if (result.status === 'not-found') return []
+  if (result.warning !== undefined) {
+    diagnostics.push({ code: 'invalid-thinking-level', pattern, message: result.warning })
+  }
+  if (result.status === 'ambiguous') {
+    ambiguous(pattern, result.candidates)
+    return result.candidates
+  }
+  return [result.model]
 }
