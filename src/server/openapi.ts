@@ -212,7 +212,8 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
     },
     400: errorResponse(
       'Invalid JSON, an invalid field value or message, a conversation longer than the model ' +
-        'takes, or the old `X-Pi-Upstream-Api-Key` header.'
+        'takes (`context_length_exceeded`), a request the provider refused as invalid ' +
+        '(`upstream_invalid_request`), or the old `X-Pi-Upstream-Api-Key` header.'
     ),
     401: errorResponse(
       'Proxy auth failed, or pi has no credential for the model and no ' +

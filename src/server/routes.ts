@@ -161,9 +161,11 @@ async function getExposure(configReader: ExposureConfigReader): Promise<ModelExp
  * Logs a mapped upstream failure.
  *
  * @remarks
- * An error line for the failure, plus a warning for rate limiting or overload (429, 503) so those
- * can be counted apart from real failures. The raw upstream `detail` stays at debug: some
- * providers quote parts of the request back. The request's IDs come from the logging context.
+ * A line for the failure, plus a warning for rate limiting or overload (429, 503) so those can be
+ * counted apart from real failures. A 400 is the client's doing (a field the provider refused, a
+ * history too long for the model), so its line is a warning; any other failure is an error. The
+ * raw upstream `detail` stays at debug: some providers quote parts of the request back. The
+ * request's IDs come from the logging context.
  *
  * @param mapped - the status and body the client gets
  * @param detail - the raw upstream error message, or `undefined` when there is none
@@ -173,11 +175,16 @@ function reportUpstreamFailure(
   mapped: MappedUpstreamError,
   detail: string | undefined
 ): MappedUpstreamError {
-  chatLogger.error('Upstream call failed with {status}: {message}', {
+  const properties = {
     status: mapped.status,
     message: mapped.body.error.message,
     code: mapped.body.error.code
-  })
+  }
+  if (mapped.status === HTTP_BAD_REQUEST) {
+    chatLogger.warn('Upstream refused the request with {status}: {message}', properties)
+  } else {
+    chatLogger.error('Upstream call failed with {status}: {message}', properties)
+  }
   if (detail !== undefined) {
     chatLogger.debug('Upstream error detail: {detail}', { detail })
   }

@@ -6,7 +6,8 @@
  * Every error body has OpenAI's shape: `{ error: { message, type, param, code } }`.
  *
  * Statuses the proxy answers with:
- * - 400: invalid JSON or request field, failed message conversion, context overflow
+ * - 400: invalid JSON or request field, failed message conversion, context overflow, a request
+ *   the provider refused as invalid (its 400 or 422)
  * - 401: proxy auth failure, no upstream credential for the model
  * - 404: model not found, unsupported endpoint, any other route (`Invalid URL (<method> <path>)`)
  * - 413: request body over the size limit
@@ -193,6 +194,21 @@ const CONTEXT_OVERFLOW: MappedUpstreamError = {
   )
 }
 
+/**
+ * The provider refused the request as invalid (its 400 or 422, not a context overflow): the
+ * client's own field caused it, so retrying cannot help (#147). OpenAI's error shape with fixed
+ * text: the provider's message can quote the request.
+ */
+const REJECTED_AS_INVALID: MappedUpstreamError = {
+  status: 400,
+  body: makeError(
+    'The provider rejected the request as invalid. Check the fields this model accepts.',
+    'invalid_request_error',
+    null,
+    'upstream_invalid_request'
+  )
+}
+
 /** HTTP 400 Bad Request. */
 const HTTP_BAD_REQUEST = 400
 /** HTTP 401 Unauthorized. */
@@ -203,6 +219,8 @@ const HTTP_FORBIDDEN = 403
 const HTTP_REQUEST_TIMEOUT = 408
 /** HTTP 413 Payload Too Large. */
 const HTTP_PAYLOAD_TOO_LARGE = 413
+/** HTTP 422 Unprocessable Entity. */
+const HTTP_UNPROCESSABLE_ENTITY = 422
 /** HTTP 429 Too Many Requests. */
 const HTTP_TOO_MANY_REQUESTS = 429
 /** HTTP 503 Service Unavailable. */
@@ -218,9 +236,11 @@ const PAST_LAST_ERROR_STATUS = 600
 
 /** Upstream HTTP statuses with their own answer; any other 4xx or 5xx is PROVIDER_FAILED. */
 const BY_STATUS: ReadonlyMap<number, MappedUpstreamError> = new Map([
+  [HTTP_BAD_REQUEST, REJECTED_AS_INVALID],
   [HTTP_UNAUTHORIZED, AUTH_FAILED],
   [HTTP_FORBIDDEN, AUTH_FAILED],
   [HTTP_REQUEST_TIMEOUT, TIMED_OUT],
+  [HTTP_UNPROCESSABLE_ENTITY, REJECTED_AS_INVALID],
   [HTTP_TOO_MANY_REQUESTS, RATE_LIMITED],
   [HTTP_SERVICE_UNAVAILABLE, UNAVAILABLE],
   [HTTP_GATEWAY_TIMEOUT, TIMED_OUT],

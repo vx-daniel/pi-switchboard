@@ -762,6 +762,7 @@ Fields translated to Anthropic's wire format:
 
 | OpenAI field | Anthropic translation |
 |---|---|
+| `temperature` | `temperature`, by pi, only with thinking off and only to a model whose pi catalog entry neither clears `supportsTemperature` nor sets `supportsMidConvoEffort` (Claude 4.7 and later refuse a temperature below 1). Otherwise pi leaves it out; the proxy passes it to pi anyway and logs that it did not reach Claude, the first per model at `info` (constitution 3.2.0, #147) |
 | `top_p` | `top_p` (same name, natively supported) |
 | `stop` | `stop_sequences` (string or array → always array) |
 | `user` | `metadata: { user_id }`, through pi's `metadata` option, which its Anthropic adapter sends (#48), not the payload patch |
@@ -974,7 +975,8 @@ Use an OpenAI-style shape:
 - `400` invalid JSON, invalid request shape or value, unsupported or invalid content part
   (remote image URL while `remoteImages` is off, or one it refused; audio, file, bad data URI); or the conversation is longer than the model's
   context window (`invalid_request_error`, `param: "messages"`, `context_length_exceeded`, as
-  OpenAI answers it)
+  OpenAI answers it); or the provider refused the request as invalid, its 400 or 422
+  (`invalid_request_error`, `upstream_invalid_request`, #147)
 - `401` proxy auth failure or no upstream credential for target provider
 - `404` model not found (`model_not_found`), an unsupported endpoint, or any other route
   (`Invalid URL (<METHOD> <path>)`)
@@ -983,7 +985,7 @@ Use an OpenAI-style shape:
 - `429` upstream rate limit (`rate_limit`)
 - `500` internal proxy failure, including an invalid model exposure config
 - `502` upstream auth failure (`upstream_auth_error`), or any other upstream failure
-  (`upstream_error`)
+  (`upstream_error`), such as an upstream 404 or 500
 - `503` provider unavailable (`provider_unavailable`, upstream 503) or overloaded
   (`provider_overloaded`, upstream 529)
 - `504` upstream timeout (`timeout`): an upstream 408 or 504, or the provider sent nothing for
@@ -1009,6 +1011,15 @@ Bedrock, Mistral, OpenRouter, …), before the status mapping. A reported status
 rules it out, so a 429 that says "too many tokens" stays a rate limit. A provider that accepts an
 over-long prompt and answers anyway (input beyond the context window, or a `length` stop with no
 output) is not an error: the answer goes to the client and a warning is logged.
+
+Provider rejections (#147, #128 item 5): an upstream 400 or 422 that is not a context overflow is
+the provider refusing a field the client sent, such as Claude's `top_p` on 4.7 and later, a forced
+`tool_choice` on Claude 5.x, or a whitespace-only stop sequence. It answers `400
+invalid_request_error`, code `upstream_invalid_request`, with fixed text ("The provider rejected
+the request as invalid. Check the fields this model accepts."), so a client does not retry a
+request that cannot succeed. The provider's own message stays out of the response, as it can quote
+the request, and reaches the log at `debug` only; the route's line for it is a warning, not an
+error. An upstream 401 or 403 is still `upstream_auth_error` (#128 item 3 decides it).
 
 A streaming request is not answered until pi's first event. pi's adapters emit `start` only once the
 provider has accepted the request, so a failure before it (an overflow, a rate limit, bad

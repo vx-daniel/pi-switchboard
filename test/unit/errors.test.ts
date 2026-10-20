@@ -80,7 +80,7 @@ describe('mapUpstreamError', () => {
     ],
     [
       'anything else',
-      `400 {"error":"prompt contained ${SECRET}"}`,
+      `404 {"error":"no route for ${SECRET}"}`,
       502,
       upstreamBody('Upstream provider error', 'upstream_error')
     ]
@@ -88,6 +88,37 @@ describe('mapUpstreamError', () => {
     const mapped = mapUpstreamError(new Error(upstreamMessage))
 
     expect(mapped).toEqual({ status, body })
+    expect(JSON.stringify(mapped)).not.toContain(SECRET)
+  })
+
+  /** The provider refused the request as invalid: OpenAI's client error, fixed text (#147). */
+  const REJECTED_AS_INVALID = {
+    status: 400,
+    body: {
+      error: {
+        message:
+          'The provider rejected the request as invalid. Check the fields this model accepts.',
+        type: 'invalid_request_error',
+        param: null,
+        code: 'upstream_invalid_request'
+      }
+    }
+  }
+
+  // Catches a request the provider refused for the client's own field answered as a server fault
+  // (502), which tells the client to retry a request that cannot succeed; or the provider's text,
+  // which can quote the request, reaching the client.
+  test.each([
+    [
+      'Anthropic',
+      `400 {"type":"error","error":{"type":"invalid_request_error","message":"top_p: ${SECRET}"}}`
+    ],
+    ['OpenAI SDK', `400 "Unsupported parameter: ${SECRET}"`],
+    ['a labeled 422', `OpenAI API error (422): ${SECRET} is not a valid value`]
+  ])('maps a %s rejection to 400 invalid_request_error', (_case, upstreamMessage) => {
+    const mapped = mapUpstreamError(new Error(upstreamMessage))
+
+    expect(mapped).toEqual(REJECTED_AS_INVALID)
     expect(JSON.stringify(mapped)).not.toContain(SECRET)
   })
 
@@ -278,6 +309,13 @@ describe('mapFailedCall', () => {
       '503 mentioning a token limit',
       '503: {"message":"Token limit exceeded on this shard, try again"}',
       { status: 503, code: 'provider_unavailable' }
+    ],
+    // Catches a 400 that is not an overflow (Claude refusing a whitespace-only stop sequence)
+    // treated as one, which would tell an agent client to compact a history that is not too long.
+    [
+      '400 that is not an overflow',
+      '400 {"type":"error","error":{"type":"invalid_request_error","message":"stop_sequences: each stop sequence must contain non-whitespace"}}',
+      { status: 400, code: 'upstream_invalid_request' }
     ]
   ])('keeps a %s as its status says', (_case, errorMessage, expected) => {
     const mapped = mapFailedCall(failedCall(errorMessage))
