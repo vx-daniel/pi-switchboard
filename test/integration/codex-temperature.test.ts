@@ -57,6 +57,7 @@ beforeAll(async () => {
     'codex-mock': answer,
     'chat-mock': answer,
     'claude-no-temperature': answer,
+    'claude-mid-effort': answer,
     'claude-plain': answer,
     'claude-no-reasoning': answer
   })
@@ -76,6 +77,7 @@ beforeAll(async () => {
           apiKey: 'notarealsecret-anthropic-key',
           models: [
             { id: 'claude-no-temperature', compat: { supportsTemperature: false } },
+            { id: 'claude-mid-effort', compat: { supportsMidConvoEffort: true } },
             { id: 'claude-plain', reasoning: true },
             { id: 'claude-no-reasoning', reasoning: false }
           ]
@@ -161,17 +163,21 @@ describe('temperature', () => {
 
 describe('temperature on Claude (#147)', () => {
   // Catches pi's own drop going unreported: Claude 4.7 and later refuse a temperature below 1, so
-  // pi leaves it out on models whose catalog entry says so, and the operator must see that it
-  // never reached the provider.
-  test('is left out by pi where the model does not accept it, and logged', async () => {
-    const first = await sentBody('anthropic/claude-no-temperature', TEMPERATURE)
-    const second = await sentBody('anthropic/claude-no-temperature', TEMPERATURE)
+  // pi leaves it out on models whose catalog entry says so, by either compat flag, and the operator
+  // must see that it never reached the provider. The body is pi's real request, so a pi upgrade
+  // that changes its rule fails here, not only in the log.
+  test.each([
+    ['supportsTemperature: false', 'claude-no-temperature'],
+    ['supportsMidConvoEffort: true', 'claude-mid-effort']
+  ])('is left out by pi on a model with %s, and logged', async (_flag, modelId) => {
+    const first = await sentBody(`anthropic/${modelId}`, TEMPERATURE)
+    const second = await sentBody(`anthropic/${modelId}`, TEMPERATURE)
 
     expect(first).not.toHaveProperty('temperature')
     expect(second).not.toHaveProperty('temperature')
     const properties = {
       temperature: TEMPERATURE,
-      modelId: 'claude-no-temperature',
+      modelId,
       reason: 'pi does not send it, as the model does not accept it'
     }
     expect(dropRecords).toEqual([

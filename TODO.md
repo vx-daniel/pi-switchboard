@@ -423,7 +423,8 @@ serving model and login reported under `x_pi` and in the log.
 
 ## Open decisions
 
-- [ ] Proxy auth and upstream failure contract (#128)
+- [ ] Proxy auth and upstream failure contract (#128): item 5 done (an upstream 400 or 422 is
+      `400 upstream_invalid_request`, #147); items 1–4 open
 
 ## Later, not planned: experimental agentic mode
 
