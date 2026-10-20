@@ -1726,7 +1726,7 @@
             }
           },
           "404": {
-            "description": "No exposed model has this ID (`model_not_found`).",
+            "description": "No exposed model has this ID, or the provider refused the model for the login the proxy uses (`model_not_found`).",
             "content": {
               "application/json": {
                 "schema": {

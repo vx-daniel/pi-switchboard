@@ -219,6 +219,8 @@ Control which models appear in the API:
 | `scoped` (default) | Expose the models pi's global `enabledModels` setting selects (`/scoped-models` in pi, or `settings.json`), resolved as pi resolves them: exact `provider/id`, bare IDs, globs such as `anthropic/*` or `*sonnet*`, and `:level` suffixes. As in pi, a bare word also matches by substring of a model's ID or name (`opus` selects an Opus model), and a pattern several providers match exposes all of them (listed as `ambiguous`): write `provider/id` to pick one. With no `enabledModels`, every model with credentials, as `all`. Patterns that match nothing are listed in `/healthz/models`. pi's `--models` flag is per session, so it does not apply |
 | `custom` | Expose an explicit allowlist of canonical IDs (`customModels`), matched exactly |
 
+pi lists every model a provider offers, including some the login's plan cannot run: with a ChatGPT login, Codex refuses `gpt-5.5` and `gpt-5.3-codex-spark`, for example. Such a model answers `404` `model_not_found` ("not available with the provider login the proxy uses"), and the proxy logs the refusal as an error. To stop exposing it, select the models you can use in pi's `enabledModels` (`scoped`), or list them in `customModels` (`custom`).
+
 ### Canonical model IDs
 
 Internal canonical IDs use the `provider/model-id` format matching pi's registry:

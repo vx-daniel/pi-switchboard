@@ -16,6 +16,7 @@ import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { FAKE_CODEX_TOKEN } from '../fixtures/codex-token'
 import {
   finishChunk,
   type MockProvider,
@@ -26,25 +27,6 @@ import {
 import { testApp } from '../helpers'
 
 const TEMPERATURE = 0.3
-
-/**
- * Encodes a value as a JWT segment: base64url JSON.
- *
- * @param value - the header or payload to encode
- * @returns the base64url encoding of `value`'s JSON
- */
-function jwtSegment(value: unknown): string {
-  return Buffer.from(JSON.stringify(value)).toString('base64url')
-}
-
-/** An unsigned JWT with the claim pi's Codex adapter reads the account ID from. */
-const FAKE_CODEX_TOKEN = [
-  jwtSegment({ alg: 'none' }),
-  jwtSegment({
-    'https://api.openai.com/auth': { chatgpt_account_id: 'notarealsecret-account' }
-  }),
-  'notarealsecret-signature'
-].join('.')
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir

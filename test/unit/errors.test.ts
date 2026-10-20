@@ -159,6 +159,50 @@ describe('mapUpstreamError', () => {
     expect(JSON.stringify(mapped)).not.toContain(SECRET)
   })
 
+  // Catches a model the provider login cannot use answered as an outage (502), which a client
+  // retries forever (#156): Codex refuses a model the ChatGPT plan lacks with a stream event and no
+  // status, or a 400. A refusal on other grounds is not this, and the model ID never reaches the
+  // body.
+  test.each([
+    [
+      'a stream error event, no status',
+      "Codex error: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account."
+    ],
+    [
+      'a 400',
+      `400 {"detail":"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account."}`
+    ]
+  ])('maps Codex refusing the model, %s, to 404 model_not_found', (_case, upstreamMessage) => {
+    const mapped = mapUpstreamError(new Error(upstreamMessage))
+
+    expect(mapped).toEqual({
+      status: 404,
+      body: {
+        error: {
+          message:
+            'The model is not available with the provider login the proxy uses. Choose another model.',
+          type: 'invalid_request_error',
+          param: 'model',
+          code: 'model_not_found'
+        }
+      }
+    })
+    expect(JSON.stringify(mapped)).not.toContain('gpt-5')
+  })
+
+  // Catches the wording rule outranking a status that says otherwise, or matching a model refusal
+  // that is not about the login: a 503 or a plain "model not supported" keeps its own mapping.
+  test.each([
+    [
+      'a 503 quoting the wording',
+      "503: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account.",
+      UNAVAILABLE
+    ],
+    ['a model refusal from another provider', 'Codex error: model not supported', PROVIDER_FAILED]
+  ])('keeps %s as it was', (_case, upstreamMessage, expected) => {
+    expect(mapUpstreamError(new Error(upstreamMessage))).toEqual(expected)
+  })
+
   // Catches the status read from the wrong place (#42): pi 1.3.0 reports it in fixed positions per
   // SDK, and those decide over the wording; a number elsewhere in the text, or a word inside
   // another word, must not.

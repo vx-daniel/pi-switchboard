@@ -996,7 +996,8 @@ Use an OpenAI-style shape:
   OpenAI answers it); or the provider refused the request as invalid, its 400 or 422
   (`invalid_request_error`, `upstream_invalid_request`, #147)
 - `401` proxy auth failure or no upstream credential for target provider
-- `404` model not found (`model_not_found`), an unsupported endpoint, or any other route
+- `404` model not found (`model_not_found`): no exposed model has the ID, or the provider refused
+  the model for the login the proxy uses (#156); an unsupported endpoint, or any other route
   (`Invalid URL (<METHOD> <path>)`)
 - `413` request body larger than `maxBodySize`
 - `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
@@ -1042,6 +1043,18 @@ error. An upstream 401 or 403 is still `upstream_auth_error` (#128 item 3 decide
 answers a bad API key with `400 INVALID_ARGUMENT`, which the client cannot fix. The wording check
 reads the provider's whole message, which can quote the request, so a refusal that quotes a prompt
 mentioning an API key would answer `502 upstream_auth_error` too; that errs toward the operator.
+
+A model the provider login cannot use (#156): pi's Codex catalog lists models a ChatGPT plan does
+not include, and the proxy exposes what pi lists, so a request reaches Codex, which refuses it with
+"The '<model>' model is not supported when using Codex with a ChatGPT account." It arrives as a
+WebSocket stream event with no status (or a 400), so the proxy recognizes it by that wording and
+answers `404 invalid_request_error`, code `model_not_found`, `param: "model"`, with fixed text ("The
+model is not available with the provider login the proxy uses. Choose another model."). That is
+OpenAI's answer for a model an account cannot use, and agent clients move on to another model on
+it; a 502 read as an outage and was retried. The wording is Codex's own and could change: if it
+does, the refusal is a 502 again. The route logs it as an error, as the operator can fix it by
+hiding the model (README, "Exposure modes"). Live, Codex refuses before pi's first event, so a
+stream gets the 404 too; a stream that has started gets the same body as its error event.
 
 A streaming request is not answered until pi's first event. pi's adapters emit `start` only once the
 provider has accepted the request, so a failure before it (an overflow, a rate limit, bad
