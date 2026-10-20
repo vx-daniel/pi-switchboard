@@ -1,7 +1,7 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "pi-openai-proxy",
+    "title": "pi-switchboard",
     "description": "An OpenAI-compatible API over pi: its models, logins and providers. The OpenAI-compatible routes follow OpenAI's schemas; pi-specific data on them sits under `x_pi`. The `/v1/switchboard/` routes are the proxy's own.",
     "version": "v1"
   },

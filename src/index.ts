@@ -1,5 +1,5 @@
 /**
- * pi-openai-proxy entry point: the citty CLI (args, help, version) that configures logging, loads
+ * pi-switchboard entry point: the citty CLI (args, help, version) that configures logging, loads
  * the config and starts the HTTP server.
  *
  * @remarks
@@ -228,11 +228,11 @@ function logProxyAuth(config: ServerConfig): void {
   }
 }
 
-/** The `pi-openai-proxy` command: its flags, and `run`, which starts the server. */
+/** The `pi-switchboard` command: its flags, and `run`, which starts the server. */
 const main = defineCommand({
   meta: {
-    name: 'pi-openai-proxy',
-    description: "OpenAI-compatible HTTP proxy for pi's multi-provider model registry"
+    name: 'pi-switchboard',
+    description: "OpenAI-compatible HTTP API over pi's models, logins and providers"
   },
   args: {
     'host': {

@@ -63,7 +63,7 @@ describe('JSON Lines output', () => {
     expect(lines[0]?.endsWith('\n')).toBe(true)
     expect(records()[0]).toMatchObject({
       level: 'INFO',
-      logger: 'pi-openai-proxy.server.http',
+      logger: 'pi-switchboard.server.http',
       // The rendered message quotes string values, so a value can never pose as message text.
       message: '"GET" "/v1/models" received',
       properties: { method: 'GET', path: '/v1/models' }

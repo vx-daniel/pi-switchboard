@@ -192,7 +192,7 @@ describe('fetchRemoteImage: success', () => {
         path: '/image.png',
         headers: {
           'host': new URL(server.origin).host,
-          'user-agent': 'pi-openai-proxy (remote image fetch)',
+          'user-agent': 'pi-switchboard (remote image fetch)',
           'accept': 'image/png, image/jpeg, image/gif, image/webp',
           'connection': 'close'
         }

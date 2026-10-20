@@ -1,20 +1,16 @@
 <!--
 Sync Impact Report
-Version change: 2.1.0 → 2.2.0 (MINOR)
-Rationale: the maintainer moved the docs page to `GET /docs`, at the root where a browser goes,
-and asked for every route in the OpenAPI document, the health endpoints and the unsupported
-OpenAI endpoints included. `/docs` is outside `/v1`, so it joins the operational endpoints; it
-still skips proxy authentication and names no model, provider or credential. MINOR: one route
-moves between the two groups.
+Version change: 2.2.0 → 2.2.1 (PATCH)
+Rationale: the project is renamed pi-switchboard (#65); the title follows. No principle changes.
 Modified sections:
-- I. Stable OpenAI Contract: `GET /docs` is an operational endpoint; the document stays under
-  `/v1/switchboard/`
+- Title
 Templates requiring updates:
-- ✅ PLAN.md: the docs route and what the document covers
-- ✅ README.md: the endpoint table, the API documentation section, the configuration table
-- ✅ AGENTS.md: the routes that skip proxy auth
+- ✅ AGENTS.md, README.md, PLAN.md, ROADMAP.md, TODO.md: the new name
 Follow-up TODOs:
 - None.
+
+2.2.0 (2026-10-19): the docs page moves to `GET /docs` and joins the operational endpoints; the
+OpenAPI document describes every route.
 
 2.1.0 (2026-10-19): the OpenAPI document (`GET /v1/switchboard/openapi.json`) and an opt-in
 Swagger UI page join the non-standard routes, and both may skip proxy authentication (#129).
@@ -39,7 +35,7 @@ lefthook or spec-kit memory); defined operational and /v1/pi/ routes, the operat
 rule, logging limits, the lint-directive ban, verbatim exposure, and commit types driving releases.
 -->
 
-# pi-openai-proxy Constitution
+# pi-switchboard Constitution
 
 ## Core Principles
 
@@ -136,4 +132,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 2.2.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-19
+**Version**: 2.2.1 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20

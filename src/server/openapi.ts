@@ -274,7 +274,7 @@ export const OPENAPI_OPTIONS: Partial<GenerateSpecOptions> = {
   excludeStaticFile: false,
   documentation: {
     info: {
-      title: 'pi-openai-proxy',
+      title: 'pi-switchboard',
       // The API's version, the `/v1` in every path, not the package's: a release must not change
       // the committed document.
       version: 'v1',

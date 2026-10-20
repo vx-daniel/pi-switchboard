@@ -1,6 +1,6 @@
 # TODO
 
-Actionable implementation checklist for `pi-openai-proxy`.
+Actionable implementation checklist for `pi-switchboard`.
 
 Read `PLAN.md` first. This file should track concrete work items and decisions needed to implement that plan.
 

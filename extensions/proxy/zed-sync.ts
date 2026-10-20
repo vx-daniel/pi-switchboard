@@ -5,10 +5,10 @@
  */
 
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
-import { loadConfigFromFile } from '@vx-daniel/pi-openai-proxy/config'
-import { computeModelExposure } from '@vx-daniel/pi-openai-proxy/exposure'
-import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
-import { syncToZed, type ZedSyncOptions } from '@vx-daniel/pi-openai-proxy/sync/zed'
+import { loadConfigFromFile } from '@vx-daniel/pi-switchboard/config'
+import { computeModelExposure } from '@vx-daniel/pi-switchboard/exposure'
+import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
+import { syncToZed, type ZedSyncOptions } from '@vx-daniel/pi-switchboard/sync/zed'
 
 import { buildExposureConfig, getSessionAvailableModels, type ProxyState } from './state'
 

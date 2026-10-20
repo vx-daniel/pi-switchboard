@@ -1,6 +1,6 @@
-# pi-openai-proxy
+# pi-switchboard
 
-This repo is a **local OpenAI-compatible HTTP proxy for pi**. It exposes a small OpenAI-style API on top of pi's SDK, model registry, and auth flow.
+This repo is **pi-switchboard**, a **local OpenAI-compatible HTTP API for pi** (formerly `pi-openai-proxy`; see the README's Attribution). It exposes a small OpenAI-style API on top of pi's SDK, model registry, and auth flow.
 
 `AGENTS.md` is always-on Pi context. Keep this file short, precise, and operational. The project's principles live in [`CONSTITUTION.md`](CONSTITUTION.md), which supersedes conflicting guidance here or in any other doc. Put deep architecture detail in [`PLAN.md`](PLAN.md), human onboarding in [`README.md`](README.md), the execution checklist in [`TODO.md`](TODO.md), and phase summary in [`ROADMAP.md`](ROADMAP.md).
 
@@ -62,7 +62,7 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 - Use repo type guards such as `isRecord()` instead of ad-hoc unsafe narrowing.
 - Respect strict TS settings, especially `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`, and `noPropertyAccessFromIndexSignature`.
 - `process.env` is typed via `src/env.d.ts`; prefer dot notation.
-- Log with LogTape, never `console`: `proxyLogger(...)` from `@proxy/logging` (extension: `@vx-daniel/pi-openai-proxy/logging`), using a category and level from the header of `src/logging/index.ts`. Message templates take `{placeholders}`, not template literals. Never log message content, tool arguments, image data, or credentials.
+- Log with LogTape, never `console`: `proxyLogger(...)` from `@proxy/logging` (extension: `@vx-daniel/pi-switchboard/logging`), using a category and level from the header of `src/logging/index.ts`. Message templates take `{placeholders}`, not template literals. Never log message content, tool arguments, image data, or credentials.
 - Doc comments are TSDoc (#101):
   - Every function needs a summary, `@param name - …` per parameter, `@typeParam` per type parameter, and `@returns` unless it returns nothing. Types, interfaces, classes and top-level constants need a summary. A file comment ends with `@packageDocumentation`.
   - No `{type}` in tags; TSDoc tags only (no `@return`, no `@yields`; a generator documents its values in `@returns`).

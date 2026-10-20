@@ -15,8 +15,8 @@ import {
   configToEnv,
   loadConfigFromFile,
   type ProxyConfig
-} from '@vx-daniel/pi-openai-proxy/config'
-import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
+} from '@vx-daniel/pi-switchboard/config'
+import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 import * as z from 'zod'
 
 import { type ProxyState, proxyUrl } from './state'
@@ -44,7 +44,7 @@ const ProbeBodySchema = z.object({ data: z.array(z.unknown()) })
 
 /**
  * Resolves the proxy entry point: the built `dist/index.mjs` this package ships beside the
- * extension, or failing that the package's `pi-openai-proxy` bin on PATH.
+ * extension, or failing that the package's `pi-switchboard` bin on PATH.
  *
  * @param packageRoot - the package root holding `dist/`
  * @returns the absolute path of the built entry, or the bare bin name
@@ -57,9 +57,9 @@ function findProxyBinary(packageRoot: string): string {
   }
   processLogger.debug('No built entry at {localBin}; using {bin} from PATH', {
     localBin,
-    bin: 'pi-openai-proxy'
+    bin: 'pi-switchboard'
   })
-  return 'pi-openai-proxy'
+  return 'pi-switchboard'
 }
 
 /**

@@ -10,13 +10,13 @@ import {
   configFileAuthTokenInvalid,
   loadConfigFromFile,
   type ProxyConfig
-} from '@vx-daniel/pi-openai-proxy/config'
+} from '@vx-daniel/pi-switchboard/config'
 import {
   computeModelExposure,
   type ExposedModel,
   type ModelExposureOutcome
-} from '@vx-daniel/pi-openai-proxy/exposure'
-import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
+} from '@vx-daniel/pi-switchboard/exposure'
+import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 
 import {
   buildExposureConfig,

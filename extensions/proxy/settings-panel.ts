@@ -18,8 +18,8 @@ import {
   type ProxyConfig,
   PublicModelIdModeSchema,
   saveConfigToFile
-} from '@vx-daniel/pi-openai-proxy/config'
-import { proxyLogger } from '@vx-daniel/pi-openai-proxy/logging'
+} from '@vx-daniel/pi-switchboard/config'
+import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 
 import { buildModelSelectorSubmenu } from './model-selector'
 import { type ProxyState, tokenPreview } from './state'

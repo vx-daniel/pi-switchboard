@@ -120,7 +120,7 @@ describe('chat request logging', () => {
     })
 
     expect(response.status).toBe(422)
-    const chatLines = logged('pi-openai-proxy.server.chat').filter((record) =>
+    const chatLines = logged('pi-switchboard.server.chat').filter((record) =>
       record.message.startsWith('Chat request for')
     )
     expect(chatLines).toHaveLength(1)
@@ -149,7 +149,7 @@ describe('chat request logging', () => {
 
     expect(response.status).toBe(404)
     expect(
-      logged('pi-openai-proxy.server.chat').filter((record) =>
+      logged('pi-switchboard.server.chat').filter((record) =>
         record.message.startsWith('Chat request for')
       )
     ).toEqual([])
@@ -160,7 +160,7 @@ describe('chat request logging', () => {
     const response = await app.request('/v1/models')
     const requestId = response.headers.get('x-request-id')
 
-    const http = logged('pi-openai-proxy.server.http')
+    const http = logged('pi-switchboard.server.http')
     expect(http.map((record) => record.properties['requestId'])).toEqual([requestId, requestId])
     expect(http[1]?.properties).toMatchObject({ method: 'GET', path: '/v1/models', status: 200 })
   })
@@ -176,12 +176,12 @@ describe('chat request logging', () => {
     })
 
     await authApp.request('/healthz')
-    expect(logged('pi-openai-proxy.server.http')).toEqual([])
+    expect(logged('pi-switchboard.server.http')).toEqual([])
 
     const rejected = await authApp.request('/healthz/models')
     expect(rejected.status).toBe(401)
     await app.request('/v1/models')
-    const answered = logged('pi-openai-proxy.server.http').filter((record) =>
+    const answered = logged('pi-switchboard.server.http').filter((record) =>
       record.message.includes('answered')
     )
     expect(
@@ -211,7 +211,7 @@ describe('chat request logging', () => {
     // key went through every point that logs. A 4xx would mean it stopped early and the assertion
     // below covered less: fail loudly rather than pass on a shorter path.
     expect(response.status).toBeGreaterThanOrEqual(500)
-    expect(logged('pi-openai-proxy.server.http')[0]?.properties).toMatchObject({
+    expect(logged('pi-switchboard.server.http')[0]?.properties).toMatchObject({
       hasUpstreamApiKey: true
     })
     expect(lines.join('')).not.toContain(upstreamKey)
@@ -238,7 +238,7 @@ describe('proxy auth logging', () => {
     })
 
     expect([rejected.status, accepted.status]).toEqual([401, 200])
-    const authRecords = logged('pi-openai-proxy.server.auth')
+    const authRecords = logged('pi-switchboard.server.auth')
     expect(authRecords.some((record) => record.level === 'WARN')).toBe(true)
     expect(lines.join('')).not.toContain(wrongToken)
     expect(lines.join('')).not.toContain(configuredToken)

@@ -1,5 +1,5 @@
 /**
- * The CLI entry (src/index.ts), run in-process the way `pi-openai-proxy` runs it: argv in, then
+ * The CLI entry (src/index.ts), run in-process the way `pi-switchboard` runs it: argv in, then
  * what the user sees (stdout, stderr, exit code) and what the started server answers on loopback.
  */
 
@@ -74,12 +74,12 @@ function writeConfigFile(contents: Record<string, unknown>): void {
 }
 
 /**
- * Runs the CLI entry with these arguments, as `pi-openai-proxy <args>` would.
+ * Runs the CLI entry with these arguments, as `pi-switchboard <args>` would.
  *
  * @param args - the command-line arguments after the program name
  */
 async function runCli(args: readonly string[]): Promise<void> {
-  process.argv = [process.execPath, 'pi-openai-proxy', ...args]
+  process.argv = [process.execPath, 'pi-switchboard', ...args]
   vi.resetModules()
   // Dynamic and fresh each time: evaluating the entry module is what runs the CLI on process.argv.
   await import('@proxy/index')

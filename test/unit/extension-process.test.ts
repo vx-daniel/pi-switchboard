@@ -39,8 +39,8 @@ import type { ProxyState } from '../../extensions/proxy/state'
 import { fakeCommandContext } from '../fixtures/extension-context'
 import { listenOnLoopback } from '../fixtures/local-server'
 
-vi.mock('@vx-daniel/pi-openai-proxy/config', () => import('@proxy/config/schema'))
-vi.mock('@vx-daniel/pi-openai-proxy/logging', () => import('@proxy/logging'))
+vi.mock('@vx-daniel/pi-switchboard/config', () => import('@proxy/config/schema'))
+vi.mock('@vx-daniel/pi-switchboard/logging', () => import('@proxy/logging'))
 
 /** HTTP 401, what a proxy with auth on answers a probe without the right token. */
 const HTTP_UNAUTHORIZED = 401

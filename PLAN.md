@@ -1,6 +1,6 @@
 # Plan
 
-This document is the implementation source of truth for `pi-openai-proxy`.
+This document is the implementation source of truth for `pi-switchboard`.
 
 Use this file for architecture, API compatibility policy, security boundaries, phase gates, and acceptance criteria. Use `TODO.md` for the actionable checklist. Use `ROADMAP.md` for a short phase summary.
 

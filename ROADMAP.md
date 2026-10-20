@@ -52,7 +52,7 @@ Prepare the stable proxy for release.
 - [x] Add per-request upstream API key override (`X-Pi-Upstream-Api-Key`)
 - [x] Add image MIME type and payload size validation
 - [x] Add CI gates (GitHub Actions: typecheck, lint, test, build, package)
-- [x] Package for npm release (`@victor-software-house/pi-openai-proxy` upstream; `@vx-daniel/pi-openai-proxy` in this fork)
+- [x] Package for npm release (`@victor-software-house/pi-openai-proxy` upstream; `@vx-daniel/pi-switchboard` in this fork)
 - [ ] Run compatibility smoke tests with target clients (Open WebUI, Continue, Aider)
 
 ## Phase 3A — Model exposure and identifier controls [DONE]
@@ -116,7 +116,7 @@ Research-backed decisions on deferred compatibility and resilience items. Analys
 - [x] Add a `chat_request` log line naming the requested and the resolved model of each chat request
 - [x] Consolidate tooling on Vite+ (Oxfmt, Oxlint + tsgolint, Vitest, tsdown, `vp` hooks) and run on Node instead of Bun
 - [x] Adopt the Viaanix lint rules (copied into `vite.config.ts`) with zero warnings
-- [x] Rename the package to `@vx-daniel/pi-openai-proxy` (GitHub Packages scope must match the repo owner)
+- [x] Rename the package to `@vx-daniel/pi-switchboard` (GitHub Packages scope must match the repo owner)
 
 ## Phase 4 — Monorepo and proper CLI
 
@@ -127,17 +127,17 @@ Split into two packages in a pnpm/turborepo monorepo (reference: pi-maestro stru
 ```text
 packages/
 ├── proxy/           pi-proxy -- standalone CLI + HTTP server + config schema
-└── pi-extension/    @pi-openai-proxy/pi-extension -- pi package (depends on pi-proxy)
+└── pi-extension/    @pi-switchboard/pi-extension -- pi package (depends on pi-proxy)
 ```
 
 - `pi-proxy` is the primary deliverable: proper CLI binary with args, help, shell completions
 - Config schema (types, defaults, normalization, JSON I/O) lives in `pi-proxy` and is exported via `pi-proxy/config`
-- `@pi-openai-proxy/pi-extension` imports config from `pi-proxy/config`, spawns `pi-proxy` binary
+- `@pi-switchboard/pi-extension` imports config from `pi-proxy/config`, spawns `pi-proxy` binary
 - People who only want the proxy install `pi-proxy`. Pi users install the extension.
 
 ### CLI (`pi-proxy`)
 
-Proper CLI with a framework. The current binary (`pi-openai-proxy`, single package) already uses citty: `--host`, `--port`, `--auth-token`, `--remote-images`, `--max-body-size`, `--upstream-timeout`, `--log-level`, `--log-format`, `--config`, `--help` and `--version`. Not done: the `pi-proxy` name and `completions`.
+Proper CLI with a framework. The current binary (`pi-switchboard`, single package) already uses citty: `--host`, `--port`, `--auth-token`, `--remote-images`, `--max-body-size`, `--upstream-timeout`, `--log-level`, `--log-format`, `--config`, `--help` and `--version`. Not done: the `pi-proxy` name and `completions`.
 
 ```bash
 pi-proxy                          Start the proxy server (foreground)

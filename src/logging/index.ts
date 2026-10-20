@@ -55,13 +55,13 @@ import { redactByField } from '@logtape/redaction'
 import * as z from 'zod'
 
 /** The category every logger in this package sits under. */
-export const ROOT_CATEGORY = 'pi-openai-proxy'
+export const ROOT_CATEGORY = 'pi-switchboard'
 
 /**
  * Returns a logger in this package's category tree, e.g. `proxyLogger('server', 'http')`.
  *
  * @param subcategories - Category segments under {@link ROOT_CATEGORY}, outermost first.
- * @returns The LogTape logger for `pi-openai-proxy.<subcategories…>`.
+ * @returns The LogTape logger for `pi-switchboard.<subcategories…>`.
  */
 export function proxyLogger(...subcategories: readonly string[]): Logger {
   return getLogger([ROOT_CATEGORY, ...subcategories])

@@ -1,7 +1,7 @@
 {
-  "name": "@vx-daniel/pi-openai-proxy",
-  "version": "4.9.6",
-  "description": "OpenAI-compatible HTTP proxy for pi's multi-provider model registry",
+  "name": "@vx-daniel/pi-switchboard",
+  "version": "0.1.0",
+  "description": "OpenAI-compatible HTTP API over pi's models, logins and providers",
   "keywords": [
     "gateway",
     "llm",
@@ -11,13 +11,16 @@
     "proxy"
   ],
   "license": "MIT",
-  "author": "Victor Software House",
+  "author": "Daniel Zenner",
+  "contributors": [
+    "Victor Araújo (original pi-openai-proxy, https://github.com/victor-software-house/pi-openai-proxy)"
+  ],
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/vx-daniel/pi-openai-proxy.git"
+    "url": "git+https://github.com/vx-daniel/pi-switchboard.git"
   },
   "bin": {
-    "pi-openai-proxy": "dist/index.mjs"
+    "pi-switchboard": "dist/index.mjs"
   },
   "files": [
     "dist",

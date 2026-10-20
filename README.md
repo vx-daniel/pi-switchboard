@@ -1,6 +1,6 @@
-# pi-openai-proxy
+# pi-switchboard
 
-A local OpenAI-compatible HTTP proxy built on [pi](https://github.com/badlogic/pi-mono)'s SDK. Routes requests through pi's multi-provider model registry and credential management, exposing a single `http://localhost:4141/v1/...` endpoint that any OpenAI-compatible client can connect to.
+A local OpenAI-compatible HTTP API built on [pi](https://github.com/badlogic/pi-mono)'s SDK. Routes requests through pi's multi-provider model registry and credential management, exposing a single `http://localhost:4141/v1/...` endpoint that any OpenAI-compatible client can connect to. It started as [`pi-openai-proxy`](#attribution).
 
 ## Why
 
@@ -20,17 +20,17 @@ A local OpenAI-compatible HTTP proxy built on [pi](https://github.com/badlogic/p
 
 ```bash
 # Install globally
-pnpm add -g @vx-daniel/pi-openai-proxy
+pnpm add -g @vx-daniel/pi-switchboard
 
 # Or run directly
-pnpm dlx @vx-daniel/pi-openai-proxy
+pnpm dlx @vx-daniel/pi-switchboard
 ```
 
 ## Quickstart
 
 ```bash
 # Start the proxy (defaults to http://127.0.0.1:4141)
-pi-openai-proxy
+pi-switchboard
 ```
 
 ### List available models
@@ -243,7 +243,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 
 The proxy logs with [LogTape](https://logtape.org) to stderr:
 - **Pretty** ([@logtape/pretty](https://jsr.io/@logtape/pretty)): readable, colored lines stamped with the local date, time and UTC offset (in a container, set `TZ`, e.g. `TZ=America/Chicago`). The default on a terminal.
-- **JSON** ([JSON Lines](https://jsonlines.org)): one object per record with `@timestamp` (UTC), `level`, `logger` (the category, e.g. `pi-openai-proxy.server.http`), `message` and `properties`. The default when stderr is piped or redirected, as in `docker logs`.
+- **JSON** ([JSON Lines](https://jsonlines.org)): one object per record with `@timestamp` (UTC), `level`, `logger` (the category, e.g. `pi-switchboard.server.http`), `message` and `properties`. The default when stderr is piped or redirected, as in `docker logs`.
 
 `PI_PROXY_LOG_FORMAT` (or `--log-format`) picks one regardless of the terminal, for example `pretty` for reading `docker compose logs` directly.
 
@@ -304,7 +304,7 @@ curl http://localhost:4141/v1/chat/completions \
 Set `PI_PROXY_AUTH_TOKEN` to require a bearer token for every request except the `GET /healthz` liveness check:
 
 ```bash
-PI_PROXY_AUTH_TOKEN=my-secret-token pi-openai-proxy
+PI_PROXY_AUTH_TOKEN=my-secret-token pi-switchboard
 
 # Clients must include the token
 curl http://localhost:4141/v1/models \
@@ -330,7 +330,7 @@ There is no OpenAPI/Swagger spec for the proxy itself. Use the [OpenAI API refer
 Install as a pi package to get the `/proxy` command family:
 
 ```bash
-pi install npm:@vx-daniel/pi-openai-proxy
+pi install npm:@vx-daniel/pi-switchboard
 ```
 
 ### Command family
@@ -364,13 +364,13 @@ For a proxy that outlives pi sessions, run the binary directly:
 
 ```bash
 # Foreground
-pi-openai-proxy
+pi-switchboard
 
 # Background
-pi-openai-proxy &
+pi-switchboard &
 
 # With custom port
-PI_PROXY_PORT=8080 pi-openai-proxy &
+PI_PROXY_PORT=8080 pi-switchboard &
 ```
 
 The extension detects externally running instances and shows their status via `/proxy status` without trying to manage them.
@@ -379,7 +379,7 @@ The extension detects externally running instances and shows their status via `/
 
 ```text
 ┌─────────────────────────────┐         ┌──────────────────────────────────┐
-│       HTTP Client           │         │        pi-openai-proxy           │
+│       HTTP Client           │         │        pi-switchboard            │
 │  (curl, Aider, Continue,    │         │                                  │
 │   LiteLLM, Open WebUI, etc.)│         │  ┌────────────────────────────┐  │
 └─────────────┬───────────────┘         │  │     Hono HTTP Server       │  │
@@ -457,8 +457,22 @@ Offline tests run with pi pointed at an empty agent directory and credential env
 - **Node.js** — runtime (`@hono/node-server`)
 - **commitlint** — conventional commits (`commit-msg` hook)
 - **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`)
-- **semantic-release** — automated versioning and npm publish
+- **semantic-release** — automated versioning, GitHub releases and the changelog (npm publishing comes with [#59](https://github.com/vx-daniel/pi-switchboard/issues/59))
+
+## Attribution
+
+pi-switchboard started as [`pi-openai-proxy`](https://github.com/victor-software-house/pi-openai-proxy) by **Victor Araújo** (Victor Software House), published on npm as `@victor-software-house/pi-openai-proxy` (last release 4.9.5). This project forked it at `2fec663` (v4.9.6, 2026-06-08). The 110 commits up to that point are his and stay in this repository's history.
+
+Model exposure, public IDs and strict request validation come from the original. Since the fork, the project has:
+- moved to pi 1.x and its `ModelRuntime`;
+- added health checks, opt-in remote images and checks against OpenAI's published spec;
+- added the OpenAPI document and docs page;
+- moved to the Vite+ toolchain.
+
+Next is the multi-login routing it is now named for (#66–#70).
+
+Versions restart at 0.1.0 under the new name. The original's `v4.x` tags remain in the history.
 
 ## License
 
-MIT
+MIT. The original copyright, Victor Araújo's, is kept in [`LICENSE`](LICENSE), alongside this project's.
