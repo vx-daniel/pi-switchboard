@@ -20,7 +20,11 @@ import * as z from 'zod'
 
 // --- Message content parts ---
 
-/** A `text` content part of a user message. */
+/**
+ * A `text` content part of a user, system or developer message. A client may add fields pi has no
+ * use for (docker-agent puts a `prompt_cache_breakpoint` on each system part it sends a `gpt-*`
+ * model); `z.object` drops them.
+ */
 const textContentPartSchema = z.object({
   type: z.literal('text'),
   text: z.string().trim()
@@ -43,17 +47,24 @@ const contentPartSchema = z.discriminatedUnion('type', [
 
 // --- Messages ---
 
-/** A `system` message with string content. */
+/**
+ * The content of a `system` or `developer` message: a string, or text parts, which OpenAI's chat
+ * completions API accepts in place of one. docker-agent sends parts for `gpt-*` models and a
+ * string for Claude ones.
+ */
+const instructionContentSchema = z.union([z.string().trim(), z.array(textContentPartSchema).min(1)])
+
+/** A `system` message with string or text-part content. */
 const systemMessageSchema = z.object({
   role: z.literal('system'),
-  content: z.string().trim(),
+  content: instructionContentSchema,
   name: z.string().trim().optional()
 })
 
-/** A `developer` message with string content. */
+/** A `developer` message with string or text-part content. */
 const developerMessageSchema = z.object({
   role: z.literal('developer'),
-  content: z.string().trim(),
+  content: instructionContentSchema,
   name: z.string().trim().optional()
 })
 

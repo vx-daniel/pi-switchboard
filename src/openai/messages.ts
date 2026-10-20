@@ -4,6 +4,8 @@
  * @remarks
  * - `system` and `developer` messages before the first conversation turn: the system prompt
  * - later `system` and `developer` messages: pi SystemMessages in place (#45)
+ * - text parts of a `system` or `developer` message: joined with blank lines, as separate
+ *   messages are
  * - `user` text, or text and base64 image parts: pi UserMessage
  * - `assistant` text and tool calls: pi AssistantMessage history
  * - `tool`: pi ToolResultMessage
@@ -51,6 +53,21 @@ export interface ConversionError {
 /** Outcome of {@link convertMessages}, discriminated on `ok`. */
 export type ConversionResult = ConversionSuccess | ConversionError
 
+/** The content of a system or developer message, as the request schema accepts it. */
+type InstructionContent = Extract<OpenAIMessage, { role: 'system' | 'developer' }>['content']
+
+/**
+ * The text of a system or developer message. Its parts are joined with blank lines, the same
+ * separator as between leading messages: a client that splits its instructions into parts (one per
+ * block, as docker-agent does) means separate blocks, not one run-on paragraph.
+ *
+ * @param content - the message's string or text parts
+ * @returns the instruction text
+ */
+function instructionText(content: InstructionContent): string {
+  return typeof content === 'string' ? content : content.map((part) => part.text).join('\n\n')
+}
+
 /**
  * Converts an OpenAI messages array into a pi Context.
  *
@@ -76,10 +93,11 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
     roleCounts[message.role]++
 
     if (message.role === 'system' || message.role === 'developer') {
+      const text = instructionText(message.content)
       if (piMessages.length === 0) {
-        systemParts.push(message.content)
+        systemParts.push(text)
       } else {
-        piMessages.push({ role: 'system', content: message.content, timestamp: Date.now() })
+        piMessages.push({ role: 'system', content: text, timestamp: Date.now() })
         laterSystemCount++
       }
       continue

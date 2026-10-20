@@ -15,6 +15,44 @@ describe('validateChatRequest', () => {
     expect(result.data.messages).toHaveLength(1)
   })
 
+  // Catches every docker-agent request to a gpt-* model failing with a 400 at messages.N: it sends
+  // system content as text parts, each with a prompt_cache_breakpoint (docker-agent v1.145.0).
+  test('accepts system and developer content as text parts, dropping fields pi does not use', () => {
+    const result = validateChatRequest({
+      model: 'gpt-6.1-sol',
+      messages: [
+        {
+          role: 'system',
+          content: [{ type: 'text', text: 'Rules.', prompt_cache_breakpoint: { mode: 'explicit' } }]
+        },
+        { role: 'developer', content: [{ type: 'text', text: 'Context.' }] },
+        { role: 'user', content: 'Hello' }
+      ]
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.data.messages[0]).toEqual({
+      role: 'system',
+      content: [{ type: 'text', text: 'Rules.' }]
+    })
+  })
+
+  // Catches the new shape letting through what a system message cannot carry: no parts at all,
+  // or a part pi could not put in a system prompt.
+  test.each([
+    ['an empty part list', []],
+    ['an image part', [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }]]
+  ])('rejects system content that is %s', (_description, content) => {
+    const result = validateChatRequest({
+      model: 'gpt-6.1-sol',
+      messages: [
+        { role: 'system', content },
+        { role: 'user', content: 'Hello' }
+      ]
+    })
+    expect(result.ok).toBe(false)
+  })
+
   test('accepts request with all Phase 1 fields', () => {
     const result = validateChatRequest({
       model: 'openai/gpt-4o',
