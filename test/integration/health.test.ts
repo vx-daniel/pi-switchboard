@@ -141,6 +141,18 @@ describe('/healthz/creds', () => {
     ])
   })
 
+  // Catches a repeated `verify` failing the query validator into hono-openapi's own 400 shape:
+  // before validation `c.req.query()` read its first value, and that value still decides.
+  test.each([
+    ['verify=true&verify=no', true],
+    ['verify=no&verify=true', false]
+  ])('?%s verifies by the first value', async (query, verified) => {
+    const response = await testApp().request(`/healthz/creds?${query}`)
+
+    expect(response.status).toBe(200)
+    expect(await jsonBody(response)).toMatchObject({ status: 'ok', verified })
+  })
+
   // Catches a proxy without any credential passing the check it exists for.
   test('answers 503 when no provider has a credential', async () => {
     await loadAgentDir()

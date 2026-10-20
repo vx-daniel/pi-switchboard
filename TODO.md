@@ -442,5 +442,6 @@ Kept for when it is picked up: a separate opt-in endpoint, never under an OpenAI
 - [x] Keep this file focused on concrete action items only
 - [x] Document all silent-drop fields and their resolution plan
 - [x] Add "Known gaps" tracking to `PLAN.md`
+- [x] Request parameters and the chat body validated and documented by hono-openapi's `validator()`, with the 400/422 split kept; `app.onError` answers thrown errors in OpenAI's shape
 - [x] Publish the API as an OpenAPI document at `/v1/switchboard/openapi.json`, committed as `openapi.json` and checked against the routes (#129)
 - [x] Opt-in Swagger UI at `/docs` (`docsUi`), Swagger UI pinned on the CDN; the document covers every route (#129)

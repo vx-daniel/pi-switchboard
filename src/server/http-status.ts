@@ -22,5 +22,7 @@ export const HTTP_PAYLOAD_TOO_LARGE = 413
 export const HTTP_UNPROCESSABLE_ENTITY = 422
 /** HTTP 429 Too Many Requests. */
 export const HTTP_TOO_MANY_REQUESTS = 429
+/** HTTP 500 Internal Server Error. */
+export const HTTP_INTERNAL_SERVER_ERROR = 500
 /** HTTP 503 Service Unavailable. */
 export const HTTP_SERVICE_UNAVAILABLE = 503

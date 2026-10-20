@@ -163,8 +163,36 @@ route table.
 The response schemas are the Zod schemas the builders type their bodies with (`OpenAIChatCompletion`
 is `z.infer` of `openAIChatCompletionSchema`, the health bodies likewise in `src/server/health.ts`),
 so the document cannot name a field the code does not send. They are never parsed at runtime.
-Validation stays in `validateChatRequest`; hono-openapi's `validator()` is not used, since it would
-replace the 400/422 split and its messages.
+
+What a route reads from a request is validated with hono-openapi's `validator()`, which also
+documents it, so no parameter or request body is described by hand:
+
+| Route | Validated | Schema (`src/server/openapi.ts`) |
+|---|---|---|
+| `GET /v1/models/{model}` | path `model` | `modelPathSchema` |
+| `POST /v1/chat/completions` | header `X-Switchboard-Upstream-Api-Key`, JSON body | `chatHeadersSchema`, `chatRequestBodySchema` |
+| `GET /healthz/creds` | query `verify` | `credentialsQuerySchema` |
+
+- **The chat body keeps the proxy's 400/422 split and wording.** The validator's hook answers a
+  failed body with `chatRequestRejection` (`src/openai/validate.ts`): a named 422 for a rejected
+  or unknown field, a 400 naming the first invalid value. The schema runs once per request; the
+  rejection parses again only for a body that already failed.
+- **Any `Content-Type`.** `validator('json')` reads only a body declared as JSON, so
+  `jsonBodyMiddleware` declares it JSON first. The proxy has always read the body as JSON whatever
+  its declared type, and `curl -d` sends form-urlencoded.
+- **Malformed JSON.** The validator throws Hono's `HTTPException` (400, "Malformed JSON in request
+  body"), which `app.onError` answers in OpenAI's error shape.
+- **`?verify=`**: only `true` verifies, and any other value is the same as none. A repeated
+  `verify` counts by its first value, as before; the schema accepts the array the validator
+  builds for it, so it never fails into hono-openapi's own error shape. Surrounding spaces are
+  trimmed, so `%20true` now verifies.
+- **Model IDs from the path are trimmed,** as the chat body's `model` already was (the repo's Zod
+  lint rule requires `.trim()`): `/v1/models/%20gpt-x` finds `gpt-x`. The exposure config is
+  still matched exactly as written (constitution, principle IV).
+- **No failure hooks besides the chat body's.** The path, header and query schemas accept any value
+  the request can carry, so their validators never fail.
+- **No default 400.** `defaultValidationErrorResponse` is off: hono-openapi's default documents a
+  400 in its own `{ success, error, data }` shape, which the proxy never sends.
 
 `openapi.json` at the repository root is the document as committed: a file snapshot in
 `test/integration/openapi-document.test.ts`. A change to a route, field, status or description
@@ -176,6 +204,17 @@ The model detail route is `/v1/models/:model{.+}`: hono-openapi leaves a wildcar
 document. Hono decodes the ID once (`%252F` stays a literal `%2F`), and a malformed escape is
 answered `404 model_not_found` rather than thrown as a 500. `/v1/models/` with no ID keeps its
 OpenAI-style 404.
+
+### Errors thrown inside the proxy
+
+`app.onError` answers anything a handler or middleware throws, instead of Hono's plain-text 500
+and its `console.error`:
+
+- a Hono `HTTPException` with a 4xx status (today only the validator's malformed-JSON 400): that
+  status, as `invalid_request_error` with Hono's fixed message;
+- anything else, an invalid exposure config included: `500`, `server_error`, code
+  `internal_error`, with fixed text. The thrown message, which can quote a path or a config value,
+  is logged at debug only; the error line names the error class.
 
 ### Unsupported endpoints
 
@@ -1055,7 +1094,7 @@ removed.
 
 ### Scaling notes
 
-`routes.ts` is the sole composition root. The chat completions work is split across helpers (`parseChatRequest`, `inlineImages`, `buildPiContext`, `checkRequestAuth`, `streamChat`, `completeChat`) driven by `handleChatCompletion`. This is manageable for the current surface but should be decomposed before a second completion route (the Responses API, #140) or routing middleware (#66–#70) is added.
+`routes.ts` is the sole composition root. The chat route validates its body and header with hono-openapi's `validator()`, then `handleChatCompletion` drives the helpers (`inlineImages`, `buildPiContext`, `checkRequestAuth`, `streamChat`, `completeChat`). This is manageable for the current surface but should be decomposed before a second completion route (the Responses API, #140) or routing middleware (#66–#70) is added.
 
 The pi extension lives in `extensions/proxy/`, isolated from the core proxy. pi loads `index.ts` (the `/proxy` command family and lifecycle hooks) as the single extension; the sibling modules split the rest: `state.ts` (shared config/registry state), `process.ts` (PID file, probe, start/stop/status), `reports.ts` (show/models/verify), `zed-sync.ts`, `settings-panel.ts`, and `model-selector.ts`. Add new extension modules there rather than as top-level files in `extensions/`, which pi would load as separate extensions.
 

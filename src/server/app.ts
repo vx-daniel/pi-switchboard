@@ -8,9 +8,9 @@ import { swaggerUI } from '@hono/swagger-ui'
 import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
-import { invalidRequest } from '@proxy/server/errors'
+import { internalError, invalidRequest } from '@proxy/server/errors'
 import { createHealthRoutes } from '@proxy/server/health'
-import { HTTP_NOT_FOUND } from '@proxy/server/http-status'
+import { HTTP_INTERNAL_SERVER_ERROR, HTTP_NOT_FOUND } from '@proxy/server/http-status'
 import {
   bodySizeLimitMiddleware,
   disconnectMiddleware,
@@ -28,8 +28,10 @@ import {
 } from '@proxy/server/openapi'
 import { createRoutes, type ExposureConfigReader, fileConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
+import { errorCode } from '@proxy/utils/guards'
 import { Hono } from 'hono'
 import { describeRoute, openAPIRouteHandler } from 'hono-openapi'
+import { HTTPException } from 'hono/http-exception'
 
 /** Logger for server lifecycle events. */
 const lifecycleLogger = proxyLogger('server')
@@ -110,6 +112,28 @@ export function createApp(
     const { method, path } = context.req
     httpLogger.debug('No route for {method} {path}', { method, path })
     return context.json(invalidRequest(`Invalid URL (${method} ${path})`), HTTP_NOT_FOUND)
+  })
+
+  // Anything a handler or middleware throws, in OpenAI's error shape instead of Hono's plain text
+  // (and without Hono's `console.error`). Hono's own exceptions carry a client error and a fixed
+  // message: `validator('json')` throws "Malformed JSON in request body" (400). Anything else is
+  // the proxy's fault, answered 500 with fixed text; the thrown message, which can quote a path or
+  // a config value, goes to the log at debug only.
+  app.onError((error, context) => {
+    const { method, path } = context.req
+    if (error instanceof HTTPException && error.status < HTTP_INTERNAL_SERVER_ERROR) {
+      httpLogger.warn('Rejected {method} {path}: {reason}', { method, path, reason: error.message })
+      return context.json(invalidRequest(error.message), error.status)
+    }
+    httpLogger.error('{method} {path} failed inside the proxy: {error}', {
+      method,
+      path,
+      error: errorCode(error)
+    })
+    httpLogger.debug('Internal error detail: {detail}', {
+      detail: error instanceof Error ? error.message : String(error)
+    })
+    return context.json(internalError(), HTTP_INTERNAL_SERVER_ERROR)
   })
 
   lifecycleLogger.debug(
