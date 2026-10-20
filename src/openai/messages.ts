@@ -4,6 +4,7 @@
  * Phase 0 contract:
  * - `system` messages -> accumulated system prompt
  * - `developer` messages -> merged into effective system prompt in message order
+ * - text parts of a `system` or `developer` message -> joined with blank lines, as messages are
  * - `user` text -> pi UserMessage
  * - `assistant` text -> pi AssistantMessage history
  * - `tool` -> pi ToolResultMessage
@@ -43,6 +44,21 @@ export interface ConversionError {
 
 export type ConversionResult = ConversionSuccess | ConversionError
 
+/** The content of a system or developer message, as the request schema accepts it. */
+type InstructionContent = Extract<OpenAIMessage, { role: 'system' | 'developer' }>['content']
+
+/**
+ * The text of a system or developer message. Its parts are joined with blank lines, the same
+ * separator as between leading messages: a client that splits its instructions into parts (one per
+ * block, as docker-agent does) means separate blocks, not one run-on paragraph.
+ *
+ * @param content - the message's string or text parts
+ * @returns the instruction text
+ */
+function instructionText(content: InstructionContent): string {
+  return typeof content === 'string' ? content : content.map((part) => part.text).join('\n\n')
+}
+
 /**
  * Convert OpenAI messages array into a pi Context.
  *
@@ -61,10 +77,8 @@ export function convertMessages(messages: OpenAIMessage[]): ConversionResult {
     if (message === undefined) continue
     roleCounts[message.role]++
 
-    if (message.role === 'system') {
-      systemParts.push(message.content)
-    } else if (message.role === 'developer') {
-      systemParts.push(message.content)
+    if (message.role === 'system' || message.role === 'developer') {
+      systemParts.push(instructionText(message.content))
     } else if (message.role === 'user') {
       const userMsg = convertUserMessage(message.content, messageIndex)
       if (!userMsg.ok) return userMsg

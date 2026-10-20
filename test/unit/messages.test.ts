@@ -28,6 +28,25 @@ describe('convertMessages', () => {
     expect(result.context.systemPrompt).toBe('System prompt\n\nDeveloper context')
   })
 
+  // Catches text-part instructions (docker-agent sends them for gpt-* models) losing a part, or
+  // running parts together: each part is a block, joined like separate messages.
+  test('joins the text parts of a system or developer message with blank lines', () => {
+    const result = convertMessages([
+      {
+        role: 'system',
+        content: [
+          { type: 'text', text: 'Rule one.' },
+          { type: 'text', text: 'Rule two.' }
+        ]
+      },
+      { role: 'developer', content: 'Developer context' },
+      { role: 'user', content: 'Hello' }
+    ])
+    expect(result.ok).toBe(true)
+    if (!result.ok) return
+    expect(result.context.systemPrompt).toBe('Rule one.\n\nRule two.\n\nDeveloper context')
+  })
+
   test('converts user text messages', () => {
     const messages: OpenAIMessage[] = [{ role: 'user', content: 'Hello world' }]
     const result = convertMessages(messages)
