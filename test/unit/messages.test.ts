@@ -28,6 +28,27 @@ describe('convertMessages', () => {
     expect(result.context.systemPrompt).toBe('System prompt\n\nDeveloper context')
   })
 
+  // Catches text-part instructions (docker-agent sends them for gpt-* models) losing a part, or
+  // running parts together: each part is a block, joined like separate messages, wherever it is.
+  test('joins the text parts of a system or developer message with blank lines', () => {
+    const result = convertMessages([
+      {
+        role: 'system',
+        content: [
+          { type: 'text', text: 'Rule one.' },
+          { type: 'text', text: 'Rule two.' }
+        ]
+      },
+      { role: 'developer', content: 'Developer context' },
+      { role: 'user', content: 'Hello' },
+      { role: 'system', content: [{ type: 'text', text: 'Later rule.' }] }
+    ])
+    assert(result.ok, 'expected the conversation to convert')
+
+    expect(result.context.systemPrompt).toBe('Rule one.\n\nRule two.\n\nDeveloper context')
+    expect(result.context.messages.at(-1)).toMatchObject({ role: 'system', content: 'Later rule.' })
+  })
+
   /**
    * Reduces each pi message to its role and its text (system and user messages carry plain text
    * here).
