@@ -1,0 +1,109 @@
+# Claude's OpenAI compatibility layer vs pi-switchboard
+
+Anthropic serves an OpenAI-compatible endpoint of its own
+([OpenAI SDK compatibility](https://platform.claude.com/docs/en/cli-sdks-libraries/libraries/openai-sdk),
+read 2026-10-20). pi-switchboard does the same job, OpenAI clients talking to Claude, in a
+different way. Anthropic's layer translates at Anthropic's endpoint and needs a Claude API key.
+The proxy takes the OpenAI request, and pi sends it to Claude's native Messages API with pi's
+login, OAuth included. This page compares the two field by field, for a Claude model
+(`anthropic-messages`), as of pi-switchboard on `dev` after #144 with pi-ai 1.3.0 (#143).
+
+How each proxy-side claim is backed:
+- **test:** an offline test asserts it;
+- **code:** read from the source named;
+- **probe:** observed on 2026-10-20 with a throwaway test against the mock provider;
+- **unverified:** not checked live. A live check on 2026-10-20 never reached Claude, because the
+  `anthropic` login failed its OAuth refresh.
+
+## The differences that matter
+
+| | Anthropic's layer | pi-switchboard |
+|---|---|---|
+| Unsupported fields | most are silently ignored | rejected with a named 422 or 400, except the drops constitution principle I lists, and the ones in #146 (probe) |
+| Thinking | `reasoning_effort` ignored; a non-OpenAI `thinking` body field turns it on; the thinking is never returned | `reasoning_effort` becomes pi's thinking level, clamped to the model's levels (#43, test); the thinking is not returned either |
+| System and developer messages | all moved into `system`, joined with `\n`, wherever they appear | before the first turn they form the system prompt; later ones stay in place where the model's compat allows (#45, test) |
+| Prompt caching | not supported | pi marks the system prompt, the last user message and the last tool with `cache_control` on every request (code: pi-ai `anthropic-messages.js`); cache reads come back as `prompt_tokens_details.cached_tokens` |
+| Auth | Claude API key, plus `anthropic-workspace-id` for keys with access to several workspaces | pi's stored login (API key or OAuth, refreshed by pi), or a per-request key in `X-Switchboard-Upstream-Api-Key` |
+| Errors | OpenAI's format with Claude's messages | OpenAI's format with fixed messages that never quote the provider; a provider 400 that isn't a context overflow is `502` (#147, code) |
+
+## Request fields
+
+| Field | Anthropic's layer | pi-switchboard, Claude model |
+|---|---|---|
+| `model` | Claude model names | the proxy's public model ID or canonical `provider/model-id`; only exposed models (test) |
+| `max_tokens`, `max_completion_tokens` | supported | supported; `max_completion_tokens` wins (test) |
+| `stream`, `stream_options` | supported | supported; `include_usage` adds the final usage chunk (test) |
+| `temperature` | 0–1, above 1 capped at 1; below 1 is a 400 on Claude 4.7+ and Mythos Preview | 0–2 accepted and sent unchanged (probe). Claude's rule applies to the proxy's traffic too, and its 400 becomes a 502 (#147; unverified live) |
+| `top_p` | passed through; anything but `0.99` is a 400 on Claude 4.7+, as is sending it with `temperature` | sent as `top_p` (probe: `0.5` reached the body); same outcome as `temperature` (#147; unverified live) |
+| `stop` | non-whitespace sequences work | sent as `stop_sequences`, **but each sequence is trimmed first**, so `"\n"` becomes `""` (probe; #145) |
+| `n` | must be 1 | any `n` is rejected with 422 (test) |
+| `parallel_tool_calls` | supported | `false` becomes `disable_parallel_tool_use: true` on `tool_choice` (PLAN, Anthropic table) |
+| `tool_choice` | supported; forced (`required` or named) is an error on Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 | translated: `auto`/`none` → `{type}`, `required` → `{type: "any"}`, named → `{type: "tool", name}` (PLAN). The forced-use error on those models is answered 502 (#147; unverified live) |
+| `reasoning_effort` | ignored | pi's thinking level, clamped (#43, test) |
+| `response_format` | ignored | accepted; skipped for Anthropic (PLAN, listed drop) |
+| `metadata` | ignored | accepted; skipped for Anthropic, which takes only `user_id` (PLAN, listed drop) |
+| `user` | ignored | sent as `metadata.user_id` (#48, test) |
+| `seed`, `presence_penalty`, `frequency_penalty`, `prediction` | ignored | accepted; skipped for Anthropic (PLAN, listed drops) |
+| `logprobs`, `top_logprobs`, `logit_bias` | ignored | rejected with 422 (test) |
+| `store`, `service_tier`, `audio`, `modalities` | ignored | unknown parameters, 422 (spec check) |
+| `prompt_cache_key` | not listed | accepted; pi's session ID, which a direct Anthropic OAuth login does not use (#39, test) |
+
+### Tools
+
+| Field | Anthropic's layer | pi-switchboard |
+|---|---|---|
+| `tools[].function.name`, `description`, `parameters` | supported | supported; `parameters` limited to a JSON Schema subset, other keywords get a 422 naming them (PLAN, "Tool schema policy"; test) |
+| `tools[].function.strict` | ignored | strict sampling where pi marks the model strict-capable and the schema fits Anthropic's strict subset; otherwise sent without strict, silently (PLAN, "`strict` on function tools", a known gap by decision; test) |
+| `functions` (deprecated) | supported | rejected with 422 (test) |
+
+### Messages
+
+| Field | Anthropic's layer | pi-switchboard |
+|---|---|---|
+| `system` / `developer` `content` | supported, moved to the top | string only; leading turns become the system prompt, later ones stay in place where compat allows (#45) |
+| `system` / `developer` / `user` / `assistant` `name` | ignored | accepted, then dropped silently (probe; #146) |
+| `user` `content` string, `text` parts | supported | supported, **but trimmed** (probe; #145) |
+| `user` `image_url` `url` | supported | base64 data URIs; remote URLs only with the remote-images setting on (test) |
+| `user` `image_url` `detail` | ignored | accepted, then dropped silently (probe; #146) |
+| `user` `input_audio`, `file` parts | ignored and stripped | rejected with 400 (test) |
+| `assistant` `content` string | supported | supported (trimmed, #145) |
+| `assistant` `content` array (`text`, `refusal`) | text supported, refusal ignored | string or `null` only; an array is rejected with 400 (code: `schemas.ts`) |
+| `assistant` `tool_calls` | supported | supported (test) |
+| `assistant` `function_call`, `audio`, `refusal` | `function_call` supported, the others ignored | not declared: dropped silently by the message schema (probe; #146) |
+| `tool` `content` string | supported | supported (trimmed, #145) |
+| `tool` `content` array of `text` | supported | rejected with 400: string only (code: `schemas.ts`) |
+| `tool` `tool_call_id` | supported | supported (test) |
+| `function` role (deprecated) | supported | rejected with 400 (code: not in the message union) |
+
+## Response fields
+
+| Field | Anthropic's layer | pi-switchboard |
+|---|---|---|
+| `id`, `object`, `created`, `model` | supported | supported; `id` is the proxy's request ID, `model` the public ID (test) |
+| `choices` | always one | always one (test) |
+| `finish_reason`, `message.role`, `content`, `tool_calls` | supported | supported, checked against OpenAI's spec (#132, test) |
+| `usage.prompt_tokens`, `completion_tokens`, `total_tokens` | supported | supported; `prompt_tokens` includes cache reads and writes (test) |
+| `usage.prompt_tokens_details` | always empty | `cached_tokens` (cache reads) and `cache_write_tokens` (test) |
+| `usage.completion_tokens_details` | always empty | not sent |
+| `logprobs` | always empty | `null` (#132, test) |
+| `message.refusal`, `message.audio`, `service_tier` | always empty | not sent |
+| `system_fingerprint` | always empty | not sent (#132) |
+| non-OpenAI data | none | `x_pi`: cost and cache token counts (test) |
+
+## Headers
+
+| Header | Anthropic's layer | pi-switchboard |
+|---|---|---|
+| `x-ratelimit-*`, `retry-after` | passed back | not passed back: the client sees a `429 rate_limit` without them (code: no handler sets them). Quota awareness is #69 |
+| `request-id` | Anthropic's | `x-request-id`, the proxy's own request ID; `x-client-request-id` echoed when sent (code: `middleware.ts`) |
+| `openai-version`, `openai-processing-ms` | fixed or empty | not sent |
+| `authorization` | the Claude API key | the proxy's own token when proxy auth is on; the provider key comes from pi or `X-Switchboard-Upstream-Api-Key` |
+
+## Follow-ups from this comparison
+
+- #145: request strings are trimmed, so stop sequences and message whitespace change.
+- #146: `name`, `image_url.detail`, and an assistant message's `refusal` and `audio` are dropped
+  silently.
+- #147: a provider 400 caused by the client's own field answers 502. This covers Claude 4.7+
+  `temperature` and `top_p`, and forced `tool_choice` on the Claude 5.x models listed above. The
+  Claude rows marked unverified need one live request each once the `anthropic` login works.

@@ -712,6 +712,8 @@ All passthrough fields injected directly as flat top-level properties (same name
 
 #### Anthropic (`anthropic-messages`)
 
+[`docs/reference/claude-openai-compatibility.md`](docs/reference/claude-openai-compatibility.md) compares this translation, field by field, with Anthropic's own OpenAI-compatible endpoint (#143).
+
 Fields translated to Anthropic's wire format:
 
 | OpenAI field | Anthropic translation |
