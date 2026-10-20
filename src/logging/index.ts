@@ -3,8 +3,9 @@
  *
  * Library-first: every module asks for a logger with `proxyLogger(...)` and logs; nothing is
  * written until an entry point configures LogTape. The proxy's CLI calls `configureLogging()`
- * (stderr); the extension calls `configureFileLogging()` only when `PI_SWITCHBOARD_EXTENSION_LOG_FILE`
- * names a file, because console output would corrupt pi's terminal UI.
+ * (stderr); the extension calls `configureFileLogging()` only when
+ * `PI_SWITCHBOARD_EXTENSION_LOG_FILE` names a file, because console output would corrupt pi's
+ * terminal UI.
  *
  * CATEGORIES — every logger sits under `ROOT_CATEGORY`, so one `lowestLevel` governs them all:
  *   server             lifecycle: startup, shutdown

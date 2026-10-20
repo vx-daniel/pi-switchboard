@@ -152,8 +152,17 @@ describe('an empty token override refuses to start (#99)', () => {
 describe('the pre-rename PI_PROXY_AUTH_TOKEN (#65)', () => {
   // Catches the old variable ignored silently: a proxy its operator meant to protect would start
   // with auth off, open to anyone who reaches the port.
-  test('set alone, it refuses to start', () => {
-    vi.stubEnv('PI_PROXY_AUTH_TOKEN', ENV_TOKEN)
+  test.each([
+    { label: 'set alone', old: ENV_TOKEN, file: {} },
+    { label: 'set but empty', old: '', file: {} },
+    {
+      label: 'set beside a token in the config file',
+      old: ENV_TOKEN,
+      file: { authToken: 'notarealsecret-file-token' }
+    }
+  ])('$label, it refuses to start', ({ old, file }) => {
+    writeProxyConfig(file)
+    vi.stubEnv('PI_PROXY_AUTH_TOKEN', old)
 
     expect(refusal()).toEqual({ cause: 'renamed-env-var' })
   })

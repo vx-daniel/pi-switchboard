@@ -153,25 +153,16 @@ export interface ServerConfig {
   readonly logLevel: LogLevel
 }
 
-/** Env vars `loadConfig` reads. Only their names are logged, never their values. */
-const CONFIG_ENV_VARS = [
-  'PI_SWITCHBOARD_HOST',
-  'PI_SWITCHBOARD_PORT',
-  'PI_SWITCHBOARD_AUTH_TOKEN',
-  'PI_SWITCHBOARD_REMOTE_IMAGES',
-  'PI_SWITCHBOARD_DOCS_UI',
-  'PI_SWITCHBOARD_MAX_BODY_SIZE',
-  'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
-  'PI_SWITCHBOARD_AGENTIC',
-  'PI_SWITCHBOARD_LOG_LEVEL'
-] as const
-
-/** The prefix the env vars had before the rename to pi-switchboard (#65). */
-const OLD_ENV_PREFIX = 'PI_PROXY_'
-/** The prefix they have now. */
+/** The prefix of the proxy's env vars. */
 const ENV_PREFIX = 'PI_SWITCHBOARD_'
-/** The proxy's runtime env vars, by the name after the prefix, old and new alike. */
-const RENAMED_ENV_SUFFIXES = [
+/** The prefix they had before the rename to pi-switchboard (#65). */
+const OLD_ENV_PREFIX = 'PI_PROXY_'
+
+/**
+ * Every runtime env var the proxy and its extension read, by the name after the prefix: the one
+ * list the config debug line and the rename warnings both come from.
+ */
+const RUNTIME_ENV_SUFFIXES = [
   'HOST',
   'PORT',
   'AUTH_TOKEN',
@@ -190,7 +181,7 @@ const RENAMED_ENV_SUFFIXES = [
  * meant does not apply. Names only, never values (an old auth token is a secret).
  */
 function warnAboutRenamedEnvVars(): void {
-  for (const suffix of RENAMED_ENV_SUFFIXES) {
+  for (const suffix of RUNTIME_ENV_SUFFIXES) {
     const oldName = `${OLD_ENV_PREFIX}${suffix}`
     if (process.env[oldName] === undefined) continue
     configLogger.warn(
@@ -297,7 +288,9 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     cliOverrides: Object.entries(cli)
       .filter(([, value]) => value !== undefined)
       .map(([name]) => name),
-    envOverrides: CONFIG_ENV_VARS.filter((envVar) => process.env[envVar] !== undefined)
+    envOverrides: RUNTIME_ENV_SUFFIXES.map((suffix) => `${ENV_PREFIX}${suffix}`).filter(
+      (envVar) => process.env[envVar] !== undefined
+    )
   })
 
   const host = cli.host ?? process.env.PI_SWITCHBOARD_HOST ?? file.host

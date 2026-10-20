@@ -14,12 +14,15 @@ import { loadConfig } from '@proxy/config/env'
 import { configureLogging } from '@proxy/logging'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { isErrorBody, jsonBody, testApp } from '../helpers'
+import { isErrorBody, jsonBody, testApp, testConfig } from '../helpers'
 
+const HTTP_OK = 200
 const HTTP_BAD_REQUEST = 400
+const HTTP_UNAUTHORIZED = 401
 const DEFAULT_PORT = 4141
 const OLD_PORT = '9999'
 const OLD_KEY = 'notarealsecret-old-header-key'
+const PROXY_TOKEN = 'notarealsecret-pre-rename-proxy-token'
 
 let agentDir = ''
 let lines: string[] = []
@@ -83,5 +86,29 @@ describe('the X-Pi-Upstream-Api-Key header', () => {
     )
     expect(JSON.stringify(body)).not.toContain(OLD_KEY)
     expect(lines.join('\n')).not.toContain(OLD_KEY)
+  })
+
+  // Catches the check reaching routes that never read the key: a liveness probe that still sends
+  // it would start failing.
+  test('does not affect routes that never read the key', async () => {
+    const response = await testApp().request('/healthz', {
+      headers: { 'X-Pi-Upstream-Api-Key': OLD_KEY }
+    })
+
+    expect(response.status).toBe(HTTP_OK)
+  })
+
+  // Catches the check answering before proxy auth: an unauthenticated caller would learn
+  // something from a 400 it should not get past the 401 for.
+  test('with proxy auth on, a caller without the token gets the 401 first', async () => {
+    const app = testApp({ ...testConfig(), proxyAuth: { kind: 'token', token: PROXY_TOKEN } })
+
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Pi-Upstream-Api-Key': OLD_KEY },
+      body: '{}'
+    })
+
+    expect(response.status).toBe(HTTP_UNAUTHORIZED)
   })
 })

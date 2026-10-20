@@ -602,9 +602,9 @@ async function buildStreamOptions(
     opts.signal = signal
   }
 
-  // A per-request upstream key (X-Switchboard-Upstream-Api-Key) overrides everything. Without one, leave
-  // apiKey unset: the ModelRuntime resolves request auth itself for the chosen model (API keys,
-  // OAuth with refresh, model-specific headers, dynamic models.json headers).
+  // A per-request upstream key (X-Switchboard-Upstream-Api-Key) overrides everything. Without
+  // one, leave apiKey unset: the ModelRuntime resolves request auth itself for the chosen model
+  // (API keys, OAuth with refresh, model-specific headers, dynamic models.json headers).
   if (options.upstreamApiKey !== undefined) {
     opts.apiKey = options.upstreamApiKey
   }
