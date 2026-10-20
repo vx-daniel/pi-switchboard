@@ -164,3 +164,24 @@ describe('a blank assistant turn with tool calls', () => {
     ])
   })
 })
+
+describe('a blank assistant turn on its own', () => {
+  // Catches a blank assistant turn reaching Anthropic as a whitespace-only text block, which it
+  // refuses, or the request losing its last user turn around it. Clients echo an empty reply back
+  // in history; pi drops the blank block, and with it the empty assistant turn.
+  test('anthropic-messages: the conversation still ends with the user turn', async () => {
+    const body = await upstreamBody(CLAUDE_MODEL, {
+      messages: [
+        { role: 'user', content: 'first' },
+        { role: 'assistant', content: '\n' },
+        { role: 'user', content: 'second' }
+      ]
+    })
+    const messages = field(body, 'messages')
+    const texts = JSON.stringify(messages)
+
+    expect(texts).not.toMatch(/"text":"\\n"/)
+    expect(Array.isArray(messages) ? messages.at(-1) : undefined).toMatchObject({ role: 'user' })
+    expect(texts).toContain('second')
+  })
+})
