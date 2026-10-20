@@ -1075,7 +1075,7 @@ Deliverable:
 
 Build:
 
-- project scaffolding (Bun, Hono, Zod v4, tsdown, Biome, oxlint, lefthook, commitlint)
+- project scaffolding (Bun, Hono, Zod v4, tsdown, Biome, oxlint, lefthook, commitlint); Bun, Biome and lefthook since replaced by Node and Vite+ (see "Tooling and type safety")
 - `ModelRuntime` integration
 - model resolution (canonical + shorthand with ambiguity detection)
 - `GET /v1/models`
@@ -1091,7 +1091,7 @@ Release gate:
 - unit tests for mapping logic
 - integration tests for models and validation
 - no unsupported parameters silently accepted, beyond the exceptions `CONSTITUTION.md` principle I lists
-- zero oxlint errors, zero biome errors
+- zero oxlint errors, zero biome errors (today: `pnpm run check:all` with zero lint warnings; Biome is gone)
 - typecheck passes with ultra-strict tsconfig
 
 ### Phase 2 — Tools and richer compatibility [DONE]

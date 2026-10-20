@@ -27,7 +27,7 @@ Deliver the minimum production-capable proxy.
 - [x] Implement request IDs, structured logs, and disconnect cancellation
 - [x] Implement OpenAI-style errors
 - [x] Add unit and integration tests for the stable contract
-- [x] Align strict tooling with pi-acp (oxlintrc, biome, lefthook, commitlint, Zod v4)
+- [x] Align strict tooling with pi-acp (oxlintrc, biome, lefthook, commitlint, Zod v4); since replaced by Vite+, see Fork maintenance
 
 ## Phase 2 — Tools and richer compatibility [DONE]
 
@@ -40,7 +40,7 @@ Add the supported compatibility surface deliberately.
 - [x] Support `reasoning_effort` (mapped to pi ThinkingLevel)
 - [x] Add passthrough parameters: `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`
 - [x] Add JSON Schema conversion and tool acceptance/rejection tests
-- [x] Remote image URL support, behind the remote-images setting (off by default) with SSRF protections ([#109](https://github.com/vx-daniel/pi-openai-proxy/issues/109))
+- [x] Remote image URL support, behind the remote-images setting (off by default) with SSRF protections ([#109](https://github.com/vx-daniel/pi-switchboard/issues/109))
 
 ## Phase 3 — Hardening and packaging [DONE]
 
@@ -52,7 +52,7 @@ Prepare the stable proxy for release.
 - [x] Add per-request upstream API key override (`X-Switchboard-Upstream-Api-Key`)
 - [x] Add image MIME type and payload size validation
 - [x] Add CI gates (GitHub Actions: typecheck, lint, test, build, package)
-- [x] Package for npm release (`@victor-software-house/pi-openai-proxy` upstream; `@vx-daniel/pi-switchboard` in this fork)
+- [x] Package for npm release (`@victor-software-house/pi-openai-proxy` upstream; `@vx-daniel/pi-switchboard` here, since the rename below)
 - [ ] Run compatibility smoke tests with target clients (Open WebUI, Continue, Aider)
 
 ## Phase 3A — Model exposure and identifier controls [DONE]
@@ -116,7 +116,14 @@ Research-backed decisions on deferred compatibility and resilience items. Analys
 - [x] Add a `chat_request` log line naming the requested and the resolved model of each chat request
 - [x] Consolidate tooling on Vite+ (Oxfmt, Oxlint + tsgolint, Vitest, tsdown, `vp` hooks) and run on Node instead of Bun
 - [x] Adopt the Viaanix lint rules (copied into `vite.config.ts`) with zero warnings
-- [x] Rename the package to `@vx-daniel/pi-switchboard` (GitHub Packages scope must match the repo owner)
+- [x] Rename the package to `@vx-daniel/pi-openai-proxy` (GitHub Packages scope must match the repo owner)
+
+## Rename to pi-switchboard [DONE]
+
+- [x] Leave the fork network; rename the repo to `vx-daniel/pi-switchboard` (#65)
+- [x] Rename the package, bin, log categories, env vars (`PI_SWITCHBOARD_*`) and the upstream key header (`X-Switchboard-Upstream-Api-Key`), with no aliases; old names warned about or rejected
+- [x] Credit the original project (README "Attribution", LICENSE)
+- [x] Restart versions at 0.1.0 (`pi-switchboard-v` tags); npm publishing waits for #59
 
 ## Phase 4 — Monorepo and proper CLI
 

@@ -1,7 +1,8 @@
 # Architecture Plan: Two Repos
 
 > Status: plan from 2026-03-25 (`6cf2e98`–`28f7929`); not carried out. The repo is still one
-> package, `@vx-daniel/pi-openai-proxy` (a fork of `victor-software-house/pi-openai-proxy`), with
+> package, now `@vx-daniel/pi-switchboard` (it started as a fork of
+> `victor-software-house/pi-openai-proxy` and was renamed and detached, #65), with
 > the server in `src/` and the extension in `extensions/proxy/`; the Zed sync lives in
 > `src/sync/zed.ts`, with no `@pi-proxy/*` packages and no `x_pi` metadata.
 
