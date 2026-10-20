@@ -1,18 +1,29 @@
 <!--
 Sync Impact Report
-Version change: 2.2.0 → 2.3.0 (MINOR)
-Rationale: the project is renamed pi-switchboard (#65), and with it the env vars (`PI_PROXY_*` →
-`PI_SWITCHBOARD_*`) and the upstream key header (`X-Pi-Upstream-Api-Key` →
-`X-Switchboard-Upstream-Api-Key`). The old names are not read. An old auth token still set would
-silently turn auth off, so principle II's auth exception grows by that case: it refuses to start.
-The old header is rejected with 400 rather than ignored (principle I).
+Version change: 2.3.0 → 3.0.0 (MAJOR)
+Rationale: the project is no longer a fork that only mirrors three OpenAI routes. It stays
+OpenAI-compatible on the client side and grows in two directions: more of OpenAI's API (the
+Responses API, #140) and routing across pi's logins (#66–#70). Naming the exact stable routes
+here made every new route an amendment and kept the same list in four files. The constitution now
+says what a stable route must meet, and the list lives once, in `PLAN.md`. Principle I is renamed
+for what it protects, and a new principle VI states the routing rules before routing is built.
+MAJOR: principle I's governance changes (the route list leaves the constitution).
 Modified sections:
-- Title
-- II. Validate at Boundaries: the auth exception names the old `PI_PROXY_AUTH_TOKEN`
+- Scope (new): what pi-switchboard is and is not
+- I. OpenAI Compatibility (was Stable OpenAI Contract): criteria for a stable route; the list
+  moves to `PLAN.md`
+- VI. Routing Transparency (new)
+- API Compatibility and Security Boundaries: refers to the list in `PLAN.md`
 Templates requiring updates:
-- ✅ AGENTS.md, README.md, PLAN.md, ROADMAP.md, TODO.md: the new names
+- ✅ PLAN.md: "Stable surface" is the list, with the criteria; goals and non-goals rewritten
+- ✅ AGENTS.md: links to the list instead of repeating it
+- ✅ ROADMAP.md, TODO.md: forward phases rewritten
+- ✅ README.md: project description
 Follow-up TODOs:
 - None.
+
+2.3.0 (2026-10-20): the env vars become `PI_SWITCHBOARD_*` and the upstream key header
+`X-Switchboard-Upstream-Api-Key` (#65); the old `PI_PROXY_AUTH_TOKEN` refuses to start.
 
 2.2.0 (2026-10-19): the docs page moves to `GET /docs` and joins the operational endpoints; the
 OpenAPI document describes every route.
@@ -42,10 +53,20 @@ rule, logging limits, the lint-directive ban, verbatim exposure, and commit type
 
 # pi-switchboard Constitution
 
+## Scope
+
+pi-switchboard is a local HTTP API over pi's models, logins and providers that speaks OpenAI's API to its clients. It grows in two directions: more of OpenAI's API where pi can back it (chat completions today, the Responses API next), and routing requests across pi's logins (aliases, fallback, cooldowns, quota awareness). It does not run logins or store credentials of its own (pi does), does not keep conversation state, and does not speak other vendors' client protocols. It started as a fork of `pi-openai-proxy` and is maintained independently.
+
 ## Core Principles
 
-### I. Stable OpenAI Contract
-The stable HTTP surface is exactly `GET /v1/models`, `GET /v1/models/{model}`, and `POST /v1/chat/completions`. Responses on it MUST stay close to OpenAI's schema; pi-specific data on a stable response MUST be namespaced under `x_pi` and documented. Unsupported routes or parameters MUST fail with clear OpenAI-style errors rather than being silently ignored.
+### I. OpenAI Compatibility
+The stable HTTP surface is the set of routes `PLAN.md` lists under "Stable surface". A route joins it only by a decision recorded there, and only when:
+- it is a route OpenAI's published API defines, with OpenAI's method, path and semantics;
+- its requests and responses are checked against OpenAI's pinned spec (`test/integration/openai-spec.test.ts`), and every OpenAI field it does not accept is listed there with its reason;
+- it is described in the OpenAPI document (`openapi.json`);
+- README and PLAN document what it accepts and answers.
+
+A route can start as experimental, opt-in and outside the stable surface, and be promoted once it meets these. Responses on the stable surface MUST stay close to OpenAI's schema; pi-specific data on a stable response MUST be namespaced under `x_pi` and documented. Unsupported routes or parameters MUST fail with clear OpenAI-style errors rather than being silently ignored.
 
 Exceptions: a request field MAY be dropped instead of rejected only where it is listed here, with its reason, and documented where operators read the contract. Any other silent drop is a violation, and a new one needs an amendment.
 - Codex `temperature` (`openai-codex-responses`): the Codex backend refuses any request that carries it, and widely used clients send one on every request, so a `422` would make every Codex model unusable from them (#49, #80). Each drop is logged (the first per model at `info`, later ones at `debug`) and documented in `PLAN.md`'s Codex table and in `README.md`.
@@ -97,9 +118,18 @@ Commits SHOULD stay small and reviewable and MUST follow Conventional Commits. T
 
 Rationale: the proxy's public contract is documentation-heavy. If behavior changes without synchronized docs and verification, downstream users and agents will diverge from the real system.
 
+### VI. Routing Transparency
+Routing (aliases, fallback chains, cooldowns, quota awareness; #66–#70) MUST be configured explicitly and MUST be visible to the client and the operator:
+- A request is only ever routed to models the exposure config exposes; an alias or fallback never reaches a hidden model (principle IV).
+- A response says which model and login served it, under `x_pi`, and the log records every hop (the requested model, each one tried, and why it moved on), by name, never credential.
+- A request with no routing configured behaves exactly as without routing: the model it names, or an error.
+- Fallback only follows failures the configuration names (for example a rate limit or an outage), never a client error such as an invalid request.
+
+Rationale: routing changes which model and account a client is billed on. Doing that silently would break the predictability principle I protects and the trust the operator places in the exposure config.
+
 ## API Compatibility and Security Boundaries
 
-- Stable support is limited to the documented chat-completions and models routes; operational and `/v1/switchboard/` routes are governed by principle I.
+- Stable support is limited to the routes `PLAN.md` lists under "Stable surface" (principle I); operational and `/v1/switchboard/` routes are governed by principle I too.
 - Unsupported fields and endpoints MUST fail explicitly; silent downgrades are not acceptable, except the drops principle I lists.
 - Model exposure policy MUST be derived from configured credentials and the active exposure mode, not from ad hoc request-time guessing.
 - Experimental capabilities MUST be separated from the stable contract and require explicit opt-in before they can affect user traffic.
@@ -137,4 +167,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 2.3.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20
+**Version**: 3.0.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20

@@ -1,6 +1,6 @@
 # pi-switchboard
 
-This repo is **pi-switchboard**, a **local OpenAI-compatible HTTP API for pi** (formerly `pi-openai-proxy`; see the README's Attribution). It exposes a small OpenAI-style API on top of pi's SDK, model registry, and auth flow.
+This repo is **pi-switchboard**, a **local HTTP API over pi's models, logins and providers that speaks OpenAI's API** (formerly `pi-openai-proxy`; see the README's Attribution). It is growing toward more of OpenAI's API (the Responses API, #140) and toward routing across pi's logins (#66–#70); the constitution's "Scope" says what is in and out.
 
 `AGENTS.md` is always-on Pi context. Keep this file short, precise, and operational. The project's principles live in [`CONSTITUTION.md`](CONSTITUTION.md), which supersedes conflicting guidance here or in any other doc. Put deep architecture detail in [`PLAN.md`](PLAN.md), human onboarding in [`README.md`](README.md), the execution checklist in [`TODO.md`](TODO.md), and phase summary in [`ROADMAP.md`](ROADMAP.md).
 
@@ -25,16 +25,13 @@ Before changing code:
 - `src/sync/` — external/editor sync integrations
 - `extensions/` — Pi extension surface for the package
 - `test/unit/`, `test/integration/`, `test/conformance/` — behavior checks
-- `docs/` — supporting analysis/discovery docs, not the main source of truth
+- `docs/` — supporting analysis and client research, not the main source of truth; `docs/archive/` holds the March 2026 plans that were not carried out
 
 ## Core constraints
 
 Treat these as stable unless the user explicitly changes direction:
 
-- Stable HTTP surface is:
-  - `GET /v1/models`
-  - `GET /v1/models/{model}`
-  - `POST /v1/chat/completions`
+- The stable HTTP surface is the list in [`PLAN.md`](PLAN.md) "Stable surface" (today `GET /v1/models`, `GET /v1/models/{model}`, `POST /v1/chat/completions`). A route joins it only by the criteria in constitution principle I, recorded in that table; never add one silently.
 - Operational endpoints (`GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs`) sit outside that surface; see [`PLAN.md`](PLAN.md). None may return a credential.
 - Non-OpenAI capability data goes on `GET /v1/switchboard/models`, never on the standard model objects; non-standard routes live under `/v1/switchboard/`. See [`PLAN.md`](PLAN.md).
 - Only three paths skip proxy auth: `/healthz`, `GET /v1/switchboard/openapi.json` and the opt-in docs page `GET /docs`. The document and docs page name no model, provider or credential. The document describes every route the proxy serves (a test compares it with the route table); `openapi.json` at the repo root is the committed copy, and `vp test -u` rewrites it after a deliberate contract change.
@@ -43,7 +40,8 @@ Treat these as stable unless the user explicitly changes direction:
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.
 - Keep stable responses close to OpenAI's schema. If pi-specific metadata is exposed, namespace it under `x_pi`.
 - Reject unsupported parameters clearly. Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (Codex `temperature`; passthrough fields a provider has no equivalent for); any other needs an amendment.
-- Agentic mode is experimental and security-sensitive. Do not expand it casually under the stable chat-completions contract.
+- Routing (aliases, fallback, cooldowns, quota; #66–#70) follows constitution principle VI: configured explicitly, never reaching a model the exposure config hides, and the serving model and login reported under `x_pi` and in the log.
+- Agentic mode is a "Later, not planned" idea. Do not build it under an OpenAI route.
 - Default network posture should remain local-first and safe by default.
 
 For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of duplicating them here.
@@ -140,7 +138,7 @@ Keep durable docs aligned with implementation:
 
 Stop and confirm with the user before:
 
-- expanding the stable API surface beyond the documented endpoints
+- adding a route to, or removing one from, PLAN's "Stable surface"
 - changing auth semantics or header contracts
 - altering model ID resolution behavior or exposure policy
 - loosening validation/security behavior

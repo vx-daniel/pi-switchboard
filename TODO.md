@@ -394,38 +394,46 @@ Analysis document: `docs/engineering/phase-3d-analysis.md`
 - [x] Header `X-Pi-Upstream-Api-Key` → `X-Switchboard-Upstream-Api-Key`; the old one answers 400
 - [x] README "Attribution" and "Coming from pi-openai-proxy"; LICENSE keeps the original copyright
 - [x] Versions restart at 0.1.0: `pi-switchboard-v${version}` tags, baseline tag on `main`, breaking → minor while 0.x
-- [ ] Publish to npm under the new name (#59; `npmPublish` is off until then)
+- [ ] Publish to npm under the new name (#59; `npmPublish` is off until then), tracked in Phase 4
 
-## Phase 4 — Experimental agentic mode
+The sections above are done and kept as history. The ones below follow `ROADMAP.md`'s numbering
+since the rename; each issue holds the detailed checklist.
 
-### Contract
+## Phase 4 — Distribution
 
-- [ ] Decide whether experimental agentic mode uses a separate endpoint
-- [ ] If not, document the opt-in header and the compatibility tradeoff explicitly
-- [ ] Define the SSE event contract for agentic mode
-- [ ] Define the session identifier contract
+- [ ] npm and `pi install` (#59)
+- [ ] Docker image (#60)
+- [ ] Standalone binary (#61)
 
-### Session integration
+## Phase 5 — Routing across pi's logins
 
-- [ ] Build `AgentSession` lifecycle wrapper
-- [ ] Bridge `AgentSession` events to SSE
-- [ ] Implement session persistence
-- [ ] Implement session resume
-- [ ] Clean up subscriptions and resources reliably
+Constitution principle VI applies to each item: configured explicitly, exposure-bound, and the
+serving model and login reported under `x_pi` and in the log.
 
-### Security
+- [ ] Aliases (#66)
+- [ ] Fallback chains (#67)
+- [ ] Cooldowns after rate limits (#68)
+- [ ] Quota awareness (#69)
+- [ ] Usage and cost by route (#70)
 
-- [ ] Define cwd allowlist policy
-- [ ] Prevent arbitrary client-controlled cwd escape
-- [ ] Disable extension loading by default
-- [ ] Add tool allowlist policy for agentic mode
+## Phase 6 — More of OpenAI's API
 
-### Experimental tests
+- [ ] Responses API, stateless (#140): experimental first, then added to PLAN's "Stable surface"
+- [ ] `prompt_cache_key` (#39)
 
-- [ ] Test session creation and resume
-- [ ] Test streamed tool execution events
-- [ ] Test cwd policy enforcement
-- [ ] Test extension policy enforcement
+## Open decisions
+
+- [ ] Proxy auth and upstream failure contract (#128)
+
+## Later, not planned: experimental agentic mode
+
+Kept for when it is picked up: a separate opt-in endpoint, never under an OpenAI route (PLAN
+"Agentic mode" has the security requirements).
+
+- [ ] Define the endpoint, its SSE event contract and its session identifier contract
+- [ ] `AgentSession` lifecycle wrapper, events bridged to SSE, session persistence and resume
+- [ ] cwd allowlist with no client-controlled escape; extension loading off by default; tool allowlist
+- [ ] Tests for session creation and resume, streamed tool events, cwd and extension policy
 
 ## Documentation follow-through
 
