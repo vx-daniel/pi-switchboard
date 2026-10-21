@@ -305,9 +305,16 @@ describe('GET /v1/switchboard/models', () => {
     expect(isRecord(body) && body['object']).toBe('list')
     const data = isRecord(body) && Array.isArray(body['data']) ? body['data'] : []
     const fixtureEntries = data.filter((model) => entryId(model) in expected)
-    expect(
-      fixtureEntries.toSorted((left, right) => entryId(left).localeCompare(entryId(right)))
-    ).toEqual(Object.entries(expected).map(([id, efforts]) => ({ id, reasoning_efforts: efforts })))
+    // The efforts only: the entry's other catalogue fields are switchboard-models.test.ts's.
+    const efforts = fixtureEntries
+      .toSorted((left, right) => entryId(left).localeCompare(entryId(right)))
+      .map((model) => ({
+        id: entryId(model),
+        reasoning_efforts: isRecord(model) ? model['reasoning_efforts'] : undefined
+      }))
+    expect(efforts).toEqual(
+      Object.entries(expected).map(([id, levels]) => ({ id, reasoning_efforts: levels }))
+    )
   })
 })
 

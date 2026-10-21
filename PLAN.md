@@ -1059,11 +1059,23 @@ Not part of OpenAI's API: what pi knows about each exposed model that the standa
 ```json
 {
   "object": "list",
-  "data": [{ "id": "claude-sonnet-4-5", "reasoning_efforts": ["none", "minimal", "low", "medium", "high"] }]
+  "data": [{
+    "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
+    "reasoning_efforts": ["none", "minimal", "low", "medium", "high"], "input": ["text", "image"],
+    "context_window": 200000, "max_output_tokens": 64000,
+    "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }
+  }]
 }
 ```
 
+Each entry is pi's catalogue entry for the model, as pi resolves it (`models.json` values included), so a client can choose by price, size and capability instead of hard-coding them (#173). An alias carries its target's entry under its own `id`.
+
+- `provider`: pi's provider, as `owned_by` on `/v1/models`
+- `reasoning`: whether the model reasons (`Model.reasoning`)
 - `reasoning_efforts`: the `reasoning_effort` values the model runs at as asked, lowest first, from pi's `getSupportedThinkingLevels` (`off` is `none`, and every other level the effort of the same name, `max` included). `["none"]` for a model without reasoning
+- `input`: what the model accepts, `text` and `image` (`Model.input`)
+- `context_window`, `max_output_tokens`: in tokens (`Model.contextWindow`, `Model.maxTokens`)
+- `cost`: USD per million tokens for uncached input, output, cache reads and cache writes (`Model.cost`; pi computes a call's cost as rate / 1,000,000 × tokens). `0` where pi has no price. A client can use these as docker-agent `cost` tables, which docker-agent needs to price calls through a custom `base_url` (#177)
 - new capability fields go here, never on `/v1/models`
 - non-standard routes live under `/v1/switchboard/`, as `/v1/switchboard/agent/completions` would. The prefix was `/v1/pi/` until constitution 2.0.0; `/v1/pi/models` moved here with no alias
 
