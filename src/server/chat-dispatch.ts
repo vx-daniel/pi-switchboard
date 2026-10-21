@@ -93,6 +93,16 @@ export function failureClass(answer: FailedAnswer): FailureClass | undefined {
 }
 
 /**
+ * Logs a failed call's raw upstream message at debug, never higher: some providers quote parts of
+ * the request back.
+ *
+ * @param detail - the raw upstream error message, or `undefined` when there is none
+ */
+function logUpstreamDetail(detail: string | undefined): void {
+  if (detail !== undefined) chatLogger.debug('Upstream error detail: {detail}', { detail })
+}
+
+/**
  * Logs a mapped upstream failure.
  *
  * @remarks
@@ -101,8 +111,8 @@ export function failureClass(answer: FailedAnswer): FailureClass | undefined {
  * history too long for the model), so its line is a warning; any other failure is an error. The
  * level follows the mapped status on purpose: mapping decides whose fault a failure is (a
  * credential problem a provider answers with 400 maps to a 502, so it stays an error), and any
- * future mapping to 400 is a client error too. The raw upstream `detail` stays at debug: some
- * providers quote parts of the request back. The request's IDs come from the logging context.
+ * future mapping to 400 is a client error too. The raw upstream `detail` stays at debug
+ * ({@link logUpstreamDetail}). The request's IDs come from the logging context.
  *
  * @param mapped - the status and body the client gets
  * @param detail - the raw upstream error message, or `undefined` when there is none
@@ -122,9 +132,7 @@ function reportUpstreamFailure(
   } else {
     chatLogger.error('Upstream call failed with {status}: {message}', properties)
   }
-  if (detail !== undefined) {
-    chatLogger.debug('Upstream error detail: {detail}', { detail })
-  }
+  logUpstreamDetail(detail)
   if (mapped.status === HTTP_TOO_MANY_REQUESTS || mapped.status === HTTP_SERVICE_UNAVAILABLE) {
     chatLogger.warn('Upstream overloaded ({upstreamStatus}, {code})', {
       upstreamStatus: mapped.status,
@@ -502,7 +510,10 @@ async function attemptComplete(
 ): Promise<AttemptOutcome> {
   const { requestId, context, request, options } = job
   const start = performance.now()
-  // A client that left gets no fallback: answer with the failure, as the single-model path does.
+  // A client that left gets no fallback. pi ends the call `aborted` (or the SDK throws), which
+  // maps to a failure; it is logged and answered as the single-model path always did, though
+  // nobody reads the answer. Without the abort, a failure is returned for `dispatchChat` to
+  // decide on. (The streamed path answers a client that left with an empty body instead.)
   const final = (outcome: AttemptOutcome): AttemptOutcome => {
     if (outcome.kind !== 'failed' || options.signal?.aborted !== true) return outcome
     outcome.report()
@@ -631,9 +642,7 @@ export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob):
       outcome.report()
       return honoContext.json(outcome.answer.body, outcome.answer.status)
     }
-    if (outcome.detail !== undefined) {
-      chatLogger.debug('Upstream error detail: {detail}', { detail: outcome.detail })
-    }
+    logUpstreamDetail(outcome.detail)
     logFallback(job.alias, { failed: candidate, next, failure, attempt: attempts.length + 1 })
     attempts.push({ model: candidate.canonicalId, reason: failure })
   }
