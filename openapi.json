@@ -1526,6 +1526,36 @@
                         "alias": {
                           "description": "The alias the request named (#66); present only when it named one.",
                           "type": "string"
+                        },
+                        "attempts": {
+                          "description": "The models an alias tried before the one that answered, in order, and why each failed (#67); present only when one did.",
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "model": {
+                                "type": "string",
+                                "description": "The canonical ID of the model tried."
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": [
+                                  "rate_limit",
+                                  "unavailable",
+                                  "timeout",
+                                  "auth",
+                                  "refused",
+                                  "upstream_error"
+                                ],
+                                "description": "Why the chain moved on from it."
+                              }
+                            },
+                            "required": [
+                              "model",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
                       "required": [
@@ -1534,7 +1564,7 @@
                         "cache_write_tokens"
                       ],
                       "additionalProperties": false,
-                      "description": "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias used."
+                      "description": "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias and fallback attempts that led to the answer."
                     }
                   },
                   "required": [
@@ -1668,17 +1698,44 @@
                       ]
                     },
                     "x_pi": {
-                      "description": "Not OpenAI's: in every chunk, only when the request named an alias.",
+                      "description": "Not OpenAI's: in every chunk, only when the request named an alias or an alias fell back (#67).",
                       "type": "object",
                       "properties": {
                         "alias": {
-                          "type": "string",
-                          "description": "The alias the request named (#66)."
+                          "description": "The alias the request named (#66).",
+                          "type": "string"
+                        },
+                        "attempts": {
+                          "description": "The models an alias tried before the one that answered, in order, and why each failed (#67); present only when one did.",
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "model": {
+                                "type": "string",
+                                "description": "The canonical ID of the model tried."
+                              },
+                              "reason": {
+                                "type": "string",
+                                "enum": [
+                                  "rate_limit",
+                                  "unavailable",
+                                  "timeout",
+                                  "auth",
+                                  "refused",
+                                  "upstream_error"
+                                ],
+                                "description": "Why the chain moved on from it."
+                              }
+                            },
+                            "required": [
+                              "model",
+                              "reason"
+                            ],
+                            "additionalProperties": false
+                          }
                         }
                       },
-                      "required": [
-                        "alias"
-                      ],
                       "additionalProperties": false
                     }
                   },

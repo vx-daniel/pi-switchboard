@@ -27,7 +27,12 @@
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
-import type { ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
+import type {
+  AliasTarget,
+  FailureClass,
+  ModelExposureMode,
+  PublicModelIdMode
+} from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { type AliasDiagnostic, exposeAliases } from '@proxy/openai/model-aliases'
 import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
@@ -51,6 +56,17 @@ export interface ExposedModel {
   readonly provider: string
   /** The alias, when this entry is one: the target's model under a name from the config (#66). */
   readonly alias?: string
+  /**
+   * An alias's fallback chain (#67): every exposed target, this entry's own first, and the
+   * failures that move to the next. Only on an alias entry.
+   */
+  readonly route?: AliasRoute
+}
+
+/** An alias's exposed targets, in order, and the failures that move to the next (#67). */
+export interface AliasRoute {
+  readonly candidates: readonly ExposedModel[]
+  readonly fallbackOn: readonly FailureClass[]
 }
 
 /** The config inputs of {@link computeModelExposure}. */
@@ -67,8 +83,8 @@ export interface ModelExposureConfig {
   /** The proxy's own canonical IDs, used when modelExposureMode is "custom"; empty exposes none. */
   readonly customModels: readonly string[]
   readonly providerPrefixes: Readonly<Record<string, string>>
-  /** Alias -> the canonical ID of the model it names (#66). */
-  readonly aliases: Readonly<Record<string, string>>
+  /** Alias -> one canonical ID, or targets with the failures that move between them (#66, #67). */
+  readonly aliases: Readonly<Record<string, AliasTarget>>
 }
 
 /** A successful exposure computation: the exposed models and lookup maps. */

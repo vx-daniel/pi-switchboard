@@ -6,6 +6,7 @@
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { resetSync } from '@logtape/logtape'
+import type { AliasTarget } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
 import {
   computeModelExposure,
@@ -47,12 +48,12 @@ const MODELS = [
 /**
  * Computes the exposure of {@link MODELS} with these aliases and settings.
  *
- * @param aliases - alias -> canonical ID
+ * @param aliases - alias -> one canonical ID, or a fallback chain
  * @param overrides - exposure settings that differ from scoped, collision-prefixed, unfiltered
  * @returns the exposure; the test fails when the config is invalid
  */
 function exposeWith(
-  aliases: Record<string, string>,
+  aliases: Record<string, AliasTarget>,
   overrides: Partial<ModelExposureConfig> = {}
 ): ModelExposureResult {
   const outcome = computeModelExposure(MODELS, {
@@ -123,6 +124,39 @@ describe('which aliases are exposed', () => {
     expect(resolved(exposure, 'quick')).toBeUndefined()
     expect(exposure.aliasDiagnostics).toEqual([
       expect.objectContaining({ code: 'target-not-exposed', alias: 'quick', target: 'fast' })
+    ])
+  })
+
+  // Catches a fallback chain that reaches a hidden model, that is dropped when only its first
+  // target is hidden, or that is listed as a model it may not use first: the chain keeps its
+  // exposed targets in order, is listed as the first of them, and reports the hidden one (#67).
+  test('a fallback chain keeps its exposed targets, in order', () => {
+    const exposure = exposeWith(
+      {
+        chain: {
+          targets: ['openai/gpt-4o', 'anthropic/claude', 'codex/gpt-4o'],
+          fallbackOn: ['rate_limit']
+        }
+      },
+      { modelExposureMode: 'custom', customModels: ['anthropic/claude', 'codex/gpt-4o'] }
+    )
+    const chain = resolveExposedModel(exposure, 'chain')
+
+    expect({
+      listedAs: chain?.canonicalId,
+      candidates: chain?.route?.candidates.map((candidate) => candidate.canonicalId),
+      fallbackOn: chain?.route?.fallbackOn
+    }).toEqual({
+      listedAs: 'anthropic/claude',
+      candidates: ['anthropic/claude', 'codex/gpt-4o'],
+      fallbackOn: ['rate_limit']
+    })
+    expect(exposure.aliasDiagnostics).toEqual([
+      expect.objectContaining({
+        code: 'target-not-exposed',
+        alias: 'chain',
+        target: 'openai/gpt-4o'
+      })
     ])
   })
 })

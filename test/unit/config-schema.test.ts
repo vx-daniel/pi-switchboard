@@ -163,6 +163,27 @@ describe('normalizeConfig', () => {
     expect(result.aliases).toEqual({ 'coding': 'anthropic/opus', ' padded ': 'openai/gpt ' })
   })
 
+  // Catches a fallback chain kept with a failure class nobody defined, no fallbackOn at all, or
+  // no targets: each would fall back on what the configuration doesn't name (principle VI). The
+  // valid chain beside them is kept as written (#67).
+  test('keeps a valid fallback chain and drops the invalid ones', () => {
+    const chain = {
+      targets: ['anthropic/opus', 'openai/gpt'],
+      fallbackOn: ['rate_limit', 'timeout']
+    }
+    const result = normalizeConfig({
+      aliases: {
+        chain,
+        'typo-class': { targets: ['anthropic/opus'], fallbackOn: ['rate-limit'] },
+        'no-classes': { targets: ['anthropic/opus', 'openai/gpt'] },
+        'no-targets': { targets: [], fallbackOn: ['timeout'] },
+        'plain-list': ['anthropic/opus', 'openai/gpt']
+      }
+    })
+
+    expect(result.aliases).toEqual({ chain })
+  })
+
   // Catches a valid field being dropped or replaced by its default during normalization.
   test('preserves all fields from a complete valid config', () => {
     const full = {
