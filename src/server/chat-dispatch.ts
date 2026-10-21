@@ -692,10 +692,11 @@ export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob):
   const sharedLogin = job.options.upstreamApiKey === undefined
   for (const [position, candidate] of job.candidates.entries()) {
     if (skipCooling(job, position, attempts)) continue
+    const sentAt = Date.now()
     const { outcome, captured } = await runAttempt(honoContext, candidate, job, position > 0)
     if (outcome.kind === 'final') return outcome.response
     if (outcome.kind === 'answered') {
-      if (sharedLogin) clearCooldowns(candidate)
+      if (sharedLogin) clearCooldowns(candidate, sentAt)
       return answerWith(outcome.respond, candidate, job, attempts)
     }
     if (sharedLogin) recordCooldown(candidate, failureClass(outcome.answer), captured)

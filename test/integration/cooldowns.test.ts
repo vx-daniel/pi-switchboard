@@ -46,21 +46,22 @@ let agentDir: FixtureAgentDir
 let limiting = true
 
 /**
- * Answers 429 with `retry-after` while {@link limiting}, else with an answer.
+ * Answers `status` with `retry-after` while {@link limiting}, else with an answer.
  *
+ * @param status - the failure status: 429, 503 or 529
  * @param answer - the normal answer
  * @returns the reply
  */
-function rateLimitedFor(answer: MockReply): MockReply {
+function failingWith(status: number, answer: MockReply): MockReply {
   return (response, request) => {
     if (!limiting) return answer(response, request)
-    response.writeHead(429, {
+    response.writeHead(status, {
       'content-type': 'application/json',
       'retry-after': String(RETRY_AFTER_SECONDS)
     })
-    response.end(
-      JSON.stringify({ error: { message: 'Rate limit reached', type: 'rate_limit_error' } })
-    )
+    // Google's SDK error has no status the proxy reads, so it classifies by the message's words.
+    const message = status === 429 ? 'Rate limit reached' : 'The model is overloaded'
+    response.end(JSON.stringify({ error: { message, type: 'upstream_error' } }))
     return undefined
   }
 }
@@ -68,10 +69,13 @@ function rateLimitedFor(answer: MockReply): MockReply {
 beforeAll(async () => {
   const answer = sse([...textChunks('ok'), finishChunk('stop')])
   mock = await startMockProvider({
-    'limited-mock': rateLimitedFor(answer),
+    'limited-mock': failingWith(429, answer),
     'sibling-mock': answer,
     'answer-mock': answer,
-    'limited-gemini': rateLimitedFor(googleSse('ok'))
+    'limited-gemini': failingWith(429, googleSse('ok')),
+    'unavailable-mock': failingWith(503, answer),
+    'overloaded-mock': failingWith(529, answer),
+    'steady-mock': answer
   })
   const provider = (models: string[]): Record<string, unknown> => ({
     baseUrl: `${mock.origin}/v1`,
@@ -84,6 +88,7 @@ beforeAll(async () => {
       providers: {
         alpha: provider(['limited-mock', 'sibling-mock']),
         beta: provider(['answer-mock']),
+        gamma: provider(['unavailable-mock', 'overloaded-mock', 'steady-mock']),
         google: { ...mock.provider('google-generative-ai'), models: [{ id: 'limited-gemini' }] }
       }
     }
@@ -271,6 +276,34 @@ describe("Google's adapter", () => {
         reason: 'rate_limit',
         source: 'backoff',
         secondsLeft: 60
+      })
+    ])
+  })
+})
+
+describe('a 503 or 529 cools only its model', () => {
+  // Catches an overload cooling the whole provider, when it is about one model: the chain skips
+  // the overloaded model, while a chain starting at its sibling still calls the sibling.
+  test.each([
+    ['503', 'unavailable-mock'],
+    ['529', 'overloaded-mock']
+  ])('after a %s', async (_status, failing) => {
+    setAliases({
+      overload: { targets: [`gamma/${failing}`, 'beta/answer-mock'], fallbackOn: ['unavailable'] },
+      sibling: { targets: ['gamma/steady-mock', 'beta/answer-mock'], fallbackOn: ['unavailable'] }
+    })
+
+    expect((await ask('overload')).upstream).toEqual([failing, 'answer-mock'])
+    expect((await ask('overload')).upstream).toEqual(['answer-mock'])
+    expect((await ask('sibling')).upstream).toEqual(['steady-mock'])
+    expect(await listedCooldowns()).toEqual([
+      expect.objectContaining({
+        scope: 'model',
+        provider: 'gamma',
+        model: `gamma/${failing}`,
+        reason: 'unavailable',
+        secondsLeft: RETRY_AFTER_SECONDS,
+        source: 'response'
       })
     ])
   })

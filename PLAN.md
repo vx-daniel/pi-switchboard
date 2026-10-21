@@ -440,7 +440,9 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
   cooldown's start, end and skip is an info line. `/healthz/models` lists the active cooldowns
   (operator), and `/v1/switchboard/models` gives each model's `cooldown` (clients that pick models
   themselves, #68's comment). A cooldown never fails `/healthz/models`.
-- **Ended by a success.** A call that succeeds clears its provider's and its model's cooldowns.
+- **Ended by a success.** A call that succeeds clears its provider's and its model's cooldowns,
+  if they started before that call was sent. A call sent earlier was taken while the provider
+  still had room, so it says nothing about the limit that started a newer cooldown.
 - **No hidden SDK retries.** pi 1.3.0 builds every SDK client with `maxRetries: 0` and defaults
   its own retry loop (`retryProviderRequest`) to 0, as does its Codex adapter. A 429 therefore
   reaches the proxy at once. #68's proposal to set `maxRetries: 0` per candidate was unneeded.

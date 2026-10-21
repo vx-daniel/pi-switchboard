@@ -42,6 +42,8 @@ export interface Cooldown {
   /** The canonical ID, for a model's cooldown. */
   readonly model: string | undefined
   readonly reason: CooldownReason
+  /** When it started, in milliseconds since the epoch. */
+  readonly since: number
   /** When it ends, in milliseconds since the epoch. */
   readonly until: number
   /** Whether the failed response gave the time (`response`) or the default gave it (`backoff`). */
@@ -110,6 +112,7 @@ export function startCooldown(
     provider: subject.provider,
     model: scope === 'model' ? subject.canonicalId : undefined,
     reason,
+    since: now,
     // A long enough streak of failures would grow the default past what a Date can hold.
     until: Math.min(now + (waitMs ?? backoffMs(streak)), LATEST_DATE_MS),
     source: waitMs === undefined ? 'backoff' : 'response',
@@ -129,21 +132,29 @@ export function startCooldown(
 }
 
 /**
- * Clears a model's cooldowns after it answered: its provider's and its own.
+ * Clears a model's cooldowns after it answered: its provider's and its own, when they started
+ * before the call was sent.
+ *
+ * @remarks
+ * A call sent before a cooldown started says nothing about the limit that started it: the
+ * provider took it while there was still room. Clearing on it would erase a fresh cooldown, so
+ * the next request would hit the limit again (#181 review).
  *
  * @param subject - the model that answered
+ * @param sentAt - when the call that answered was sent, in milliseconds since the epoch
  */
-export function clearCooldowns(subject: CooldownSubject): void {
+export function clearCooldowns(subject: CooldownSubject, sentAt: number): void {
   for (const scope of ['provider', 'model'] as const) {
     const key = keyOf(scope, subject)
-    if (cooldowns.delete(key)) {
-      endLogged.delete(key)
-      cooldownLogger.info('Cooldown of {scope} {name} cleared: {model} answered', {
-        scope,
-        name: scope === 'provider' ? subject.provider : subject.canonicalId,
-        model: subject.canonicalId
-      })
-    }
+    const cooldown = cooldowns.get(key)
+    if (cooldown === undefined || cooldown.since >= sentAt) continue
+    cooldowns.delete(key)
+    endLogged.delete(key)
+    cooldownLogger.info('Cooldown of {scope} {name} cleared: {model} answered', {
+      scope,
+      name: scope === 'provider' ? subject.provider : subject.canonicalId,
+      model: subject.canonicalId
+    })
   }
 }
 

@@ -83,7 +83,7 @@ describe('cooldowns', () => {
     expect(startCooldown(OPUS, 'rate_limit', undefined, NOW).until).toBe(NOW + MINUTE)
 
     startCooldown(OPUS, 'rate_limit', undefined, NOW)
-    clearCooldowns(OPUS)
+    clearCooldowns(OPUS, NOW + 1)
     expect(startCooldown(OPUS, 'rate_limit', undefined, NOW).until).toBe(NOW + MINUTE)
   })
 
@@ -108,8 +108,19 @@ describe('cooldowns', () => {
     expect(activeCooldown(SONNET, NOW + 30_000)).toBeUndefined()
 
     startCooldown(OPUS, 'rate_limit', 30_000, NOW)
-    clearCooldowns(SONNET)
+    clearCooldowns(SONNET, NOW + 1)
     expect(activeCooldown(OPUS, NOW)).toBeUndefined()
+  })
+
+  // Catches a success erasing a cooldown that started after its call was sent (sixth #181
+  // review): the provider took that call while it still had room, so the limit still holds.
+  test('a success sent before the cooldown started leaves it', () => {
+    startCooldown(OPUS, 'rate_limit', 30_000, NOW)
+
+    clearCooldowns(OPUS, NOW - 1)
+    expect(activeCooldown(OPUS, NOW)).toBeDefined()
+    clearCooldowns(OPUS, NOW)
+    expect(activeCooldown(OPUS, NOW)).toBeDefined()
   })
 })
 
