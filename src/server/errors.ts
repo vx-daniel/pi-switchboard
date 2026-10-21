@@ -359,9 +359,11 @@ const MODEL_REFUSED_WORDING = /\bmodel is not supported when using codex with\b/
 export function mapUpstreamError(err: unknown): MappedUpstreamError {
   const message = err instanceof Error ? err.message : ''
   const status = upstreamStatusIn(message)
-  if (status === HTTP_BAD_REQUEST && CREDENTIAL_WORDING.test(message)) return AUTH_FAILED
+  // Codex's model refusal first: its phrase is specific, the credential words are not, so a
+  // refusal that also mentions an account's credentials is still about the model.
   const statusAllowsRefusal = status === undefined || status === HTTP_BAD_REQUEST
   if (statusAllowsRefusal && MODEL_REFUSED_WORDING.test(message)) return MODEL_UNAVAILABLE
+  if (status === HTTP_BAD_REQUEST && CREDENTIAL_WORDING.test(message)) return AUTH_FAILED
   if (status !== undefined) {
     return BY_STATUS.get(status) ?? PROVIDER_FAILED
   }

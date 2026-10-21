@@ -5,7 +5,10 @@
  * observed live on 2026-10-20; its other fields were not captured, and pi reads only the message.
  */
 
-import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
+import { resetSync } from '@logtape/logtape'
+import { configureLogging } from '@proxy/logging'
+import { isRecord } from '@proxy/utils/guards'
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import { FAKE_CODEX_TOKEN } from '../fixtures/codex-token'
@@ -18,6 +21,8 @@ const REFUSAL =
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
+/** Every log record a request causes: its level, logger and whole line. */
+let records: { level: string; logger: string; line: string }[] = []
 
 beforeAll(async () => {
   mock = await startMockProvider({ 'refused-model': sse([{ type: 'error', message: REFUSAL }]) })
@@ -35,7 +40,22 @@ beforeAll(async () => {
   })
 })
 
+beforeEach(() => {
+  records = []
+  configureLogging({
+    level: 'trace',
+    format: 'json',
+    write: (line) => {
+      const parsed: unknown = JSON.parse(line)
+      const field = (name: string): string =>
+        isRecord(parsed) && typeof parsed[name] === 'string' ? parsed[name] : ''
+      records.push({ level: field('level'), logger: field('logger'), line })
+    }
+  })
+})
+
 afterAll(async () => {
+  resetSync()
   vi.unstubAllEnvs()
   await mock.close()
   agentDir.remove()
@@ -81,6 +101,22 @@ describe('a Codex model the login cannot use (#156)', () => {
     expect(status).toBe(404)
     expect(JSON.parse(text)).toEqual(MODEL_UNAVAILABLE)
     expect(text).not.toContain('ChatGPT')
+  })
+
+  // Catches the refusal going unseen by the operator, who is the one who can fix it by hiding the
+  // model: the route logs it at error, and Codex's text, which names the plan, only at debug.
+  test('is logged as an error for the operator, the provider text at debug only', async () => {
+    await askRefused(false)
+
+    const routeErrors = records.filter(
+      (record) => record.logger === 'pi-switchboard.server.chat' && record.level === 'ERROR'
+    )
+    expect(routeErrors.map((record) => record.line)).toEqual([
+      expect.stringContaining('Upstream call failed with 404')
+    ])
+    const withProviderText = records.filter((record) => record.line.includes('ChatGPT'))
+    expect(withProviderText.length).toBeGreaterThan(0)
+    expect(withProviderText.every((record) => record.level === 'DEBUG')).toBe(true)
   })
 
   // Catches the same refusal as an outage in a stream that has started. Live, Codex refuses over

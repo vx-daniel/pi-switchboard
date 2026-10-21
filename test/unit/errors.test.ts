@@ -171,6 +171,10 @@ describe('mapUpstreamError', () => {
     [
       'a 400',
       `400 {"detail":"The 'gpt-5.3-codex-spark' model is not supported when using Codex with a ChatGPT account."}`
+    ],
+    [
+      'a 400 that also mentions credentials',
+      `400 {"detail":"The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account. Check your account credentials."}`
     ]
   ])('maps Codex refusing the model, %s, to 404 model_not_found', (_case, upstreamMessage) => {
     const mapped = mapUpstreamError(new Error(upstreamMessage))
