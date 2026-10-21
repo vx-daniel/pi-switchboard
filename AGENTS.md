@@ -39,7 +39,7 @@ Treat these as stable unless the user explicitly changes direction:
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.
 - Keep stable responses close to OpenAI's schema. If pi-specific metadata is exposed, namespace it under `x_pi`.
-- Reject unsupported parameters clearly, top level and inside messages and parts (their schemas are strict). Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (`temperature` on Codex and where pi leaves it out for Claude; passthrough fields a provider has no equivalent for; `prompt_cache_breakpoint` where the API has no slot for it; `name` on messages and `image_url.detail`); any other needs an amendment.
+- Reject unsupported parameters clearly, top level and inside messages and parts (their schemas are strict). Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (`temperature` on Codex and where pi leaves it out for Claude; passthrough fields a provider has no equivalent for; `prompt_cache_breakpoint` where the API has no slot for it or the model refuses it; `name` on messages and `image_url.detail`); any other needs an amendment.
 - Routing (aliases, fallback, cooldowns, quota; #66–#70) follows constitution principle VI: configured explicitly, never reaching a model the exposure config hides, and the serving model and login reported under `x_pi` and in the log.
 - Agentic mode is a "Later, not planned" idea. Do not build it under an OpenAI route.
 - Default network posture should remain local-first and safe by default.
@@ -104,7 +104,7 @@ Hook-backed workflow already exists (`.vite-hooks/`, installed by `vp config` on
 - `pre-commit` -> `pnpm run check:all` over the working tree
 - `pre-push` -> lockfile sync check
 
-CI (`.github/workflows/`): `ci.yml` (`gate`, pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks over every pushed commit), `claude-pr-review.yml` (manual Claude review; needs the `CLAUDE_CODE_OAUTH_TOKEN` secret), `publish.yml` (release on `main`).
+CI (`.github/workflows/`): `ci.yml` (`gate`, pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks over every pushed commit), `claude-pr-review.yml` (manual Claude review; needs the `CLAUDE_CODE_OAUTH_TOKEN` secret), `publish.yml` (release on `main`, then `image.yml` and `package.yml` for the new tag).
 
 Do not weaken these hooks or workflows unless the user asks.
 

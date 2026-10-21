@@ -12,6 +12,7 @@
 import {
   type Api,
   type AssistantMessage,
+  type AssistantMessageEvent,
   type AssistantMessageEventStream,
   type Context,
   isContextOverflow,
@@ -21,7 +22,7 @@ import {
 import { proxyLogger } from '@proxy/logging'
 import { supportedReasoningEfforts, thinkingLevelFor } from '@proxy/openai/reasoning-effort'
 import type { ChatCompletionRequest, ReasoningEffort } from '@proxy/openai/schemas'
-import { breakpointPatch } from '@proxy/pi/cache-breakpoints'
+import { breakpointPatch, retryWithoutBreakpoints } from '@proxy/pi/cache-breakpoints'
 import { getRuntime } from '@proxy/pi/registry'
 import { upstreamTemperature } from '@proxy/pi/temperature'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
@@ -845,7 +846,8 @@ async function openUpstream(
  *
  * @remarks
  * Reads the stream's final message, which is all pi's `completeSimple()` returns, so the idle
- * timeout sees every event.
+ * timeout sees every event. A model that refuses the request's `prompt_cache_breakpoint` gets the
+ * request once more without them (#163, {@link retryWithoutBreakpoints}).
  *
  * @param model - the pi model
  * @param context - pi's context: system prompt, messages and tools
@@ -860,21 +862,46 @@ export async function piComplete(
   request: ChatCompletionRequest,
   options: CompletionOptions
 ): Promise<AssistantMessage> {
-  const eventStream = await openUpstream({ model, context, request, options }, false)
-  return eventStream.result()
+  const input: UpstreamInput = { model, context, request, options }
+  const message = await (await openUpstream(input, false)).result()
+  if (!retryWithoutBreakpoints(model, request.messages, message)) return message
+  return (await openUpstream(input, false)).result()
+}
+
+/** A streaming call with its first event read: how the route tells a failure from a stream. */
+export interface StartedStream {
+  /** The call's first event, or the end of a stream that had none. */
+  readonly first: IteratorResult<AssistantMessageEvent>
+  /** The rest of the call's events, after {@link StartedStream.first}. */
+  readonly events: AsyncIterator<AssistantMessageEvent>
 }
 
 /**
- * Starts a streaming completion.
+ * Opens a streaming call and reads its first event.
+ *
+ * @param input - the model, context, request and options
+ * @returns the first event and the rest
+ * @throws whatever opening the upstream call or reading its first event throws
+ */
+async function startStream(input: UpstreamInput): Promise<StartedStream> {
+  const events = (await openUpstream(input, true))[Symbol.asyncIterator]()
+  return { first: await events.next(), events }
+}
+
+/**
+ * Starts a streaming completion and reads its first event.
  *
  * @remarks
- * The client's `options.signal` aborts the call.
+ * The client's `options.signal` aborts the call. pi emits `start` only once the provider has
+ * accepted the request, so a refusal is the first event: a model that refuses the request's
+ * `prompt_cache_breakpoint` gets the request once more without them, before the client sees
+ * anything (#163, {@link retryWithoutBreakpoints}).
  *
  * @param model - the pi model
  * @param context - pi's context: system prompt, messages and tools
  * @param request - the validated chat request
  * @param options - the per-request options
- * @returns pi's event stream for the call
+ * @returns the call's first event and the rest of its events
  * @throws whatever opening the upstream call throws
  */
 export async function piStream(
@@ -882,6 +909,13 @@ export async function piStream(
   context: Context,
   request: ChatCompletionRequest,
   options: CompletionOptions
-): Promise<AssistantMessageEventStream> {
-  return openUpstream({ model, context, request, options }, true)
+): Promise<StartedStream> {
+  const input: UpstreamInput = { model, context, request, options }
+  const started = await startStream(input)
+  const { first } = started
+  const refused =
+    first.done !== true &&
+    first.value.type === 'error' &&
+    retryWithoutBreakpoints(model, request.messages, first.value.error)
+  return refused ? startStream(input) : started
 }
