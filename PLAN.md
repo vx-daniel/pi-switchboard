@@ -1460,6 +1460,14 @@ on a TTY and JSON Lines with a UTC `@timestamp` otherwise; `--log-format` / `PI_
 (`pretty`, `json`) overrides that choice. Passing `/healthz` checks log at `debug`. The pi
 extension logs to a file only when `PI_SWITCHBOARD_EXTENSION_LOG_FILE` is set.
 
+A JSON line's `message` keeps LogTape's rendering, which quotes every string value
+(`Listening on http://"0.0.0.0":4141`). This is deliberate (#159): values such as the requested
+model, a path or `X-Client-Request-Id` come from clients, and the quotes keep a crafted one from
+passing for message text. JSON encoding already keeps a value from forging a second line.
+`properties` carries the values unquoted for anything that parses logs. People reading by eye use
+`pretty`, which prints values bare. Bare strings in JSON, and template-only messages, were
+considered and not taken.
+
 Minimum production observability:
 
 - generated proxy request ID, carried by every log line a request causes (`withContext`)
