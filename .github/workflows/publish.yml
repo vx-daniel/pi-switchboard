@@ -78,3 +78,5 @@ jobs:
     uses: ./.github/workflows/image.yml
     with:
       tag: ${{ needs.release.outputs.tag }}
+    secrets:
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}

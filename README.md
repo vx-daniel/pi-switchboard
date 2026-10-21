@@ -404,7 +404,7 @@ The extension detects externally running instances and shows their status via `/
 
 ## Docker
 
-The image runs the proxy headless, with its own pi login in a volume. Each release publishes `ghcr.io/vx-daniel/pi-switchboard:<version>` for `linux/amd64` and `linux/arm64`. A published tag is never overwritten, and there is no `latest`, so a version always means the same image. The `Dockerfile` builds it from this repository's source, with one lockfile for the proxy and pi.
+The image runs the proxy headless, with its own pi login in a volume. Each release publishes it for `linux/amd64` and `linux/arm64` as [`vxdaniel/pi-switchboard:<version>`](https://hub.docker.com/r/vxdaniel/pi-switchboard) on Docker Hub. The same image is also published as `ghcr.io/vx-daniel/pi-switchboard:<version>` on GHCR, which is not subject to Docker Hub's pull limit of 100 anonymous pulls per 6 hours per IP address. A published tag is never overwritten, and there is no `latest`, so a version always means the same image. The `Dockerfile` builds it from this repository's source, with one lockfile for the proxy and pi.
 
 From a checkout, with [`compose.yaml`](compose.yaml):
 

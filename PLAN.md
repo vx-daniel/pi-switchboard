@@ -1146,12 +1146,22 @@ command and the server run the same pi on one `auth.json`.
 - **Base: `node:<version>-bookworm-slim`.** Alpine was measured as well: pruned, 73 MB to pull and
   252 MB unpacked. It was not taken, because the 18 MB saved is not worth musl (pi's TUI ships
   glibc-only native prebuilds) or the risk of a future native dependency without a musl build.
-- **Published once per version.** The release workflow's `image` job calls `image.yml` with each
-  new release tag. It builds that tag for `linux/amd64` and `linux/arm64` and pushes
-  `ghcr.io/vx-daniel/pi-switchboard:<version>`. It refuses a tag that is already published, and
-  any registry error other than "not found", so a version always means one image. There is no
-  `latest`. The multi-platform manifest is pushed last, so a failed run publishes nothing; run
-  `image.yml` by hand with the tag to publish a release whose image is missing.
+- **Published once per version, to two registries.** The release workflow's `image` job calls
+  `image.yml` with each new release tag. It builds that tag for `linux/amd64` and `linux/arm64`
+  and pushes the same image, in one push, as `vxdaniel/pi-switchboard:<version>` on Docker Hub
+  (what the docs lead with: the short name) and `ghcr.io/vx-daniel/pi-switchboard:<version>` on
+  GHCR (linked to this repository; GitHub documents no pull limit for public images, and Docker
+  Hub allows 100 anonymous pulls per 6 hours per IP address). It refuses a tag already published
+  on either registry, and any registry error other than "not found", so a version always means
+  one image. There is no `latest`. The multi-platform manifest is pushed last, so a failed run
+  publishes nothing; run `image.yml` by hand with the tag to publish a release whose image is
+  missing.
+- **Registry setup, once.** Docker Hub needs the `DOCKERHUB_TOKEN` repository secret, a
+  `vxdaniel` access token with read and write access. Without it the image job fails before
+  pushing anywhere. Turn on immutable tags on the Docker Hub repository, so the registry enforces
+  what `image.yml` checks. GHCR makes a new package private on first publish even for a public
+  repository: after the first release, set `pi-switchboard` public in the package settings, once
+  (it cannot be made private again).
 - **Port published on loopback.** Compose publishes `127.0.0.1:4141` only, keeping the
   local-first default for the host.
 

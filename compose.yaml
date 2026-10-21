@@ -10,12 +10,13 @@ name: pi-switchboard
 
 services:
   proxy:
-    # A released image, ghcr.io/vx-daniel/pi-switchboard:<version>, with PI_SWITCHBOARD_VERSION
-    # set and `docker compose pull`; unset, `local`, which `docker compose build` makes from this
-    # checkout. Without a build first, `docker compose up` tries to pull `local`, prints the
-    # registry's refusal, and builds it. Published tags are never overwritten, so a version always
-    # means the same image.
-    image: ghcr.io/vx-daniel/pi-switchboard:${PI_SWITCHBOARD_VERSION:-local}
+    # A released image, vxdaniel/pi-switchboard:<version> on Docker Hub, with
+    # PI_SWITCHBOARD_VERSION set and `docker compose pull`. The same image is on GHCR as
+    # ghcr.io/vx-daniel/pi-switchboard:<version>, free of Docker Hub's pull limits. Unset, `local`,
+    # which `docker compose build` makes from this checkout. Without a build first, `docker compose
+    # up` tries to pull `local`, prints the registry's refusal, and builds it. Published tags are
+    # never overwritten, so a version always means the same image.
+    image: vxdaniel/pi-switchboard:${PI_SWITCHBOARD_VERSION:-local}
     build:
       context: .
     # Forwards signals to the proxy and reaps children.
