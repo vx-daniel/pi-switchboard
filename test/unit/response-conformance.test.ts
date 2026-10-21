@@ -110,7 +110,9 @@ function makeToolCallMessage(
 
 describe('non-streaming response conformance', () => {
   test('has all required top-level fields', () => {
-    const result = buildChatCompletion('req-1', 'openai/gpt-4o', makeTextMessage('Hello'))
+    const result = buildChatCompletion('req-1', makeTextMessage('Hello'), {
+      model: 'openai/gpt-4o'
+    })
 
     expect(result.id).toBe('req-1')
     expect(result.object).toBe('chat.completion')
@@ -123,7 +125,7 @@ describe('non-streaming response conformance', () => {
   })
 
   test('choices[0].finish_reason is never null', () => {
-    const result = buildChatCompletion('req-2', 'openai/gpt-4o', makeTextMessage('Hi'))
+    const result = buildChatCompletion('req-2', makeTextMessage('Hi'), { model: 'openai/gpt-4o' })
 
     const choice = result.choices[0]
     expect(choice).toBeDefined()
@@ -142,18 +144,18 @@ describe('non-streaming response conformance', () => {
 
     for (const [piReason, expected] of mapping) {
       const message = makeTextMessage('test', { stopReason: piReason })
-      const result = buildChatCompletion('req', 'm', message)
+      const result = buildChatCompletion('req', message, { model: 'm' })
       expect(result.choices[0]?.finish_reason).toBe(expected)
     }
   })
 
   test('choices[0].message.role is assistant', () => {
-    const result = buildChatCompletion('req-3', 'm', makeTextMessage('Hi'))
+    const result = buildChatCompletion('req-3', makeTextMessage('Hi'), { model: 'm' })
     expect(result.choices[0]?.message.role).toBe('assistant')
   })
 
   test('content is string for text responses', () => {
-    const result = buildChatCompletion('req-4', 'm', makeTextMessage('Hello world'))
+    const result = buildChatCompletion('req-4', makeTextMessage('Hello world'), { model: 'm' })
     const content = result.choices[0]?.message.content
     expect(content).toBeTypeOf('string')
     expect(content).toBe('Hello world')
@@ -163,7 +165,7 @@ describe('non-streaming response conformance', () => {
     const message = makeToolCallMessage([
       { id: 'tc-1', name: 'get_weather', args: { city: 'NYC' } }
     ])
-    const result = buildChatCompletion('req-5', 'm', message)
+    const result = buildChatCompletion('req-5', message, { model: 'm' })
     const content = result.choices[0]?.message.content
     // Must be explicitly null, not undefined
     expect(content).toBeNull()
@@ -174,7 +176,7 @@ describe('non-streaming response conformance', () => {
       { id: 'call_abc', name: 'get_weather', args: { city: 'NYC' } },
       { id: 'call_def', name: 'search', args: { query: 'hello' } }
     ])
-    const result = buildChatCompletion('req-6', 'm', message)
+    const result = buildChatCompletion('req-6', message, { model: 'm' })
     const toolCalls = result.choices[0]?.message.tool_calls
 
     expect(toolCalls).toBeDefined()
@@ -191,7 +193,7 @@ describe('non-streaming response conformance', () => {
   })
 
   test('tool_calls is absent (not empty array) when no tool calls', () => {
-    const result = buildChatCompletion('req-7', 'm', makeTextMessage('Hi'))
+    const result = buildChatCompletion('req-7', makeTextMessage('Hi'), { model: 'm' })
     expect(result.choices[0]?.message.tool_calls).toBeUndefined()
   })
 
@@ -199,7 +201,7 @@ describe('non-streaming response conformance', () => {
     const message = makeTextMessage('Hi', {
       usage: makeUsage({ input: 15, output: 25, totalTokens: 40 })
     })
-    const result = buildChatCompletion('req-8', 'm', message)
+    const result = buildChatCompletion('req-8', message, { model: 'm' })
 
     expect(result.usage.prompt_tokens).toBeTypeOf('number')
     expect(result.usage.completion_tokens).toBeTypeOf('number')
@@ -210,7 +212,7 @@ describe('non-streaming response conformance', () => {
   })
 
   test('choices[0].index is 0', () => {
-    const result = buildChatCompletion('req-9', 'm', makeTextMessage('Hi'))
+    const result = buildChatCompletion('req-9', makeTextMessage('Hi'), { model: 'm' })
     expect(result.choices[0]?.index).toBe(0)
   })
 })

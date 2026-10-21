@@ -335,6 +335,35 @@ Most clients only let you pick a model name, so an alias is the routing control 
 - **Used as written.** Names and targets are not trimmed or normalized; a mistyped target matches no model. An entry with an empty name or target is dropped with the config warning.
 - **In pi,** `/proxy show` lists the aliases and any left out. Editing them in the settings panel can come later.
 
+#### Fallback chains
+
+An alias can name several models, tried in order, and the failures that move to the next one. `fallbackOn` is required: the proxy falls back only on what you list.
+
+```json
+{ "aliases": { "coding": {
+  "targets": ["anthropic/claude-opus-5-5", "openai-codex/gpt-6-sol", "github-copilot/claude-sonnet-5-5"],
+  "fallbackOn": ["rate_limit", "unavailable", "timeout"]
+} } }
+```
+
+| Class | Failure before the response starts |
+|---|---|
+| `rate_limit` | 429 |
+| `unavailable` | 503, or 529 overloaded |
+| `timeout` | 504, or the upstream idle timeout |
+| `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve) |
+| `refused` | The login can't run the model (`404 model_not_found`) |
+| `upstream_error` | Any other upstream failure, a network failure included |
+
+- **Never on the request's own fault, or once the answer has started.** A `400`, the client leaving, and a failure after a stream sent its first byte are answered as they are without a chain. After the last target, the client gets that target's failure.
+- **Visible.** The response's `model` is the model that answered. `x_pi.attempts` lists each model tried before it and why it failed (`[{ "model": "anthropic/claude-opus-5-5", "reason": "rate_limit" }]`), in a non-streamed response and in every stream chunk. Each hop is a warning in the log, naming the alias, the model, the class and the next model.
+- **Exposed targets only.** A target the exposure config hides is skipped (and listed in `/healthz/models` as `target-not-exposed`). The alias is listed while one target is exposed, as the first exposed one.
+- **Targets as written.** A target listed twice is tried twice, which is a retry of the same model. `targets` needs at least one entry.
+- **Images go to a model that takes them.** An image request skips the chain's text-only models when another one accepts images.
+- **No fallback with your own key.** A request with `X-Switchboard-Upstream-Api-Key` runs on the first target only: the key is one provider's.
+- **No opt-out per request.** To avoid a chain, name the model directly (its canonical ID); for a shorter chain, define another alias.
+- **Timeouts add up.** The upstream idle timeout applies to each attempt, so a three-model chain can wait up to three timeouts before failing.
+
 ### Discovering available models
 
 List all models the proxy exposes (filtered by the active exposure mode):

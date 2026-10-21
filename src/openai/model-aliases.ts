@@ -3,9 +3,13 @@
  *
  * @remarks
  * Most clients only let you choose a model name, so a name is the one routing control every
- * client has. An alias maps a name to an exposed model's canonical ID, used exactly as written:
- * - **Listed and resolved only while its target is exposed**, so an alias never reaches a model
- *   the exposure config hides (CONSTITUTION.md, principle IV).
+ * client has. An alias maps a name to an exposed model's canonical ID, or to several tried in order
+ * (#67), used exactly as written:
+ * - **Listed and resolved only while a target is exposed**, so an alias never reaches a model
+ *   the exposure config hides (CONSTITUTION.md, principle IV). Each target that is not exposed is
+ *   reported and skipped.
+ * - **Listed as its first exposed target.** A fallback chain's other exposed targets are kept,
+ *   in order, for the chat route (`src/server/chat-dispatch.ts`).
  * - **Never shadows a model.** An alias named like an exposed public or canonical ID is left out,
  *   and the model keeps its name. `/healthz/models` reports it and answers 503.
  * - **Resolved last:** public ID, then canonical ID, then alias (`resolveExposedModel`).
@@ -13,6 +17,7 @@
  * @packageDocumentation
  */
 
+import type { AliasTarget } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import * as z from 'zod'
@@ -66,15 +71,15 @@ function warnShadowing(diagnostics: readonly AliasDiagnostic[]): void {
 }
 
 /**
- * Exposes the configured aliases whose targets are exposed.
+ * Exposes the configured aliases with an exposed target.
  *
- * @param aliases - alias -> canonical ID, from the config
+ * @param aliases - alias -> one canonical ID, or `{ targets, fallbackOn }`, from the config
  * @param byPublicId - the exposed models by public ID
  * @param byCanonicalId - the exposed models by canonical ID
- * @returns the exposed aliases, and a diagnostic for each one left out
+ * @returns the exposed aliases, and a diagnostic for each alias or target left out
  */
 export function exposeAliases(
-  aliases: Readonly<Record<string, string>>,
+  aliases: Readonly<Record<string, AliasTarget>>,
   byPublicId: ReadonlyMap<string, ExposedModel>,
   byCanonicalId: ReadonlyMap<string, ExposedModel>
 ): ExposedAliases {
@@ -82,26 +87,23 @@ export function exposeAliases(
   const byAlias = new Map<string, ExposedModel>()
   const diagnostics: AliasDiagnostic[] = []
   for (const [alias, target] of Object.entries(aliases)) {
+    const targets = typeof target === 'string' ? [target] : target.targets
     if (byPublicId.has(alias) || byCanonicalId.has(alias)) {
       diagnostics.push({
         code: 'shadows-model',
         alias,
-        target,
+        target: targets.join(', '),
         message: `Alias "${alias}" is an exposed model's ID; that model keeps it and the alias is ignored. Rename the alias.`
       })
       continue
     }
-    const model = byCanonicalId.get(target)
-    if (model === undefined) {
-      diagnostics.push({
-        code: 'target-not-exposed',
-        alias,
-        target,
-        message: `Alias "${alias}" names "${target}", which is not an exposed model's canonical ID (provider/model-id).`
-      })
-      continue
-    }
-    const entry: ExposedModel = { ...model, publicId: alias, alias }
+    const candidates = exposedTargets(alias, targets, byCanonicalId, diagnostics)
+    const [first] = candidates
+    if (first === undefined) continue
+    const entry: ExposedModel =
+      typeof target === 'string'
+        ? { ...first, publicId: alias, alias }
+        : { ...first, publicId: alias, alias, route: { candidates, fallbackOn: target.fallbackOn } }
     exposed.push(entry)
     byAlias.set(alias, entry)
   }
@@ -113,4 +115,36 @@ export function exposeAliases(
     })
   }
   return { aliases: exposed, byAlias, diagnostics }
+}
+
+/**
+ * Looks an alias's targets up among the exposed models, in order, reporting each one that is not.
+ *
+ * @param alias - the alias
+ * @param targets - its canonical IDs, as written
+ * @param byCanonicalId - the exposed models by canonical ID
+ * @param diagnostics - receives a `target-not-exposed` diagnostic per missing target; appended to
+ * @returns the exposed targets, in the alias's order
+ */
+function exposedTargets(
+  alias: string,
+  targets: readonly string[],
+  byCanonicalId: ReadonlyMap<string, ExposedModel>,
+  diagnostics: AliasDiagnostic[]
+): ExposedModel[] {
+  const candidates: ExposedModel[] = []
+  for (const target of targets) {
+    const model = byCanonicalId.get(target)
+    if (model === undefined) {
+      diagnostics.push({
+        code: 'target-not-exposed',
+        alias,
+        target,
+        message: `Alias "${alias}" names "${target}", which is not an exposed model's canonical ID (provider/model-id).`
+      })
+    } else {
+      candidates.push(model)
+    }
+  }
+  return candidates
 }

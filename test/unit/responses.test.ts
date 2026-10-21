@@ -74,8 +74,8 @@ describe('buildChatCompletion', () => {
   test('a text answer has exactly the OpenAI chat.completion shape, with pi metadata under x_pi', () => {
     const result = buildChatCompletion(
       'req-123',
-      'anthropic/claude-haiku-5-5',
-      assistantMessage([{ type: 'text', text: 'Hello there!' }], 'stop')
+      assistantMessage([{ type: 'text', text: 'Hello there!' }], 'stop'),
+      { model: 'anthropic/claude-haiku-5-5' }
     )
 
     expect(result).toEqual({
@@ -110,14 +110,14 @@ describe('buildChatCompletion', () => {
   test('tool calls have exactly the OpenAI shape, in order, with arguments as JSON text', () => {
     const result = buildChatCompletion(
       'req-456',
-      'anthropic/claude-haiku-5-5',
       assistantMessage(
         [
           { type: 'toolCall', id: 'tc_1', name: 'get_weather', arguments: { city: 'Oslo' } },
           { type: 'toolCall', id: 'tc_2', name: 'get_time', arguments: { zone: 'CET' } }
         ],
         'toolUse'
-      )
+      ),
+      { model: 'anthropic/claude-haiku-5-5' }
     )
 
     expect(result.choices).toEqual([
@@ -150,7 +150,6 @@ describe('buildChatCompletion', () => {
   test('text around a tool call stays in content, next to the call', () => {
     const result = buildChatCompletion(
       'req-789',
-      'anthropic/claude-haiku-5-5',
       assistantMessage(
         [
           { type: 'text', text: 'Checking the weather. ' },
@@ -158,7 +157,8 @@ describe('buildChatCompletion', () => {
           { type: 'text', text: 'One moment.' }
         ],
         'toolUse'
-      )
+      ),
+      { model: 'anthropic/claude-haiku-5-5' }
     )
 
     expect(result.choices).toEqual([

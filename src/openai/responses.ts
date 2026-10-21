@@ -19,11 +19,60 @@ import type {
   ToolCall,
   Usage
 } from '@earendil-works/pi-ai'
+import { FailureClassSchema } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import * as z from 'zod'
 
 /** Logger for non-streaming response building. */
 const responsesLogger = proxyLogger('openai', 'responses')
+
+/**
+ * One failed attempt of an alias's fallback chain (#67), before the model that answered.
+ * Documents the response; never parsed.
+ */
+const attemptSchema = z.object({
+  model: z.string().trim().meta({ description: 'The canonical ID of the model tried.' }),
+  reason: FailureClassSchema.meta({ description: 'Why the chain moved on from it.' })
+})
+
+/** One failed attempt of an alias's fallback chain (#67). */
+export type Attempt = z.infer<typeof attemptSchema>
+
+/** `x_pi.attempts`: documents the response; never parsed. */
+export const attemptsSchema = z
+  .array(attemptSchema)
+  .optional()
+  .meta({
+    description:
+      'The models an alias tried before the one that answered, in order, and why each failed ' +
+      '(#67); present only when one did.'
+  })
+
+/** Which model answered a request, and how the request got to it (#66, #67). */
+export interface ResponseRoute {
+  /** The canonical ID of the model that answered, reported as `model`. */
+  readonly model: string
+  /** The alias the request named, reported as `x_pi.alias`. */
+  readonly alias?: string
+  /** The alias's failed attempts before `model`, reported as `x_pi.attempts`. */
+  readonly attempts?: readonly Attempt[]
+}
+
+/**
+ * Returns the `x_pi` fields a route adds: the alias, and the failed attempts, each only when there
+ * is one, so a request without them is unchanged.
+ *
+ * @param route - how the request got to the model that answered
+ * @returns the fields to spread into `x_pi`
+ */
+export function routeFields(route: ResponseRoute): { alias?: string; attempts?: Attempt[] } {
+  return {
+    ...(route.alias === undefined ? {} : { alias: route.alias }),
+    ...(route.attempts === undefined || route.attempts.length === 0
+      ? {}
+      : { attempts: [...route.attempts] })
+  }
+}
 
 /** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
 const MS_PER_SECOND = 1000
@@ -114,10 +163,13 @@ export const openAIChatCompletionSchema = z
         cache_write_tokens: z.int(),
         alias: z.string().trim().optional().meta({
           description: 'The alias the request named (#66); present only when it named one.'
-        })
+        }),
+        attempts: attemptsSchema
       })
       .meta({
-        description: "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias used."
+        description:
+          "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias and fallback " +
+          'attempts that led to the answer.'
       })
   })
   .meta({ id: 'ChatCompletion', description: 'A non-streaming chat completion.' })
@@ -191,17 +243,17 @@ export function mapUsage(usage: Usage): OpenAIUsage {
  * dropped. Tool call arguments are JSON-encoded.
  *
  * @param requestId - the response `id`
- * @param canonicalModelId - the model ID reported as `model`
  * @param message - pi's final assistant message
- * @param alias - the alias the request named, reported as `x_pi.alias` (#66); none when absent
+ * @param route - the model that answered, reported as `model`, and the alias and failed attempts
+ *   that led to it, under `x_pi` (#66, #67)
  * @returns the `chat.completion` object with a single choice
  */
 export function buildChatCompletion(
   requestId: string,
-  canonicalModelId: string,
   message: AssistantMessage,
-  alias?: string
+  route: ResponseRoute
 ): OpenAIChatCompletion {
+  const canonicalModelId = route.model
   // Concatenate text content
   const textParts = message.content.filter((part): part is TextContent => part.type === 'text')
   const textContent =
@@ -256,7 +308,7 @@ export function buildChatCompletion(
       cost: message.usage.cost,
       cache_read_tokens: message.usage.cacheRead,
       cache_write_tokens: message.usage.cacheWrite,
-      ...(alias === undefined ? {} : { alias })
+      ...routeFields(route)
     }
   }
 }

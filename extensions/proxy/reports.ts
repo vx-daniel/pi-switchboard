@@ -173,7 +173,11 @@ function formatExposurePolicy(
     )
     lines.push(`prefixes: ${pairs.join(', ')}`)
   }
-  const aliasPairs = Object.entries(config.aliases).map(([alias, target]) => `${alias}=${target}`)
+  const aliasPairs = Object.entries(config.aliases).map(([alias, target]) =>
+    typeof target === 'string'
+      ? `${alias}=${target}`
+      : `${alias}=${target.targets.join(' > ')} (on ${target.fallbackOn.join(', ') || 'nothing'})`
+  )
   if (aliasPairs.length > 0) lines.push(`aliases: ${aliasPairs.join(', ')}`)
   return lines
 }

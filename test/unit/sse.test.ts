@@ -89,7 +89,7 @@ describe('streamToSSE', () => {
     const frames: string[] = []
     for await (const frame of streamToSSE(
       yieldEvents(events),
-      { requestId: 'req-1', model: 'openai/gpt-5.4-mini', alias: undefined },
+      { requestId: 'req-1', route: { model: 'openai/gpt-5.4-mini' } },
       false
     )) {
       frames.push(frame)
@@ -115,7 +115,7 @@ describe('streamToSSE', () => {
     const frames: string[] = []
     for await (const frame of streamToSSE(
       yieldEvents(events),
-      { requestId: 'req-1', model: 'openai/gpt-5.4-mini', alias: undefined },
+      { requestId: 'req-1', route: { model: 'openai/gpt-5.4-mini' } },
       false
     )) {
       frames.push(frame)
@@ -138,7 +138,7 @@ describe('streamToSSE', () => {
     const frames: string[] = []
     for await (const frame of streamToSSE(
       yieldEvents(events),
-      { requestId: 'req-1', model: 'test/model', alias: undefined },
+      { requestId: 'req-1', route: { model: 'test/model' } },
       false
     )) {
       frames.push(frame)
@@ -194,7 +194,7 @@ describe('streamToSSE', () => {
       const frames: string[] = []
       for await (const frame of streamToSSE(
         yieldEvents(events(message)),
-        { requestId: 'req-1', model: 'test/model', alias: undefined },
+        { requestId: 'req-1', route: { model: 'test/model' } },
         false
       )) {
         frames.push(frame)
@@ -236,7 +236,7 @@ describe('upstream error logging', () => {
     const events: AssistantMessageEvent[] = [{ type: 'error', reason: 'error', error: echoed }]
     for await (const frame of streamToSSE(
       yieldEvents(events),
-      { requestId: 'req-1', model: 'p/m', alias: undefined },
+      { requestId: 'req-1', route: { model: 'p/m' } },
       false
     )) {
       expect(frame.length).toBeGreaterThan(0)

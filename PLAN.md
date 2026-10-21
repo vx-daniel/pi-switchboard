@@ -326,8 +326,8 @@ The public model list itself defines the valid request IDs.
 
 ### Aliases (#66)
 
-`aliases` in `proxy-config.json` maps a name to an exposed model's canonical ID, the first routing
-control under constitution principle VI; fallback chains (#67) widen the value to a list.
+`aliases` in `proxy-config.json` maps a name to an exposed model's canonical ID, or to a fallback
+chain (#67, below), the routing controls under constitution principle VI.
 `src/openai/model-aliases.ts` (`exposeAliases`) runs inside `computeModelExposure`, after the
 public and canonical IDs are built:
 
@@ -349,6 +349,51 @@ public and canonical IDs are built:
   log line adds `alias`. There is one login per provider, so no login is reported yet.
 - **Verbatim.** Names and targets are never trimmed; an empty name or target is dropped by the
   config repair.
+
+### Fallback chains (#67)
+
+An alias value `{ targets: [...], fallbackOn: [...] }` tries its targets in order. `fallbackOn` is
+required, and names the failure classes (`FailureClassSchema`, `src/config/schema.ts`) that move to
+the next target, because principle VI allows fallback only on failures the configuration names.
+A string alias, and a request that names a model, never fall back.
+
+- **Exposure.** `exposeAliases` keeps the chain's exposed targets in order (`ExposedModel.route`)
+  and lists the alias as the first of them. Each hidden target gets a `target-not-exposed`
+  diagnostic, and the alias is left out only when none is exposed.
+- **Dispatch** (`src/server/chat-dispatch.ts`):
+  - `planRoute` picks the candidates. An image request skips text-only targets when another takes
+    images. A request with `X-Switchboard-Upstream-Api-Key` keeps only the first target, because
+    the key is one provider's and must not reach another.
+  - `findCredentialedStart` checks credentials in order before remote images are fetched (#109),
+    moving past a target only if `auth` is named.
+  - `dispatchChat` gives each candidate one attempt. A failure before the response starts (for a
+    stream, before pi's first event, as `streamChat` always waited for) is classed by
+    `failureClass` from the mapped answer:
+
+| Answer | Class |
+|---|---|
+| 429 | `rate_limit` |
+| 503 (and 529, mapped to 503) | `unavailable` |
+| 504 (and the idle timeout) | `timeout` |
+| 401 (no credential), 502 `upstream_auth_error` | `auth` |
+| 404 `model_not_found` (the login refuses the model, #156) | `refused` |
+| any other 502 | `upstream_error` |
+| 400 | none: never falls back |
+
+  When the class is named and a target is left, the chain moves on. Otherwise the failure is
+  answered exactly as on the single-model path, including after the last target. A client that
+  left, and any failure after a stream started (an SSE error event), end the request.
+- **Visible (principle VI).** `model` is the model that answered, and `x_pi.attempts` lists
+  `{ model, reason }` for each failed attempt, in the body and in every chunk, only when there is
+  one. Each hop is a warning (alias, model, class, next model, attempt number), and a success after
+  hops is an info line with the attempts. Never content. Principle VI also asks for the serving
+  *login*: pi has one login per provider today, and a chain moves between providers or models,
+  never between logins, so the provider in `model` identifies it. Multi-login routing adds a login
+  field when there is a choice to report.
+- **Limits.** The idle timeout applies per attempt, so an N-target chain can take N timeouts. There
+  is no per-request opt-out: docker-agent can't send a header, and a body field would need a
+  principle I exception (#177). A client that wants no fallback names the model, and one that
+  wants a shorter chain uses another alias.
 
 ### Route handling
 
