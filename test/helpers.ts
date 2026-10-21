@@ -144,6 +144,7 @@ export function testConfig(): ServerConfig {
     modelExposureMode: 'scoped',
     customModels: [],
     providerPrefixes: {},
+    aliases: {},
     logLevel: 'info'
   }
 }
@@ -167,7 +168,8 @@ export function testApp(
     modelExposureMode: serverConfig.modelExposureMode,
     enabledModels: undefined,
     customModels: serverConfig.customModels,
-    providerPrefixes: serverConfig.providerPrefixes
+    providerPrefixes: serverConfig.providerPrefixes,
+    aliases: serverConfig.aliases
   })
   return createApp(serverConfig, reader, remoteImageFetch)
 }

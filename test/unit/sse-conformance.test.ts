@@ -108,7 +108,11 @@ async function collectFrames(
   includeUsage = false
 ): Promise<string[]> {
   const frames: string[] = []
-  for await (const frame of streamToSSE(mockEvents(events), 'req-1', 'test-model', includeUsage)) {
+  for await (const frame of streamToSSE(
+    mockEvents(events),
+    { requestId: 'req-1', route: { model: 'test-model' } },
+    includeUsage
+  )) {
     frames.push(frame)
   }
   return frames

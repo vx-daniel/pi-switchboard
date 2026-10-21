@@ -10,7 +10,7 @@ import {
   collectAnthropicPayloadFields,
   patchGooglePayload,
   translateToolChoiceForAnthropic
-} from '@proxy/pi/complete'
+} from '@proxy/pi/payload-fields'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { minimalRequest } from './payload-passthrough-helpers'

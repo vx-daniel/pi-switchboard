@@ -18,7 +18,7 @@
  */
 
 import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
-import type { ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
+import type { AliasTarget, ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
 import {
   BYTES_PER_MB,
   configFileAuthTokenInvalid,
@@ -149,6 +149,8 @@ export interface ServerConfig {
   readonly customModels: readonly string[]
   /** Provider key -> custom public prefix label. */
   readonly providerPrefixes: Readonly<Record<string, string>>
+  /** Alias -> one canonical ID, or targets with the failures that move between them (#66, #67). */
+  readonly aliases: Readonly<Record<string, AliasTarget>>
   /** Lowest log level written. */
   readonly logLevel: LogLevel
 }
@@ -351,6 +353,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     modelExposureMode: file.modelExposureMode,
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
+    aliases: file.aliases,
     logLevel: cli.logLevel ?? envLogLevel(process.env.PI_SWITCHBOARD_LOG_LEVEL, file.logLevel)
   }
 }

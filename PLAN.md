@@ -316,12 +316,136 @@ For incoming model references on the HTTP API, resolve in this order:
 
 1. exact public ID match
 2. exact canonical ID match for backward compatibility
+3. exact alias match (#66, below)
 
 Canonical fallback is only allowed for models inside the current exposed set.
-Hidden models must not become reachable through canonical fallback.
+Hidden models must not become reachable through canonical fallback, nor through an alias.
 
 Do not rely on the old registry-wide shorthand ambiguity rules on the public HTTP surface.
 The public model list itself defines the valid request IDs.
+
+### Aliases (#66)
+
+`aliases` in `proxy-config.json` maps a name to an exposed model's canonical ID, or to a fallback
+chain (#67, below), the routing controls under constitution principle VI.
+`src/openai/model-aliases.ts` (`exposeAliases`) runs inside `computeModelExposure`, after the
+public and canonical IDs are built:
+
+- **Exposed only while the target is.** The target is looked up among the exposed models by
+  canonical ID, so an alias never reaches a hidden model (principle IV). An alias whose target is
+  not exposed is left out with a `target-not-exposed` diagnostic. That is not a failure: leaving a
+  model out of `enabledModels` is how scoped mode hides it.
+- **Never shadows a model.** An alias named like an exposed public or canonical ID is left out
+  with a `shadows-model` diagnostic, and the model keeps its name. It is not an exposure error
+  (`ok: false`), which would answer every request with 500; `/healthz/models` answers 503 and
+  lists it, and one warning is logged per distinct set. Resolving aliases last is a second guard.
+- **Listed as its target under the alias.** Each exposed alias is an `ExposedModel` with
+  `publicId` set to the alias and `alias` set, so `/v1/models`, `/v1/models/{alias}` and
+  `/v1/switchboard/models` list it after the models (`owned_by` and `reasoning_efforts` are the
+  target's). `exposure.models` and its count stay the real models.
+- **Visible in the response and the log (principle VI).** `model` stays the target's canonical
+  ID. `x_pi.alias` carries the alias, in a non-streamed response and in every stream chunk, and
+  only when the request named one, so a request without an alias is unchanged. The chat request
+  log line adds `alias`. There is one login per provider, so no login is reported yet.
+- **Verbatim.** Names and targets are never trimmed; an empty name or target is dropped by the
+  config repair.
+
+### Fallback chains (#67)
+
+An alias value `{ targets: [...], fallbackOn: [...] }` tries its targets in order. `fallbackOn` is
+required, and names the failure classes (`FailureClassSchema`, `src/config/schema.ts`) that move to
+the next target, because principle VI allows fallback only on failures the configuration names.
+A string alias, and a request that names a model, never fall back.
+
+- **Exposure.** `exposeAliases` keeps the chain's exposed targets in order (`ExposedModel.route`)
+  and lists the alias as the first of them. Each hidden target gets a `target-not-exposed`
+  diagnostic, and the alias is left out only when none is exposed.
+- **Dispatch** (`src/server/chat-dispatch.ts`):
+  - `planRoute` picks the candidates. An image request skips text-only targets when another takes
+    images. A request with `X-Switchboard-Upstream-Api-Key` keeps only the first target, because
+    the key is one provider's and must not reach another.
+  - `findCredentialedStart` checks credentials in order before remote images are fetched (#109),
+    moving past a target only if `auth` is named.
+  - `dispatchChat` gives each candidate one attempt. A failure before the response starts (for a
+    stream, before pi's first event, as `streamChat` always waited for) is classed by
+    `failureClass` from the mapped answer:
+
+| Answer | Class |
+|---|---|
+| 429 | `rate_limit` |
+| 503 (and 529, mapped to 503) | `unavailable` |
+| 504 (and the idle timeout) | `timeout` |
+| 401 (no credential), 502 `upstream_auth_error` | `auth` |
+| 404 `model_not_found` (the login refuses the model, #156) | `refused` |
+| any other 502 | `upstream_error` |
+| 400 | none: never falls back |
+
+  When the class is named and a target is left, the chain moves on. Otherwise the failure is
+  answered exactly as on the single-model path, including after the last target. A client that
+  left, and any failure after a stream started (an SSE error event), end the request.
+- **Visible (principle VI).** `model` is the model that answered, and `x_pi.attempts` lists
+  `{ model, reason }` for each failed attempt, in the body and in every chunk, only when there is
+  one. Each hop is a warning (alias, model, class, next model, attempt number), and a success after
+  hops is an info line with the attempts. Never content. Principle VI also asks for the serving
+  *login*: pi has one login per provider today, and a chain moves between providers or models,
+  never between logins, so the provider in `model` identifies it. Multi-login routing adds a login
+  field when there is a choice to report.
+- **Limits.** The idle timeout applies per attempt, so an N-target chain can take N timeouts. There
+  is no per-request opt-out: docker-agent can't send a header, and a body field would need a
+  principle I exception (#177). A client that wants no fallback names the model, and one that
+  wants a shorter chain uses another alias.
+
+### Cooldowns (#68)
+
+A 429 or 503 is remembered, so a chain stops calling a failing provider first on every request.
+State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/route-cooldowns.ts`.
+
+- **Scope.** A 429 (`rate_limit`) cools the **provider**: pi has one login per provider, and a
+  subscription's limit covers the account. A 503 or 529 (`unavailable`) cools the **model**.
+- **Length: from the failed response, no cap** (`src/pi/reset-time.ts`). pi calls `onResponse`
+  only after a success (except Codex), so the proxy passes pi a `fetch` (`capturingFetch`) that
+  copies each 429, 503 and 529 (status, headers, and up to 16 KiB of the body, from a clone).
+  The copy is read before pi gets the response, so a body that stalls holds up that failure by at
+  most 2 s (`BODY_READ_MS`). Reading it after returning would make `runAttempt` wait on it anyway.
+  `resetAfterMs` takes the first source that gives a positive wait, in this order:
+  1. `retry-after-ms`, then `retry-after` (seconds or an HTTP date);
+  2. body `resets_in_seconds`, `retry_after` or `resets_at` (Codex's usage limit);
+  3. the latest `*ratelimit*reset*` header (OpenAI's durations, Anthropic's timestamps), passing
+     over a bucket whose `*-remaining` twin is above 0: those headers come for every bucket, full
+     or not;
+  4. the message's "try again in …" wording.
+
+  A number is read as seconds to wait, as a Unix time in seconds past 1e9, or in milliseconds past
+  1e11. A date counts only as ISO 8601 or an HTTP date, as `Date.parse` reads odd text as dates.
+  A wait ending after the last time a `Date` can hold (`LATEST_DATE_MS`, the year 275760) is no
+  real reset time and falls through too; `toISOString()` throws on such a date. With none, a
+  growing default: 60 s, 180 s, then doubling, counted per provider or model and reset by a
+  stated time or a success. Its end is clamped to that same date, which a client naming a
+  rate-limited model would pass after about 38 failures in a row. That bound is the limit of
+  `Date`, not a cap. pi's Google adapters refuse a custom `fetch`, so Google models always use
+  the default.
+- **Applied by routing only, recorded always (principle VI).** Every request's 429 or 503 on the
+  proxy's login starts a cooldown, so the state is visible. A request with its own upstream key
+  records and clears nothing: its failures are about that key, not the login others share. It
+  never skips either, as `planRoute` gives it one candidate and no `fallbackOn`. Only a
+  chain whose `fallbackOn` names the class skips a cooling candidate (`cooldownSkip`); a request
+  that names a model calls it as before. The check runs as the chain reaches each candidate, so a
+  429 met earlier in the same request skips that provider's later models too. When the candidate
+  and every one after it are cooling, the one of those whose cooldown ends first is called (on a
+  tie, the earlier), so a request is never answered without a call. A candidate already skipped
+  is not reconsidered, even if it ends sooner. The comparison uses the state as each candidate is
+  reached: a cooldown that a parallel request starts or clears meanwhile can change which one
+  that is.
+- **Visible.** A skipped candidate is an `x_pi.attempts` entry with `skipped: true`. Each
+  cooldown's start, end and skip is an info line. `/healthz/models` lists the active cooldowns
+  (operator), and `/v1/switchboard/models` gives each model's `cooldown` (clients that pick models
+  themselves, #68's comment). A cooldown never fails `/healthz/models`.
+- **Ended by a success.** A call that succeeds clears its provider's and its model's cooldowns,
+  if they started before that call was sent. A call sent earlier was taken while the provider
+  still had room, so it says nothing about the limit that started a newer cooldown.
+- **No hidden SDK retries.** pi 1.3.0 builds every SDK client with `maxRetries: 0` and defaults
+  its own retry loop (`retryProviderRequest`) to 0, as does its Codex adapter. A 429 therefore
+  reaches the proxy at once. #68's proposal to set `maxRetries: 0` per candidate was unneeded.
 
 ### Route handling
 
@@ -348,6 +472,7 @@ Required settings:
 - `modelExposureMode`: `all` | `scoped` | `custom`
 - `customModels`: string[] — canonical model IDs only
 - `providerPrefixes`: record of provider key -> public prefix label
+- `aliases`: record of alias -> canonical ID of an exposed model (#66)
 
 Note: `scoped` mode delegates to pi's global `enabledModels` setting (from `/scoped-models` Ctrl+S,
 or a hand-edited `settings.json`). No proxy-side config is needed: the proxy reads
@@ -372,7 +497,7 @@ Settings-panel requirements:
 - model selection for `custom` mode should use a searchable selector UI
 - prefix overrides should be editable without requiring manual JSON editing
 - `/proxy verify` should validate collisions, invalid universal mode, unknown providers, and missing custom models
-- `/proxy show` should summarize the effective exposure policy and preview representative public IDs
+- `/proxy show` should summarize the effective exposure policy and preview representative public IDs, and list the aliases and any left out (#66)
 
 ## Authentication model
 
@@ -944,7 +1069,7 @@ Return the OpenAI-compatible list shape:
     {
       "id": "gpt-5.4-mini",
       "object": "model",
-      "created": 0,
+      "created": 1792599474,
       "owned_by": "openai"
     }
   ]
@@ -956,6 +1081,7 @@ Compatibility rule:
 - keep the stable response strictly to the standard OpenAI model object fields
 - do not attach capability metadata such as context window, max tokens, reasoning support, or modality support to the standard `/v1/models` path
 - if richer metadata is exposed, use a separate non-standard endpoint rather than `x_pi` on the standard model object: `GET /v1/switchboard/models` (below)
+- `created` is the Unix time the proxy started, the same for every model: OpenAI requires the field, and pi's catalogue has no release dates (#176). pi-ai generates its catalogue from models.dev, which has a `release_date`, but drops it, and pi will not keep it. A proxy-side snapshot of the dates was rejected: a second catalogue to keep in step with pi's, for a field no known client reads. Clients must not read it as recency.
 
 Availability rule:
 
@@ -985,11 +1111,24 @@ Not part of OpenAI's API: what pi knows about each exposed model that the standa
 ```json
 {
   "object": "list",
-  "data": [{ "id": "claude-sonnet-4-5", "reasoning_efforts": ["none", "minimal", "low", "medium", "high"] }]
+  "data": [{
+    "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
+    "reasoning_efforts": ["none", "minimal", "low", "medium", "high"], "input": ["text", "image"],
+    "context_window": 200000, "max_output_tokens": 64000,
+    "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }
+  }]
 }
 ```
 
+Each entry is pi's catalogue entry for the model, as pi resolves it (`models.json` values included), so a client can choose by price, size and capability instead of hard-coding them (#173). An alias carries its target's entry under its own `id`.
+
+- `provider`: pi's provider, as `owned_by` on `/v1/models`
+- `reasoning`: whether the model reasons (`Model.reasoning`)
 - `reasoning_efforts`: the `reasoning_effort` values the model runs at as asked, lowest first, from pi's `getSupportedThinkingLevels` (`off` is `none`, and every other level the effort of the same name, `max` included). `["none"]` for a model without reasoning
+- `input`: what the model accepts, `text` and `image` (`Model.input`)
+- `context_window`, `max_output_tokens`: in tokens (`Model.contextWindow`, `Model.maxTokens`)
+- `cost`: USD per million tokens for uncached input, output, cache reads and cache writes (`Model.cost`; pi computes a call's cost as rate / 1,000,000 × tokens). `0` where pi has no price. A client can use these as docker-agent `cost` tables, which docker-agent needs to price calls through a custom `base_url` (#177)
+- `cooldown`: `null`, or the model's active cooldown (`reason`, `scope`, `until` in Unix seconds), below "Cooldowns (#68)"
 - new capability fields go here, never on `/v1/models`
 - non-standard routes live under `/v1/switchboard/`, as `/v1/switchboard/agent/completions` would. The prefix was `/v1/pi/` until constitution 2.0.0; `/v1/pi/models` moved here with no alias
 

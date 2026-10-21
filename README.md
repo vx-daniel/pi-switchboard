@@ -122,6 +122,7 @@ The proxy resolves model references in this order:
 
 1. **Exact public ID match** — the ID from `GET /v1/models`
 2. **Canonical ID fallback** — `provider/model-id` format (only for exposed models)
+3. **Alias** — a name from `aliases` in the config file ([below](#aliases))
 
 With the default `collision-prefixed` mode and no collisions, model IDs are exposed without prefixes:
 
@@ -159,7 +160,7 @@ Operational endpoints, outside the OpenAI-compatible `/v1` surface:
 | Endpoint | Auth | Answers |
 |---|---|---|
 | `GET /healthz` | Never | `200 {"status":"ok"}` once the proxy listens and pi's model runtime is loaded. No upstream calls: use it for container healthchecks and liveness probes. |
-| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there). `503` when no model is exposed or the exposure config is invalid. |
+| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`), aliases left out (`aliasDiagnostics`), and active cooldowns (`cooldowns`, [below](#cooldowns)). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model; a cooldown does not fail it. |
 | `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …) and `availableModelCount`. `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
 
 None of them returns a credential. `/healthz` proves the process is up, not that a provider will accept a request: `GET /healthz/creds?verify=true` is the closest check to that without spending a completion.
@@ -313,10 +314,66 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 | `modelExposureMode` | `scoped` | Which models to expose: `all`, `scoped`, `custom` |
 | `customModels` | `[]` | Canonical model IDs for `custom` mode. An empty list exposes no model |
 | `providerPrefixes` | `{}` | Provider key -> custom prefix label overrides |
+| `aliases` | `{}` | Alias -> the canonical ID of an exposed model ([Aliases](#aliases)) |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.
 
 A config file is never refused: an invalid value is replaced and the proxy starts anyway. A number outside its range is clamped to the nearest bound, a list or map keeps its valid entries, and anything else takes its default. One exception: an `authToken` that is not a string is not replaced by the default (which would turn auth off); the proxy refuses to start instead (see [Proxy authentication](#proxy-authentication)). `host` is trimmed; model IDs, prefix labels and `authToken` are used exactly as written, so a padded model ID matches no model rather than exposing one. One warning names the fields that were replaced, never their values, and it repeats only when that set of fields changes.
+
+### Aliases
+
+Most clients only let you pick a model name, so an alias is the routing control every client has. Define names in `proxy-config.json`, each pointing at an exposed model's canonical ID:
+
+```json
+{ "aliases": { "coding": "anthropic/claude-opus-5-5", "cheap": "anthropic/claude-haiku-5-5" } }
+```
+
+- **Request it like a model.** `"model": "coding"` is answered by `anthropic/claude-opus-5-5`. The response's `model` is the target's canonical ID, so you see which model answered, and `x_pi.alias` is `coding`, in a non-streamed response and in every stream chunk. The request log line names the alias too.
+- **Listed beside the models.** `coding` appears in `GET /v1/models` (with the target's provider as `owned_by`), in `GET /v1/models/coding`, and in `GET /v1/switchboard/models` with the target's `reasoning_efforts`.
+- **Only while its target is exposed.** An alias never reaches a model the exposure config hides: leave the target out of `enabledModels` (or `customModels`) and the alias disappears too. `/healthz/models` then lists it as `target-not-exposed`.
+- **Never shadows a model.** An alias named like an exposed model's public or canonical ID is ignored, and the model keeps its name. `/healthz/models` answers `503` and lists it as `shadows-model`, and the proxy logs a warning. Rename the alias.
+- **Used as written.** Names and targets are not trimmed or normalized; a mistyped target matches no model. An entry with an empty name or target is dropped with the config warning.
+- **In pi,** `/proxy show` lists the aliases and any left out. Editing them in the settings panel can come later.
+
+#### Fallback chains
+
+An alias can name several models, tried in order, and the failures that move to the next one. `fallbackOn` is required: the proxy falls back only on what you list.
+
+```json
+{ "aliases": { "coding": {
+  "targets": ["anthropic/claude-opus-5-5", "openai-codex/gpt-6-sol", "github-copilot/claude-sonnet-5-5"],
+  "fallbackOn": ["rate_limit", "unavailable", "timeout"]
+} } }
+```
+
+| Class | Failure before the response starts |
+|---|---|
+| `rate_limit` | 429 |
+| `unavailable` | 503, or 529 overloaded |
+| `timeout` | 504, or the upstream idle timeout |
+| `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve) |
+| `refused` | The login can't run the model (`404 model_not_found`) |
+| `upstream_error` | Any other upstream failure, a network failure included |
+
+- **Never on the request's own fault, or once the answer has started.** A `400`, the client leaving, and a failure after a stream sent its first byte are answered as they are without a chain. After the last target, the client gets that target's failure.
+- **Visible.** The response's `model` is the model that answered. `x_pi.attempts` lists each model tried before it and why it failed (`[{ "model": "anthropic/claude-opus-5-5", "reason": "rate_limit" }]`), in a non-streamed response and in every stream chunk. Each hop is a warning in the log, naming the alias, the model, the class and the next model.
+- **Exposed targets only.** A target the exposure config hides is skipped (and listed in `/healthz/models` as `target-not-exposed`). The alias is listed while one target is exposed, as the first exposed one.
+- **Targets as written.** A target listed twice is tried twice, which is a retry of the same model. `targets` needs at least one entry.
+- **Images go to a model that takes them.** An image request skips the chain's text-only models when another one accepts images.
+- **No fallback with your own key.** A request with `X-Switchboard-Upstream-Api-Key` runs on the first target only: the key is one provider's.
+- **No opt-out per request.** To avoid a chain, name the model directly (its canonical ID); for a shorter chain, define another alias.
+- **Timeouts add up.** The upstream idle timeout applies to each attempt, so a three-model chain can wait up to three timeouts before failing.
+
+#### Cooldowns
+
+A provider that answers 429 is cooled down, so a chain stops calling it first on every request.
+
+- **What cools.** A `429` cools the whole provider: pi has one login per provider, and a subscription's limit covers the account. A `503` or `529` cools only that model.
+- **For how long.** As long as the failed response says: `retry-after-ms` or `retry-after`, a body field such as Codex's `resets_in_seconds` or `resets_at`, OpenAI's `x-ratelimit-reset-*` or Anthropic's `anthropic-ratelimit-*-reset` headers, or the message's own words ("try again in 20s"). There is no cap, so a weekly limit cools the provider until it resets. When the response gives no time, the cooldown grows: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each failure in a row. A stated time or a success starts it over. Google's API doesn't let the proxy read the response, so Google models always use the growing default.
+- **Who skips.** Only a chain whose `fallbackOn` names the class (`rate_limit` for a 429, `unavailable` for a 503) skips a cooling model. A request that names the model, or a chain that names neither, still calls it. When every model left in the chain is cooling, the one whose cooldown ends first is called.
+- **Visible.** A skipped model is listed in `x_pi.attempts` with `"skipped": true` and the reason; the log has a line for each cooldown that starts, ends or is skipped. `/healthz/models` lists the active ones (`scope`, `provider`, `model`, `reason`, `until`, `secondsLeft`, `source`), and `/v1/switchboard/models` gives each model's `cooldown` (`reason`, `scope`, `until` in Unix seconds), so a client can pick another model or wait.
+- **Ended early by a success.** A call to the provider or model that succeeds clears its cooldown, if the call was sent after the cooldown started. Cooldowns live in memory: a restart forgets them. A request that sends its own key (`X-Switchboard-Upstream-Api-Key`) neither starts nor clears one, as it isn't using the proxy's login.
+- **No hidden retries.** pi calls each provider once per attempt (the provider SDKs' own retries are off), so a 429 reaches the proxy at once and the chain moves on without waiting.
 
 ### Discovering available models
 
@@ -326,13 +383,28 @@ List all models the proxy exposes (filtered by the active exposure mode):
 curl http://localhost:4141/v1/models | jq '.data[].id'
 ```
 
-Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owned_by`) with no proprietary extensions.
+Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owned_by`) with no proprietary extensions. `created` is the Unix time the proxy started, the same for every model, because pi's catalogue has no release dates and OpenAI requires the field. Don't read it as a model's age; choose models by what `GET /v1/switchboard/models` reports.
 
-`GET /v1/switchboard/models` (not part of OpenAI's API; proxy token, if set) lists what pi knows about each exposed model beyond that. Today: `reasoning_efforts`, the `reasoning_effort` values the model runs at as asked, lowest first (`["none"]` for a model without reasoning). Any other value is accepted and clamped. It was `GET /v1/pi/models` before this release; the old path is gone.
+`GET /v1/switchboard/models` (not part of OpenAI's API; proxy token, if set) lists what pi knows about each exposed model beyond that: its pi catalogue entry, with any `models.json` values. An alias shows its target's entry.
+
+| Field | Meaning |
+|---|---|
+| `provider` | pi's provider (`owned_by` on `/v1/models`) |
+| `reasoning` | Whether the model reasons |
+| `reasoning_efforts` | The `reasoning_effort` values the model runs at as asked, lowest first (`["none"]` for a model without reasoning). Any other value is accepted and clamped |
+| `input` | What it accepts: `text`, `image` |
+| `context_window`, `max_output_tokens` | In tokens |
+| `cost` | USD per million tokens: `input` (uncached), `output`, `cache_read`, `cache_write`; `0` where pi has no price |
+| `cooldown` | `null`, or the cooldown the model is under after a 429 or 503: `reason`, `scope` (`provider` or `model`), `until` (Unix seconds) ([Cooldowns](#cooldowns)) |
 
 ```json
-{ "object": "list", "data": [{ "id": "claude-sonnet-4-5", "reasoning_efforts": ["none", "minimal", "low", "medium", "high"] }] }
+{ "object": "list", "data": [{ "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
+  "reasoning_efforts": ["none", "minimal", "low", "medium", "high"], "input": ["text", "image"],
+  "context_window": 200000, "max_output_tokens": 64000,
+  "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null }] }
 ```
+
+docker-agent prices a model reached through a custom `base_url` only from a `cost` table in `team.yaml`, so a team can take these prices; without one it records usage but no cost. The path was `GET /v1/pi/models` before 0.1.0; the old path is gone.
 
 ### Per-request API key override
 

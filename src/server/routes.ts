@@ -21,7 +21,6 @@ import { proxyLogger } from '@proxy/logging'
 import { type ConversionSuccess, convertMessages } from '@proxy/openai/messages'
 import {
   computeModelExposure,
-  type ExposedModel,
   type ModelExposureConfig,
   type ModelExposureResult,
   resolveExposedModel
@@ -32,33 +31,15 @@ import {
   STRICT_REMOTE_IMAGE_FETCH
 } from '@proxy/openai/remote-image-fetch'
 import { inlineRemoteImages } from '@proxy/openai/remote-images'
-import { buildChatCompletion } from '@proxy/openai/responses'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
-import { streamToSSE } from '@proxy/openai/sse'
 import { convertTools } from '@proxy/openai/tools'
 import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/validate'
-import {
-  type CompletionOptions,
-  piComplete,
-  piStream,
-  type StartedStream
-} from '@proxy/pi/complete'
-import { getAvailableModels, getEnabledModels, getRequestAuth } from '@proxy/pi/registry'
-import {
-  authenticationError,
-  invalidRequest,
-  type MappedUpstreamError,
-  mapFailedCall,
-  mapUpstreamError,
-  modelNotFound,
-  unsupportedParameter
-} from '@proxy/server/errors'
+import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
+import { dispatchChat, findCredentialedStart, planRoute } from '@proxy/server/chat-dispatch'
+import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
   HTTP_BAD_REQUEST,
   HTTP_NOT_FOUND,
-  HTTP_SERVICE_UNAVAILABLE,
-  HTTP_TOO_MANY_REQUESTS,
-  HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE_ENTITY
 } from '@proxy/server/http-status'
 import { jsonBodyMiddleware } from '@proxy/server/middleware'
@@ -76,7 +57,6 @@ import {
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
 import { describeRoute, validator } from 'hono-openapi'
-import { stream as honoStream } from 'hono/streaming'
 
 /**
  * Reads the model exposure config.
@@ -106,14 +86,16 @@ export async function fileConfigReader(): Promise<ModelExposureConfig> {
     publicModelIdMode: file.publicModelIdMode,
     enabledModelCount: enabledModels?.length,
     customModelCount: file.customModels.length,
-    providerPrefixCount: Object.keys(file.providerPrefixes).length
+    providerPrefixCount: Object.keys(file.providerPrefixes).length,
+    aliasCount: Object.keys(file.aliases).length
   })
   return {
     publicModelIdMode: file.publicModelIdMode,
     modelExposureMode: file.modelExposureMode,
     enabledModels,
     customModels: file.customModels,
-    providerPrefixes: file.providerPrefixes
+    providerPrefixes: file.providerPrefixes,
+    aliases: file.aliases
   }
 }
 
@@ -124,8 +106,6 @@ const CHAT_PATH = '/v1/chat/completions'
 type ProxyContext = Context<ProxyEnv>
 /** A validated chat completion request body. */
 type ChatRequest = ChatCompletionRequest
-/** A pi model, as the exposure engine resolves it. */
-type PiModel = ExposedModel['model']
 /** A pi `Context`: system prompt, messages and tools. */
 type PiContext = ConversionSuccess['context']
 
@@ -159,61 +139,6 @@ async function getExposure(configReader: ExposureConfigReader): Promise<ModelExp
     availableModelCount: available.length
   })
   return outcome
-}
-
-/**
- * Logs a mapped upstream failure.
- *
- * @remarks
- * A line for the failure, plus a warning for rate limiting or overload (429, 503) so those can be
- * counted apart from real failures. A 400 is the client's doing (a field the provider refused, a
- * history too long for the model), so its line is a warning; any other failure is an error. The
- * level follows the mapped status on purpose: mapping decides whose fault a failure is (a
- * credential problem a provider answers with 400 maps to a 502, so it stays an error), and any
- * future mapping to 400 is a client error too. The raw upstream `detail` stays at debug: some
- * providers quote parts of the request back. The request's IDs come from the logging context.
- *
- * @param mapped - the status and body the client gets
- * @param detail - the raw upstream error message, or `undefined` when there is none
- * @returns `mapped`, unchanged
- */
-function reportUpstreamFailure(
-  mapped: MappedUpstreamError,
-  detail: string | undefined
-): MappedUpstreamError {
-  const properties = {
-    status: mapped.status,
-    message: mapped.body.error.message,
-    code: mapped.body.error.code
-  }
-  if (mapped.status === HTTP_BAD_REQUEST) {
-    chatLogger.warn('Upstream refused the request with {status}: {message}', properties)
-  } else {
-    chatLogger.error('Upstream call failed with {status}: {message}', properties)
-  }
-  if (detail !== undefined) {
-    chatLogger.debug('Upstream error detail: {detail}', { detail })
-  }
-  if (mapped.status === HTTP_TOO_MANY_REQUESTS || mapped.status === HTTP_SERVICE_UNAVAILABLE) {
-    chatLogger.warn('Upstream overloaded ({upstreamStatus}, {code})', {
-      upstreamStatus: mapped.status,
-      code: mapped.body.error.code ?? 'unknown'
-    })
-  }
-  return mapped
-}
-
-/**
- * Maps and logs a thrown upstream failure, as {@link reportUpstreamFailure} does.
- *
- * @param err - the thrown value; an `Error`'s message is both mapped and logged as the detail
- * @returns the status and body the client gets
- */
-function reportThrownFailure(err: unknown): MappedUpstreamError {
-  return reportUpstreamFailure(
-    mapUpstreamError(err),
-    err instanceof Error ? err.message : undefined
-  )
 }
 
 /**
@@ -335,204 +260,6 @@ function buildPiContext(honoContext: ProxyContext, request: ChatRequest): Step<P
   return { ok: true, value: context }
 }
 
-/**
- * Checks that the request can authenticate upstream before calling the provider.
- *
- * @remarks
- * With no per-request key, the model's provider must have a credential pi can resolve; otherwise
- * the request is rejected early instead of letting the provider fail later with a less actionable
- * error.
- *
- * @param context - the request's Hono context
- * @param model - the resolved pi model
- * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined` when not sent
- * @returns a 401 response when no upstream auth is available, else `undefined`
- */
-async function checkRequestAuth(
-  context: ProxyContext,
-  model: PiModel,
-  upstreamApiKey: string | undefined
-): Promise<Response | undefined> {
-  if (upstreamApiKey !== undefined) {
-    chatLogger.debug('Using per-request upstream API key for {provider}', {
-      provider: model.provider
-    })
-    return undefined
-  }
-  const requestAuth = await getRequestAuth(model)
-  if (requestAuth.ok) {
-    chatLogger.debug('Resolved upstream auth for {provider} from pi', { provider: model.provider })
-    return undefined
-  }
-  chatLogger.warn('Rejected chat request: no upstream auth for {provider}: {reason}', {
-    provider: model.provider,
-    model: `${model.provider}/${model.id}`,
-    reason: requestAuth.error
-  })
-  return context.json(
-    authenticationError(
-      `Could not resolve request auth for provider '${model.provider}'. ${requestAuth.error}. ` +
-        "Configure credentials via 'pi /login' or pass X-Switchboard-Upstream-Api-Key header."
-    ),
-    HTTP_UNAUTHORIZED
-  )
-}
-
-/** Everything needed to run an upstream completion for one request. */
-interface CompletionJob {
-  readonly requestId: string
-  readonly canonicalModelId: string
-  readonly model: PiModel
-  readonly context: PiContext
-  readonly request: ChatRequest
-  readonly options: CompletionOptions
-}
-
-/**
- * Joins the first result of an event iterator and the rest of it into one async iterable.
- *
- * @remarks
- * Ending it early (the client left mid-stream) ends the rest too.
- *
- * @typeParam T - the event type
- * @param first - the result already read from `rest`
- * @param rest - the iterator `first` came from
- * @returns a generator that yields `first`'s value (unless it is done), then the rest
- */
-async function* startingWith<T>(
-  first: IteratorResult<T>,
-  rest: AsyncIterator<T>
-): AsyncGenerator<T> {
-  try {
-    if (first.done === true) return
-    yield first.value
-    for (let next = await rest.next(); next.done !== true; next = await rest.next()) {
-      yield next.value
-    }
-  } finally {
-    await rest.return?.()
-  }
-}
-
-/**
- * Streams a completion as SSE.
- *
- * @remarks
- * Nothing is sent until pi's first event: every pi adapter emits `start` only once the provider
- * has accepted the request, so a failure before it (an overflow, a rate limit, bad credentials, a
- * provider that never answers) still gets its HTTP status and JSON body, as OpenAI answers a
- * streaming request it refuses. Once the stream has started, a failure can only be an SSE error
- * event with the same body.
- *
- * @param honoContext - the request's Hono context
- * @param job - the resolved model, pi context, request and call options
- * @returns the SSE response, a mapped upstream error response, or an empty response when the
- *   client left before the stream started
- */
-async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promise<Response> {
-  const { requestId, canonicalModelId, model, context, request, options } = job
-  const includeUsage =
-    request.stream_options !== null &&
-    request.stream_options !== undefined &&
-    request.stream_options.include_usage === true
-  const start = performance.now()
-  // The client's own departure aborts the call, which then fails: not an upstream failure, and
-  // nobody is waiting for the answer.
-  const answerClientLeft = (): Response => {
-    chatLogger.debug('Client left before the stream started, after {durationMs} ms', {
-      durationMs: Math.round(performance.now() - start)
-    })
-    return honoContext.body(null)
-  }
-
-  let started: StartedStream
-  try {
-    started = await piStream(model, context, request, options)
-  } catch (err: unknown) {
-    if (options.signal?.aborted === true) return answerClientLeft()
-    const mapped = reportThrownFailure(err)
-    return honoContext.json(mapped.body, mapped.status)
-  }
-  const { first, events } = started
-  if (first.done !== true && first.value.type === 'error') {
-    if (options.signal?.aborted === true) return answerClientLeft()
-    const failed = first.value.error
-    const mapped = reportUpstreamFailure(mapFailedCall(failed), failed.errorMessage)
-    chatLogger.debug('Upstream failed before the stream started; answering {status}', {
-      status: mapped.status
-    })
-    return honoContext.json(mapped.body, mapped.status)
-  }
-
-  honoContext.header('content-type', 'text/event-stream')
-  honoContext.header('cache-control', 'no-cache')
-  honoContext.header('connection', 'keep-alive')
-  chatLogger.debug('Streaming {model} with includeUsage={includeUsage}', {
-    model: canonicalModelId,
-    includeUsage
-  })
-
-  return honoStream(honoContext, async (stream) => {
-    let frameCount = 0
-    try {
-      for await (const frame of streamToSSE(
-        startingWith(first, events),
-        requestId,
-        canonicalModelId,
-        includeUsage
-      )) {
-        await stream.write(frame)
-        frameCount += 1
-      }
-      chatLogger.debug('Stream finished: {frameCount} frames in {durationMs} ms', {
-        frameCount,
-        durationMs: Math.round(performance.now() - start),
-        aborted: stream.aborted
-      })
-    } catch (err: unknown) {
-      const mapped = reportThrownFailure(err)
-      chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
-        frameCount,
-        durationMs: Math.round(performance.now() - start)
-      })
-      await stream.write(`data: ${JSON.stringify(mapped.body)}\n\n`)
-      await stream.write('data: [DONE]\n\n')
-    }
-  })
-}
-
-/**
- * Runs a non-streaming completion and answers it as an OpenAI chat completion.
- *
- * @param honoContext - the request's Hono context
- * @param job - the resolved model, pi context, request and call options
- * @returns the chat completion, or a mapped upstream error response when the call fails or ends
- *   with `stopReason` `error` or `aborted`
- */
-async function completeChat(honoContext: ProxyContext, job: CompletionJob): Promise<Response> {
-  const { requestId, canonicalModelId, model, context, request, options } = job
-  const start = performance.now()
-  try {
-    const message = await piComplete(model, context, request, options)
-    chatLogger.debug('Completion for {model} finished: {stopReason} in {durationMs} ms', {
-      model: canonicalModelId,
-      stopReason: message.stopReason,
-      durationMs: Math.round(performance.now() - start)
-    })
-
-    // Detect upstream errors reported via stopReason
-    if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-      const mapped = reportUpstreamFailure(mapFailedCall(message), message.errorMessage)
-      return honoContext.json(mapped.body, mapped.status)
-    }
-
-    return honoContext.json(buildChatCompletion(requestId, canonicalModelId, message))
-  } catch (err: unknown) {
-    const mapped = reportThrownFailure(err)
-    return honoContext.json(mapped.body, mapped.status)
-  }
-}
-
 /** What the chat handler needs from the app beyond the request: set once when routes are built. */
 interface ChatRouteSettings {
   /** The server config; `upstreamTimeoutMs` and `remoteImagesEnabled` are read. */
@@ -544,8 +271,9 @@ interface ChatRouteSettings {
 }
 
 /**
- * Handles `POST /v1/chat/completions` for a validated request: resolves the model, inlines remote
- * images, builds the pi context, checks upstream auth, then streams or completes.
+ * Handles `POST /v1/chat/completions` for a validated request: resolves the model or alias, checks
+ * upstream auth, inlines remote images, builds the pi context, then runs it on the model or the
+ * alias's fallback chain (`chat-dispatch.ts`, #67).
  *
  * @param context - the request's Hono context
  * @param request - the request body, as the route's `validator('json')` parsed it
@@ -574,22 +302,27 @@ async function handleChatCompletion(
     return context.json(modelNotFound(request.model), HTTP_NOT_FOUND)
   }
 
-  const model = resolved.model
-  const canonicalModelId = resolved.canonicalId
+  const route = planRoute(resolved, request, upstreamApiKey)
+  const [first = resolved] = route.candidates
 
   // The request and response lines carry no model, so this one ties the call to the model that
-  // served it. Ids only, never message content or credentials.
+  // serves it first, and to the alias it was asked for by. Ids only, never message content or
+  // credentials.
   chatLogger.info('Chat request for {requestedModel} resolved to {model}', {
     requestedModel: request.model,
-    model: canonicalModelId,
-    provider: model.provider,
-    stream: request.stream === true
+    model: first.canonicalId,
+    provider: first.provider,
+    stream: request.stream === true,
+    ...(resolved.alias === undefined ? {} : { alias: resolved.alias }),
+    ...(route.candidates.length > 1
+      ? { fallbackModels: route.candidates.slice(1).map((candidate) => candidate.canonicalId) }
+      : {})
   })
 
-  // Upstream credentials first: a request that cannot reach the provider must not make the proxy
+  // Upstream credentials first: a request that cannot reach any provider must not make the proxy
   // fetch anything on its behalf (#109 review).
-  const authFailure = await checkRequestAuth(context, model, upstreamApiKey)
-  if (authFailure !== undefined) return authFailure
+  const start = await findCredentialedStart(route, upstreamApiKey, resolved.alias)
+  if (start.kind === 'refused') return context.json(start.answer.body, start.answer.status)
 
   const prepared = await inlineImages(context, request, config, remoteImageFetch)
   if (!prepared.ok) return prepared.response
@@ -597,27 +330,22 @@ async function handleChatCompletion(
   const built = buildPiContext(context, prepared.value)
   if (!built.ok) return built.response
 
-  const job: CompletionJob = {
+  return dispatchChat(context, {
     requestId,
-    canonicalModelId,
-    model,
+    alias: resolved.alias,
+    candidates: start.candidates,
+    fallbackOn: route.fallbackOn,
+    attempts: start.attempts,
     context: built.value,
     request,
     options: {
       upstreamApiKey,
-      // The client's disconnect only. streamChat reads it to tell a client that left from an
+      // The client's disconnect only. The dispatch reads it to tell a client that left from an
       // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
       signal: context.get('abortController').signal,
       upstreamTimeoutMs: config.upstreamTimeoutMs
     }
-  }
-
-  chatLogger.debug('Dispatching {model} as {mode}', {
-    model: canonicalModelId,
-    mode: request.stream === true ? 'stream' : 'complete',
-    upstreamTimeoutMs: config.upstreamTimeoutMs
   })
-  return request.stream === true ? streamChat(context, job) : completeChat(context, job)
 }
 
 /**
@@ -640,8 +368,11 @@ export function createRoutes(
   // --- GET /v1/models ---
   routes.get('/v1/models', describeRoute(listModelsDescription), async (context) => {
     const exposure = await getExposure(configReader)
-    chatLogger.debug('Listing {modelCount} models', { modelCount: exposure.models.length })
-    return context.json(buildModelList(exposure.models))
+    chatLogger.debug('Listing {modelCount} models and {aliasCount} aliases', {
+      modelCount: exposure.models.length,
+      aliasCount: exposure.aliases.length
+    })
+    return context.json(buildModelList([...exposure.models, ...exposure.aliases]))
   })
 
   // --- GET /v1/switchboard/models ---
@@ -651,10 +382,11 @@ export function createRoutes(
     describeRoute(listModelCapabilitiesDescription),
     async (context) => {
       const exposure = await getExposure(configReader)
-      chatLogger.debug('Listing capabilities of {modelCount} models', {
-        modelCount: exposure.models.length
+      chatLogger.debug('Listing capabilities of {modelCount} models and {aliasCount} aliases', {
+        modelCount: exposure.models.length,
+        aliasCount: exposure.aliases.length
       })
-      return context.json(buildPiModelList(exposure.models))
+      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
     }
   )
 

@@ -114,6 +114,44 @@ const ZedSyncConfigSchema = z.object({
 /** The `zed` section of the config, as validated. */
 export type ZedSyncConfig = z.infer<typeof ZedSyncConfigSchema>
 
+/**
+ * The upstream failures an alias's fallback chain can name (#67). A failure before the response
+ * starts moves to the next target only when the alias names its class:
+ * - `rate_limit`: 429
+ * - `unavailable`: 503, or 529 overloaded
+ * - `timeout`: 504, or the upstream idle timeout
+ * - `auth`: the credential fails (no credential pi can resolve, or the provider's 401 or 403)
+ * - `refused`: the login can't run the model (`404 model_not_found`, #156)
+ * - `upstream_error`: any other upstream failure, a network failure included
+ *
+ * A 400 (the request's own fault), the client leaving, and a failure after the stream started
+ * never fall back.
+ */
+export const FailureClassSchema = z.enum([
+  'rate_limit',
+  'unavailable',
+  'timeout',
+  'auth',
+  'refused',
+  'upstream_error'
+])
+/** One of {@link FailureClassSchema}'s classes. */
+export type FailureClass = z.infer<typeof FailureClassSchema>
+
+/**
+ * What an alias names (#66, #67): one canonical ID, or targets tried in order, moving to the next
+ * only on the failures `fallbackOn` names (principle VI: the configuration names them).
+ */
+const AliasTargetSchema = z.union([
+  VerbatimNameSchema,
+  z.object({
+    targets: z.array(VerbatimNameSchema).min(1).readonly(),
+    fallbackOn: z.array(FailureClassSchema).readonly()
+  })
+])
+/** What an alias names: see {@link AliasTargetSchema}. */
+export type AliasTarget = z.infer<typeof AliasTargetSchema>
+
 /** The JSON config file's fields and the values each accepts. */
 const ProxyConfigSchema = z.object({
   /** Bind address. Surrounding whitespace is a typo; empty means unset. */
@@ -137,6 +175,11 @@ const ProxyConfigSchema = z.object({
   customModels: z.array(VerbatimNameSchema).readonly(),
   /** Provider key -> custom public prefix label. Default prefix = provider key. */
   providerPrefixes: z.record(z.string(), VerbatimNameSchema).readonly(),
+  /**
+   * Alias -> one canonical ID, or `{ targets, fallbackOn }` (#66, #67). IDs verbatim and never
+   * empty: an alias is listed and resolved only while one of its targets is exposed.
+   */
+  aliases: z.record(z.string().min(1), AliasTargetSchema).readonly(),
   /** Lowest log level the proxy writes (LogTape levels). */
   logLevel: LogLevelSchema,
   zed: ZedSyncConfigSchema
@@ -183,6 +226,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   modelExposureMode: 'scoped',
   customModels: [],
   providerPrefixes: {},
+  aliases: {},
   logLevel: 'info',
   zed: {
     providerName: 'Pi Proxy',
@@ -245,6 +289,22 @@ function validNameEntries(value: unknown): Record<string, string> {
     if (parsed.success) result[key] = parsed.data
   }
   return result
+}
+
+/**
+ * Keeps the `aliases` entries the schema accepts: a non-empty name for a valid target.
+ *
+ * @param value - The field's raw value.
+ * @returns The valid entries; empty when `value` is not a plain object.
+ */
+function validAliases(value: unknown): Record<string, AliasTarget> {
+  if (!isRecord(value)) return {}
+  const entries: Record<string, AliasTarget> = {}
+  for (const [alias, candidate] of Object.entries(value)) {
+    const parsed = AliasTargetSchema.safeParse(candidate)
+    if (alias.length > 0 && parsed.success) entries[alias] = parsed.data
+  }
+  return entries
 }
 
 /** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
@@ -363,6 +423,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     ),
     customModels: field('customModels', fields.customModels, validNames),
     providerPrefixes: field('providerPrefixes', fields.providerPrefixes, validNameEntries),
+    aliases: field('aliases', fields.aliases, validAliases),
     logLevel: field('logLevel', fields.logLevel, () => DEFAULT_CONFIG.logLevel),
     zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected)
   }

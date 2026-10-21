@@ -412,9 +412,9 @@ since the rename; each issue holds the detailed checklist.
 Constitution principle VI applies to each item: configured explicitly, exposure-bound, and the
 serving model and login reported under `x_pi` and in the log.
 
-- [ ] Aliases (#66)
-- [ ] Fallback chains (#67)
-- [ ] Cooldowns after rate limits (#68)
+- [x] Aliases (#66): `aliases` in `proxy-config.json`, listed while the target is exposed, `x_pi.alias`, a shadowing alias reported in `/healthz/models`
+- [x] Fallback chains (#67): `{ targets, fallbackOn }` aliases, fallback only on the named failure classes before the response starts, `x_pi.attempts`, every hop logged
+- [x] Cooldowns after rate limits (#68): a 429 cools the provider, a 503 the model, for the time the response gives (else 60 s, 180 s, doubling); chains that name the class skip it; shown on `/healthz/models`, `/v1/switchboard/models` and `x_pi.attempts`
 - [ ] Quota awareness (#69)
 - [ ] Usage and cost by route (#70)
 

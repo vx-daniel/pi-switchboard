@@ -15,11 +15,14 @@
 import type { AssistantMessageEvent, Usage } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import {
+  attemptsSchema,
   type FinishReason,
   finishReasonSchema,
   mapFinishReason,
   mapUsage,
-  openAIUsageSchema
+  openAIUsageSchema,
+  type ResponseRoute,
+  routeFields
 } from '@proxy/openai/responses'
 import { mapFailedCall, type OpenAIError } from '@proxy/server/errors'
 import * as z from 'zod'
@@ -72,7 +75,22 @@ export const sseChunkSchema = z
     }),
     usage: openAIUsageSchema.nullable().optional().meta({
       description: 'Only in the final chunk, and only with `stream_options.include_usage`.'
-    })
+    }),
+    x_pi: z
+      .object({
+        alias: z
+          .string()
+          .trim()
+          .optional()
+          .meta({ description: 'The alias the request named (#66).' }),
+        attempts: attemptsSchema
+      })
+      .optional()
+      .meta({
+        description:
+          "Not OpenAI's: in every chunk, only when the request named an alias or an alias fell " +
+          'back (#67).'
+      })
   })
   .meta({ id: 'ChatCompletionChunk', description: 'One `data:` event of a streamed completion.' })
 
@@ -106,6 +124,19 @@ interface ChunkMeta {
   readonly id: string
   readonly created: number
   readonly model: string
+  /** The alias and failed attempts (#66, #67): sent under `x_pi` in every chunk. */
+  readonly route: ResponseRoute
+}
+
+/**
+ * Returns the `x_pi` a chunk carries: the alias and the failed attempts, when there are any.
+ *
+ * @param meta - the shared chunk fields
+ * @returns `{ x_pi: … }`, or nothing to add
+ */
+function routeField(meta: ChunkMeta): Pick<SSEChunk, 'x_pi'> {
+  const fields = routeFields(meta.route)
+  return fields.alias === undefined && fields.attempts === undefined ? {} : { x_pi: fields }
 }
 
 /** Mutable state of one stream while events are encoded. */
@@ -142,7 +173,8 @@ function encodeChoiceChunk(
         delta,
         finish_reason: finishReason
       }
-    ]
+    ],
+    ...routeField(meta)
   })
 }
 
@@ -386,13 +418,22 @@ function closingFrames(
         created: meta.created,
         model: meta.model,
         choices: [],
-        usage: mapUsage(state.finalUsage)
+        usage: mapUsage(state.finalUsage),
+        ...routeField(meta)
       })
     )
   }
 
   frames.push(encodeDone())
   return frames
+}
+
+/** What every chunk of one stream reports, besides its events. */
+export interface StreamIdentity {
+  /** The chunk `id`. */
+  readonly requestId: string
+  /** The model that answers, reported in each chunk, and the alias and attempts (#66, #67). */
+  readonly route: ResponseRoute
 }
 
 /**
@@ -403,19 +444,24 @@ function closingFrames(
  * `events` are rethrown after the end of the stream is logged.
  *
  * @param events - pi's event stream for one response
- * @param requestId - the chunk `id`
- * @param model - the model ID reported in each chunk
+ * @param identity - the request ID, and the route every chunk reports
  * @param includeUsage - whether to send a final usage chunk
  * @returns an async generator of SSE frames
  * @throws whatever iterating `events` throws
  */
 export async function* streamToSSE(
   events: AsyncIterable<AssistantMessageEvent>,
-  requestId: string,
-  model: string,
+  identity: StreamIdentity,
   includeUsage: boolean
 ): AsyncGenerator<string> {
-  const meta: ChunkMeta = { id: requestId, created: Math.floor(Date.now() / MS_PER_SECOND), model }
+  const { requestId, route } = identity
+  const model = route.model
+  const meta: ChunkMeta = {
+    id: requestId,
+    created: Math.floor(Date.now() / MS_PER_SECOND),
+    model,
+    route
+  }
   const state: StreamState = {
     sentFirstChunk: false,
     finishReason: null,
