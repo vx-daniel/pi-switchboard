@@ -7,6 +7,14 @@
 # auth semantics are unchanged for everyone else (#60, "Decision needed").
 set -eu
 
+# Exactly one of these as the only argument prints and exits: the CLI starts no server for them, so
+# `docker run --rm <image> --version` needs no token (#168). Anything else goes through the guard.
+if [ "$#" -eq 1 ]; then
+  case "$1" in
+    --version | -v | --help | -h) exec node /app/dist/index.mjs "$1" ;;
+  esac
+fi
+
 if [ -z "${PI_SWITCHBOARD_AUTH_TOKEN:-}" ]; then
   echo 'pi-switchboard: set PI_SWITCHBOARD_AUTH_TOKEN. This image listens on every interface and' \
     'serves the pi login in its volume, so it does not start without a bearer token.' >&2

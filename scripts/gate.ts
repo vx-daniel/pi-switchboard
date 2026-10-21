@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * The single repo-wide gate: runs format, lint, test, fallow and build in that order and stops at
- * the first failure.
+ * The single repo-wide gate: runs format, lint, test, fallow, build and smoke in that order and
+ * stops at the first failure.
  *
  * @remarks
  * Ported from zen-harness-foundation's `scripts/gate.ts` (itself from slop-factory's bun example).
@@ -33,7 +33,11 @@
  *                included (`--fail-on-issues`; by default a clone only warns); exceptions live in
  *                `.fallowrc.jsonc`, each with its reason.
  *   5. build  — `vp pack`: the tsdown build of every published entry point and its declarations.
- *                Last, because it is the slowest and the checks above cover the source it reads.
+ *                Late, because it is slow and the checks above cover the source it reads.
+ *   6. smoke  — `node dist/index.mjs --version`: runs the built CLI, as its `bin` does. The entry
+ *                loads the CLI dynamically (#165), a split only the build makes, so only this
+ *                sees a bundle that cannot load it, or one built without the package version
+ *                (#168). Last, because it needs the build.
  *
  * ⚠ Each row's name and first backticked command is CHECKED against GATES and package.json by
  * `test/unit/gate.test.ts`: this list is the documented authority for what "green" means, and a
@@ -142,6 +146,11 @@ export const GATES: readonly Gate[] = [
     name: 'build',
     describe: 'tsdown: every published entry point and its declarations',
     script: 'build'
+  },
+  {
+    name: 'smoke',
+    describe: 'the built CLI starts: its entry loads the bundled CLI, which knows its version',
+    script: 'smoke'
   }
 ]
 

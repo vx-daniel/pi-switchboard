@@ -23,7 +23,8 @@ Secondary goals:
 
 - Preserve request and usage observability
 - Be safe by default for local usage
-- Distribution: npm and `pi install` (#59), a Docker image (#60), a standalone binary (#61)
+- Distribution: the pi package on GitHub Packages, npmjs later (#59), a Docker image (#60), a
+  standalone binary (#61)
 - Later, not planned: an experimental agentic mode ("Agentic mode" below)
 
 ## Non-goals
@@ -64,9 +65,9 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 - **Gate** (`scripts/gate.ts`, `pnpm run check:all`): format → lint + type check → tests with coverage → fallow → build; the single definition of green, run by the pre-commit hook, CI, and the release workflow
 - **fallow** (`.fallowrc.jsonc`, `fallow-plugin-oxlint-js.jsonc`): dead code, duplication and complexity, CRAP scored against the test coverage; adopted at zero findings (#83), so any new one fails the gate. Exceptions are config entries with reasons, never inline comments. No complexity ceiling is raised: the ones set at adoption were refactored away (#85), the last being `resolveModelScope`
 - **Git hooks** (`.vite-hooks/`): pre-commit (`check:all`), commit-msg (commitlint), pre-push (lockfile sync)
-- **CI** (`.github/workflows/`): `ci.yml` (`gate` on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks, new commits only, every branch), `claude-pr-review.yml` (manual), `publish.yml` (release on `main`)
+- **CI** (`.github/workflows/`): `ci.yml` (`gate` on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks, new commits only, every branch), `claude-pr-review.yml` (manual), `publish.yml` (release on `main`, then `image.yml` and `package.yml` for the new tag)
 - **commitlint**: conventional commits via `@commitlint/config-conventional`
-- **semantic-release**: changelog, npm publish, GitHub release, git commit
+- **semantic-release**: version, changelog, GitHub release and the release commit; the image and the package are published from its tag by `image.yml` and `package.yml`
 
 ## API compatibility policy
 
@@ -527,7 +528,7 @@ user), and sends it on only where the API takes it (constitution 3.1.0, principl
 
 | API | What happens |
 |---|---|
-| OpenAI chat completions and Responses at `api.openai.com` | Forwarded. pi joins the leading system and developer text into one string; the proxy's `onPayload` (`src/pi/cache-breakpoints.ts`) puts the client's parts back in its place, joined with the same blank lines, each with its breakpoint (`text` or `input_text` parts). User parts get theirs back by position. Each change is made only when pi's text matches exactly, so a payload pi built differently is left alone. |
+| OpenAI chat completions and Responses at `api.openai.com` | Forwarded. pi joins the leading system and developer text into one string; the proxy's `onPayload` (`src/pi/cache-breakpoints.ts`) puts the client's parts back in its place, joined with the same blank lines, each with its breakpoint (`text` or `input_text` parts). User parts get theirs back by position. Each change is made only when pi's text matches exactly, so a payload pi built differently is left alone. A model there that refuses the field is retried without it and then left out (below). |
 | Codex (`openai-codex-responses`) | Dropped: pi sends the system prompt as the plain string `instructions`, which has no part to carry it. |
 | Every other API (OpenAI-compatible servers, Anthropic, Google, Bedrock, …) | Dropped: an OpenAI-compatible server may refuse a field it does not know, and the others have no such field. |
 
@@ -536,6 +537,25 @@ forward reports how many were placed. Rejecting the field instead would break do
 which sends it on every system part to `gpt-*` models (#149). `test/unit/cache-breakpoints.test.ts`
 runs pi's real chat-completions and Responses builders, so a change in how pi builds the system
 message shows up there.
+
+**A model that refuses the field** (#163, constitution 3.4.0). Some models on `api.openai.com`,
+the ChatGPT-subscription ones (`gpt-6-luna`, `gpt-5.6-terra`, `gpt-6.1-sol`, `gpt-6-astra`),
+answer it with a 400: `{"message":"prompt_cache_breakpoint is not supported on this model",
+"param":"prompt_cache_breakpoint",…}`. `retryWithoutBreakpoints` recognizes that answer in pi's
+error text (`400: {…}` on chat completions, `OpenAI API error (400): {…}` on Responses, `param`
+top level or under `error`) for a request that sent breakpoints. It remembers the model as
+`provider/id` for the life of the process, and `piComplete` or `piStream` sends the request once
+more. The breakpoint patch then leaves the field out for that model, on this request and every
+later one, so each such model costs one failed request per proxy start, or one per request
+already in flight when the first refusal comes back: a refusal naming the field proves its
+request sent it, so those are each retried too (#166 review). A client that has left gets no
+retry. pi emits `start` only once the provider has accepted the request, so a stream's refusal is
+its first event, and the retry happens before the client sees anything. The first refusal per
+model is logged at `info` (`{modelId} refused prompt_cache_breakpoint: retrying without it…`), and
+later drops at `debug`. A 400 for any other `param`, and any other status, are answered as they
+are. `test/integration/breakpoint-refusal.test.ts` runs the chain through pi's OpenAI adapter and
+SDK, concurrent first requests included; `test/unit/cache-breakpoints.test.ts` pins the Responses
+wording.
 
 ## Message mapping policy
 
@@ -1133,6 +1153,9 @@ command and the server run the same pi on one `auth.json`.
   before it listens. The proxy itself still only warns when it binds off loopback with auth off.
   Moving the refusal into the proxy would change auth semantics for every non-container user, so
   it stays an image rule (#60, "Decision needed"); the token comes from the environment only.
+  One exception (#168): exactly one argument, `--version`, `-v`, `--help` or `-h`, runs without
+  a token, since the CLI prints and exits for those without starting a server. Anything beside
+  it goes through the guard.
 - **Writes only to the volume.** UID 1000, `/app` owned by root, and in `compose.yaml` a
   read-only root filesystem, `/tmp` as tmpfs, `cap_drop: ALL` and `no-new-privileges`. pi's login
   and its refreshes, and the proxy's `proxy-config.json`, live in the volume at
@@ -1159,11 +1182,62 @@ command and the server run the same pi on one `auth.json`.
 - **Registry setup, once.** Docker Hub needs the `DOCKERHUB_TOKEN` repository secret, a
   `vxdaniel` access token with read and write access. Without it the image job fails before
   pushing anywhere. Turn on immutable tags on the Docker Hub repository, so the registry enforces
-  what `image.yml` checks. GHCR makes a new package private on first publish even for a public
-  repository: after the first release, set `pi-switchboard` public in the package settings, once
-  (it cannot be made private again).
+  what `image.yml` checks (on since 2026-10-21). GitHub's docs say a new package starts private,
+  but the GHCR package was public from its first publish, 0.1.0: anonymous `docker pull` worked at
+  once, presumably because it is linked to this public repository. If a package ever turns up
+  private, set it public in the package settings (a public package cannot be made private again).
 - **Port published on loopback.** Compose publishes `127.0.0.1:4141` only, keeping the
   local-first default for the host.
+
+### pi package
+
+The pi package, `@vx-daniel/pi-switchboard` (the CLI, the library entry points and the extension),
+is published to GitHub Packages' npm registry (#59), not npmjs: the maintainer is not ready to
+share it widely. npmjs comes later, by choice.
+
+- **Published once per version.** The release workflow's `package` job calls `package.yml` with
+  each new release tag. It builds that tag with the frozen lockfile and runs
+  `pnpm publish --ignore-scripts` with `GITHUB_TOKEN`. pnpm rewrites the `catalog:` specs and
+  drops `prepare`. Scripts are off because the release gate already tested that commit. The
+  registry refuses a version twice. Run `package.yml` by hand with a tag to publish a release
+  whose package is missing.
+- **Installing needs a token.** GitHub Packages requires a classic personal access token with
+  `read:packages` to install any package, public ones included, unlike GHCR. Every user sets the
+  `@vx-daniel` scope and the token in `~/.npmrc` once (README, "Installation").
+- **Ruled out, tested with pi 1.3.0:**
+  - `pi install git:github.com/vx-daniel/pi-switchboard` clones `dev` and runs
+    `npm install --omit=dev`. `dist/` is not in git, and `prepare` needs the dev dependencies,
+    which that leaves out.
+  - A release tarball as a URL (`npm:https://…/x.tgz`) installs and is listed, but pi takes the
+    whole URL for the package name, looks under `node_modules/<url>`, and never loads the
+    extension.
+  - By package name, pi finds the package, and `/proxy start` runs the installed
+    `dist/index.mjs`.
+- **pi's packages are not `dependencies`** (#165). pi warns about an extension package that
+  lists `@earendil-works/pi-ai`, `pi-coding-agent` or `pi-tui` in `dependencies`, and rightly: the
+  extension runs in pi's process, where pi provides them, and the library entry points it imports
+  (`config`, `exposure`) loaded this package's installed copy of pi as well, a second pi runtime.
+  So:
+  - **Those entry points import no pi at runtime.** `piAgentDir` (`src/config/agent-dir.ts`)
+    stands in for pi's `getAgentDir`, Windows shell paths included, checked against it in
+    `test/unit/agent-dir.test.ts` (on Windows with `process.platform` stubbed). `sameModel` in
+    `model-scope.ts` stands in for `modelsAreEqual`; `model-scope.test.ts` compares the whole
+    resolver with pi's, so a dedup that differs from pi's fails there.
+    `test/unit/library-entry-points.test.ts` loads the four entry points with every pi package
+    mocked to throw.
+  - **`pi-tui` is an optional `peerDependency` (`*`)**, a dev dependency for the extension's
+    tests. Only the extension uses it, and pi's loader gives the extension the host's copy;
+    optional, so npm installs no copy for a standalone user.
+  - **`pi-ai` and `pi-coding-agent` are `optionalDependencies`.** The proxy that `/proxy start`
+    runs, the standalone CLI and the image need them in their own process; with pi's bundled
+    build there is no host copy on disk to use. npm, pnpm and pi's own install add optional
+    dependencies by default, and pi checks only `dependencies`. An install with `--omit=optional`
+    or `--no-optional` leaves them out; the CLI entry (`src/index.ts`) loads the CLI
+    (`src/cli.ts`) dynamically, so it says which package is missing and how to fix it, and exits
+    1, instead of failing with a stack trace.
+
+  Measured with pi 1.3.0 and a marker in the installed copies: before, pi's own process loaded
+  both at startup; after, only the proxy process does, and pi prints no extension warning.
 
 ### Agentic mode
 
@@ -1459,6 +1533,15 @@ what must never be logged). The CLI writes to stderr at `--log-level` / `PI_SWIT
 on a TTY and JSON Lines with a UTC `@timestamp` otherwise; `--log-format` / `PI_SWITCHBOARD_LOG_FORMAT`
 (`pretty`, `json`) overrides that choice. Passing `/healthz` checks log at `debug`. The pi
 extension logs to a file only when `PI_SWITCHBOARD_EXTENSION_LOG_FILE` is set.
+
+A JSON line's `message` keeps LogTape's rendering, which quotes every string value
+(`Listening on http://"0.0.0.0":4141`). This is deliberate (#159): values such as the requested
+model, a path or `X-Client-Request-Id` come from clients, and the quotes keep a crafted one from
+passing for message text. JSON encoding already keeps a value from forging a second line
+(`test/unit/logging.test.ts`, "keeps a property containing a newline on a single line").
+`properties` carries the values unquoted for anything that parses logs. People reading by eye use
+`pretty`, which prints values bare. Bare strings in JSON, and template-only messages, were
+considered and not taken.
 
 Minimum production observability:
 

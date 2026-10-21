@@ -1,0 +1,88 @@
+name: Package
+
+# Publishes the pi package (@vx-daniel/pi-switchboard) for a release tag to GitHub Packages'
+# npm registry (#59), so `pi install npm:@vx-daniel/pi-switchboard` works for anyone with
+# registry access. Installing from it needs a GitHub token even for a public package (README,
+# "Installation"). The release workflow calls it for each new release; run it by hand to publish
+# a release whose package is missing. The registry refuses to publish a version twice.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to publish, such as pi-switchboard-v0.1.0
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to publish, such as pi-switchboard-v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  package:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Read the version from the tag
+        id: version
+        run: |
+          version="${TAG#pi-switchboard-v}"
+          if [ "$version" = "$TAG" ] ||
+            ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$TAG' is not a release tag (pi-switchboard-v<version>)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the release tag
+        uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      # The release commit sets package.json's version, so the two agree on every release tag.
+      - name: Check the tag matches package.json
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          package_version="$(node -p 'require("./package.json").version')"
+          if [ "$package_version" != "$VERSION" ]; then
+            echo "::error::package.json at $TAG says $package_version, not $VERSION"
+            exit 1
+          fi
+
+      # Node, pnpm and the frozen install, as in CI. registry-url and scope write an .npmrc that
+      # sends @vx-daniel to GitHub Packages with NODE_AUTH_TOKEN. VP_GIT_HOOKS=0 keeps `prepare`
+      # from installing hooks.
+      - name: Set up Vite+
+        uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          node-version: '24'
+          registry-url: https://npm.pkg.github.com
+          scope: '@vx-daniel'
+          cache: true
+        env:
+          VP_GIT_HOOKS: '0'
+
+      - name: Build
+        run: pnpm run build
+
+      # pnpm, not npm: it rewrites the `catalog:` specs in package.json into real versions. Scripts
+      # are off because the release gate already ran the tests on this commit (`prepublishOnly`)
+      # and the build is the step above (`prepack`). A detached tag checkout needs --no-git-checks.
+      - name: Publish
+        run: pnpm publish --ignore-scripts --no-git-checks
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

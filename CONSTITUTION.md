@@ -1,22 +1,24 @@
 <!--
 Sync Impact Report
-Version change: 3.2.0 → 3.3.0 (MINOR)
-Rationale: fields inside messages were dropped without a word (#146): `name`, `image_url.detail`,
-and an assistant message's `refusal` and `audio`, and any key OpenAI does not define, because the
-message and part schemas were not strict like the request. They are now strict, so an unknown or
-unsupported field inside a message gets a named 422 at its path. `name` and `image_url.detail`
-are the exceptions: clients send them routinely and pi has no equivalent, so rejecting them would
-break those clients, and they are listed and logged instead. A null `refusal` or `audio`, which
-OpenAI SDKs send when they echo a reply back, is accepted; a value is refused.
-MINOR: one exception added to principle I; no principle changes.
+Version change: 3.3.0 → 3.4.0 (MINOR)
+Rationale: some models on `api.openai.com`, the ChatGPT-subscription ones (`gpt-6-luna`,
+`gpt-5.6-terra`, `gpt-6.1-sol`, `gpt-6-astra`), answer `prompt_cache_breakpoint` with a 400 naming
+the field (#163), so every request from a client that sends it, docker-agent among them, failed on
+them. The first refusal per model is retried once without the field, and the model is remembered
+for the life of the process, so it costs at most one failed request per model per start. That is a
+second drop of the field, on an API that otherwise gets it, so principle I lists it.
+MINOR: one exception in principle I widened; no principle changes.
 Modified sections:
-- I. OpenAI Compatibility: exceptions list gains `name` on messages and `image_url.detail`
+- I. OpenAI Compatibility: the `prompt_cache_breakpoint` exception covers models that refuse it
 Templates requiring updates:
-- ✅ PLAN.md: "Rejected" and "Unknown field policy" cover fields inside messages
-- ✅ README.md: the messages rows and "Not supported"
-- ✅ docs/reference/claude-openai-compatibility.md: the message rows
+- ✅ PLAN.md: "Prompt cache breakpoints"
+- ✅ README.md: the `prompt_cache_breakpoint` row
+- ✅ AGENTS.md: the permitted drops
 Follow-up TODOs:
 - None.
+
+3.3.0 (2026-10-20): fields inside messages are strict; `name` on messages and `image_url.detail`
+are listed drops, a null `refusal` or `audio` is accepted (#146).
 
 3.2.0 (2026-10-20): `temperature` where pi leaves it out for Claude, listed and logged (#147).
 
@@ -77,7 +79,7 @@ Exceptions: a request field MAY be dropped instead of rejected only where it is 
   - Codex (`openai-codex-responses`): the Codex backend refuses any request that carries it, and widely used clients send one on every request, so a `422` would make every Codex model unusable from them (#49, #80). The proxy drops it. Documented in `PLAN.md`'s Codex table and in `README.md`.
   - Claude (`anthropic-messages`): pi's adapter leaves it out on models whose pi catalog entry clears `supportsTemperature` or sets `supportsMidConvoEffort` (Claude 4.7 and later, which refuse a temperature below 1), and whenever thinking is on (#147). The proxy still passes it to pi and logs that it does not reach Claude. Documented in `PLAN.md`'s Anthropic table and in `README.md`.
 - Passthrough fields a provider has no equivalent for (#81): `stop`, `user`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`, `tool_choice`, `parallel_tool_calls`, `metadata` and `prediction` reach each API verbatim or translated where it has an equivalent, and are dropped where it has none. Clients commonly send one parameter set to every model, and rejecting per API would break them. The per-API tables in `PLAN.md` ("API-aware payload translation") list exactly what each API receives, and `README.md` says fields without an equivalent are skipped; a change to what an API receives updates those tables.
-- `prompt_cache_breakpoint` on content parts (#149): forwarded to OpenAI's own chat completions and Responses (`api.openai.com`), which use it, and dropped for every other API. pi rebuilds each provider's request: Codex's system prompt is a plain `instructions` string with no part to carry it, and an OpenAI-compatible server may refuse a field it does not know. It only affects caching, never the answer, and docker-agent sends it on every `gpt-*` request, so a `422` would break it. Each drop is logged at `debug`, and `PLAN.md` ("Prompt cache breakpoints") and `README.md` document where it goes.
+- `prompt_cache_breakpoint` on content parts (#149): forwarded to OpenAI's own chat completions and Responses (`api.openai.com`), which use it, and dropped for every other API. pi rebuilds each provider's request: Codex's system prompt is a plain `instructions` string with no part to carry it, and an OpenAI-compatible server may refuse a field it does not know. It only affects caching, never the answer, and docker-agent sends it on every `gpt-*` request, so a `422` would break it. A model there that refuses it with a 400 naming the field (the ChatGPT-subscription models, #163) gets the request once more without it, and is remembered for the life of the process; the first refusal per model is logged at `info`. Each other drop is logged at `debug`, and `PLAN.md` ("Prompt cache breakpoints") and `README.md` document where it goes.
 - `name` on a message and `detail` on an `image_url` (#146): OpenAI fields pi has no equivalent for, a participant name and an image detail level. Clients send them routinely, so a `422` would break them. They are accepted and dropped, each drop logged at `debug` by count, and `README.md` and `PLAN.md` ("Unknown field policy") say so. Every other field inside a message is accepted only as declared, and any other key is refused with a named `422`.
 
 Two kinds of route sit outside the stable surface, and only these:
@@ -175,4 +177,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.3.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-20
+**Version**: 3.4.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-21

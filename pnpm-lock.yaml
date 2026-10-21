@@ -20,15 +20,6 @@ importers:
 
   .:
     dependencies:
-      '@earendil-works/pi-ai':
-        specifier: ^1.3.0
-        version: 1.3.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.10.2)(ws@8.22.0)(zod@4.4.3)
-      '@earendil-works/pi-coding-agent':
-        specifier: ^1.3.0
-        version: 1.3.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(ws@8.22.0)(zod@4.4.3)
-      '@earendil-works/pi-tui':
-        specifier: ^1.3.0
-        version: 1.3.0
       '@hono/node-server':
         specifier: ^2.1.5
         version: 2.1.5(hono@4.12.18)
@@ -72,6 +63,9 @@ importers:
       '@commitlint/config-conventional':
         specifier: ^20.5.3
         version: 20.5.3
+      '@earendil-works/pi-tui':
+        specifier: ^1.3.0
+        version: 1.3.0
       '@limegrass/eslint-plugin-import-alias':
         specifier: ^1.6.1
         version: 1.6.1(eslint@10.3.0(jiti@2.7.0))
@@ -117,6 +111,13 @@ importers:
       vite-plus:
         specifier: 'catalog:'
         version: 1.2.0(@types/node@25.7.0)(@vitest/coverage-v8@5.0.4(@vitest/browser@5.0.4)(vitest@5.0.4))(@vitest/ui@5.0.4(vitest@5.0.4))(jiti@2.7.0)(typescript@6.0.3)(yaml@2.9.0)
+    optionalDependencies:
+      '@earendil-works/pi-ai':
+        specifier: ^1.3.0
+        version: 1.3.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.10.2)(ws@8.22.0)(zod@4.4.3)
+      '@earendil-works/pi-coding-agent':
+        specifier: ^1.3.0
+        version: 1.3.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(ws@8.22.0)(zod@4.4.3)
 
 packages:
 
@@ -3493,6 +3494,7 @@ snapshots:
       standardwebhooks: 1.1.1
     optionalDependencies:
       zod: 4.4.3
+    optional: true
 
   '@aws-sdk/client-bedrock-runtime@3.1127.0':
     dependencies:
@@ -3508,6 +3510,7 @@ snapshots:
       '@smithy/node-http-handler': 4.12.1
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/core@3.978.3':
     dependencies:
@@ -3519,6 +3522,7 @@ snapshots:
       '@smithy/types': 4.19.0
       bowser: 2.14.1
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/credential-provider-env@3.972.74':
     dependencies:
@@ -3527,6 +3531,7 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/credential-provider-http@3.972.76':
     dependencies:
@@ -3537,6 +3542,7 @@ snapshots:
       '@smithy/node-http-handler': 4.12.1
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/credential-provider-ini@3.973.19':
     dependencies:
@@ -3553,6 +3559,7 @@ snapshots:
       '@smithy/credential-provider-imds': 4.5.2
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/credential-provider-login@3.972.81':
     dependencies:
@@ -3562,6 +3569,7 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/credential-provider-node@3.972.86':
     dependencies:
@@ -3576,6 +3584,7 @@ snapshots:
       '@smithy/credential-provider-imds': 4.5.2
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/credential-provider-process@3.972.74':
     dependencies:
@@ -3584,6 +3593,7 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/credential-provider-sso@3.973.18':
     dependencies:
@@ -3594,6 +3604,7 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/credential-provider-web-identity@3.972.80':
     dependencies:
@@ -3603,6 +3614,7 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/eventstream-handler-node@3.972.36':
     dependencies:
@@ -3610,6 +3622,7 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/middleware-eventstream@3.972.31':
     dependencies:
@@ -3617,6 +3630,7 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/middleware-websocket@3.972.56':
     dependencies:
@@ -3627,6 +3641,7 @@ snapshots:
       '@smithy/signature-v4': 5.7.4
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/nested-clients@3.997.48':
     dependencies:
@@ -3638,6 +3653,7 @@ snapshots:
       '@smithy/node-http-handler': 4.12.1
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/signature-v4-multi-region@3.996.48':
     dependencies:
@@ -3645,6 +3661,7 @@ snapshots:
       '@smithy/signature-v4': 5.7.4
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/token-providers@3.1127.0':
     dependencies:
@@ -3654,6 +3671,7 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/token-providers@3.1150.0':
     dependencies:
@@ -3663,18 +3681,22 @@ snapshots:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/types@3.974.6':
     dependencies:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@aws-sdk/xml-builder@3.972.41':
     dependencies:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
-  '@aws/lambda-invoke-store@0.3.0': {}
+  '@aws/lambda-invoke-store@0.3.0':
+    optional: true
 
   '@babel/code-frame@7.29.0':
     dependencies:
@@ -3841,6 +3863,7 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
+    optional: true
 
   '@earendil-works/pi-ai@1.3.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(undici@8.10.2)(ws@8.22.0)(zod@4.4.3)':
     dependencies:
@@ -3866,10 +3889,12 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
+    optional: true
 
   '@earendil-works/pi-codemode@1.3.0':
     dependencies:
       quickjs-wasi: 3.6.2
+    optional: true
 
   '@earendil-works/pi-coding-agent@1.3.0(@aws-sdk/credential-provider-node@3.972.86)(@smithy/signature-v4@5.7.4)(ws@8.22.0)(zod@4.4.3)':
     dependencies:
@@ -3906,12 +3931,15 @@ snapshots:
       - utf-8-validate
       - ws
       - zod
+    optional: true
 
   '@earendil-works/pi-mcp@1.3.0':
     dependencies:
       cross-spawn: 7.0.6
+    optional: true
 
-  '@earendil-works/pi-telemetry@1.3.0': {}
+  '@earendil-works/pi-telemetry@1.3.0':
+    optional: true
 
   '@earendil-works/pi-tui@1.3.0':
     dependencies:
@@ -3982,6 +4010,7 @@ snapshots:
       - bufferutil
       - supports-color
       - utf-8-validate
+    optional: true
 
   '@hono/node-server@2.1.5(hono@4.12.18)':
     dependencies:
@@ -4261,28 +4290,38 @@ snapshots:
 
   '@polka/url@1.0.0-next.29': {}
 
-  '@protobufjs/aspromise@1.1.2': {}
+  '@protobufjs/aspromise@1.1.2':
+    optional: true
 
-  '@protobufjs/base64@1.1.2': {}
+  '@protobufjs/base64@1.1.2':
+    optional: true
 
-  '@protobufjs/codegen@2.0.5': {}
+  '@protobufjs/codegen@2.0.5':
+    optional: true
 
-  '@protobufjs/eventemitter@1.1.0': {}
+  '@protobufjs/eventemitter@1.1.0':
+    optional: true
 
   '@protobufjs/fetch@1.1.0':
     dependencies:
       '@protobufjs/aspromise': 1.1.2
       '@protobufjs/inquire': 1.1.1
+    optional: true
 
-  '@protobufjs/float@1.0.2': {}
+  '@protobufjs/float@1.0.2':
+    optional: true
 
-  '@protobufjs/inquire@1.1.1': {}
+  '@protobufjs/inquire@1.1.1':
+    optional: true
 
-  '@protobufjs/path@1.1.2': {}
+  '@protobufjs/path@1.1.2':
+    optional: true
 
-  '@protobufjs/pool@1.1.0': {}
+  '@protobufjs/pool@1.1.0':
+    optional: true
 
-  '@protobufjs/utf8@1.1.1': {}
+  '@protobufjs/utf8@1.1.1':
+    optional: true
 
   '@sec-ant/readable-stream@0.4.1': {}
 
@@ -4382,7 +4421,8 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@silvia-odwyer/photon-node@0.3.4': {}
+  '@silvia-odwyer/photon-node@0.3.4':
+    optional: true
 
   '@simple-libs/child-process-utils@1.0.2':
     dependencies:
@@ -4398,36 +4438,43 @@ snapshots:
     dependencies:
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@smithy/credential-provider-imds@4.5.2':
     dependencies:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@smithy/fetch-http-handler@5.8.0':
     dependencies:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@smithy/node-http-handler@4.12.1':
     dependencies:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@smithy/signature-v4@5.7.4':
     dependencies:
       '@smithy/core': 3.36.0
       '@smithy/types': 4.19.0
       tslib: 2.8.1
+    optional: true
 
   '@smithy/types@4.19.0':
     dependencies:
       tslib: 2.8.1
+    optional: true
 
-  '@stablelib/base64@1.0.1': {}
+  '@stablelib/base64@1.0.1':
+    optional: true
 
   '@standard-community/standard-json@0.3.7(@standard-schema/spec@1.1.0)(@types/json-schema@7.0.15)(typebox@1.3.27)(zod@4.4.3)':
     dependencies:
@@ -4485,7 +4532,8 @@ snapshots:
 
   '@types/normalize-package-data@2.4.4': {}
 
-  '@types/retry@0.12.0': {}
+  '@types/retry@0.12.0':
+    optional: true
 
   '@typescript-eslint/project-service@8.59.3(typescript@6.0.3)':
     dependencies:
@@ -4776,7 +4824,8 @@ snapshots:
 
   acorn@8.16.0: {}
 
-  agent-base@7.1.4: {}
+  agent-base@7.1.4:
+    optional: true
 
   agent-base@9.0.0: {}
 
@@ -4846,15 +4895,18 @@ snapshots:
 
   balanced-match@4.0.4: {}
 
-  base64-js@1.5.1: {}
+  base64-js@1.5.1:
+    optional: true
 
   before-after-hook@4.0.0: {}
 
-  bignumber.js@9.3.1: {}
+  bignumber.js@9.3.1:
+    optional: true
 
   bottleneck@2.19.5: {}
 
-  bowser@2.14.1: {}
+  bowser@2.14.1:
+    optional: true
 
   brace-expansion@5.0.12:
     dependencies:
@@ -4864,7 +4916,8 @@ snapshots:
     dependencies:
       fill-range: 7.1.1
 
-  buffer-equal-constant-time@1.0.1: {}
+  buffer-equal-constant-time@1.0.1:
+    optional: true
 
   callsites@3.1.0: {}
 
@@ -4883,7 +4936,8 @@ snapshots:
 
   chalk@5.6.2: {}
 
-  chalk@6.0.0: {}
+  chalk@6.0.0:
+    optional: true
 
   char-regex@1.0.2: {}
 
@@ -5005,7 +5059,8 @@ snapshots:
     dependencies:
       type-fest: 1.4.0
 
-  data-uri-to-buffer@4.0.1: {}
+  data-uri-to-buffer@4.0.1:
+    optional: true
 
   debug@4.4.3:
     dependencies:
@@ -5019,7 +5074,8 @@ snapshots:
 
   detect-libc@2.1.2: {}
 
-  diff@8.0.4: {}
+  diff@8.0.4:
+    optional: true
 
   dir-glob@3.0.1:
     dependencies:
@@ -5038,6 +5094,7 @@ snapshots:
   ecdsa-sig-formatter@1.0.11:
     dependencies:
       safe-buffer: 5.2.1
+    optional: true
 
   emoji-regex@10.6.0: {}
 
@@ -5193,7 +5250,8 @@ snapshots:
 
   expect-type@1.4.0: {}
 
-  extend@3.0.2: {}
+  extend@3.0.2:
+    optional: true
 
   fallow-type-aware@3.34.1:
     dependencies:
@@ -5222,7 +5280,8 @@ snapshots:
 
   fast-levenshtein@2.0.6: {}
 
-  fast-sha256@1.3.0: {}
+  fast-sha256@1.3.0:
+    optional: true
 
   fast-uri@3.1.2: {}
 
@@ -5234,6 +5293,7 @@ snapshots:
     dependencies:
       node-domexception: 1.0.0
       web-streams-polyfill: 3.3.3
+    optional: true
 
   fflate@0.8.3: {}
 
@@ -5279,6 +5339,7 @@ snapshots:
   formdata-polyfill@4.0.10:
     dependencies:
       fetch-blob: 3.2.0
+    optional: true
 
   fs-extra@10.1.0:
     dependencies:
@@ -5304,6 +5365,7 @@ snapshots:
       node-fetch: 3.3.2
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   gcp-metadata@8.1.2:
     dependencies:
@@ -5312,6 +5374,7 @@ snapshots:
       json-bigint: 1.0.0
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   get-caller-file@2.0.5: {}
 
@@ -5361,14 +5424,17 @@ snapshots:
       jws: 4.0.1
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
-  google-logging-utils@1.1.3: {}
+  google-logging-utils@1.1.3:
+    optional: true
 
   graceful-fs@4.2.10: {}
 
   graceful-fs@4.2.11: {}
 
-  grok-mermaid@0.2.3: {}
+  grok-mermaid@0.2.3:
+    optional: true
 
   handlebars@4.7.9:
     dependencies:
@@ -5432,6 +5498,7 @@ snapshots:
     transitivePeerDependencies:
       - kerberos
       - supports-color
+    optional: true
 
   https-proxy-agent@7.0.6:
     dependencies:
@@ -5439,6 +5506,7 @@ snapshots:
       debug: 4.4.3
     transitivePeerDependencies:
       - supports-color
+    optional: true
 
   https-proxy-agent@9.0.0:
     dependencies:
@@ -5455,6 +5523,7 @@ snapshots:
     transitivePeerDependencies:
       - kerberos
       - supports-color
+    optional: true
 
   human-signals@2.1.0: {}
 
@@ -5464,7 +5533,8 @@ snapshots:
 
   ignore@5.3.2: {}
 
-  ignore@7.0.8: {}
+  ignore@7.0.8:
+    optional: true
 
   import-fresh@3.3.1:
     dependencies:
@@ -5534,7 +5604,8 @@ snapshots:
 
   jiti@2.6.1: {}
 
-  jiti@2.7.0: {}
+  jiti@2.7.0:
+    optional: true
 
   js-tokens@10.0.0: {}
 
@@ -5547,6 +5618,7 @@ snapshots:
   json-bigint@1.0.0:
     dependencies:
       bignumber.js: 9.3.1
+    optional: true
 
   json-buffer@3.0.1: {}
 
@@ -5558,6 +5630,7 @@ snapshots:
     dependencies:
       '@babel/runtime': 7.29.2
       ts-algebra: 2.0.0
+    optional: true
 
   json-schema-traverse@0.4.1: {}
 
@@ -5582,11 +5655,13 @@ snapshots:
       buffer-equal-constant-time: 1.0.1
       ecdsa-sig-formatter: 1.0.11
       safe-buffer: 5.2.1
+    optional: true
 
   jws@4.0.1:
     dependencies:
       jwa: 2.0.1
       safe-buffer: 5.2.1
+    optional: true
 
   keyv@4.5.4:
     dependencies:
@@ -5678,7 +5753,8 @@ snapshots:
 
   lodash@4.18.1: {}
 
-  long@5.3.2: {}
+  long@5.3.2:
+    optional: true
 
   lru-cache@10.4.3: {}
 
@@ -5756,7 +5832,8 @@ snapshots:
 
   nerf-dart@1.0.0: {}
 
-  node-domexception@1.0.0: {}
+  node-domexception@1.0.0:
+    optional: true
 
   node-emoji@2.2.0:
     dependencies:
@@ -5770,6 +5847,7 @@ snapshots:
       data-uri-to-buffer: 4.0.1
       fetch-blob: 3.2.0
       formdata-polyfill: 4.0.10
+    optional: true
 
   normalize-package-data@6.0.2:
     dependencies:
@@ -5824,6 +5902,7 @@ snapshots:
       undici: 8.10.2
       ws: 8.22.0
       zod: 4.4.3
+    optional: true
 
   openapi-types@12.1.3: {}
 
@@ -5930,6 +6009,7 @@ snapshots:
     dependencies:
       '@types/retry': 0.12.0
       retry: 0.13.1
+    optional: true
 
   p-timeout@6.1.4: {}
 
@@ -5967,7 +6047,8 @@ snapshots:
 
   parse5@6.0.1: {}
 
-  partial-json@0.1.7: {}
+  partial-json@0.1.7:
+    optional: true
 
   path-exists@3.0.0: {}
 
@@ -6023,6 +6104,7 @@ snapshots:
       graceful-fs: 4.2.11
       retry: 0.12.0
       signal-exit: 3.0.7
+    optional: true
 
   proto-list@1.2.4: {}
 
@@ -6040,14 +6122,17 @@ snapshots:
       '@protobufjs/utf8': 1.1.1
       '@types/node': 25.7.0
       long: 5.3.2
+    optional: true
 
-  proxy-agent-negotiate@1.1.0: {}
+  proxy-agent-negotiate@1.1.0:
+    optional: true
 
   punycode@2.3.1: {}
 
   quansync@0.2.11: {}
 
-  quickjs-wasi@3.6.2: {}
+  quickjs-wasi@3.6.2:
+    optional: true
 
   rc@1.2.8:
     dependencies:
@@ -6108,13 +6193,16 @@ snapshots:
 
   resolve-from@5.0.0: {}
 
-  retry@0.12.0: {}
+  retry@0.12.0:
+    optional: true
 
-  retry@0.13.1: {}
+  retry@0.13.1:
+    optional: true
 
   safe-buffer@5.1.2: {}
 
-  safe-buffer@5.2.1: {}
+  safe-buffer@5.2.1:
+    optional: true
 
   semantic-release@25.0.3(typescript@6.0.3):
     dependencies:
@@ -6154,7 +6242,8 @@ snapshots:
 
   semver@7.8.0: {}
 
-  semver@7.8.5: {}
+  semver@7.8.5:
+    optional: true
 
   shebang-command@2.0.0:
     dependencies:
@@ -6212,6 +6301,7 @@ snapshots:
     dependencies:
       '@stablelib/base64': 1.0.1
       fast-sha256: 1.3.0
+    optional: true
 
   std-env@4.3.0: {}
 
@@ -6329,7 +6419,8 @@ snapshots:
 
   traverse@0.6.8: {}
 
-  ts-algebra@2.0.0: {}
+  ts-algebra@2.0.0:
+    optional: true
 
   ts-api-utils@2.5.0(typescript@6.0.3):
     dependencies:
@@ -6341,7 +6432,8 @@ snapshots:
       minimist: 1.2.8
       strip-bom: 3.0.0
 
-  tslib@2.8.1: {}
+  tslib@2.8.1:
+    optional: true
 
   tunnel@0.0.6: {}
 
@@ -6359,7 +6451,8 @@ snapshots:
     dependencies:
       tagged-tag: 1.0.0
 
-  typebox@1.3.27: {}
+  typebox@1.3.27:
+    optional: true
 
   typescript@6.0.3: {}
 
@@ -6396,7 +6489,8 @@ snapshots:
 
   undici@7.25.0: {}
 
-  undici@8.10.2: {}
+  undici@8.10.2:
+    optional: true
 
   unicode-emoji-modifier-base@1.0.0: {}
 
@@ -6511,7 +6605,8 @@ snapshots:
     transitivePeerDependencies:
       - msw
 
-  web-streams-polyfill@3.3.3: {}
+  web-streams-polyfill@3.3.3:
+    optional: true
 
   web-worker@1.5.0: {}
 
@@ -6537,7 +6632,8 @@ snapshots:
       string-width: 7.2.0
       strip-ansi: 7.2.0
 
-  ws@8.20.0: {}
+  ws@8.20.0:
+    optional: true
 
   ws@8.22.0: {}
 
@@ -6545,7 +6641,8 @@ snapshots:
 
   y18n@5.0.8: {}
 
-  yaml@2.9.0: {}
+  yaml@2.9.0:
+    optional: true
 
   yargs-parser@20.2.9: {}
 

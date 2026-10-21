@@ -20,13 +20,31 @@ Where it's going (see [`ROADMAP.md`](ROADMAP.md)): routing across your pi logins
 
 ## Installation
 
-```bash
-# Install globally
-pnpm add -g @vx-daniel/pi-switchboard
+The package is published to GitHub Packages, whose npm registry needs a GitHub token to install anything, public packages included. The Docker image needs none: see [Docker](#docker).
 
-# Or run directly
-pnpm dlx @vx-daniel/pi-switchboard
+**Once, before the first install:**
+
+1. Create a GitHub personal access token (classic) with the `read:packages` scope. GitHub Packages accepts only classic tokens.
+2. Point the `@vx-daniel` scope at GitHub Packages in `~/.npmrc`. These two lines send only `@vx-daniel/*` packages there; everything else still comes from npmjs:
+
+   ```ini
+   @vx-daniel:registry=https://npm.pkg.github.com
+   //npm.pkg.github.com/:_authToken=<your token>
+   ```
+
+**Then:**
+
+```bash
+# As a pi package: /proxy, the settings panel and the model selector inside pi
+pi install npm:@vx-daniel/pi-switchboard
+
+# Or the CLI on its own
+pnpm add -g @vx-daniel/pi-switchboard
 ```
+
+Install by the package name, as above. pi also accepts a tarball URL (`npm:https://…/x.tgz`), but pi 1.3.0 then reports the package as installed without loading its extension.
+
+pi's own packages (`@earendil-works/pi-ai`, `pi-coding-agent`) are optional dependencies, so that pi, which provides them to its extensions, does not load a second copy (#165). Every installer adds optional dependencies by default. Installed with `--omit=optional` or `--no-optional`, the `pi-switchboard` CLI cannot start: it says which package is missing and exits with status `1`.
 
 ### Coming from pi-openai-proxy
 
@@ -49,6 +67,9 @@ Version 0.1.0 renamed everything that carried the old name, with no aliases:
 ```bash
 # Start the proxy (defaults to http://127.0.0.1:4141)
 pi-switchboard
+
+# Which version is installed
+pi-switchboard --version
 ```
 
 ### List available models
@@ -180,7 +201,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `metadata` | OpenAI passthrough; arbitrary keys silently skipped for other providers |
 | `prediction` | OpenAI passthrough only (speculative decoding) |
 | `prompt_cache_key` | Becomes pi's session ID, which pi sends where the provider takes one: OpenAI Responses and Codex as `prompt_cache_key` (Codex also keeps a WebSocket per session and sends only the new messages), chat completions to `api.openai.com` as `prompt_cache_key`, and an affinity header for Anthropic-API gateways that ask for one (OpenRouter; never a direct Anthropic OAuth login, where caching needs no key). Elsewhere it changes nothing. Surrounding spaces are trimmed (so `" a "` and `"a"` are one key), then it must be 1–64 characters; `null` is the same as none. Send one stable key per conversation |
-| `prompt_cache_breakpoint` on content parts | Accepted on text and image parts. Sent on to OpenAI's own API (chat completions and Responses at `api.openai.com`), where it marks the end of a reusable prompt prefix; dropped for every other provider (Codex sends the system prompt as a plain string, and other servers may refuse a field they don't know), and logged at `debug`. It only affects caching |
+| `prompt_cache_breakpoint` on content parts | Accepted on text and image parts. Sent on to OpenAI's own API (chat completions and Responses at `api.openai.com`), where it marks the end of a reusable prompt prefix; dropped for every other provider (Codex sends the system prompt as a plain string, and other servers may refuse a field they don't know), and logged at `debug`. A model on `api.openai.com` that refuses it with a `400` (the ChatGPT-subscription models such as `gpt-6-luna`) gets the request once more without it, and from then on it is left out for that model until the proxy restarts, logged once at `info`. It only affects caching |
 
 **Not supported:** `n` (any value), `logprobs`, `top_logprobs`, `logit_bias`, and the deprecated `functions` / `function_call`, each rejected with `422`; `prompt_cache_retention` (deprecated by OpenAI) and `prompt_cache_options` (no pi equivalent), rejected as unknown with `422`; a value in an assistant message's `refusal`, `audio`, deprecated `function_call` or `annotations`, rejected with `422`; `name` on a `tool` message (OpenAI defines none there; the call a result answers names the tool), rejected as unknown with `422`; remote image URLs while the remote-images setting is off, rejected with `400`.
 
@@ -193,7 +214,7 @@ Fields are translated to each provider's native format, not blindly forwarded:
 - **Anthropic**: `tool_choice` → `{ type }` format, `stop` → `stop_sequences`, `user` → `metadata.user_id`, `parallel_tool_calls: false` → `disable_parallel_tool_use`
 - **Google**: Translated to camelCase names (`topP`, `stopSequences`, `seed`, `frequencyPenalty`, `presencePenalty`) in Google's generation config; `tool_choice` maps to `toolConfig.functionCallingConfig.mode`
 
-Fields that have no equivalent in a target provider are skipped: the request succeeds and the provider's default applies. That, dropping `temperature` on Codex models, and dropping `prompt_cache_breakpoint` where the provider has no slot for it are the only parameters the proxy ignores instead of rejecting; `CONSTITUTION.md` (principle I) lists them as deliberate exceptions, and PLAN.md's per-API tables list exactly what each API receives.
+Fields that have no equivalent in a target provider are skipped: the request succeeds and the provider's default applies. That, dropping `temperature` on Codex models, and dropping `prompt_cache_breakpoint` where the provider has no slot for it or the model refuses it are the only parameters the proxy ignores instead of rejecting; `CONSTITUTION.md` (principle I) lists them as deliberate exceptions, and PLAN.md's per-API tables list exactly what each API receives.
 
 ## Model Naming and Exposure
 
@@ -268,7 +289,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 
 The proxy logs with [LogTape](https://logtape.org) to stderr:
 - **Pretty** ([@logtape/pretty](https://jsr.io/@logtape/pretty)): readable, colored lines stamped with the local date, time and UTC offset (in a container, set `TZ`, e.g. `TZ=America/Chicago`). The default on a terminal.
-- **JSON** ([JSON Lines](https://jsonlines.org)): one object per record with `@timestamp` (UTC), `level`, `logger` (the category, e.g. `pi-switchboard.server.http`), `message` and `properties`. The default when stderr is piped or redirected, as in `docker logs`.
+- **JSON** ([JSON Lines](https://jsonlines.org)): one object per record with `@timestamp` (UTC), `level`, `logger` (the category, e.g. `pi-switchboard.server.http`), `message` and `properties`. The default when stderr is piped or redirected, as in `docker logs`. `message` quotes the string values it contains (`Listening on http://"0.0.0.0":4141`, `"GET" "/v1/models" received`) on purpose. Some values come from clients, such as the requested model, a path or a client request ID, and the quotes stop a crafted one from reading as message text. `properties` holds each value unquoted; read or query those. The pretty format prints values bare.
 
 `PI_SWITCHBOARD_LOG_FORMAT` (or `--log-format`) picks one regardless of the terminal, for example `pretty` for reading `docker compose logs` directly.
 
@@ -354,7 +375,7 @@ The proxy describes its own API as an OpenAPI document (see [API documentation](
 
 ## Pi Integration
 
-Install as a pi package to get the `/proxy` command family:
+Install as a pi package to get the `/proxy` command family. It needs the GitHub Packages setup in [Installation](#installation) first:
 
 ```bash
 pi install npm:@vx-daniel/pi-switchboard
@@ -419,7 +440,7 @@ docker compose up --wait
 curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141/v1/models
 ```
 
-- **The token is required.** The image listens on every interface inside the container, so it refuses to start without `PI_SWITCHBOARD_AUTH_TOKEN` and exits with status `64`. It takes the token from the environment only, not from `proxy-config.json`. The token is a local secret that protects the proxy, not a provider key. Compose publishes the port on `127.0.0.1` only (`PI_SWITCHBOARD_PUBLISH_PORT` changes it, default `4141`).
+- **The token is required.** The image listens on every interface inside the container, so it refuses to start without `PI_SWITCHBOARD_AUTH_TOKEN` and exits with status `64`. It takes the token from the environment only, not from `proxy-config.json`. The token is a local secret that protects the proxy, not a provider key. Compose publishes the port on `127.0.0.1` only (`PI_SWITCHBOARD_PUBLISH_PORT` changes it, default `4141`). The one exception is `--version` or `--help` alone, which starts no server: `docker run --rm vxdaniel/pi-switchboard:<version> --version` needs no token (from the first release after 0.1.0).
 - **Logging in.** In pi, `/login` lists the providers. The container publishes no OAuth callback port, so when the browser redirects to a `localhost` URL that does not load, paste that whole URL, or the code, into pi. `fd` and `ripgrep` warnings are expected: pi is there to log in, not to run tools. Stop the proxy before logging in again.
 - **The volume holds the login.** pi's login and its token refreshes live in the `pi-agent` volume at `/home/node/.pi/agent`, and survive `docker compose down` and `up` (`down -v` deletes them). Never seed the volume by copying a host `auth.json`: refreshing a login rotates its refresh token, and the other copy stops working.
 - **Settings.** `proxy-config.json` in the volume works as on the host. Compose passes `PI_SWITCHBOARD_LOG_LEVEL`, `PI_SWITCHBOARD_LOG_FORMAT`, `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` and `TZ` to the container only when they are set, so the file's values apply otherwise.

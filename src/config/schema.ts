@@ -12,8 +12,8 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 
-import { getAgentDir } from '@earendil-works/pi-coding-agent'
 import { isLogLevel, type LogLevel } from '@logtape/logtape'
+import { piAgentDir } from '@proxy/config/agent-dir'
 import { proxyLogger } from '@proxy/logging'
 import { errorCode, isRecord } from '@proxy/utils/guards'
 import * as z from 'zod'
@@ -378,14 +378,15 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
  * Returns the path of the JSON config file.
  *
  * @remarks
- * The directory is pi's own agent dir ({@link getAgentDir}): `$PI_CODING_AGENT_DIR` when set and
+ * The directory is pi's own agent dir ({@link piAgentDir}): `$PI_CODING_AGENT_DIR` when set and
  * non-empty (a leading `~` expanded), otherwise `.pi/agent` in the user's home directory. Reading
- * `HOME` directly made a relative `./~/.pi/agent` when it was unset (#111).
+ * `HOME` directly made a relative `./~/.pi/agent` when it was unset (#111). It is resolved without
+ * importing pi, as the pi extension loads this module in pi's own process (#165).
  *
  * @returns `proxy-config.json` in pi's agent dir
  */
 export function getConfigPath(): string {
-  return resolve(getAgentDir(), 'proxy-config.json')
+  return resolve(piAgentDir(), 'proxy-config.json')
 }
 
 // ---------------------------------------------------------------------------

@@ -15,7 +15,6 @@
  * @packageDocumentation
  */
 
-import type { AssistantMessageEvent } from '@earendil-works/pi-ai'
 import type { ServerConfig } from '@proxy/config/env'
 import { loadConfigFromFile } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
@@ -38,7 +37,12 @@ import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
 import { convertTools } from '@proxy/openai/tools'
 import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/validate'
-import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
+import {
+  type CompletionOptions,
+  piComplete,
+  piStream,
+  type StartedStream
+} from '@proxy/pi/complete'
 import { getAvailableModels, getEnabledModels, getRequestAuth } from '@proxy/pi/registry'
 import {
   authenticationError,
@@ -441,16 +445,15 @@ async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promis
     return honoContext.body(null)
   }
 
-  let events: AsyncIterator<AssistantMessageEvent>
-  let first: IteratorResult<AssistantMessageEvent>
+  let started: StartedStream
   try {
-    events = (await piStream(model, context, request, options))[Symbol.asyncIterator]()
-    first = await events.next()
+    started = await piStream(model, context, request, options)
   } catch (err: unknown) {
     if (options.signal?.aborted === true) return answerClientLeft()
     const mapped = reportThrownFailure(err)
     return honoContext.json(mapped.body, mapped.status)
   }
+  const { first, events } = started
   if (first.done !== true && first.value.type === 'error') {
     if (options.signal?.aborted === true) return answerClientLeft()
     const failed = first.value.error

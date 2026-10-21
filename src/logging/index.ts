@@ -145,7 +145,9 @@ export function resolveLogFormat(
  * @returns LogTape's JSON Lines formatter, or a pretty formatter in local time.
  */
 function formatterFor(format: LogFormat): TextFormatter {
-  // JSON keeps LogTape's UTC `@timestamp`: unambiguous for anything that parses or ships logs.
+  // JSON keeps LogTape's UTC `@timestamp`: unambiguous for anything that parses or ships logs. It
+  // also keeps LogTape's quoted string values in `message`, on purpose: some come from clients, and
+  // the quotes keep a crafted one from passing for message text (PLAN "Observability", #159).
   if (format === 'json') return jsonLinesFormatter
   // A person reads local time: `timeZone: null` is the system zone (the `TZ` variable in a
   // container), with the offset shown so a line is never ambiguous. `bare` prints strings without

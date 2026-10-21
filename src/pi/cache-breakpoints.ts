@@ -14,10 +14,15 @@
  * the system prompt as a plain `instructions` string, and an OpenAI-compatible server may refuse a
  * field it does not know.
  *
+ * Some models on `api.openai.com` refuse the field with a 400 too: the ChatGPT-subscription ones
+ * (`gpt-6-luna` and others, #163). The first refusal is retried once without breakpoints
+ * ({@link retryWithoutBreakpoints}), and the model is remembered for the life of the process, so
+ * each such model costs at most one failed request per proxy start.
+ *
  * @packageDocumentation
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
+import type { Api, AssistantMessage, Model } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import type { OpenAIMessage, PromptCacheBreakpoint } from '@proxy/openai/schemas'
 import { isRecord } from '@proxy/utils/guards'
@@ -33,6 +38,22 @@ const MESSAGE_FIELD_BY_API: ReadonlyMap<string, 'messages' | 'input'> = new Map(
   ['openai-completions', 'messages'],
   ['openai-responses', 'input']
 ])
+
+/**
+ * Models, as `provider/id`, that refused `prompt_cache_breakpoint` in this process: their requests
+ * leave the field out (#163).
+ *
+ * @remarks
+ * Module state with no reset, on purpose: a refusal holds until restart. Vitest gives each test
+ * file its own copy, so within a file each test that triggers a refusal uses its own model ID.
+ */
+const modelsRefusingBreakpoints = new Set<string>()
+
+/**
+ * The start of an upstream 400 as pi's OpenAI adapters word it, the JSON error body after it:
+ * `400: {…}` (chat completions) and `OpenAI API error (400): {…}` (Responses).
+ */
+const BAD_REQUEST_PREFIX = /^(?:400: |[^\n(]{1,80} \(400\): )/
 
 /** The separator the proxy joins instruction text with (`convertMessages`). */
 const INSTRUCTION_SEPARATOR = '\n\n'
@@ -132,6 +153,36 @@ function messageField(model: Model<Api>): 'messages' | 'input' | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * The key a model is remembered by: `provider/id`, as two providers can serve one model ID.
+ *
+ * @param model - the pi model
+ * @returns the model's `provider/id`
+ */
+function modelKey(model: Model<Api>): string {
+  return `${model.provider}/${model.id}`
+}
+
+/**
+ * Reads which request field an upstream 400 names, from the JSON body pi puts after the status.
+ *
+ * @param errorMessage - the failed call's error message, as pi's OpenAI adapters word it
+ * @returns the body's `param` (also under `error`, as some bodies nest it), or `undefined` when the
+ *   message is not a 400 with a JSON body
+ */
+function badRequestParam(errorMessage: string): unknown {
+  const prefix = BAD_REQUEST_PREFIX.exec(errorMessage)?.[0]
+  if (prefix === undefined) return undefined
+  let body: unknown
+  try {
+    body = JSON.parse(errorMessage.slice(prefix.length))
+  } catch {
+    return undefined
+  }
+  if (!isRecord(body)) return undefined
+  return isRecord(body['error']) ? body['error']['param'] : body['param']
 }
 
 /**
@@ -246,6 +297,13 @@ export function breakpointPatch(
     )
     return undefined
   }
+  if (modelsRefusingBreakpoints.has(modelKey(model))) {
+    breakpointLogger.debug(
+      'Dropped {count} prompt_cache_breakpoint(s) for {modelId}: the model refused them earlier',
+      { count: plan.count, modelId: model.id, api: model.api }
+    )
+    return undefined
+  }
   const textType = field === 'input' ? 'input_text' : 'text'
   return (payload) => {
     const payloadMessages = payload[field]
@@ -270,4 +328,39 @@ export function breakpointPatch(
       properties
     )
   }
+}
+
+/**
+ * Decides whether a failed call is the model refusing the request's `prompt_cache_breakpoint`,
+ * and if so remembers the model, so the caller can retry once without them (#163).
+ *
+ * @remarks
+ * A refusal is an upstream 400 whose body names `prompt_cache_breakpoint` as its `param`, for a
+ * request that sent breakpoints. Any other 400 is left as it is. A refusal that names the field
+ * proves this request carried it, even when the model is already remembered: requests in flight
+ * together all send it before the first refusal comes back, and each is retried (#166 review).
+ * The retry is built after the model is remembered, so it cannot be refused for the field again.
+ * The first refusal per model is logged at info; later requests drop the field at debug.
+ *
+ * @param model - the pi model
+ * @param messages - the request's messages
+ * @param failed - the call's final message
+ * @returns whether to retry without breakpoints
+ */
+export function retryWithoutBreakpoints(
+  model: Model<Api>,
+  messages: readonly OpenAIMessage[],
+  failed: AssistantMessage
+): boolean {
+  if (failed.stopReason !== 'error') return false
+  if (badRequestParam(failed.errorMessage ?? '') !== 'prompt_cache_breakpoint') return false
+  if (breakpointPlan(messages) === undefined || messageField(model) === undefined) return false
+  const key = modelKey(model)
+  if (modelsRefusingBreakpoints.has(key)) return true
+  modelsRefusingBreakpoints.add(key)
+  breakpointLogger.info(
+    '{modelId} refused prompt_cache_breakpoint: retrying without it, and leaving it out for this model until the proxy restarts',
+    { provider: model.provider, modelId: model.id, api: model.api }
+  )
+  return true
 }
