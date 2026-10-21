@@ -66,6 +66,7 @@
     "test:live:record": "node scripts/record-fixtures.ts",
     "openai-spec:update": "node scripts/update-openai-spec.ts",
     "build": "vp pack",
+    "smoke": "node dist/index.mjs --help",
     "prepare": "vp config --no-agent && vp pack",
     "prepack": "vp pack",
     "prepublishOnly": "vp test"
