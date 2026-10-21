@@ -77,7 +77,10 @@ export function buildModelList(models: readonly ExposedModel[]): OpenAIModelList
 }
 
 /** A price in USD per million tokens. Documents the response; never parsed. */
-const pricePerMillionSchema = z.number().meta({ description: 'USD per million tokens.' })
+const pricePerMillionSchema = z
+  .number()
+  .nonnegative()
+  .meta({ description: 'USD per million tokens.' })
 
 /**
  * What pi knows about an exposed model that the OpenAI model object has no field for: pi's
@@ -96,9 +99,10 @@ const piModelCapabilitiesSchema = z
         'model without reasoning.'
     }),
     input: z.array(z.enum(['text', 'image'])).meta({ description: 'What the model accepts.' }),
-    context_window: z.int().meta({ description: 'The context window, in tokens.' }),
+    context_window: z.int().nonnegative().meta({ description: 'The context window, in tokens.' }),
     max_output_tokens: z
       .int()
+      .nonnegative()
       .meta({ description: 'The most output tokens one response can have.' }),
     cost: z
       .object({

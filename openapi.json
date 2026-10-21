@@ -389,13 +389,13 @@
           },
           "context_window": {
             "type": "integer",
-            "minimum": -9007199254740991,
+            "minimum": 0,
             "maximum": 9007199254740991,
             "description": "The context window, in tokens."
           },
           "max_output_tokens": {
             "type": "integer",
-            "minimum": -9007199254740991,
+            "minimum": 0,
             "maximum": 9007199254740991,
             "description": "The most output tokens one response can have."
           },
@@ -404,18 +404,22 @@
             "properties": {
               "input": {
                 "type": "number",
+                "minimum": 0,
                 "description": "USD per million tokens."
               },
               "output": {
                 "type": "number",
+                "minimum": 0,
                 "description": "USD per million tokens."
               },
               "cache_read": {
                 "type": "number",
+                "minimum": 0,
                 "description": "USD per million tokens."
               },
               "cache_write": {
                 "type": "number",
+                "minimum": 0,
                 "description": "USD per million tokens."
               }
             },
