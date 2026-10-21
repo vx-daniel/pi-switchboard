@@ -12,6 +12,7 @@ import {
   clearCooldowns,
   startCooldown
 } from '@proxy/pi/cooldowns'
+import { LATEST_DATE_MS } from '@proxy/pi/reset-time'
 import { cooldownSkip } from '@proxy/server/route-cooldowns'
 import { beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -84,6 +85,19 @@ describe('cooldowns', () => {
     startCooldown(OPUS, 'rate_limit', undefined, NOW)
     clearCooldowns(OPUS)
     expect(startCooldown(OPUS, 'rate_limit', undefined, NOW).until).toBe(NOW + MINUTE)
+  })
+
+  // Catches the growing default overflowing a Date (fifth #181 review): a client that keeps
+  // naming a rate-limited model grows the streak each call, and past about 38 calls the end could
+  // not be shown, so every skip and every /healthz/models answer threw.
+  test('a long streak ends at the last representable date, not past it', () => {
+    for (let failure = 0; failure < 60; failure += 1) {
+      startCooldown(OPUS, 'rate_limit', undefined, NOW)
+    }
+
+    const until = activeCooldown(OPUS, NOW)?.until ?? 0
+    expect(until).toBe(LATEST_DATE_MS)
+    expect(() => new Date(until).toISOString()).not.toThrow()
   })
 
   // Catches a cooldown outliving its end, or one a success doesn't clear.

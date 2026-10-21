@@ -19,6 +19,7 @@
 
 import { MS_PER_SECOND } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { LATEST_DATE_MS } from '@proxy/pi/reset-time'
 
 /** Logger for routing decisions. */
 const cooldownLogger = proxyLogger('server', 'chat')
@@ -109,7 +110,8 @@ export function startCooldown(
     provider: subject.provider,
     model: scope === 'model' ? subject.canonicalId : undefined,
     reason,
-    until: now + (waitMs ?? backoffMs(streak)),
+    // A long enough streak of failures would grow the default past what a Date can hold.
+    until: Math.min(now + (waitMs ?? backoffMs(streak)), LATEST_DATE_MS),
     source: waitMs === undefined ? 'backoff' : 'response',
     streak
   }

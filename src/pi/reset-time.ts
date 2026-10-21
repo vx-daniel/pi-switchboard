@@ -46,6 +46,12 @@ const BODY_LIMIT = 16_384
 /** How long the clone's body may take to arrive before the proxy stops reading it. */
 const BODY_READ_MS = 2000
 
+/**
+ * The latest time a `Date` can hold (ECMAScript's limit, the year 275760). A cooldown ending later
+ * could not be shown: `toISOString()` throws on it.
+ */
+export const LATEST_DATE_MS = 8_640_000_000_000_000
+
 /** Milliseconds in a minute. */
 const MS_PER_MINUTE = 60_000
 /** Milliseconds in an hour. */
@@ -265,8 +271,9 @@ function parseJson(body: string): unknown {
  * Reads how long a failed response says to wait before trying the provider again.
  *
  * @remarks
- * The sources are tried in order, and the first that gives a positive wait counts: a
- * `retry-after: 0` or a time already past falls through to the body and the reset headers.
+ * The sources are tried in order, and the first that gives a usable wait counts. A
+ * `retry-after: 0` or a time already past falls through to the body and the reset headers, and
+ * so does a wait ending after {@link LATEST_DATE_MS}: that is no real reset time (#181 review).
  *
  * @param response - the failed response
  * @param now - the current time, in milliseconds since the epoch; `Date.now()` by default
@@ -285,7 +292,7 @@ export function resetAfterMs(
   ]
   for (const source of sources) {
     const wait = source()
-    if (wait !== undefined && Number.isFinite(wait) && wait > 0) return Math.ceil(wait)
+    if (wait !== undefined && wait > 0 && now + wait <= LATEST_DATE_MS) return Math.ceil(wait)
   }
   return undefined
 }

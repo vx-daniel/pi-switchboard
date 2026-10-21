@@ -417,12 +417,17 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
 
   A number is read as seconds to wait, as a Unix time in seconds past 1e9, or in milliseconds past
   1e11. A date counts only as ISO 8601 or an HTTP date, as `Date.parse` reads odd text as dates.
-  With none, a growing default: 60 s, 180 s, then doubling, counted per provider or model and
-  reset by a stated time or a success. pi's Google adapters refuse a custom `fetch`, so Google
-  models always use the default.
+  A wait ending after the last time a `Date` can hold (`LATEST_DATE_MS`, the year 275760) is no
+  real reset time and falls through too; `toISOString()` throws on such a date. With none, a
+  growing default: 60 s, 180 s, then doubling, counted per provider or model and reset by a
+  stated time or a success. Its end is clamped to that same date, which a client naming a
+  rate-limited model would pass after about 38 failures in a row. That bound is the limit of
+  `Date`, not a cap. pi's Google adapters refuse a custom `fetch`, so Google models always use
+  the default.
 - **Applied by routing only, recorded always (principle VI).** Every request's 429 or 503 on the
   proxy's login starts a cooldown, so the state is visible. A request with its own upstream key
-  records and clears nothing: its failures are about that key, not the login others share. Only a
+  records and clears nothing: its failures are about that key, not the login others share. It
+  never skips either, as `planRoute` gives it one candidate and no `fallbackOn`. Only a
   chain whose `fallbackOn` names the class skips a cooling candidate (`cooldownSkip`); a request
   that names a model calls it as before. The check runs as the chain reaches each candidate, so a
   429 met earlier in the same request skips that provider's later models too. When the candidate

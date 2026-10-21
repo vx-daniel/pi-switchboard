@@ -110,7 +110,13 @@ describe('resetAfterMs', () => {
     // `retry-after-ms` is checked as strictly as `retry-after` (third #181 review).
     ['retry-after-ms: 5abc', failed({ 'retry-after-ms': '5abc', 'retry-after': '30' }), 30_000],
     ['retry-after-ms: -5', failed({ 'retry-after-ms': '-5', 'retry-after': '30' }), 30_000],
-    ['retry-after-ms: 0', failed({ 'retry-after-ms': '0', 'retry-after': '30' }), 30_000]
+    ['retry-after-ms: 0', failed({ 'retry-after-ms': '0', 'retry-after': '30' }), 30_000],
+    // A wait past what a Date can hold made toISOString throw on every skip (fifth #181 review).
+    [
+      'a retry-after past the last representable date',
+      failed({ 'retry-after': '99999999999999999999' }, '{"error":{"resets_in_seconds":90}}'),
+      90_000
+    ]
   ])('%s falls through to the next source', (_case, response, expected) => {
     expect(resetAfterMs(response, NOW)).toBe(expected)
   })
@@ -128,6 +134,10 @@ describe('resetAfterMs', () => {
   // cooldown then uses its growing default.
   test.each([
     ['no time anywhere', failed({}, '{"error":{"message":"Too many requests"}}')],
+    [
+      'only a wait past the last representable date',
+      failed({}, '{"error":{"resets_in_seconds":1e13}}')
+    ],
     // V8's Date.parse reads this as 1 December 2030 (#181 review).
     ['text that is not a date', failed({ 'retry-after': 'Dec 2030' })],
     ['a reset time already past', failed({ 'retry-after': 'Wed, 21 Oct 2026 11:00:00 GMT' })],
