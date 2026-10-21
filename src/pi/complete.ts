@@ -846,8 +846,8 @@ async function openUpstream(
  *
  * @remarks
  * Reads the stream's final message, which is all pi's `completeSimple()` returns, so the idle
- * timeout sees every event. A model that refuses the request's `prompt_cache_breakpoint` gets the
- * request once more without them (#163, {@link retryWithoutBreakpoints}).
+ * timeout sees every event. A model that refuses `prompt_cache_breakpoint` gets the request once
+ * more without it, unless the client has left (#163, {@link retryWithoutBreakpoints}).
  *
  * @param model - the pi model
  * @param context - pi's context: system prompt, messages and tools
@@ -864,6 +864,7 @@ export async function piComplete(
 ): Promise<AssistantMessage> {
   const input: UpstreamInput = { model, context, request, options }
   const message = await (await openUpstream(input, false)).result()
+  if (options.signal?.aborted === true) return message
   if (!retryWithoutBreakpoints(model, request.messages, message)) return message
   return (await openUpstream(input, false)).result()
 }
@@ -912,10 +913,10 @@ export async function piStream(
 ): Promise<StartedStream> {
   const input: UpstreamInput = { model, context, request, options }
   const started = await startStream(input)
-  const { first } = started
   const refused =
-    first.done !== true &&
-    first.value.type === 'error' &&
-    retryWithoutBreakpoints(model, request.messages, first.value.error)
+    options.signal?.aborted !== true &&
+    started.first.done !== true &&
+    started.first.value.type === 'error' &&
+    retryWithoutBreakpoints(model, request.messages, started.first.value.error)
   return refused ? startStream(input) : started
 }

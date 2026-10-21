@@ -288,8 +288,9 @@ describe('a model that refuses the field (#163)', () => {
 
     expect(retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(refusal))).toBe(true)
     expect(breakpointPatch(model, WITH_BREAKPOINT)).toBeUndefined()
-    // Remembered once: the same refusal again is not the field's doing, as it was not sent.
-    expect(retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(refusal))).toBe(false)
+    // A refusal that comes back after the model is remembered is from a request already in flight,
+    // which did send the field: it is retried too (#166 review).
+    expect(retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(refusal))).toBe(true)
   })
 
   // Catches the retry widened past the field: another param, another status, or a message that

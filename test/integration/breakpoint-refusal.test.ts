@@ -78,11 +78,41 @@ function refusingWith(refusal: unknown): MockReply {
       : ANSWER(response, request)
 }
 
+/** How long a held refusal waits for the others before it is sent anyway, in milliseconds. */
+const HOLD_LIMIT_MS = 2000
+
+/**
+ * Answers as {@link refusingWith} does with the field's refusal, but holds each refusal until
+ * `count` requests carrying the field have arrived: all of them are in flight before the first
+ * refusal comes back, as an agent's parallel calls are at first use.
+ *
+ * @param count - how many requests to hold together
+ * @returns the reply
+ */
+function refusingTogether(count: number): MockReply {
+  let held: (() => void)[] = []
+  return async (response, request) => {
+    if (!carriesBreakpoint(request)) {
+      await ANSWER(response, request)
+      return
+    }
+    await new Promise<void>((resolve) => {
+      held.push(resolve)
+      setTimeout(resolve, HOLD_LIMIT_MS)
+      if (held.length < count) return
+      for (const release of held) release()
+      held = []
+    })
+    httpError(400, BREAKPOINT_REFUSAL)(response, request)
+  }
+}
+
 beforeAll(async () => {
   mock = await startMockProvider({
     'refuses-plain': refusingWith(BREAKPOINT_REFUSAL),
     'refuses-stream': refusingWith(BREAKPOINT_REFUSAL),
     'refuses-temperature': refusingWith(TEMPERATURE_REFUSAL),
+    'refuses-together': refusingTogether(2),
     'accepts': ANSWER
   })
   agentDir = await loadFixtureAgentDir({
@@ -96,6 +126,7 @@ beforeAll(async () => {
             { id: 'refuses-plain' },
             { id: 'refuses-stream' },
             { id: 'refuses-temperature' },
+            { id: 'refuses-together' },
             { id: 'accepts' }
           ]
         }
@@ -199,6 +230,26 @@ describe('a model that refuses prompt_cache_breakpoint (#163)', () => {
       expect(refusalLines).toHaveLength(1)
     }
   )
+
+  // Catches only the first of several requests in flight together being retried: they all send
+  // the field before the first refusal comes back, and the later ones, refused after the model is
+  // remembered, reached the client as a 400 (#166 review).
+  test('requests in flight together are each retried', async () => {
+    const before = mock.requests.length
+    const results = await Promise.all([
+      ask('refuses-together', false),
+      ask('refuses-together', true)
+    ])
+    const upstream = mock.requests
+      .slice(before)
+      .filter((request) => isRecord(request.body) && request.body['model'] === 'refuses-together')
+
+    expect(results.map((answer) => answer.status)).toEqual([200, 200])
+    // Each request: one call with the field, refused, then one without it.
+    expect(upstream.filter(carriesBreakpoint)).toHaveLength(2)
+    expect(upstream.filter((request) => !carriesBreakpoint(request))).toHaveLength(2)
+    expect(refusalLines).toHaveLength(1)
+  })
 
   // Catches the retry widened to any 400: a refusal of another field is the client's to see.
   test('a 400 naming another field is answered, not retried', async () => {

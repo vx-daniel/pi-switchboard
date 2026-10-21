@@ -546,13 +546,15 @@ error text (`400: {…}` on chat completions, `OpenAI API error (400): {…}` on
 top level or under `error`) for a request that sent breakpoints. It remembers the model as
 `provider/id` for the life of the process, and `piComplete` or `piStream` sends the request once
 more. The breakpoint patch then leaves the field out for that model, on this request and every
-later one, so each such model costs at most one failed request per proxy start. pi emits `start`
-only once the provider has accepted the request, so a stream's refusal is its first event, and
-the retry happens before the client sees anything. The first refusal per model is logged at
-`info` (`{modelId} refused prompt_cache_breakpoint: retrying without it…`), and later drops at
-`debug`. A 400 for any other `param`, any other status, and a refusal for a model already
-remembered are answered as they are. `test/integration/breakpoint-refusal.test.ts` runs the chain
-through pi's OpenAI adapter and SDK; `test/unit/cache-breakpoints.test.ts` pins the Responses
+later one, so each such model costs one failed request per proxy start, or one per request
+already in flight when the first refusal comes back: a refusal naming the field proves its
+request sent it, so those are each retried too (#166 review). A client that has left gets no
+retry. pi emits `start` only once the provider has accepted the request, so a stream's refusal is
+its first event, and the retry happens before the client sees anything. The first refusal per
+model is logged at `info` (`{modelId} refused prompt_cache_breakpoint: retrying without it…`), and
+later drops at `debug`. A 400 for any other `param`, and any other status, are answered as they
+are. `test/integration/breakpoint-refusal.test.ts` runs the chain through pi's OpenAI adapter and
+SDK, concurrent first requests included; `test/unit/cache-breakpoints.test.ts` pins the Responses
 wording.
 
 ## Message mapping policy

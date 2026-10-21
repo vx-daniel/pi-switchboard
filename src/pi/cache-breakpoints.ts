@@ -332,9 +332,11 @@ export function breakpointPatch(
  *
  * @remarks
  * A refusal is an upstream 400 whose body names `prompt_cache_breakpoint` as its `param`, for a
- * request that sent breakpoints. Any other 400, or one for a model already remembered (the field
- * was not sent, so it is not the cause), is left as it is. The first refusal per model is logged
- * at info; later requests drop the field at debug.
+ * request that sent breakpoints. Any other 400 is left as it is. A refusal that names the field
+ * proves this request carried it, even when the model is already remembered: requests in flight
+ * together all send it before the first refusal comes back, and each is retried (#166 review).
+ * The retry is built after the model is remembered, so it cannot be refused for the field again.
+ * The first refusal per model is logged at info; later requests drop the field at debug.
  *
  * @param model - the pi model
  * @param messages - the request's messages
@@ -348,9 +350,9 @@ export function retryWithoutBreakpoints(
 ): boolean {
   if (failed.stopReason !== 'error') return false
   if (badRequestParam(failed.errorMessage ?? '') !== 'prompt_cache_breakpoint') return false
-  const key = modelKey(model)
-  if (modelsRefusingBreakpoints.has(key)) return false
   if (breakpointPlan(messages) === undefined || messageField(model) === undefined) return false
+  const key = modelKey(model)
+  if (modelsRefusingBreakpoints.has(key)) return true
   modelsRefusingBreakpoints.add(key)
   breakpointLogger.info(
     '{modelId} refused prompt_cache_breakpoint: retrying without it, and leaving it out for this model until the proxy restarts',
