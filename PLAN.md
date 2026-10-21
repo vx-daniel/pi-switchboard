@@ -424,6 +424,23 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
   rate-limited model would pass after about 38 failures in a row. That bound is the limit of
   `Date`, not a cap. pi's Google adapters refuse a custom `fetch`, so Google models always use
   the default.
+- **Codex over SSE (#185).** pi's Codex adapter tries a WebSocket first (`transport: "auto"`),
+  and `fetch` sees nothing of it. So the proxy passes `transport: "sse"` for
+  `openai-codex-responses` (`transportOptions` in `src/pi/complete.ts`), and the 429 body's
+  `resets_in_seconds` is read. pi throws that 429 with its own wording only ("You have hit your
+  ChatGPT usage limit", no status), so "usage limit" is rate-limit wording in `BY_WORDING`.
+  Before 0.3.1, a Codex limit answered 502 `upstream_error` and started no cooldown.
+
+  Measured live on 2026-10-21 (`gpt-6-luna`, median time to the first event):
+
+  | Calls | WebSocket | SSE |
+  |---|---|---|
+  | One turn, 4 calls each | 1,522 ms | 954 ms |
+  | One turn with a session ID, 4 calls each | 1,199 ms | 916 ms |
+  | Turns 2–6 on a 31k-token history, 10 each | 1,049 ms | 1,071 ms |
+
+  With a session ID the WebSocket sends only the new turns, but that bought nothing measurable at
+  31k tokens. Both transports read 30,720 tokens from the prompt cache.
 - **Applied by routing only, recorded always (principle VI).** Every request's 429 or 503 on the
   proxy's login starts a cooldown, so the state is visible. A request with its own upstream key
   records and clears nothing: its failures are about that key, not the login others share. It
@@ -1176,10 +1193,11 @@ is read from the fixed positions pi 1.3.0's messages put it in: leading, and onl
 what only a status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 status code (no body)`;
 `429 tokens…` is not a status), after a label (`OpenAI API error (429): …`, `Mistral API error
 (429): …`), Google's `got status: 429.` or its error body's `error.code`. When a status is found it
-decides; the wording (`rate limit`, `too many requests`, `timed out`, `overloaded`,
+decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`, `overloaded`,
 `service unavailable`, …, checked in that order) is consulted only when no status is reported
-(Bedrock, network failures, the proxy's own idle timeout), and a number elsewhere in the text never
-counts (#42). The client gets a fixed message and code, never the upstream text. A missing or broken
+(Bedrock, network failures, the proxy's own idle timeout, pi's Codex usage limit), and a number
+elsewhere in the text never counts (#42). The client gets a fixed message and code, never the
+upstream text. A missing or broken
 upstream credential is refused with `401` before any response starts, streamed or not
 (`checkRequestAuth`).
 
