@@ -30,6 +30,8 @@ import { getAvailableModels, initRegistry } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { defineCommand, runMain } from 'citty'
 
+import packageJson from '../package.json' with { type: 'json' }
+
 /** Logger for process lifecycle (`server` category). */
 const lifecycleLogger = proxyLogger('server')
 
@@ -238,6 +240,7 @@ function logProxyAuth(config: ServerConfig): void {
 const main = defineCommand({
   meta: {
     name: 'pi-switchboard',
+    version: packageJson.version,
     description: "OpenAI-compatible HTTP API over pi's models, logins and providers"
   },
   args: {

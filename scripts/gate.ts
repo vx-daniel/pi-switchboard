@@ -34,9 +34,10 @@
  *                `.fallowrc.jsonc`, each with its reason.
  *   5. build  — `vp pack`: the tsdown build of every published entry point and its declarations.
  *                Late, because it is slow and the checks above cover the source it reads.
- *   6. smoke  — `node dist/index.mjs --help`: runs the built CLI, as its `bin` does. The entry
+ *   6. smoke  — `node dist/index.mjs --version`: runs the built CLI, as its `bin` does. The entry
  *                loads the CLI dynamically (#165), a split only the build makes, so only this
- *                sees a bundle that cannot load it. Last, because it needs the build.
+ *                sees a bundle that cannot load it, or one built without the package version
+ *                (#168). Last, because it needs the build.
  *
  * ⚠ Each row's name and first backticked command is CHECKED against GATES and package.json by
  * `test/unit/gate.test.ts`: this list is the documented authority for what "green" means, and a
@@ -148,7 +149,7 @@ export const GATES: readonly Gate[] = [
   },
   {
     name: 'smoke',
-    describe: 'the built CLI starts: its entry loads the bundled CLI',
+    describe: 'the built CLI starts: its entry loads the bundled CLI, which knows its version',
     script: 'smoke'
   }
 ]

@@ -1153,6 +1153,9 @@ command and the server run the same pi on one `auth.json`.
   before it listens. The proxy itself still only warns when it binds off loopback with auth off.
   Moving the refusal into the proxy would change auth semantics for every non-container user, so
   it stays an image rule (#60, "Decision needed"); the token comes from the environment only.
+  One exception (#168): exactly one argument, `--version`, `-v`, `--help` or `-h`, runs without
+  a token, since the CLI prints and exits for those without starting a server. Anything beside
+  it goes through the guard.
 - **Writes only to the volume.** UID 1000, `/app` owned by root, and in `compose.yaml` a
   read-only root filesystem, `/tmp` as tmpfs, `cap_drop: ALL` and `no-new-privileges`. pi's login
   and its refreshes, and the proxy's `proxy-config.json`, live in the volume at
