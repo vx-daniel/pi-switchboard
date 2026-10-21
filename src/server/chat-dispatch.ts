@@ -29,7 +29,7 @@ import { type Attempt, buildChatCompletion, type ResponseRoute } from '@proxy/op
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
-import { clearCooldowns, type Cooldown } from '@proxy/pi/cooldowns'
+import { clearCooldowns } from '@proxy/pi/cooldowns'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
 import {
@@ -313,12 +313,7 @@ export async function findCredentialedStart(
 ): Promise<CredentialedStart> {
   const attempts: Attempt[] = []
   for (const [position, candidate] of route.candidates.entries()) {
-    const cooling = cooldownSkip(route.candidates, position, route.fallbackOn)
-    if (cooling !== undefined) {
-      logSkip(alias, candidate, cooling)
-      attempts.push({ model: candidate.canonicalId, reason: cooling.reason, skipped: true })
-      continue
-    }
+    if (skipCooling({ ...route, alias }, position, attempts)) continue
     const refused = await checkCredential(candidate.model, upstreamApiKey)
     if (refused === undefined) {
       return { kind: 'ready', candidates: route.candidates.slice(position), attempts }
@@ -589,6 +584,8 @@ async function runAttempt(
     ...job,
     options: {
       ...job.options,
+      // pi makes one call per attempt (its retries are off, PLAN "Cooldowns"); were it to retry,
+      // the last failure is the one that says when to come back.
       onFailedResponse: (response) => {
         captured = response
       }
@@ -601,20 +598,34 @@ async function runAttempt(
 }
 
 /**
- * Logs a candidate the chain skips while it cools down (#68).
+ * Skips a candidate while it cools down (#68), when the chain names its class: logs the skip and
+ * lists it in `attempts`.
  *
- * @param alias - the alias whose chain it is
- * @param candidate - the candidate skipped
- * @param cooldown - the cooldown it is under
+ * @param chain - the candidates, the classes the alias names, and the alias
+ * @param chain.candidates - the chain's candidates
+ * @param chain.fallbackOn - the failure classes the alias names
+ * @param chain.alias - the alias whose chain it is
+ * @param position - the candidate's index in `chain.candidates`
+ * @param attempts - the attempts so far; a skip is added to them
+ * @returns whether the candidate is skipped
  */
-function logSkip(alias: string | undefined, candidate: ExposedModel, cooldown: Cooldown): void {
+function skipCooling(
+  chain: Pick<ChatRoute, 'candidates' | 'fallbackOn'> & { alias: string | undefined },
+  position: number,
+  attempts: Attempt[]
+): boolean {
+  const cooldown = cooldownSkip(chain.candidates, position, chain.fallbackOn)
+  const candidate = chain.candidates[position]
+  if (cooldown === undefined || candidate === undefined) return false
   chatLogger.info('Alias {alias}: skipping {model}, cooling down after {reason} until {until}', {
-    alias,
+    alias: chain.alias,
     model: candidate.canonicalId,
     reason: cooldown.reason,
     until: new Date(cooldown.until).toISOString(),
     scope: cooldown.scope
   })
+  attempts.push({ model: candidate.canonicalId, reason: cooldown.reason, skipped: true })
+  return true
 }
 
 /**
@@ -677,12 +688,7 @@ function fallbackFor(
 export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob): Promise<Response> {
   const attempts = [...job.attempts]
   for (const [position, candidate] of job.candidates.entries()) {
-    const cooling = cooldownSkip(job.candidates, position, job.fallbackOn)
-    if (cooling !== undefined) {
-      logSkip(job.alias, candidate, cooling)
-      attempts.push({ model: candidate.canonicalId, reason: cooling.reason, skipped: true })
-      continue
-    }
+    if (skipCooling(job, position, attempts)) continue
     const { outcome, captured } = await runAttempt(honoContext, candidate, job, position > 0)
     if (outcome.kind === 'final') return outcome.response
     if (outcome.kind === 'answered') {

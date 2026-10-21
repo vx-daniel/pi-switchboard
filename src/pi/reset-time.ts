@@ -43,6 +43,9 @@ const CAPTURED_STATUSES: ReadonlySet<number> = new Set([
 /** How much of an error body is kept: enough for any provider's error JSON. */
 const BODY_LIMIT = 16_384
 
+/** How long the clone's body may take to arrive before the proxy stops reading it. */
+const BODY_READ_MS = 2000
+
 /** Milliseconds in a minute. */
 const MS_PER_MINUTE = 60_000
 /** Milliseconds in an hour. */
@@ -197,6 +200,10 @@ function parseJson(body: string): unknown {
 /**
  * Reads how long a failed response says to wait before trying the provider again.
  *
+ * @remarks
+ * The sources are tried in order, and the first that gives a positive wait counts: a
+ * `retry-after: 0` or a time already past falls through to the body and the reset headers.
+ *
  * @param response - the failed response
  * @param now - the current time, in milliseconds since the epoch; `Date.now()` by default
  * @returns the wait in milliseconds, at least 1, or `undefined` when the response gives none
@@ -205,12 +212,48 @@ export function resetAfterMs(
   response: FailedResponse,
   now: number = Date.now()
 ): number | undefined {
-  const wait =
-    fromRetryAfter(response.headers, now) ??
-    fromBodyFields(parseJson(response.body), now) ??
-    fromResetHeaders(response.headers, now) ??
-    fromMessage(response.body)
-  return wait !== undefined && Number.isFinite(wait) && wait > 0 ? Math.ceil(wait) : undefined
+  const sources: readonly (() => number | undefined)[] = [
+    () => fromRetryAfter(response.headers, now),
+    () => fromBodyFields(parseJson(response.body), now),
+    () => fromResetHeaders(response.headers, now),
+    () => fromMessage(response.body)
+  ]
+  for (const source of sources) {
+    const wait = source()
+    if (wait !== undefined && Number.isFinite(wait) && wait > 0) return Math.ceil(wait)
+  }
+  return undefined
+}
+
+/**
+ * Reads the start of a response's body from a clone: at most {@link BODY_LIMIT} characters, for at
+ * most {@link BODY_READ_MS}. Cancelling the clone leaves the original for pi to read.
+ *
+ * @param response - the response; its clone is read, never it
+ * @returns what arrived in time, or `''`
+ */
+async function readBodyStart(response: Response): Promise<string> {
+  const reader: ReadableStreamDefaultReader<Uint8Array> | undefined = response
+    .clone()
+    .body?.getReader()
+  if (reader === undefined) return ''
+  const decoder = new TextDecoder()
+  const timer = setTimeout(() => {
+    reader.cancel().catch(() => undefined)
+  }, BODY_READ_MS)
+  let text = ''
+  try {
+    for (let chunk = await reader.read(); !chunk.done; chunk = await reader.read()) {
+      text += decoder.decode(chunk.value, { stream: true })
+      if (text.length >= BODY_LIMIT) break
+    }
+  } catch {
+    // Aborted with the request, or the stream failed: keep what arrived.
+  } finally {
+    clearTimeout(timer)
+    reader.cancel().catch(() => undefined)
+  }
+  return text.slice(0, BODY_LIMIT)
 }
 
 /**
@@ -231,14 +274,10 @@ export function capturingFetch(
   return async (input, init) => {
     const response = await base(input, init)
     if (CAPTURED_STATUSES.has(response.status)) {
-      const body = await response
-        .clone()
-        .text()
-        .catch(() => '')
       onFailure({
         status: response.status,
         headers: response.headers,
-        body: body.slice(0, BODY_LIMIT)
+        body: await readBodyStart(response)
       })
     }
     return response
