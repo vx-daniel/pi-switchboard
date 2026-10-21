@@ -528,7 +528,7 @@ user), and sends it on only where the API takes it (constitution 3.1.0, principl
 
 | API | What happens |
 |---|---|
-| OpenAI chat completions and Responses at `api.openai.com` | Forwarded. pi joins the leading system and developer text into one string; the proxy's `onPayload` (`src/pi/cache-breakpoints.ts`) puts the client's parts back in its place, joined with the same blank lines, each with its breakpoint (`text` or `input_text` parts). User parts get theirs back by position. Each change is made only when pi's text matches exactly, so a payload pi built differently is left alone. |
+| OpenAI chat completions and Responses at `api.openai.com` | Forwarded. pi joins the leading system and developer text into one string; the proxy's `onPayload` (`src/pi/cache-breakpoints.ts`) puts the client's parts back in its place, joined with the same blank lines, each with its breakpoint (`text` or `input_text` parts). User parts get theirs back by position. Each change is made only when pi's text matches exactly, so a payload pi built differently is left alone. A model there that refuses the field is retried without it and then left out (below). |
 | Codex (`openai-codex-responses`) | Dropped: pi sends the system prompt as the plain string `instructions`, which has no part to carry it. |
 | Every other API (OpenAI-compatible servers, Anthropic, Google, Bedrock, …) | Dropped: an OpenAI-compatible server may refuse a field it does not know, and the others have no such field. |
 
@@ -537,6 +537,25 @@ forward reports how many were placed. Rejecting the field instead would break do
 which sends it on every system part to `gpt-*` models (#149). `test/unit/cache-breakpoints.test.ts`
 runs pi's real chat-completions and Responses builders, so a change in how pi builds the system
 message shows up there.
+
+**A model that refuses the field** (#163, constitution 3.4.0). Some models on `api.openai.com`,
+the ChatGPT-subscription ones (`gpt-6-luna`, `gpt-5.6-terra`, `gpt-6.1-sol`, `gpt-6-astra`),
+answer it with a 400: `{"message":"prompt_cache_breakpoint is not supported on this model",
+"param":"prompt_cache_breakpoint",…}`. `retryWithoutBreakpoints` recognizes that answer in pi's
+error text (`400: {…}` on chat completions, `OpenAI API error (400): {…}` on Responses, `param`
+top level or under `error`) for a request that sent breakpoints. It remembers the model as
+`provider/id` for the life of the process, and `piComplete` or `piStream` sends the request once
+more. The breakpoint patch then leaves the field out for that model, on this request and every
+later one, so each such model costs one failed request per proxy start, or one per request
+already in flight when the first refusal comes back: a refusal naming the field proves its
+request sent it, so those are each retried too (#166 review). A client that has left gets no
+retry. pi emits `start` only once the provider has accepted the request, so a stream's refusal is
+its first event, and the retry happens before the client sees anything. The first refusal per
+model is logged at `info` (`{modelId} refused prompt_cache_breakpoint: retrying without it…`), and
+later drops at `debug`. A 400 for any other `param`, and any other status, are answered as they
+are. `test/integration/breakpoint-refusal.test.ts` runs the chain through pi's OpenAI adapter and
+SDK, concurrent first requests included; `test/unit/cache-breakpoints.test.ts` pins the Responses
+wording.
 
 ## Message mapping policy
 
