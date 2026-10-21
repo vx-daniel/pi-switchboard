@@ -174,6 +174,40 @@
             },
             "description": "`enabledModels` patterns that matched nothing, matched several providers, or carried an invalid thinking level."
           },
+          "aliasDiagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "shadows-model",
+                    "target-not-exposed"
+                  ]
+                },
+                "alias": {
+                  "type": "string",
+                  "description": "The alias, as written."
+                },
+                "target": {
+                  "type": "string",
+                  "description": "The canonical ID it names, as written."
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "alias",
+                "target",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the check fail), or naming no exposed model (`target-not-exposed`)."
+          },
           "modelsJsonError": {
             "anyOf": [
               {
@@ -194,6 +228,7 @@
           "publicModelIdMode",
           "exposureError",
           "scopeDiagnostics",
+          "aliasDiagnostics",
           "modelsJsonError"
         ],
         "additionalProperties": false
@@ -655,6 +690,40 @@
                       },
                       "description": "`enabledModels` patterns that matched nothing, matched several providers, or carried an invalid thinking level."
                     },
+                    "aliasDiagnostics": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "code": {
+                            "type": "string",
+                            "enum": [
+                              "shadows-model",
+                              "target-not-exposed"
+                            ]
+                          },
+                          "alias": {
+                            "type": "string",
+                            "description": "The alias, as written."
+                          },
+                          "target": {
+                            "type": "string",
+                            "description": "The canonical ID it names, as written."
+                          },
+                          "message": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "code",
+                          "alias",
+                          "target",
+                          "message"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the check fail), or naming no exposed model (`target-not-exposed`)."
+                    },
                     "modelsJsonError": {
                       "anyOf": [
                         {
@@ -675,6 +744,7 @@
                     "publicModelIdMode",
                     "exposureError",
                     "scopeDiagnostics",
+                    "aliasDiagnostics",
                     "modelsJsonError"
                   ],
                   "additionalProperties": false
@@ -1452,6 +1522,10 @@
                           "type": "integer",
                           "minimum": -9007199254740991,
                           "maximum": 9007199254740991
+                        },
+                        "alias": {
+                          "description": "The alias the request named (#66); present only when it named one.",
+                          "type": "string"
                         }
                       },
                       "required": [
@@ -1460,7 +1534,7 @@
                         "cache_write_tokens"
                       ],
                       "additionalProperties": false,
-                      "description": "Not OpenAI's: pi's cost (USD) and cache token counts."
+                      "description": "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias used."
                     }
                   },
                   "required": [
@@ -1592,6 +1666,20 @@
                           "type": "null"
                         }
                       ]
+                    },
+                    "x_pi": {
+                      "description": "Not OpenAI's: in every chunk, only when the request named an alias.",
+                      "type": "object",
+                      "properties": {
+                        "alias": {
+                          "type": "string",
+                          "description": "The alias the request named (#66)."
+                        }
+                      },
+                      "required": [
+                        "alias"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [

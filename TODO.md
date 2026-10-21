@@ -412,7 +412,7 @@ since the rename; each issue holds the detailed checklist.
 Constitution principle VI applies to each item: configured explicitly, exposure-bound, and the
 serving model and login reported under `x_pi` and in the log.
 
-- [ ] Aliases (#66)
+- [x] Aliases (#66): `aliases` in `proxy-config.json`, listed while the target is exposed, `x_pi.alias`, a shadowing alias reported in `/healthz/models`
 - [ ] Fallback chains (#67)
 - [ ] Cooldowns after rate limits (#68)
 - [ ] Quota awareness (#69)

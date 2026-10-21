@@ -316,12 +316,39 @@ For incoming model references on the HTTP API, resolve in this order:
 
 1. exact public ID match
 2. exact canonical ID match for backward compatibility
+3. exact alias match (#66, below)
 
 Canonical fallback is only allowed for models inside the current exposed set.
-Hidden models must not become reachable through canonical fallback.
+Hidden models must not become reachable through canonical fallback, nor through an alias.
 
 Do not rely on the old registry-wide shorthand ambiguity rules on the public HTTP surface.
 The public model list itself defines the valid request IDs.
+
+### Aliases (#66)
+
+`aliases` in `proxy-config.json` maps a name to an exposed model's canonical ID, the first routing
+control under constitution principle VI; fallback chains (#67) widen the value to a list.
+`src/openai/model-aliases.ts` (`exposeAliases`) runs inside `computeModelExposure`, after the
+public and canonical IDs are built:
+
+- **Exposed only while the target is.** The target is looked up among the exposed models by
+  canonical ID, so an alias never reaches a hidden model (principle IV). An alias whose target is
+  not exposed is left out with a `target-not-exposed` diagnostic. That is not a failure: leaving a
+  model out of `enabledModels` is how scoped mode hides it.
+- **Never shadows a model.** An alias named like an exposed public or canonical ID is left out
+  with a `shadows-model` diagnostic, and the model keeps its name. It is not an exposure error
+  (`ok: false`), which would answer every request with 500; `/healthz/models` answers 503 and
+  lists it, and one warning is logged per distinct set. Resolving aliases last is a second guard.
+- **Listed as its target under the alias.** Each exposed alias is an `ExposedModel` with
+  `publicId` set to the alias and `alias` set, so `/v1/models`, `/v1/models/{alias}` and
+  `/v1/switchboard/models` list it after the models (`owned_by` and `reasoning_efforts` are the
+  target's). `exposure.models` and its count stay the real models.
+- **Visible in the response and the log (principle VI).** `model` stays the target's canonical
+  ID. `x_pi.alias` carries the alias, in a non-streamed response and in every stream chunk, and
+  only when the request named one, so a request without an alias is unchanged. The chat request
+  log line adds `alias`. There is one login per provider, so no login is reported yet.
+- **Verbatim.** Names and targets are never trimmed; an empty name or target is dropped by the
+  config repair.
 
 ### Route handling
 
@@ -348,6 +375,7 @@ Required settings:
 - `modelExposureMode`: `all` | `scoped` | `custom`
 - `customModels`: string[] — canonical model IDs only
 - `providerPrefixes`: record of provider key -> public prefix label
+- `aliases`: record of alias -> canonical ID of an exposed model (#66)
 
 Note: `scoped` mode delegates to pi's global `enabledModels` setting (from `/scoped-models` Ctrl+S,
 or a hand-edited `settings.json`). No proxy-side config is needed: the proxy reads
@@ -372,7 +400,7 @@ Settings-panel requirements:
 - model selection for `custom` mode should use a searchable selector UI
 - prefix overrides should be editable without requiring manual JSON editing
 - `/proxy verify` should validate collisions, invalid universal mode, unknown providers, and missing custom models
-- `/proxy show` should summarize the effective exposure policy and preview representative public IDs
+- `/proxy show` should summarize the effective exposure policy and preview representative public IDs, and list the aliases and any left out (#66)
 
 ## Authentication model
 

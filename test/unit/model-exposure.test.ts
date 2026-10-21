@@ -55,6 +55,7 @@ function defaultConfig(overrides: Partial<ModelExposureConfig> = {}): ModelExpos
     enabledModels: undefined,
     customModels: [],
     providerPrefixes: {},
+    aliases: {},
     ...overrides
   }
 }

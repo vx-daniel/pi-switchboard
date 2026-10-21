@@ -122,6 +122,7 @@ The proxy resolves model references in this order:
 
 1. **Exact public ID match** — the ID from `GET /v1/models`
 2. **Canonical ID fallback** — `provider/model-id` format (only for exposed models)
+3. **Alias** — a name from `aliases` in the config file ([below](#aliases))
 
 With the default `collision-prefixed` mode and no collisions, model IDs are exposed without prefixes:
 
@@ -159,7 +160,7 @@ Operational endpoints, outside the OpenAI-compatible `/v1` surface:
 | Endpoint | Auth | Answers |
 |---|---|---|
 | `GET /healthz` | Never | `200 {"status":"ok"}` once the proxy listens and pi's model runtime is loaded. No upstream calls: use it for container healthchecks and liveness probes. |
-| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there). `503` when no model is exposed or the exposure config is invalid. |
+| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`) and aliases left out (`aliasDiagnostics`). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model. |
 | `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …) and `availableModelCount`. `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
 
 None of them returns a credential. `/healthz` proves the process is up, not that a provider will accept a request: `GET /healthz/creds?verify=true` is the closest check to that without spending a completion.
@@ -313,10 +314,26 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 | `modelExposureMode` | `scoped` | Which models to expose: `all`, `scoped`, `custom` |
 | `customModels` | `[]` | Canonical model IDs for `custom` mode. An empty list exposes no model |
 | `providerPrefixes` | `{}` | Provider key -> custom prefix label overrides |
+| `aliases` | `{}` | Alias -> the canonical ID of an exposed model ([Aliases](#aliases)) |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.
 
 A config file is never refused: an invalid value is replaced and the proxy starts anyway. A number outside its range is clamped to the nearest bound, a list or map keeps its valid entries, and anything else takes its default. One exception: an `authToken` that is not a string is not replaced by the default (which would turn auth off); the proxy refuses to start instead (see [Proxy authentication](#proxy-authentication)). `host` is trimmed; model IDs, prefix labels and `authToken` are used exactly as written, so a padded model ID matches no model rather than exposing one. One warning names the fields that were replaced, never their values, and it repeats only when that set of fields changes.
+
+### Aliases
+
+Most clients only let you pick a model name, so an alias is the routing control every client has. Define names in `proxy-config.json`, each pointing at an exposed model's canonical ID:
+
+```json
+{ "aliases": { "coding": "anthropic/claude-opus-5-5", "cheap": "anthropic/claude-haiku-5-5" } }
+```
+
+- **Request it like a model.** `"model": "coding"` is answered by `anthropic/claude-opus-5-5`. The response's `model` is the target's canonical ID, so you see which model answered, and `x_pi.alias` is `coding`, in a non-streamed response and in every stream chunk. The request log line names the alias too.
+- **Listed beside the models.** `coding` appears in `GET /v1/models` (with the target's provider as `owned_by`), in `GET /v1/models/coding`, and in `GET /v1/switchboard/models` with the target's `reasoning_efforts`.
+- **Only while its target is exposed.** An alias never reaches a model the exposure config hides: leave the target out of `enabledModels` (or `customModels`) and the alias disappears too. `/healthz/models` then lists it as `target-not-exposed`.
+- **Never shadows a model.** An alias named like an exposed model's public or canonical ID is ignored, and the model keeps its name. `/healthz/models` answers `503` and lists it as `shadows-model`, and the proxy logs a warning. Rename the alias.
+- **Used as written.** Names and targets are not trimmed or normalized; a mistyped target matches no model. An entry with an empty name or target is dropped with the config warning.
+- **In pi,** `/proxy show` lists the aliases and any left out. Editing them in the settings panel can come later.
 
 ### Discovering available models
 

@@ -144,7 +144,7 @@ Get 0.1.0 into people's hands under the new name.
 
 What the name promises, under constitution principle VI (explicit, visible, exposure-bound).
 
-- [ ] Aliases: virtual model names (#66)
+- [x] Aliases: virtual model names (#66)
 - [ ] Fallback chains for aliases (#67)
 - [ ] Cooldowns after rate limits; stop the SDK sleeping on retries (#68)
 - [ ] Quota awareness from provider rate-limit headers (#69)

@@ -106,14 +106,16 @@ export async function fileConfigReader(): Promise<ModelExposureConfig> {
     publicModelIdMode: file.publicModelIdMode,
     enabledModelCount: enabledModels?.length,
     customModelCount: file.customModels.length,
-    providerPrefixCount: Object.keys(file.providerPrefixes).length
+    providerPrefixCount: Object.keys(file.providerPrefixes).length,
+    aliasCount: Object.keys(file.aliases).length
   })
   return {
     publicModelIdMode: file.publicModelIdMode,
     modelExposureMode: file.modelExposureMode,
     enabledModels,
     customModels: file.customModels,
-    providerPrefixes: file.providerPrefixes
+    providerPrefixes: file.providerPrefixes,
+    aliases: file.aliases
   }
 }
 
@@ -382,6 +384,8 @@ async function checkRequestAuth(
 interface CompletionJob {
   readonly requestId: string
   readonly canonicalModelId: string
+  /** The alias the request named (#66): reported as `x_pi.alias`. */
+  readonly alias: string | undefined
   readonly model: PiModel
   readonly context: PiContext
   readonly request: ChatRequest
@@ -430,7 +434,7 @@ async function* startingWith<T>(
  *   client left before the stream started
  */
 async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promise<Response> {
-  const { requestId, canonicalModelId, model, context, request, options } = job
+  const { requestId, canonicalModelId, alias, model, context, request, options } = job
   const includeUsage =
     request.stream_options !== null &&
     request.stream_options !== undefined &&
@@ -477,8 +481,7 @@ async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promis
     try {
       for await (const frame of streamToSSE(
         startingWith(first, events),
-        requestId,
-        canonicalModelId,
+        { requestId, model: canonicalModelId, alias },
         includeUsage
       )) {
         await stream.write(frame)
@@ -510,7 +513,7 @@ async function streamChat(honoContext: ProxyContext, job: CompletionJob): Promis
  *   with `stopReason` `error` or `aborted`
  */
 async function completeChat(honoContext: ProxyContext, job: CompletionJob): Promise<Response> {
-  const { requestId, canonicalModelId, model, context, request, options } = job
+  const { requestId, canonicalModelId, alias, model, context, request, options } = job
   const start = performance.now()
   try {
     const message = await piComplete(model, context, request, options)
@@ -526,7 +529,7 @@ async function completeChat(honoContext: ProxyContext, job: CompletionJob): Prom
       return honoContext.json(mapped.body, mapped.status)
     }
 
-    return honoContext.json(buildChatCompletion(requestId, canonicalModelId, message))
+    return honoContext.json(buildChatCompletion(requestId, canonicalModelId, message, alias))
   } catch (err: unknown) {
     const mapped = reportThrownFailure(err)
     return honoContext.json(mapped.body, mapped.status)
@@ -578,12 +581,13 @@ async function handleChatCompletion(
   const canonicalModelId = resolved.canonicalId
 
   // The request and response lines carry no model, so this one ties the call to the model that
-  // served it. Ids only, never message content or credentials.
+  // served it, and to the alias it was asked for by. Ids only, never message content or credentials.
   chatLogger.info('Chat request for {requestedModel} resolved to {model}', {
     requestedModel: request.model,
     model: canonicalModelId,
     provider: model.provider,
-    stream: request.stream === true
+    stream: request.stream === true,
+    ...(resolved.alias === undefined ? {} : { alias: resolved.alias })
   })
 
   // Upstream credentials first: a request that cannot reach the provider must not make the proxy
@@ -600,6 +604,7 @@ async function handleChatCompletion(
   const job: CompletionJob = {
     requestId,
     canonicalModelId,
+    alias: resolved.alias,
     model,
     context: built.value,
     request,
@@ -640,8 +645,11 @@ export function createRoutes(
   // --- GET /v1/models ---
   routes.get('/v1/models', describeRoute(listModelsDescription), async (context) => {
     const exposure = await getExposure(configReader)
-    chatLogger.debug('Listing {modelCount} models', { modelCount: exposure.models.length })
-    return context.json(buildModelList(exposure.models))
+    chatLogger.debug('Listing {modelCount} models and {aliasCount} aliases', {
+      modelCount: exposure.models.length,
+      aliasCount: exposure.aliases.length
+    })
+    return context.json(buildModelList([...exposure.models, ...exposure.aliases]))
   })
 
   // --- GET /v1/switchboard/models ---
@@ -651,10 +659,11 @@ export function createRoutes(
     describeRoute(listModelCapabilitiesDescription),
     async (context) => {
       const exposure = await getExposure(configReader)
-      chatLogger.debug('Listing capabilities of {modelCount} models', {
-        modelCount: exposure.models.length
+      chatLogger.debug('Listing capabilities of {modelCount} models and {aliasCount} aliases', {
+        modelCount: exposure.models.length,
+        aliasCount: exposure.aliases.length
       })
-      return context.json(buildPiModelList(exposure.models))
+      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
     }
   )
 

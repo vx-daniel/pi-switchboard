@@ -149,6 +149,8 @@ export interface ServerConfig {
   readonly customModels: readonly string[]
   /** Provider key -> custom public prefix label. */
   readonly providerPrefixes: Readonly<Record<string, string>>
+  /** Alias -> the canonical ID of the model it names (#66). */
+  readonly aliases: Readonly<Record<string, string>>
   /** Lowest log level written. */
   readonly logLevel: LogLevel
 }
@@ -351,6 +353,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     modelExposureMode: file.modelExposureMode,
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
+    aliases: file.aliases,
     logLevel: cli.logLevel ?? envLogLevel(process.env.PI_SWITCHBOARD_LOG_LEVEL, file.logLevel)
   }
 }
