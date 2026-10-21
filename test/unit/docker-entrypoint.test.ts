@@ -80,8 +80,10 @@ describe('docker/entrypoint.sh', () => {
     expect(result.stdout.trim()).toBe(`node /app/dist/index.mjs ${flag}`)
   })
 
-  // Catches the exception widened past an info flag alone: with anything beside it, or another
-  // argument, the CLI could start a server, so the token is still required.
+  // Catches the exception widened past an info flag alone, the only shape the CLI test pins as
+  // starting no server: the flag beside other arguments (`--version --port 4141`), the flag as an
+  // option's value (`--host --help`, matched by a looser check such as "any argument is --help"),
+  // or a prefix match (`--versions`). Each still needs the token.
   test.each([
     ['--version beside another argument', ['--version', '--port', '4141']],
     ['an info flag as a value', ['--host', '--help']],

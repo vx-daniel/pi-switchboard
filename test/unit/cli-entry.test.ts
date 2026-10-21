@@ -10,7 +10,16 @@ import { join } from 'node:path'
 
 import { resetSync } from '@logtape/logtape'
 import { isRecord } from '@proxy/utils/guards'
-import { afterEach, assert, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
+import {
+  afterEach,
+  assert,
+  beforeEach,
+  describe,
+  expect,
+  onTestFinished,
+  test,
+  vi
+} from 'vite-plus/test'
 
 import packageJson from '../../package.json' with { type: 'json' }
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
@@ -42,6 +51,8 @@ const UPSTREAM_TIMEOUT_SEC = 7
 const MS_PER_SECOND = 1000
 /** The four warnings the invalid-input test provokes, logged before anything else. */
 const WARNING_COUNT = 4
+/** How long an info flag's test waits for a server it must not have started, in milliseconds. */
+const SERVER_SETTLE_MS = 1000
 
 const originalArgv = process.argv
 let agentDir: FixtureAgentDir | undefined
@@ -219,7 +230,7 @@ describe('logging flags', () => {
   })
 })
 
-describe('--version', () => {
+describe('--version and --help', () => {
   // Catches the version missing (citty exits 1 with "No version specified", #168) or taken from
   // anywhere but package.json, which semantic-release bumps in each release commit.
   test.each(['--version', '-v'])('%s prints the package version and exits 0', async (flag) => {
@@ -235,6 +246,52 @@ describe('--version', () => {
     })
     expect(process.exitCode).toBeUndefined()
     expect(stderr).toEqual([])
+  })
+
+  // Catches an info flag starting the proxy: the image's entrypoint runs these four alone without
+  // a token (#168) because citty prints and exits for them without calling `run`. A change that
+  // calls `run` anyway (a citty upgrade, or `runCommand` in place of `runMain`) would serve the pi
+  // login on every interface with auth off.
+  test.each([
+    ['--version', []],
+    ['-v', []],
+    ['--help', [0]],
+    ['-h', [0]]
+  ])('%s alone starts no server', async (flag, expectedExits) => {
+    const port = await freePort()
+    writeConfigFile({ port })
+    const printed: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((...parts: unknown[]) => {
+      printed.push(parts.map(String).join(' '))
+    })
+    // citty ends --help with process.exit(0). Vitest throws on that, and citty's catch then calls
+    // process.exit(1) outside any test, so the call is recorded instead. Replaced, not spied:
+    // a spy's stub must return `never`, and this one returns.
+    const exits: unknown[] = []
+    const realExit = process.exit
+    Object.defineProperty(process, 'exit', {
+      configurable: true,
+      value: (code?: unknown) => {
+        exits.push(code)
+      }
+    })
+    onTestFinished(() => {
+      Object.defineProperty(process, 'exit', { configurable: true, value: realExit })
+    })
+
+    await runCli([flag])
+    await vi.waitFor(() => {
+      expect(printed).not.toEqual([])
+    })
+    // Long enough for a server the flag wrongly started to listen: the tests that start one
+    // (below) listen well within it.
+    await new Promise<void>((resolve) => {
+      setTimeout(resolve, SERVER_SETTLE_MS)
+    })
+
+    await expect(fetch(`http://127.0.0.1:${String(port)}/healthz`)).rejects.toThrow()
+    expect(addedListeners('SIGTERM')).toEqual([])
+    expect(exits).toEqual(expectedExits)
   })
 })
 
