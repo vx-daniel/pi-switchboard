@@ -78,6 +78,44 @@ const WAIT_PHRASE =
 
 /** A Unix time in seconds is past this; anything smaller is a number of seconds to wait. */
 const EPOCH_SECONDS_FLOOR = 1_000_000_000
+/**
+ * A Unix time in milliseconds is past this: 1973 in milliseconds, the year 5138 in seconds, so no
+ * real time in seconds reaches it.
+ */
+const EPOCH_MS_FLOOR = 100_000_000_000
+
+/** The date formats a reset time is written in: ISO 8601, and HTTP's IMF-fixdate (RFC 9110). */
+const DATE_FORMATS: readonly RegExp[] = [
+  /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})$/,
+  /^[A-Z][a-z]{2}, \d{2} [A-Z][a-z]{2} \d{4} \d{2}:\d{2}:\d{2} GMT$/
+]
+
+/**
+ * Reads a date written as ISO 8601 or an HTTP date. Other text is refused, as `Date.parse` reads
+ * odd strings (`"1"` is 2001) as dates.
+ *
+ * @param text - the date as written
+ * @param now - the current time, in milliseconds since the epoch
+ * @returns the wait in milliseconds from `now`, or `undefined` when `text` is not such a date
+ */
+function parseDate(text: string, now: number): number | undefined {
+  const trimmed = text.trim()
+  if (!DATE_FORMATS.some((format) => format.test(trimmed))) return undefined
+  const date = Date.parse(trimmed)
+  return Number.isNaN(date) ? undefined : date - now
+}
+
+/**
+ * Reads a number as a reset value: a Unix time in milliseconds or seconds, or else seconds to wait.
+ *
+ * @param value - the number
+ * @param now - the current time, in milliseconds since the epoch
+ * @returns the wait in milliseconds from `now`
+ */
+function parseResetNumber(value: number, now: number): number {
+  if (value > EPOCH_MS_FLOOR) return value - now
+  return value > EPOCH_SECONDS_FLOOR ? value * MS_PER_SECOND - now : value * MS_PER_SECOND
+}
 
 /**
  * Reads a duration such as `6m0s`, `500ms` or `3 days 4 hours`.
@@ -98,23 +136,18 @@ function parseDuration(text: string): number | undefined {
 
 /**
  * Reads a point in time or a wait, as reset headers and bodies write them: a number of seconds, a
- * Unix time in seconds, a duration, or a date.
+ * Unix time in seconds or milliseconds, a duration, or a date.
  *
  * @param value - the value as written
  * @param now - the current time, in milliseconds since the epoch
  * @returns the wait in milliseconds from `now`, or `undefined` when unreadable
  */
 function parseResetValue(value: unknown, now: number): number | undefined {
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return value > EPOCH_SECONDS_FLOOR ? value * MS_PER_SECOND - now : value * MS_PER_SECOND
-  }
+  if (typeof value === 'number' && Number.isFinite(value)) return parseResetNumber(value, now)
   if (typeof value !== 'string' || value.trim() === '') return undefined
   const trimmed = value.trim()
-  if (/^\d+(?:\.\d+)?$/.test(trimmed)) return parseResetValue(Number.parseFloat(trimmed), now)
-  const duration = parseDuration(trimmed)
-  if (duration !== undefined) return duration
-  const date = Date.parse(trimmed)
-  return Number.isNaN(date) ? undefined : date - now
+  if (/^\d+(?:\.\d+)?$/.test(trimmed)) return parseResetNumber(Number.parseFloat(trimmed), now)
+  return parseDuration(trimmed) ?? parseDate(trimmed, now)
 }
 
 /**
@@ -131,8 +164,7 @@ function fromRetryAfter(headers: Headers, now: number): number | undefined {
   if (retryAfter === null) return undefined
   const seconds = Number.parseFloat(retryAfter)
   if (/^\s*\d+(?:\.\d+)?\s*$/.test(retryAfter)) return seconds * MS_PER_SECOND
-  const date = Date.parse(retryAfter)
-  return Number.isNaN(date) ? undefined : date - now
+  return parseDate(retryAfter, now)
 }
 
 /**

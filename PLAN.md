@@ -404,13 +404,17 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
   subscription's limit covers the account. A 503 or 529 (`unavailable`) cools the **model**.
 - **Length: from the failed response, no cap** (`src/pi/reset-time.ts`). pi calls `onResponse`
   only after a success (except Codex), so the proxy passes pi a `fetch` (`capturingFetch`) that
-  copies each 429, 503 and 529 (status, headers, and the body from a clone). `resetAfterMs` takes
-  the first source found, in this order:
+  copies each 429, 503 and 529 (status, headers, and up to 16 KiB of the body, from a clone).
+  The copy is read before pi gets the response, so a body that stalls holds up that failure by at
+  most 2 s (`BODY_READ_MS`). Reading it after returning would make `runAttempt` wait on it anyway.
+  `resetAfterMs` takes the first source that gives a positive wait, in this order:
   1. `retry-after-ms`, then `retry-after` (seconds or an HTTP date);
   2. body `resets_in_seconds`, `retry_after` or `resets_at` (Codex's usage limit);
   3. the latest `*ratelimit*reset*` header (OpenAI's durations, Anthropic's timestamps);
   4. the message's "try again in …" wording.
 
+  A number is read as seconds to wait, as a Unix time in seconds past 1e9, or in milliseconds past
+  1e11. A date counts only as ISO 8601 or an HTTP date, as `Date.parse` reads odd text as dates.
   With none, a growing default: 60 s, 180 s, then doubling, counted per provider or model and
   reset by a stated time or a success. pi's Google adapters refuse a custom `fetch`, so Google
   models always use the default.
@@ -418,8 +422,10 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
   cooldown, so the state is visible. Only a chain whose `fallbackOn` names the class skips a
   cooling candidate (`cooldownSkip`); a request that names a model calls it as before. The check
   runs as the chain reaches each candidate, so a 429 met earlier in the same request skips that
-  provider's later models too. When every remaining candidate is cooling, the one whose cooldown
-  ends first is called, so a request is never answered without a call.
+  provider's later models too. When the candidate and every one after it are cooling, the one of
+  those whose cooldown ends first is called, so a request is never answered without a call. The
+  comparison uses the state as each candidate is reached: a cooldown that a parallel request starts
+  or clears meanwhile can change which one that is.
 - **Visible.** A skipped candidate is an `x_pi.attempts` entry with `skipped: true`. Each
   cooldown's start, end and skip is an info line. `/healthz/models` lists the active cooldowns
   (operator), and `/v1/switchboard/models` gives each model's `cooldown` (clients that pick models

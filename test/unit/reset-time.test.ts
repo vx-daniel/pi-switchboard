@@ -90,10 +90,21 @@ describe('resetAfterMs', () => {
     expect(resetAfterMs(response, NOW)).toBe(expected)
   })
 
+  // Catches a reset time in epoch milliseconds read as seconds (#181 review): with no cap, that
+  // is a wait of about 50,000 years, and the provider stays cooled until a restart.
+  test.each([
+    ['in a body', failed({}, `{"error":{"resets_at":${String(NOW + 600_000)}}}`)],
+    ['in a reset header', failed({ 'x-ratelimit-reset': String(NOW + 600_000) })]
+  ])('a Unix time in milliseconds %s', (_case, response) => {
+    expect(resetAfterMs(response, NOW)).toBe(600_000)
+  })
+
   // Catches a made-up wait when the response gives none, or a past time read as a wait: the
   // cooldown then uses its growing default.
   test.each([
     ['no time anywhere', failed({}, '{"error":{"message":"Too many requests"}}')],
+    // V8's Date.parse reads this as 1 December 2030 (#181 review).
+    ['text that is not a date', failed({ 'retry-after': 'Dec 2030' })],
     ['a reset time already past', failed({ 'retry-after': 'Wed, 21 Oct 2026 11:00:00 GMT' })],
     ['a number in the message that is not a wait', failed({}, 'Request 42 failed')]
   ])('%s gives none', (_case, response) => {
@@ -153,6 +164,15 @@ describe('capturingFetch', () => {
     await fetch('https://example.com')
 
     expect(captured[0]?.body).toHaveLength(16_384)
+  })
+
+  // Catches a failure with no body breaking the wrapper: it is captured with an empty body.
+  test('captures a failure with no body', async () => {
+    const { fetch, captured } = wrapped(new Response(null, { status: 429 }))
+
+    await fetch('https://example.com')
+
+    expect(captured).toMatchObject([{ status: 429, body: '' }])
   })
 
   // Catches a success cloned and read, which would buffer every streamed answer.
