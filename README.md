@@ -345,11 +345,25 @@ curl http://localhost:4141/v1/models | jq '.data[].id'
 
 Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owned_by`) with no proprietary extensions. `created` is the Unix time the proxy started, the same for every model, because pi's catalogue has no release dates and OpenAI requires the field. Don't read it as a model's age; choose models by what `GET /v1/switchboard/models` reports.
 
-`GET /v1/switchboard/models` (not part of OpenAI's API; proxy token, if set) lists what pi knows about each exposed model beyond that. Today: `reasoning_efforts`, the `reasoning_effort` values the model runs at as asked, lowest first (`["none"]` for a model without reasoning). Any other value is accepted and clamped. It was `GET /v1/pi/models` before this release; the old path is gone.
+`GET /v1/switchboard/models` (not part of OpenAI's API; proxy token, if set) lists what pi knows about each exposed model beyond that: its pi catalogue entry, with any `models.json` values. An alias shows its target's entry.
+
+| Field | Meaning |
+|---|---|
+| `provider` | pi's provider (`owned_by` on `/v1/models`) |
+| `reasoning` | Whether the model reasons |
+| `reasoning_efforts` | The `reasoning_effort` values the model runs at as asked, lowest first (`["none"]` for a model without reasoning). Any other value is accepted and clamped |
+| `input` | What it accepts: `text`, `image` |
+| `context_window`, `max_output_tokens` | In tokens |
+| `cost` | USD per million tokens: `input` (uncached), `output`, `cache_read`, `cache_write`; `0` where pi has no price |
 
 ```json
-{ "object": "list", "data": [{ "id": "claude-sonnet-4-5", "reasoning_efforts": ["none", "minimal", "low", "medium", "high"] }] }
+{ "object": "list", "data": [{ "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
+  "reasoning_efforts": ["none", "minimal", "low", "medium", "high"], "input": ["text", "image"],
+  "context_window": 200000, "max_output_tokens": 64000,
+  "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 } }] }
 ```
+
+docker-agent prices a model reached through a custom `base_url` only from a `cost` table in `team.yaml`, so a team can take these prices; without one it records usage but no cost. The path was `GET /v1/pi/models` before 0.1.0; the old path is gone.
 
 ### Per-request API key override
 
