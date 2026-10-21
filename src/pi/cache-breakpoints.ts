@@ -42,6 +42,10 @@ const MESSAGE_FIELD_BY_API: ReadonlyMap<string, 'messages' | 'input'> = new Map(
 /**
  * Models, as `provider/id`, that refused `prompt_cache_breakpoint` in this process: their requests
  * leave the field out (#163).
+ *
+ * @remarks
+ * Module state with no reset, on purpose: a refusal holds until restart. Vitest gives each test
+ * file its own copy, so within a file each test that triggers a refusal uses its own model ID.
  */
 const modelsRefusingBreakpoints = new Set<string>()
 

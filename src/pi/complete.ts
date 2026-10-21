@@ -918,5 +918,7 @@ export async function piStream(
     started.first.done !== true &&
     started.first.value.type === 'error' &&
     retryWithoutBreakpoints(model, request.messages, started.first.value.error)
+  // A refused stream is finished: pi ends it with the error event, `first` here, so there is
+  // nothing left to drain or close before the retry replaces it.
   return refused ? startStream(input) : started
 }

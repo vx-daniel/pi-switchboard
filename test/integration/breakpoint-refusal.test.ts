@@ -113,8 +113,12 @@ beforeAll(async () => {
     'refuses-stream': refusingWith(BREAKPOINT_REFUSAL),
     'refuses-temperature': refusingWith(TEMPERATURE_REFUSAL),
     'refuses-together': refusingTogether(2),
+    'refuses-always-plain': httpError(400, BREAKPOINT_REFUSAL),
+    'refuses-always-stream': httpError(400, BREAKPOINT_REFUSAL),
     'accepts': ANSWER
   })
+  // The refusals are remembered per process, and Vitest gives each test file its own: so that no
+  // test inherits another's refusal, each test here asks its own model.
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
       providers: {
@@ -127,6 +131,8 @@ beforeAll(async () => {
             { id: 'refuses-stream' },
             { id: 'refuses-temperature' },
             { id: 'refuses-together' },
+            { id: 'refuses-always-plain' },
+            { id: 'refuses-always-stream' },
             { id: 'accepts' }
           ]
         }
@@ -250,6 +256,22 @@ describe('a model that refuses prompt_cache_breakpoint (#163)', () => {
     expect(upstream.filter((request) => !carriesBreakpoint(request))).toHaveLength(2)
     expect(refusalLines).toHaveLength(1)
   })
+
+  // Catches a retry that loops, or retries again, when the retry is refused too: the upstream
+  // answers the 400 naming the field even without it, so the second refusal is the client's.
+  test.each([
+    ['non-streamed', 'refuses-always-plain', false],
+    ['streamed', 'refuses-always-stream', true]
+  ])(
+    '%s: a retry refused as well is answered, not retried again',
+    async (_mode, modelId, stream) => {
+      const result = await ask(modelId, stream)
+
+      // Refused before any bytes were streamed, so the client gets the 400 either way.
+      expect(result.status).toBe(400)
+      expect(result.upstream).toEqual([true, false])
+    }
+  )
 
   // Catches the retry widened to any 400: a refusal of another field is the client's to see.
   test('a 400 naming another field is answered, not retried', async () => {
