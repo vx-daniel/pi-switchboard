@@ -43,12 +43,13 @@ Treat these as stable unless the user explicitly changes direction:
 - Routing (aliases, fallback, cooldowns, quota; #66–#70) follows constitution principle VI: configured explicitly, never reaching a model the exposure config hides, and the serving model and login reported under `x_pi` and in the log.
 - Agentic mode is a "Later, not planned" idea. Do not build it under an OpenAI route.
 - Default network posture should remain local-first and safe by default.
+- pi runs every login and stores every credential. The proxy may present pi's own login flow (pi's screens driving `ModelRuntime.login`) in a local terminal only, never over HTTP or any other network surface (constitution Scope and principle III).
 
 For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of duplicating them here.
 
 ## Coding rules that matter in this repo
 
-- Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4 + TypeBox**.
+- Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4 + TypeBox**. Bun is a build tool for the standalone binary only; the binary's tests run in their own CI job, never in the gate or a hook.
 - Tests import from `vite-plus/test`, not `vitest` or `bun:test`.
 - Use import alias `@proxy/*` for `src/*`. Do **not** introduce relative imports across the source tree.
 - Use `import type` where required.
