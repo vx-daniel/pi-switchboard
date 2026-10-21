@@ -464,6 +464,50 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
   its own retry loop (`retryProviderRequest`) to 0, as does its Codex adapter. A 429 therefore
   reaches the proxy at once. #68's proposal to set `maxRetries: 0` per candidate was unneeded.
 
+### Quota (#69)
+
+Subscriptions report on every response how much of each usage window the account has used. The
+proxy keeps the latest report per provider, in memory (`src/pi/quota.ts`). It shows it on
+`/healthz/creds` (per provider, for the operator) and on `/v1/switchboard/models` (per model,
+for clients that pick models themselves, #69's P6 comment). Routing on it, a reserve below which
+a chain skips a provider, is not built yet; it waits on data from this.
+
+**What each subscription sends.** Read from a live probe of each login on 2026-10-21, one call each.
+Copilot wasn't logged in, so it is unknown.
+
+| Provider | Header | Meaning |
+|---|---|---|
+| Anthropic (Claude subscription) | `anthropic-ratelimit-unified-<5h\|7d>-utilization` | Share used, 0–1 (`0.0`, `0.47`) |
+| | `anthropic-ratelimit-unified-<5h\|7d>-reset` | When the window resets, in Unix seconds |
+| | `anthropic-ratelimit-unified-<5h\|7d>-status` | `allowed`, … |
+| | `anthropic-ratelimit-unified-status`, `-reset`, `-representative-claim` | Overall status, its reset, and the window that binds (`five_hour`) |
+| | `-fallback-percentage`, `-overage-status`, `-overage-disabled-reason` | Not kept |
+| Codex (ChatGPT plan) | `x-codex-<primary\|secondary>-used-percent` | Share used, 0–100 (`0`, `2`) |
+| | `x-codex-<primary\|secondary>-reset-at`, `-reset-after-seconds` | When it resets: Unix seconds, and seconds from now |
+| | `x-codex-<primary\|secondary>-window-minutes` | `300` (5 hours), `10080` (7 days) |
+| | `x-codex-plan-type`, `x-codex-active-limit` | `plus`, `premium` |
+| | `x-codex-credits-*`, `-primary-over-secondary-limit-percent` | Not kept |
+
+- **Exact fields only.** The same responses carry `anthropic-organization-id`,
+  `anthropic-workspace-id`, `set-cookie`, request IDs and `x-codex-turn-state`, an opaque token.
+  The proxy reads the window fields, the overall status and the plan by name, and checks each
+  for its type. A share outside 0–1 or a value that isn't a plain number is dropped.
+- **Where they come from.** The capturing `fetch` (#68) passes every response's headers on, success
+  or failure. Codex sends its headers only over SSE, which the proxy uses for Codex (#185). pi's
+  Google adapters refuse a custom `fetch`, so Google reports none.
+- **Never made up.** A provider that reports nothing shows `null`, not zeros. A response without
+  quota headers leaves the last report. A window whose reset has passed is left out, as its
+  share is no longer known; with none left, the provider shows `null`. Once one window has
+  reset, the overall `status` is shown as unknown, as it may have been that window's.
+- **The shared login only.** A request with its own upstream key records nothing, as for
+  cooldowns: its headers report that key's account.
+- **Keyed by provider.** pi has one login per provider, so a provider's report is its login's.
+  Routing one provider over several logins would need the reports keyed by login, or two
+  accounts would overwrite each other; that is a precondition for a reserve (#189 review).
+- **No recordings yet.** Tests use the probe's header names and formats, with fake identifying
+  values (`test/fixtures/quota-headers.ts`). Recording them needs a login made for recording
+  (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
+
 ### Route handling
 
 `GET /v1/models/{model}` must support URL-encoded full model IDs because both canonical IDs and prefixed public IDs can contain `/`.
@@ -1146,6 +1190,7 @@ Each entry is pi's catalogue entry for the model, as pi resolves it (`models.jso
 - `context_window`, `max_output_tokens`: in tokens (`Model.contextWindow`, `Model.maxTokens`)
 - `cost`: USD per million tokens for uncached input, output, cache reads and cache writes (`Model.cost`; pi computes a call's cost as rate / 1,000,000 × tokens). `0` where pi has no price. A client can use these as docker-agent `cost` tables, which docker-agent needs to price calls through a custom `base_url` (#177)
 - `cooldown`: `null`, or the model's active cooldown (`reason`, `scope`, `until` in Unix seconds), below "Cooldowns (#68)"
+- `quota`: `null`, or the model's provider's latest quota (`observed_at`, `status`, `plan`, `windows` with `name`, `used` 0–1, `resets_at` in Unix seconds, `window_minutes`, `status`), below "Quota (#69)"
 - new capability fields go here, never on `/v1/models`
 - non-standard routes live under `/v1/switchboard/`, as `/v1/switchboard/agent/completions` would. The prefix was `/v1/pi/` until constitution 2.0.0; `/v1/pi/models` moved here with no alias
 

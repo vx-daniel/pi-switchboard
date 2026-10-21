@@ -36,6 +36,7 @@ import { aliasDiagnosticSchema } from '@proxy/openai/model-aliases'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
 import { scopeDiagnosticSchema } from '@proxy/pi/model-scope'
+import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
 import {
   getAvailableModels,
   getCredentialStatuses,
@@ -124,17 +125,64 @@ const modelsHealthSchema = z
 /** `GET /healthz/models`'s body. */
 type ModelsHealth = z.infer<typeof modelsHealthSchema>
 
+/** One provider's quota on `/healthz/creds` (#69). Documents the response; never parsed. */
+const credentialQuotaSchema = z
+  .object({
+    observedAt: z.string().trim().meta({
+      description: 'When the response that reported it arrived, as an ISO 8601 time.'
+    }),
+    status: z.string().trim().nullable(),
+    plan: z.string().trim().nullable(),
+    windows: z.array(
+      z.object({
+        name: z.string().trim(),
+        used: z.number().min(0).max(1).meta({ description: 'The share used, from 0 to 1.' }),
+        resetsAt: z.string().trim().nullable().meta({ description: 'An ISO 8601 time.' }),
+        windowMinutes: z.number().nonnegative().nullable(),
+        status: z.string().trim().nullable()
+      })
+    )
+  })
+  .nullable()
+  .meta({
+    description:
+      "The provider's latest subscription quota, from its response headers (#69), or null when " +
+      'it reports none. A window that has reset since is left out.'
+  })
+
 /** `GET /healthz/creds`'s body. Documents the response; never parsed. */
 const credentialsHealthSchema = z
   .object({
     status: checkStatusSchema,
     verified: z.boolean().meta({ description: 'Whether `?verify=true` was asked for.' }),
-    providers: z.array(providerCredentialStatusSchema)
+    providers: z.array(providerCredentialStatusSchema.extend({ quota: credentialQuotaSchema }))
   })
   .meta({ id: 'CredentialsHealth' })
 
 /** `GET /healthz/creds`'s body. */
 type CredentialsHealth = z.infer<typeof credentialsHealthSchema>
+
+/**
+ * Reports a provider's quota, as `/healthz/creds` shows it.
+ *
+ * @param quota - the quota, or `undefined`
+ * @returns its windows with ISO times, or `null`
+ */
+function credentialQuota(quota: ProviderQuota | undefined): z.infer<typeof credentialQuotaSchema> {
+  if (quota === undefined) return null
+  return {
+    observedAt: new Date(quota.observedAt).toISOString(),
+    status: quota.status ?? null,
+    plan: quota.plan ?? null,
+    windows: quota.windows.map((window) => ({
+      name: window.name,
+      used: window.used,
+      resetsAt: window.resetsAt === undefined ? null : new Date(window.resetsAt).toISOString(),
+      windowMinutes: window.windowMinutes ?? null,
+      status: window.status ?? null
+    }))
+  }
+}
 
 /** The body of a detail check that threw. Documents the response; never parsed. */
 const failedCheckSchema = z
@@ -288,7 +336,11 @@ async function checkCredentials(context: HealthContext, verify: boolean): Promis
   const body: CredentialsHealth = {
     status: healthy ? 'ok' : 'unavailable',
     verified: verify,
-    providers
+    // Usage shares, reset times and plan names only, never a credential or an account ID.
+    providers: providers.map((provider) => ({
+      ...provider,
+      quota: credentialQuota(providerQuota(provider.provider))
+    }))
   }
   if (!healthy) {
     healthLogger.warn(
