@@ -352,6 +352,14 @@
             "type": "string",
             "description": "The public ID, as on `/v1/models`."
           },
+          "provider": {
+            "type": "string",
+            "description": "The model's pi provider."
+          },
+          "reasoning": {
+            "type": "boolean",
+            "description": "Whether the model reasons."
+          },
           "reasoning_efforts": {
             "type": "array",
             "items": {
@@ -367,11 +375,69 @@
               ]
             },
             "description": "The `reasoning_effort` values the model runs at as asked, lowest first. Any other value is accepted and clamped to the nearest level the model supports. `[\"none\"]` for a model without reasoning."
+          },
+          "input": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "text",
+                "image"
+              ]
+            },
+            "description": "What the model accepts."
+          },
+          "context_window": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The context window, in tokens."
+          },
+          "max_output_tokens": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "description": "The most output tokens one response can have."
+          },
+          "cost": {
+            "type": "object",
+            "properties": {
+              "input": {
+                "type": "number",
+                "description": "USD per million tokens."
+              },
+              "output": {
+                "type": "number",
+                "description": "USD per million tokens."
+              },
+              "cache_read": {
+                "type": "number",
+                "description": "USD per million tokens."
+              },
+              "cache_write": {
+                "type": "number",
+                "description": "USD per million tokens."
+              }
+            },
+            "required": [
+              "input",
+              "output",
+              "cache_read",
+              "cache_write"
+            ],
+            "additionalProperties": false,
+            "description": "pi's prices, in USD per million tokens: uncached input, output, cache reads and cache writes. 0 where pi has no price."
           }
         },
         "required": [
           "id",
-          "reasoning_efforts"
+          "provider",
+          "reasoning",
+          "reasoning_efforts",
+          "input",
+          "context_window",
+          "max_output_tokens",
+          "cost"
         ],
         "additionalProperties": false,
         "description": "What pi knows about an exposed model."
