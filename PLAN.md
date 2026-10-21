@@ -1145,7 +1145,8 @@ command and the server run the same pi on one `auth.json`.
   new release tag. It builds that tag for `linux/amd64` and `linux/arm64` and pushes
   `ghcr.io/vx-daniel/pi-switchboard:<version>`. It refuses a tag that is already published, and
   any registry error other than "not found", so a version always means one image. There is no
-  `latest`. `image.yml` can be run by hand for a release whose image is missing.
+  `latest`. The multi-platform manifest is pushed last, so a failed run publishes nothing; run
+  `image.yml` by hand with the tag to publish a release whose image is missing.
 - **Port published on loopback.** Compose publishes `127.0.0.1:4141` only, keeping the
   local-first default for the host.
 

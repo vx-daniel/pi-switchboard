@@ -61,6 +61,11 @@ jobs:
         run: |
           git tag --list 'pi-switchboard-v*' | sort > "$RUNNER_TEMP/tags-after"
           tag="$(comm -13 "$RUNNER_TEMP/tags-before" "$RUNNER_TEMP/tags-after")"
+          # One release per run: more than one new tag would be a bug, not two images to publish.
+          if [ "$(printf '%s' "$tag" | grep -c .)" -gt 1 ]; then
+            echo "::error::semantic-release created more than one tag: $(printf '%s' "$tag" | tr '\n' ' ')"
+            exit 1
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   # The container image for the release (#60), built from its tag.
