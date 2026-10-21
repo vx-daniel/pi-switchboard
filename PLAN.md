@@ -1191,10 +1191,26 @@ share it widely. npmjs comes later, by choice.
     extension.
   - By package name, pi finds the package, and `/proxy start` runs the installed
     `dist/index.mjs`.
-- **pi warns at load** that `@earendil-works/pi-ai`, `pi-coding-agent` and `pi-tui` should be
-  `peerDependencies` with `*`. The extension loads all the same, and moving them is not a plain
-  fix: the proxy the extension starts imports pi in its own process, and pi installs packages with
-  `--legacy-peer-deps`, which skips peers.
+- **pi's packages are not `dependencies`** (#165). pi warns about an extension package that
+  lists `@earendil-works/pi-ai`, `pi-coding-agent` or `pi-tui` in `dependencies`, and rightly: the
+  extension runs in pi's process, where pi provides them, and the library entry points it imports
+  (`config`, `exposure`) loaded this package's installed copy of pi as well, a second pi runtime.
+  So:
+  - **Those entry points import no pi at runtime.** `piAgentDir` (`src/config/agent-dir.ts`)
+    stands in for pi's `getAgentDir`, checked against it in `test/unit/agent-dir.test.ts` (POSIX
+    paths; pi's Windows shell-path conversion is not repeated). `sameModel` in `model-scope.ts`
+    stands in for `modelsAreEqual`. `test/unit/library-entry-points.test.ts` loads the four entry
+    points with every pi package mocked to throw.
+  - **`pi-tui` is a `peerDependency` (`*`)**, a dev dependency for the extension's tests. Only
+    the extension uses it, and pi's loader gives the extension the host's copy.
+  - **`pi-ai` and `pi-coding-agent` are `optionalDependencies`.** The proxy that `/proxy start`
+    runs, the standalone CLI and the image need them in their own process; with pi's bundled
+    build there is no host copy on disk to use. npm, pnpm and pi's own install add optional
+    dependencies by default, and pi checks only `dependencies`. An install with `--omit=optional`
+    or `--no-optional` gets a CLI that cannot start.
+
+  Measured with pi 1.3.0 and a marker in the installed copies: before, pi's own process loaded
+  both at startup; after, only the proxy process does, and pi prints no extension warning.
 
 ### Agentic mode
 

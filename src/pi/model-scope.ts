@@ -22,12 +22,7 @@
  * @packageDocumentation
  */
 
-import {
-  type Api,
-  type Model,
-  type ModelThinkingLevel,
-  modelsAreEqual
-} from '@earendil-works/pi-ai'
+import type { Api, Model, ModelThinkingLevel } from '@earendil-works/pi-ai'
 import { minimatch } from 'minimatch'
 import * as z from 'zod'
 
@@ -275,6 +270,22 @@ function resolveReference(
 type AmbiguousReporter = (pattern: string, candidates: readonly Model<Api>[]) => void
 
 /**
+ * Says whether two models are the same, as pi-ai 1.3.0's `modelsAreEqual` decides it: the same
+ * model type, ID and provider. The type is left out: for a `Model<Api>` it can only be `chat`.
+ *
+ * @remarks
+ * Local, not pi's: the pi extension loads this module in pi's own process, and importing pi-ai
+ * here loaded this package's installed copy of it next to the host's (#165).
+ *
+ * @param left - one model
+ * @param right - the other
+ * @returns whether they are the same model
+ */
+function sameModel(left: Model<Api>, right: Model<Api>): boolean {
+  return left.id === right.id && left.provider === right.provider
+}
+
+/**
  * Selects the models `enabledModels` patterns name from `models`, as pi selects them.
  *
  * @remarks
@@ -294,7 +305,7 @@ export function resolveModelScope(
   const selected: Model<Api>[] = []
   const diagnostics: ScopeDiagnostic[] = []
   const add = (model: Model<Api>): void => {
-    if (!selected.some((existing) => modelsAreEqual(existing, model))) selected.push(model)
+    if (!selected.some((existing) => sameModel(existing, model))) selected.push(model)
   }
   const noMatch = (pattern: string): void => {
     diagnostics.push({ code: 'no-match', pattern, message: `No models match pattern "${pattern}"` })

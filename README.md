@@ -44,6 +44,8 @@ pnpm add -g @vx-daniel/pi-switchboard
 
 Install by the package name, as above. pi also accepts a tarball URL (`npm:https://…/x.tgz`), but pi 1.3.0 then reports the package as installed without loading its extension.
 
+pi's own packages (`@earendil-works/pi-ai`, `pi-coding-agent`) are optional dependencies, so that pi, which provides them to its extensions, does not load a second copy (#165). Every installer adds optional dependencies by default; don't install with `--omit=optional` or `--no-optional`, or the `pi-switchboard` CLI cannot start.
+
 ### Coming from pi-openai-proxy
 
 Version 0.1.0 renamed everything that carried the old name, with no aliases:
