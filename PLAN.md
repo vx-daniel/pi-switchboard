@@ -1159,9 +1159,10 @@ command and the server run the same pi on one `auth.json`.
 - **Registry setup, once.** Docker Hub needs the `DOCKERHUB_TOKEN` repository secret, a
   `vxdaniel` access token with read and write access. Without it the image job fails before
   pushing anywhere. Turn on immutable tags on the Docker Hub repository, so the registry enforces
-  what `image.yml` checks. GHCR makes a new package private on first publish even for a public
-  repository: after the first release, set `pi-switchboard` public in the package settings, once
-  (it cannot be made private again).
+  what `image.yml` checks (on since 2026-10-21). GitHub's docs say a new package starts private,
+  but the GHCR package was public from its first publish, 0.1.0: anonymous `docker pull` worked at
+  once, presumably because it is linked to this public repository. If a package ever turns up
+  private, set it public in the package settings (a public package cannot be made private again).
 - **Port published on loopback.** Compose publishes `127.0.0.1:4141` only, keeping the
   local-first default for the host.
 
