@@ -67,6 +67,9 @@ Version 0.1.0 renamed everything that carried the old name, with no aliases:
 ```bash
 # Start the proxy (defaults to http://127.0.0.1:4141)
 pi-switchboard
+
+# Which version is installed
+pi-switchboard --version
 ```
 
 ### List available models
@@ -437,7 +440,7 @@ docker compose up --wait
 curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141/v1/models
 ```
 
-- **The token is required.** The image listens on every interface inside the container, so it refuses to start without `PI_SWITCHBOARD_AUTH_TOKEN` and exits with status `64`. It takes the token from the environment only, not from `proxy-config.json`. The token is a local secret that protects the proxy, not a provider key. Compose publishes the port on `127.0.0.1` only (`PI_SWITCHBOARD_PUBLISH_PORT` changes it, default `4141`).
+- **The token is required.** The image listens on every interface inside the container, so it refuses to start without `PI_SWITCHBOARD_AUTH_TOKEN` and exits with status `64`. It takes the token from the environment only, not from `proxy-config.json`. The token is a local secret that protects the proxy, not a provider key. Compose publishes the port on `127.0.0.1` only (`PI_SWITCHBOARD_PUBLISH_PORT` changes it, default `4141`). The one exception is `--version` or `--help` alone, which starts no server: `docker run --rm vxdaniel/pi-switchboard:<version> --version` needs no token (from the first release after 0.1.0).
 - **Logging in.** In pi, `/login` lists the providers. The container publishes no OAuth callback port, so when the browser redirects to a `localhost` URL that does not load, paste that whole URL, or the code, into pi. `fd` and `ripgrep` warnings are expected: pi is there to log in, not to run tools. Stop the proxy before logging in again.
 - **The volume holds the login.** pi's login and its token refreshes live in the `pi-agent` volume at `/home/node/.pi/agent`, and survive `docker compose down` and `up` (`down -v` deletes them). Never seed the volume by copying a host `auth.json`: refreshing a login rotates its refresh token, and the other copy stops working.
 - **Settings.** `proxy-config.json` in the volume works as on the host. Compose passes `PI_SWITCHBOARD_LOG_LEVEL`, `PI_SWITCHBOARD_LOG_FORMAT`, `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` and `TZ` to the container only when they are set, so the file's values apply otherwise.

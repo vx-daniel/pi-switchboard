@@ -2,6 +2,7 @@
  * The container image's entrypoint (`docker/entrypoint.sh`, #60). The image listens on every
  * interface and serves the pi login in its volume, so the script refuses to start the proxy
  * without a bearer token; with one, it hands the container's arguments to the proxy unchanged.
+ * The one exception is an info flag alone (`--version`, `--help`), which starts no server (#168).
  */
 
 import { spawnSync } from 'node:child_process'
@@ -68,5 +69,27 @@ describe('docker/entrypoint.sh', () => {
 
     expect(result.status).toBe(0)
     expect(result.stdout.trim()).toBe('node /app/dist/index.mjs --log-level debug')
+  })
+
+  // Catches `docker run --rm <image> --version` refused for want of a token, though it serves
+  // nothing (#168).
+  test.each(['--version', '-v', '--help', '-h'])('runs %s alone without a token', (flag) => {
+    const result = runEntrypoint({}, [flag])
+
+    expect(result.status).toBe(0)
+    expect(result.stdout.trim()).toBe(`node /app/dist/index.mjs ${flag}`)
+  })
+
+  // Catches the exception widened past an info flag alone: with anything beside it, or another
+  // argument, the CLI could start a server, so the token is still required.
+  test.each([
+    ['--version beside another argument', ['--version', '--port', '4141']],
+    ['an info flag as a value', ['--host', '--help']],
+    ['a near miss', ['--versions']]
+  ])('still refuses without a token: %s', (_case, args) => {
+    const result = runEntrypoint({}, args)
+
+    expect(result.status).toBe(EXIT_NO_TOKEN)
+    expect(result.stdout).toBe('')
   })
 })

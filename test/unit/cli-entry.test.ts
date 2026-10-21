@@ -12,6 +12,7 @@ import { resetSync } from '@logtape/logtape'
 import { isRecord } from '@proxy/utils/guards'
 import { afterEach, assert, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
+import packageJson from '../../package.json' with { type: 'json' }
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
 import { listenOnLoopback } from '../fixtures/local-server'
 
@@ -215,6 +216,25 @@ describe('logging flags', () => {
       stderr: ['--log-level must be one of: trace, debug, info, warning, error, fatal\n'],
       stdout: []
     })
+  })
+})
+
+describe('--version', () => {
+  // Catches the version missing (citty exits 1 with "No version specified", #168) or taken from
+  // anywhere but package.json, which semantic-release bumps in each release commit.
+  test.each(['--version', '-v'])('%s prints the package version and exits 0', async (flag) => {
+    const printed: string[] = []
+    vi.spyOn(console, 'log').mockImplementation((...parts: unknown[]) => {
+      printed.push(parts.map(String).join(' '))
+    })
+
+    await runCli([flag])
+
+    await vi.waitFor(() => {
+      expect(printed).toEqual([packageJson.version])
+    })
+    expect(process.exitCode).toBeUndefined()
+    expect(stderr).toEqual([])
   })
 })
 
