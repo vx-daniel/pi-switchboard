@@ -160,7 +160,7 @@ Operational endpoints, outside the OpenAI-compatible `/v1` surface:
 | Endpoint | Auth | Answers |
 |---|---|---|
 | `GET /healthz` | Never | `200 {"status":"ok"}` once the proxy listens and pi's model runtime is loaded. No upstream calls: use it for container healthchecks and liveness probes. |
-| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`) and aliases left out (`aliasDiagnostics`). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model. |
+| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`), aliases left out (`aliasDiagnostics`), and active cooldowns (`cooldowns`, [below](#cooldowns)). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model; a cooldown does not fail it. |
 | `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …) and `availableModelCount`. `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
 
 None of them returns a credential. `/healthz` proves the process is up, not that a provider will accept a request: `GET /healthz/creds?verify=true` is the closest check to that without spending a completion.
@@ -364,6 +364,17 @@ An alias can name several models, tried in order, and the failures that move to 
 - **No opt-out per request.** To avoid a chain, name the model directly (its canonical ID); for a shorter chain, define another alias.
 - **Timeouts add up.** The upstream idle timeout applies to each attempt, so a three-model chain can wait up to three timeouts before failing.
 
+#### Cooldowns
+
+A provider that answers 429 is cooled down, so a chain stops calling it first on every request.
+
+- **What cools.** A `429` cools the whole provider: pi has one login per provider, and a subscription's limit covers the account. A `503` or `529` cools only that model.
+- **For how long.** As long as the failed response says: `retry-after-ms` or `retry-after`, a body field such as Codex's `resets_in_seconds` or `resets_at`, OpenAI's `x-ratelimit-reset-*` or Anthropic's `anthropic-ratelimit-*-reset` headers, or the message's own words ("try again in 20s"). There is no cap, so a weekly limit cools the provider until it resets. When the response gives no time, the cooldown grows: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each failure in a row. A stated time or a success starts it over. Google's API doesn't let the proxy read the response, so Google models always use the growing default.
+- **Who skips.** Only a chain whose `fallbackOn` names the class (`rate_limit` for a 429, `unavailable` for a 503) skips a cooling model. A request that names the model, or a chain that names neither, still calls it. When every model of a chain is cooling, the one whose cooldown ends first is called.
+- **Visible.** A skipped model is listed in `x_pi.attempts` with `"skipped": true` and the reason; the log has a line for each cooldown that starts, ends or is skipped. `/healthz/models` lists the active ones (`scope`, `provider`, `model`, `reason`, `until`, `secondsLeft`, `source`), and `/v1/switchboard/models` gives each model's `cooldown` (`reason`, `scope`, `until` in Unix seconds), so a client can pick another model or wait.
+- **Ended early by a success.** A call to the provider or model that succeeds clears its cooldown. Cooldowns live in memory: a restart forgets them.
+- **No hidden retries.** pi calls each provider once per attempt (the provider SDKs' own retries are off), so a 429 reaches the proxy at once and the chain moves on without waiting.
+
 ### Discovering available models
 
 List all models the proxy exposes (filtered by the active exposure mode):
@@ -384,12 +395,13 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
 | `input` | What it accepts: `text`, `image` |
 | `context_window`, `max_output_tokens` | In tokens |
 | `cost` | USD per million tokens: `input` (uncached), `output`, `cache_read`, `cache_write`; `0` where pi has no price |
+| `cooldown` | `null`, or the cooldown the model is under after a 429 or 503: `reason`, `scope` (`provider` or `model`), `until` (Unix seconds) ([Cooldowns](#cooldowns)) |
 
 ```json
 { "object": "list", "data": [{ "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
   "reasoning_efforts": ["none", "minimal", "low", "medium", "high"], "input": ["text", "image"],
   "context_window": 200000, "max_output_tokens": 64000,
-  "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 } }] }
+  "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null }] }
 ```
 
 docker-agent prices a model reached through a custom `base_url` only from a `cost` table in `team.yaml`, so a team can take these prices; without one it records usage but no cost. The path was `GET /v1/pi/models` before 0.1.0; the old path is gone.

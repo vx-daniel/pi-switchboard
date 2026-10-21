@@ -12,6 +12,7 @@
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
+import { activeCooldown, type Cooldown } from '@proxy/pi/cooldowns'
 import * as z from 'zod'
 
 /** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
@@ -115,6 +116,22 @@ const piModelCapabilitiesSchema = z
         description:
           "pi's prices, in USD per million tokens: uncached input, output, cache reads and " +
           'cache writes. 0 where pi has no price.'
+      }),
+    cooldown: z
+      .object({
+        reason: z.enum(['rate_limit', 'unavailable']).meta({
+          description: 'The failure it is cooling down from: a 429, or a 503 or 529.'
+        }),
+        scope: z.enum(['provider', 'model']).meta({
+          description: 'A 429 cools the whole provider (its login); an overload, the model.'
+        }),
+        until: z.int().nonnegative().meta({ description: 'When it ends, in Unix seconds.' })
+      })
+      .nullable()
+      .meta({
+        description:
+          'The cooldown the model is under (#68), or null. An alias chain that names the reason ' +
+          'in `fallbackOn` skips it until then; a request that names the model still calls it.'
       })
   })
   .meta({ id: 'ModelCapabilities', description: 'What pi knows about an exposed model.' })
@@ -131,8 +148,23 @@ export const piModelListSchema = z
 export type PiModelList = z.infer<typeof piModelListSchema>
 
 /**
- * Builds the `/v1/switchboard/models` response: every exposed model, with pi's catalogue entry.
- * An alias carries its target's (#66).
+ * Reports a model's active cooldown, as `/v1/switchboard/models` shows it.
+ *
+ * @param cooldown - the active cooldown, or `undefined`
+ * @returns the cooldown's reason, scope and end in Unix seconds, or `null`
+ */
+function cooldownField(cooldown: Cooldown | undefined): PiModelList['data'][number]['cooldown'] {
+  if (cooldown === undefined) return null
+  return {
+    reason: cooldown.reason,
+    scope: cooldown.scope,
+    until: Math.ceil(cooldown.until / MS_PER_SECOND)
+  }
+}
+
+/**
+ * Builds the `/v1/switchboard/models` response: every exposed model, with pi's catalogue entry and
+ * its cooldown (#68). An alias carries its target's (#66).
  *
  * @param models - the exposed models, in list order
  * @returns the list response
@@ -140,20 +172,24 @@ export type PiModelList = z.infer<typeof piModelListSchema>
 export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
   return {
     object: 'list',
-    data: models.map(({ publicId, model }) => ({
-      id: publicId,
-      provider: model.provider,
-      reasoning: model.reasoning,
-      reasoning_efforts: supportedReasoningEfforts(model),
-      input: [...model.input],
-      context_window: model.contextWindow,
-      max_output_tokens: model.maxTokens,
-      cost: {
-        input: model.cost.input,
-        output: model.cost.output,
-        cache_read: model.cost.cacheRead,
-        cache_write: model.cost.cacheWrite
+    data: models.map((exposed) => {
+      const { publicId, model } = exposed
+      return {
+        id: publicId,
+        provider: model.provider,
+        reasoning: model.reasoning,
+        reasoning_efforts: supportedReasoningEfforts(model),
+        input: [...model.input],
+        context_window: model.contextWindow,
+        max_output_tokens: model.maxTokens,
+        cost: {
+          input: model.cost.input,
+          output: model.cost.output,
+          cache_read: model.cost.cacheRead,
+          cache_write: model.cost.cacheWrite
+        },
+        cooldown: cooldownField(activeCooldown(exposed))
       }
-    }))
+    })
   }
 }

@@ -1,0 +1,81 @@
+/**
+ * Reading a provider's reset time from a failed response (#68, `src/pi/reset-time.ts`).
+ */
+
+import { resetAfterMs } from '@proxy/pi/reset-time'
+import { describe, expect, test } from 'vite-plus/test'
+
+/** A fixed clock: 2026-10-21T12:00:00Z. */
+const NOW = Date.UTC(2026, 9, 21, 12, 0, 0)
+
+/**
+ * Builds a failed 429 with these headers and body.
+ *
+ * @param headers - the response headers
+ * @param body - the response body
+ * @returns the failed response
+ */
+function failed(headers: Record<string, string>, body = ''): Parameters<typeof resetAfterMs>[0] {
+  return { status: 429, headers: new Headers(headers), body }
+}
+
+describe('resetAfterMs', () => {
+  // Catches a provider's stated reset time misread, so a chain skips a provider for the wrong
+  // length: too short retries a limit that still holds, too long wastes a working login.
+  test.each([
+    ['retry-after in seconds', failed({ 'retry-after': '30' }), 30_000],
+    ['retry-after as a date', failed({ 'retry-after': 'Wed, 21 Oct 2026 12:02:00 GMT' }), 120_000],
+    ['retry-after-ms', failed({ 'retry-after-ms': '1500' }), 1500],
+    [
+      'Codex resets_in_seconds',
+      failed({}, '{"error":{"type":"usage_limit_reached","resets_in_seconds":3600}}'),
+      3_600_000
+    ],
+    [
+      'Codex resets_at, Unix seconds',
+      failed({}, `{"error":{"resets_at":${String(NOW / 1000 + 600)}}}`),
+      600_000
+    ],
+    [
+      "OpenAI's reset headers, the later one",
+      failed({ 'x-ratelimit-reset-requests': '6m0s', 'x-ratelimit-reset-tokens': '1s' }),
+      360_000
+    ],
+    [
+      "Anthropic's reset header, a timestamp",
+      failed({ 'anthropic-ratelimit-requests-reset': '2026-10-21T12:05:00Z' }),
+      300_000
+    ],
+    [
+      'the message, in short units',
+      failed({}, '{"error":{"message":"Rate limit reached. Please try again in 20s."}}'),
+      20_000
+    ],
+    [
+      'the message, in words',
+      failed({}, 'Limit reached; try again in 1 hour 2 minutes.'),
+      3_720_000
+    ],
+    ['the message, in days', failed({}, 'Your weekly limit resets in 3 days 4 hours'), 273_600_000]
+  ])('%s', (_case, response, expected) => {
+    expect(resetAfterMs(response, NOW)).toBe(expected)
+  })
+
+  // Catches the standard header losing to a guess from the message: retry-after is the provider's
+  // own instruction, so it wins.
+  test('retry-after wins over the body', () => {
+    const response = failed({ 'retry-after': '5' }, 'try again in 2 hours')
+
+    expect(resetAfterMs(response, NOW)).toBe(5000)
+  })
+
+  // Catches a made-up wait when the response gives none, or a past time read as a wait: the
+  // cooldown then uses its growing default.
+  test.each([
+    ['no time anywhere', failed({}, '{"error":{"message":"Too many requests"}}')],
+    ['a reset time already past', failed({ 'retry-after': 'Wed, 21 Oct 2026 11:00:00 GMT' })],
+    ['a number in the message that is not a wait', failed({}, 'Request 42 failed')]
+  ])('%s gives none', (_case, response) => {
+    expect(resetAfterMs(response, NOW)).toBeUndefined()
+  })
+})

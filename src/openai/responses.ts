@@ -27,15 +27,20 @@ import * as z from 'zod'
 const responsesLogger = proxyLogger('openai', 'responses')
 
 /**
- * One failed attempt of an alias's fallback chain (#67), before the model that answered.
- * Documents the response; never parsed.
+ * One model of an alias's fallback chain (#67) that did not answer, before the one that did: tried
+ * and failed, or skipped while cooling down (#68). Documents the response; never parsed.
  */
 const attemptSchema = z.object({
-  model: z.string().trim().meta({ description: 'The canonical ID of the model tried.' }),
-  reason: FailureClassSchema.meta({ description: 'Why the chain moved on from it.' })
+  model: z.string().trim().meta({ description: 'The canonical ID of the model.' }),
+  reason: FailureClassSchema.meta({
+    description: 'Why the chain moved on from it: its failure, or the one it is cooling down from.'
+  }),
+  skipped: z.literal(true).optional().meta({
+    description: 'Not called: it was cooling down after that failure (#68). Absent when tried.'
+  })
 })
 
-/** One failed attempt of an alias's fallback chain (#67). */
+/** One model of an alias's fallback chain that did not answer (#67, #68). */
 export type Attempt = z.infer<typeof attemptSchema>
 
 /** `x_pi.attempts`: documents the response; never parsed. */

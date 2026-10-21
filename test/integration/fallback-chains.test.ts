@@ -9,10 +9,11 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import type { AliasTarget } from '@proxy/config/schema'
+import { clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
 import { isRecord } from '@proxy/utils/guards'
-import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
@@ -76,6 +77,12 @@ beforeAll(async () => {
       }
     }
   })
+})
+
+// Cooldowns (#68) are process-wide: each case starts with none, so one case's 429 doesn't route
+// the next.
+beforeEach(() => {
+  clearAllCooldowns()
 })
 
 afterAll(async () => {

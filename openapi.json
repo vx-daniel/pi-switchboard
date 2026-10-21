@@ -208,6 +208,70 @@
             },
             "description": "Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the check fail), or naming no exposed model (`target-not-exposed`)."
           },
+          "cooldowns": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "provider",
+                    "model"
+                  ]
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "model": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The canonical ID, for a model."
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "rate_limit",
+                    "unavailable"
+                  ]
+                },
+                "until": {
+                  "type": "string",
+                  "description": "When it ends, as an ISO 8601 time."
+                },
+                "secondsLeft": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                },
+                "source": {
+                  "type": "string",
+                  "enum": [
+                    "response",
+                    "backoff"
+                  ],
+                  "description": "Whether the failed response gave the time, or the growing default did (60 s, 180 s, then doubling)."
+                }
+              },
+              "required": [
+                "scope",
+                "provider",
+                "model",
+                "reason",
+                "until",
+                "secondsLeft",
+                "source"
+              ],
+              "additionalProperties": false
+            },
+            "description": "Active cooldowns after a 429 (the provider) or a 503/529 (the model), soonest end first (#68). They do not fail the check."
+          },
           "modelsJsonError": {
             "anyOf": [
               {
@@ -229,6 +293,7 @@
           "exposureError",
           "scopeDiagnostics",
           "aliasDiagnostics",
+          "cooldowns",
           "modelsJsonError"
         ],
         "additionalProperties": false
@@ -431,6 +496,47 @@
             ],
             "additionalProperties": false,
             "description": "pi's prices, in USD per million tokens: uncached input, output, cache reads and cache writes. 0 where pi has no price."
+          },
+          "cooldown": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "rate_limit",
+                      "unavailable"
+                    ],
+                    "description": "The failure it is cooling down from: a 429, or a 503 or 529."
+                  },
+                  "scope": {
+                    "type": "string",
+                    "enum": [
+                      "provider",
+                      "model"
+                    ],
+                    "description": "A 429 cools the whole provider (its login); an overload, the model."
+                  },
+                  "until": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "When it ends, in Unix seconds."
+                  }
+                },
+                "required": [
+                  "reason",
+                  "scope",
+                  "until"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The cooldown the model is under (#68), or null. An alias chain that names the reason in `fallbackOn` skips it until then; a request that names the model still calls it."
           }
         },
         "required": [
@@ -441,7 +547,8 @@
           "input",
           "context_window",
           "max_output_tokens",
-          "cost"
+          "cost",
+          "cooldown"
         ],
         "additionalProperties": false,
         "description": "What pi knows about an exposed model."
@@ -794,6 +901,70 @@
                       },
                       "description": "Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the check fail), or naming no exposed model (`target-not-exposed`)."
                     },
+                    "cooldowns": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "provider",
+                              "model"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string"
+                          },
+                          "model": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The canonical ID, for a model."
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "rate_limit",
+                              "unavailable"
+                            ]
+                          },
+                          "until": {
+                            "type": "string",
+                            "description": "When it ends, as an ISO 8601 time."
+                          },
+                          "secondsLeft": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "response",
+                              "backoff"
+                            ],
+                            "description": "Whether the failed response gave the time, or the growing default did (60 s, 180 s, then doubling)."
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "provider",
+                          "model",
+                          "reason",
+                          "until",
+                          "secondsLeft",
+                          "source"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "Active cooldowns after a 429 (the provider) or a 503/529 (the model), soonest end first (#68). They do not fail the check."
+                    },
                     "modelsJsonError": {
                       "anyOf": [
                         {
@@ -815,6 +986,7 @@
                     "exposureError",
                     "scopeDiagnostics",
                     "aliasDiagnostics",
+                    "cooldowns",
                     "modelsJsonError"
                   ],
                   "additionalProperties": false
@@ -1605,7 +1777,7 @@
                             "properties": {
                               "model": {
                                 "type": "string",
-                                "description": "The canonical ID of the model tried."
+                                "description": "The canonical ID of the model."
                               },
                               "reason": {
                                 "type": "string",
@@ -1617,7 +1789,12 @@
                                   "refused",
                                   "upstream_error"
                                 ],
-                                "description": "Why the chain moved on from it."
+                                "description": "Why the chain moved on from it: its failure, or the one it is cooling down from."
+                              },
+                              "skipped": {
+                                "description": "Not called: it was cooling down after that failure (#68). Absent when tried.",
+                                "type": "boolean",
+                                "const": true
                               }
                             },
                             "required": [
@@ -1783,7 +1960,7 @@
                             "properties": {
                               "model": {
                                 "type": "string",
-                                "description": "The canonical ID of the model tried."
+                                "description": "The canonical ID of the model."
                               },
                               "reason": {
                                 "type": "string",
@@ -1795,7 +1972,12 @@
                                   "refused",
                                   "upstream_error"
                                 ],
-                                "description": "Why the chain moved on from it."
+                                "description": "Why the chain moved on from it: its failure, or the one it is cooling down from."
+                              },
+                              "skipped": {
+                                "description": "Not called: it was cooling down after that failure (#68). Absent when tried.",
+                                "type": "boolean",
+                                "const": true
                               }
                             },
                             "required": [

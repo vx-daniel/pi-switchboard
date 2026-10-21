@@ -395,6 +395,40 @@ A string alias, and a request that names a model, never fall back.
   principle I exception (#177). A client that wants no fallback names the model, and one that
   wants a shorter chain uses another alias.
 
+### Cooldowns (#68)
+
+A 429 or 503 is remembered, so a chain stops calling a failing provider first on every request.
+State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/route-cooldowns.ts`.
+
+- **Scope.** A 429 (`rate_limit`) cools the **provider**: pi has one login per provider, and a
+  subscription's limit covers the account. A 503 or 529 (`unavailable`) cools the **model**.
+- **Length: from the failed response, no cap** (`src/pi/reset-time.ts`). pi calls `onResponse`
+  only after a success (except Codex), so the proxy passes pi a `fetch` (`capturingFetch`) that
+  copies each 429, 503 and 529 (status, headers, and the body from a clone). `resetAfterMs` takes
+  the first source found, in this order:
+  1. `retry-after-ms`, then `retry-after` (seconds or an HTTP date);
+  2. body `resets_in_seconds`, `retry_after` or `resets_at` (Codex's usage limit);
+  3. the latest `*ratelimit*reset*` header (OpenAI's durations, Anthropic's timestamps);
+  4. the message's "try again in …" wording.
+
+  With none, a growing default: 60 s, 180 s, then doubling, counted per provider or model and
+  reset by a stated time or a success. pi's Google adapters refuse a custom `fetch`, so Google
+  models always use the default.
+- **Applied by routing only, recorded always (principle VI).** Every request's 429 or 503 starts a
+  cooldown, so the state is visible. Only a chain whose `fallbackOn` names the class skips a
+  cooling candidate (`cooldownSkip`); a request that names a model calls it as before. The check
+  runs as the chain reaches each candidate, so a 429 met earlier in the same request skips that
+  provider's later models too. When every remaining candidate is cooling, the one whose cooldown
+  ends first is called, so a request is never answered without a call.
+- **Visible.** A skipped candidate is an `x_pi.attempts` entry with `skipped: true`. Each
+  cooldown's start, end and skip is an info line. `/healthz/models` lists the active cooldowns
+  (operator), and `/v1/switchboard/models` gives each model's `cooldown` (clients that pick models
+  themselves, #68's comment). A cooldown never fails `/healthz/models`.
+- **Ended by a success.** A call that succeeds clears its provider's and its model's cooldowns.
+- **No hidden SDK retries.** pi 1.3.0 builds every SDK client with `maxRetries: 0` and defaults
+  its own retry loop (`retryProviderRequest`) to 0, as does its Codex adapter. A 429 therefore
+  reaches the proxy at once. #68's proposal to set `maxRetries: 0` per candidate was unneeded.
+
 ### Route handling
 
 `GET /v1/models/{model}` must support URL-encoded full model IDs because both canonical IDs and prefixed public IDs can contain `/`.
@@ -1076,6 +1110,7 @@ Each entry is pi's catalogue entry for the model, as pi resolves it (`models.jso
 - `input`: what the model accepts, `text` and `image` (`Model.input`)
 - `context_window`, `max_output_tokens`: in tokens (`Model.contextWindow`, `Model.maxTokens`)
 - `cost`: USD per million tokens for uncached input, output, cache reads and cache writes (`Model.cost`; pi computes a call's cost as rate / 1,000,000 × tokens). `0` where pi has no price. A client can use these as docker-agent `cost` tables, which docker-agent needs to price calls through a custom `base_url` (#177)
+- `cooldown`: `null`, or the model's active cooldown (`reason`, `scope`, `until` in Unix seconds), below "Cooldowns (#68)"
 - new capability fields go here, never on `/v1/models`
 - non-standard routes live under `/v1/switchboard/`, as `/v1/switchboard/agent/completions` would. The prefix was `/v1/pi/` until constitution 2.0.0; `/v1/pi/models` moved here with no alias
 

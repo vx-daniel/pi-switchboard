@@ -31,6 +31,7 @@ import {
   patchGooglePayload
 } from '@proxy/pi/payload-fields'
 import { getRuntime } from '@proxy/pi/registry'
+import { capturingFetch, type FailedResponse } from '@proxy/pi/reset-time'
 import { upstreamTemperature } from '@proxy/pi/temperature'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
 import { isRecord } from '@proxy/utils/guards'
@@ -52,6 +53,11 @@ export interface CompletionOptions {
    * upstream event; it does not cap the call's total duration.
    */
   readonly upstreamTimeoutMs?: number | undefined
+  /**
+   * Receives a copy of the call's 429, 503 or 529 response (status, headers, body), for its reset
+   * time (#68). pi's `onResponse` only sees successes, so this goes through pi's `fetch` option.
+   */
+  readonly onFailedResponse?: ((response: FailedResponse) => void) | undefined
 }
 
 /**
@@ -159,6 +165,23 @@ function passthroughHook(
 }
 
 /**
+ * Returns the `fetch` option that copies a failed response to `options.onFailedResponse` (#68).
+ *
+ * @param model - the pi model; pi's Google adapters refuse a custom fetch, so their 429s cool
+ *   down for the default time instead
+ * @param options - the per-request options
+ * @returns `{ fetch }`, or nothing to add
+ */
+function captureOptions(
+  model: Model<Api>,
+  options: CompletionOptions
+): Pick<SimpleStreamOptions, 'fetch'> {
+  return options.onFailedResponse === undefined || isGoogleApi(model.api)
+    ? {}
+    : { fetch: capturingFetch(options.onFailedResponse) }
+}
+
+/**
  * Builds pi's `SimpleStreamOptions` from an OpenAI request.
  *
  * @param model - the pi model
@@ -225,7 +248,7 @@ async function buildStreamOptions(
   const onPayload = passthroughHook(model, request)
   if (onPayload !== undefined) opts.onPayload = onPayload
 
-  return opts
+  return { ...opts, ...captureOptions(model, options) }
 }
 
 /**
