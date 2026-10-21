@@ -219,7 +219,10 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
       'Proxy auth failed, or pi has no credential for the model and no ' +
         '`X-Switchboard-Upstream-Api-Key` was sent.'
     ),
-    404: errorResponse('No exposed model has this ID (`model_not_found`).'),
+    404: errorResponse(
+      'No exposed model has this ID, or the provider refused the model for the login the proxy ' +
+        'uses (`model_not_found`).'
+    ),
     413: errorResponse('The body is over the size limit.'),
     422: errorResponse('A field the proxy does not accept (`unsupported_parameter`).'),
     429: errorResponse('The provider rate-limited the request.'),

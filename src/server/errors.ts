@@ -141,7 +141,7 @@ function upstreamError(message: string, code?: string): OpenAIError {
 }
 
 /** The statuses an upstream failure is answered with. */
-export type UpstreamErrorStatus = 400 | 429 | 502 | 503 | 504
+export type UpstreamErrorStatus = 400 | 404 | 429 | 502 | 503 | 504
 
 /** An upstream failure as the client sees it: a status and a fixed body that quotes nothing. */
 export interface MappedUpstreamError {
@@ -206,6 +206,22 @@ const REJECTED_AS_INVALID: MappedUpstreamError = {
     'invalid_request_error',
     null,
     'upstream_invalid_request'
+  )
+}
+
+/**
+ * The provider refused the model for the login the proxy uses (#156): Codex lists models a
+ * ChatGPT plan cannot run, and pi exposes them. OpenAI answers a model the account cannot use with
+ * `404 model_not_found`, and agent clients pick another model on it; a 502 would read as an outage
+ * and be retried. Fixed text: the request has one model, so `param` names it.
+ */
+const MODEL_UNAVAILABLE: MappedUpstreamError = {
+  status: 404,
+  body: makeError(
+    'The model is not available with the provider login the proxy uses. Choose another model.',
+    'invalid_request_error',
+    'model',
+    'model_not_found'
   )
 }
 
@@ -323,6 +339,13 @@ const CREDENTIAL_WORDING =
   /\bapi[\s_-]?key\b|\bunauthori[sz]ed\b|\bauthenticat\w*|\bcredentials?\b|\baccess[\s_-]?token\b/i
 
 /**
+ * Codex's refusal of a model the ChatGPT login's plan does not include (#156), as pi reports it:
+ * "Codex error: The 'gpt-5.5' model is not supported when using Codex with a ChatGPT account."
+ * It arrives as a WebSocket stream event, with no status, or as a 400.
+ */
+const MODEL_REFUSED_WORDING = /\bmodel is not supported when using codex with\b/i
+
+/**
  * Maps an upstream failure to the status and fixed body the client gets.
  *
  * @remarks
@@ -336,6 +359,10 @@ const CREDENTIAL_WORDING =
 export function mapUpstreamError(err: unknown): MappedUpstreamError {
   const message = err instanceof Error ? err.message : ''
   const status = upstreamStatusIn(message)
+  // Codex's model refusal first: its phrase is specific, the credential words are not, so a
+  // refusal that also mentions an account's credentials is still about the model.
+  const statusAllowsRefusal = status === undefined || status === HTTP_BAD_REQUEST
+  if (statusAllowsRefusal && MODEL_REFUSED_WORDING.test(message)) return MODEL_UNAVAILABLE
   if (status === HTTP_BAD_REQUEST && CREDENTIAL_WORDING.test(message)) return AUTH_FAILED
   if (status !== undefined) {
     return BY_STATUS.get(status) ?? PROVIDER_FAILED
