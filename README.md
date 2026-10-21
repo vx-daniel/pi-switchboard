@@ -20,13 +20,29 @@ Where it's going (see [`ROADMAP.md`](ROADMAP.md)): routing across your pi logins
 
 ## Installation
 
-```bash
-# Install globally
-pnpm add -g @vx-daniel/pi-switchboard
+The package is published to GitHub Packages, whose npm registry needs a GitHub token to install anything, public packages included. The Docker image needs none: see [Docker](#docker).
 
-# Or run directly
-pnpm dlx @vx-daniel/pi-switchboard
+**Once, before the first install:**
+
+1. Create a GitHub personal access token (classic) with the `read:packages` scope. GitHub Packages accepts only classic tokens.
+2. Point the `@vx-daniel` scope at GitHub Packages in `~/.npmrc`. These two lines send only `@vx-daniel/*` packages there; everything else still comes from npmjs:
+
+   ```ini
+   @vx-daniel:registry=https://npm.pkg.github.com
+   //npm.pkg.github.com/:_authToken=<your token>
+   ```
+
+**Then:**
+
+```bash
+# As a pi package: /proxy, the settings panel and the model selector inside pi
+pi install npm:@vx-daniel/pi-switchboard
+
+# Or the CLI on its own
+pnpm add -g @vx-daniel/pi-switchboard
 ```
+
+Install by the package name, as above. pi also accepts a tarball URL (`npm:https://…/x.tgz`), but pi 1.3.0 then reports the package as installed without loading its extension.
 
 ### Coming from pi-openai-proxy
 
@@ -354,7 +370,7 @@ The proxy describes its own API as an OpenAPI document (see [API documentation](
 
 ## Pi Integration
 
-Install as a pi package to get the `/proxy` command family:
+Install as a pi package to get the `/proxy` command family. It needs the GitHub Packages setup in [Installation](#installation) first:
 
 ```bash
 pi install npm:@vx-daniel/pi-switchboard

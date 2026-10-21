@@ -23,7 +23,8 @@ Secondary goals:
 
 - Preserve request and usage observability
 - Be safe by default for local usage
-- Distribution: npm and `pi install` (#59), a Docker image (#60), a standalone binary (#61)
+- Distribution: the pi package on GitHub Packages, npmjs later (#59), a Docker image (#60), a
+  standalone binary (#61)
 - Later, not planned: an experimental agentic mode ("Agentic mode" below)
 
 ## Non-goals
@@ -64,9 +65,9 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 - **Gate** (`scripts/gate.ts`, `pnpm run check:all`): format → lint + type check → tests with coverage → fallow → build; the single definition of green, run by the pre-commit hook, CI, and the release workflow
 - **fallow** (`.fallowrc.jsonc`, `fallow-plugin-oxlint-js.jsonc`): dead code, duplication and complexity, CRAP scored against the test coverage; adopted at zero findings (#83), so any new one fails the gate. Exceptions are config entries with reasons, never inline comments. No complexity ceiling is raised: the ones set at adoption were refactored away (#85), the last being `resolveModelScope`
 - **Git hooks** (`.vite-hooks/`): pre-commit (`check:all`), commit-msg (commitlint), pre-push (lockfile sync)
-- **CI** (`.github/workflows/`): `ci.yml` (`gate` on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks, new commits only, every branch), `claude-pr-review.yml` (manual), `publish.yml` (release on `main`)
+- **CI** (`.github/workflows/`): `ci.yml` (`gate` on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks, new commits only, every branch), `claude-pr-review.yml` (manual), `publish.yml` (release on `main`, then `image.yml` and `package.yml` for the new tag)
 - **commitlint**: conventional commits via `@commitlint/config-conventional`
-- **semantic-release**: changelog, npm publish, GitHub release, git commit
+- **semantic-release**: version, changelog, GitHub release and the release commit; the image and the package are published from its tag by `image.yml` and `package.yml`
 
 ## API compatibility policy
 
@@ -1164,6 +1165,35 @@ command and the server run the same pi on one `auth.json`.
   (it cannot be made private again).
 - **Port published on loopback.** Compose publishes `127.0.0.1:4141` only, keeping the
   local-first default for the host.
+
+### pi package
+
+The pi package, `@vx-daniel/pi-switchboard` (the CLI, the library entry points and the extension),
+is published to GitHub Packages' npm registry (#59), not npmjs: the maintainer is not ready to
+share it widely. npmjs comes later, by choice.
+
+- **Published once per version.** The release workflow's `package` job calls `package.yml` with
+  each new release tag. It builds that tag with the frozen lockfile and runs
+  `pnpm publish --ignore-scripts` with `GITHUB_TOKEN`. pnpm rewrites the `catalog:` specs and
+  drops `prepare`. Scripts are off because the release gate already tested that commit. The
+  registry refuses a version twice. Run `package.yml` by hand with a tag to publish a release
+  whose package is missing.
+- **Installing needs a token.** GitHub Packages requires a classic personal access token with
+  `read:packages` to install any package, public ones included, unlike GHCR. Every user sets the
+  `@vx-daniel` scope and the token in `~/.npmrc` once (README, "Installation").
+- **Ruled out, tested with pi 1.3.0:**
+  - `pi install git:github.com/vx-daniel/pi-switchboard` clones `dev` and runs
+    `npm install --omit=dev`. `dist/` is not in git, and `prepare` needs the dev dependencies,
+    which that leaves out.
+  - A release tarball as a URL (`npm:https://…/x.tgz`) installs and is listed, but pi takes the
+    whole URL for the package name, looks under `node_modules/<url>`, and never loads the
+    extension.
+  - By package name, pi finds the package, and `/proxy start` runs the installed
+    `dist/index.mjs`.
+- **pi warns at load** that `@earendil-works/pi-ai`, `pi-coding-agent` and `pi-tui` should be
+  `peerDependencies` with `*`. The extension loads all the same, and moving them is not a plain
+  fix: the proxy the extension starts imports pi in its own process, and pi installs packages with
+  `--legacy-peer-deps`, which skips peers.
 
 ### Agentic mode
 
