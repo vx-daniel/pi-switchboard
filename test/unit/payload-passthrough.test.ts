@@ -6,7 +6,7 @@
  * flags are in `test/integration/tool-strict.test.ts`.
  */
 
-import { collectPayloadFields } from '@proxy/pi/complete'
+import { collectPayloadFields } from '@proxy/pi/payload-fields'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { minimalRequest } from './payload-passthrough-helpers'
