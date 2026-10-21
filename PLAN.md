@@ -386,7 +386,10 @@ A string alias, and a request that names a model, never fall back.
 - **Visible (principle VI).** `model` is the model that answered, and `x_pi.attempts` lists
   `{ model, reason }` for each failed attempt, in the body and in every chunk, only when there is
   one. Each hop is a warning (alias, model, class, next model, attempt number), and a success after
-  hops is an info line with the attempts. Never content.
+  hops is an info line with the attempts. Never content. Principle VI also asks for the serving
+  *login*: pi has one login per provider today, and a chain moves between providers or models,
+  never between logins, so the provider in `model` identifies it. Multi-login routing adds a login
+  field when there is a choice to report.
 - **Limits.** The idle timeout applies per attempt, so an N-target chain can take N timeouts. There
   is no per-request opt-out: docker-agent can't send a header, and a body field would need a
   principle I exception (#177). A client that wants no fallback names the model, and one that

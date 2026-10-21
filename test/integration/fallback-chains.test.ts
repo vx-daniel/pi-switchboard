@@ -20,6 +20,7 @@ import {
   finishChunk,
   httpError,
   type MockProvider,
+  silent,
   sse,
   startMockProvider,
   textChunks
@@ -40,6 +41,8 @@ beforeAll(async () => {
   mock = await startMockProvider({
     'limited-mock': RATE_LIMITED,
     'limited2-mock': RATE_LIMITED,
+    'busy-mock': httpError(503, { error: { message: 'Overloaded', type: 'server_error' } }),
+    'silent-mock': silent(),
     'invalid-mock': httpError(400, {
       error: { message: 'Unsupported value', type: 'invalid_request_error' }
     }),
@@ -62,6 +65,8 @@ beforeAll(async () => {
         alpha: provider([
           { id: 'limited-mock' },
           { id: 'limited2-mock' },
+          { id: 'busy-mock' },
+          { id: 'silent-mock' },
           { id: 'invalid-mock' },
           { id: 'cut-mock' },
           { id: 'text-mock', input: ['text'] },
@@ -99,12 +104,17 @@ const PNG_DATA_URI =
  * Sends one chat request for `model` and records which models the upstream was asked for.
  *
  * @param model - the request's `model`
- * @param options - stream or not, an image part, and extra headers
+ * @param options - stream or not, an image part, extra headers, and the upstream idle timeout
  * @returns the status, the body as text, and the upstream models in call order
  */
 async function ask(
   model: string,
-  options: { stream?: boolean; image?: boolean; headers?: Record<string, string> } = {}
+  options: {
+    stream?: boolean
+    image?: boolean
+    headers?: Record<string, string>
+    timeoutMs?: number
+  } = {}
 ): Promise<{ status: number; text: string; upstream: unknown[] }> {
   const before = mock.requests.length
   const content =
@@ -114,7 +124,11 @@ async function ask(
           { type: 'image_url', image_url: { url: PNG_DATA_URI } }
         ]
       : 'Say ok'
-  const response = await createApp(testConfig(), fileConfigReader).request('/v1/chat/completions', {
+  const config = {
+    ...testConfig(),
+    upstreamTimeoutMs: options.timeoutMs ?? testConfig().upstreamTimeoutMs
+  }
+  const response = await createApp(config, fileConfigReader).request('/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...options.headers },
     body: JSON.stringify({
@@ -200,6 +214,41 @@ describe('a fallback chain moves on', () => {
 
     expect((await ask('chain', { image: true })).upstream).toEqual(['answer-mock'])
     expect((await ask('chain')).upstream).toEqual(['text-mock'])
+  })
+
+  // Catches attempts reported out of order, the earlier ones dropped, or a class mistaken for
+  // another along a longer chain: each failure is classed on its own, and the client sees them in
+  // the order tried.
+  test('through several failures, each reported in order', async () => {
+    setChain({
+      targets: ['alpha/busy-mock', 'alpha/limited-mock', 'beta/answer-mock'],
+      fallbackOn: ['unavailable', 'rate_limit']
+    })
+
+    const answer = await ask('chain')
+
+    expect(answer.status).toBe(200)
+    expect(answer.upstream).toEqual(['busy-mock', 'limited-mock', 'answer-mock'])
+    expect(xPi(answer.text, false)[0]).toMatchObject({
+      attempts: [
+        { model: 'alpha/busy-mock', reason: 'unavailable' },
+        { model: 'alpha/limited-mock', reason: 'rate_limit' }
+      ]
+    })
+  })
+
+  // Catches the idle timeout ending the chain although the alias names `timeout`: a provider that
+  // never answers is abandoned at the timeout, and the next one answers.
+  test('past a model that never answers, when the alias names timeout', async () => {
+    setChain({ targets: ['alpha/silent-mock', 'beta/answer-mock'], fallbackOn: ['timeout'] })
+
+    const answer = await ask('chain', { timeoutMs: 300 })
+
+    expect(answer.status).toBe(200)
+    expect(answer.upstream).toEqual(['silent-mock', 'answer-mock'])
+    expect(xPi(answer.text, false)[0]).toMatchObject({
+      attempts: [{ model: 'alpha/silent-mock', reason: 'timeout' }]
+    })
   })
 })
 

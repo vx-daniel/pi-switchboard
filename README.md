@@ -358,6 +358,7 @@ An alias can name several models, tried in order, and the failures that move to 
 - **Never on the request's own fault, or once the answer has started.** A `400`, the client leaving, and a failure after a stream sent its first byte are answered as they are without a chain. After the last target, the client gets that target's failure.
 - **Visible.** The response's `model` is the model that answered. `x_pi.attempts` lists each model tried before it and why it failed (`[{ "model": "anthropic/claude-opus-5-5", "reason": "rate_limit" }]`), in a non-streamed response and in every stream chunk. Each hop is a warning in the log, naming the alias, the model, the class and the next model.
 - **Exposed targets only.** A target the exposure config hides is skipped (and listed in `/healthz/models` as `target-not-exposed`). The alias is listed while one target is exposed, as the first exposed one.
+- **Targets as written.** A target listed twice is tried twice, which is a retry of the same model. `targets` needs at least one entry.
 - **Images go to a model that takes them.** An image request skips the chain's text-only models when another one accepts images.
 - **No fallback with your own key.** A request with `X-Switchboard-Upstream-Api-Key` runs on the first target only: the key is one provider's.
 - **No opt-out per request.** To avoid a chain, name the model directly (its canonical ID); for a shorter chain, define another alias.
