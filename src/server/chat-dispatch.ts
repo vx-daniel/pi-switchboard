@@ -687,15 +687,18 @@ function fallbackFor(
  */
 export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob): Promise<Response> {
   const attempts = [...job.attempts]
+  // A request with its own upstream key isn't using the proxy's login, so its 429s and successes
+  // say nothing about the login other clients share (#181 review).
+  const sharedLogin = job.options.upstreamApiKey === undefined
   for (const [position, candidate] of job.candidates.entries()) {
     if (skipCooling(job, position, attempts)) continue
     const { outcome, captured } = await runAttempt(honoContext, candidate, job, position > 0)
     if (outcome.kind === 'final') return outcome.response
     if (outcome.kind === 'answered') {
-      clearCooldowns(candidate)
+      if (sharedLogin) clearCooldowns(candidate)
       return answerWith(outcome.respond, candidate, job, attempts)
     }
-    recordCooldown(candidate, failureClass(outcome.answer), captured)
+    if (sharedLogin) recordCooldown(candidate, failureClass(outcome.answer), captured)
     const next = job.candidates[position + 1]
     const failure = fallbackFor(outcome.answer, next, job.fallbackOn)
     if (failure === undefined || next === undefined) {

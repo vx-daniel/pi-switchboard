@@ -47,6 +47,27 @@ describe('resetAfterMs', () => {
       failed({ 'anthropic-ratelimit-requests-reset': '2026-10-21T12:05:00Z' }),
       300_000
     ],
+    // A bucket with room is passed over (fourth #181 review): its reset isn't what the 429 waits on.
+    [
+      "OpenAI's reset headers, only the empty bucket's",
+      failed({
+        'x-ratelimit-reset-requests': '6m0s',
+        'x-ratelimit-remaining-requests': '12',
+        'x-ratelimit-reset-tokens': '1s',
+        'x-ratelimit-remaining-tokens': '0'
+      }),
+      1000
+    ],
+    [
+      "Anthropic's reset headers, only the empty bucket's",
+      failed({
+        'anthropic-ratelimit-requests-reset': '2026-10-21T12:05:00Z',
+        'anthropic-ratelimit-requests-remaining': '0',
+        'anthropic-ratelimit-tokens-reset': '2026-10-21T13:00:00Z',
+        'anthropic-ratelimit-tokens-remaining': '40000'
+      }),
+      300_000
+    ],
     [
       'the message, in short units',
       failed({}, '{"error":{"message":"Rate limit reached. Please try again in 20s."}}'),

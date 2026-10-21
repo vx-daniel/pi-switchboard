@@ -410,7 +410,9 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
   `resetAfterMs` takes the first source that gives a positive wait, in this order:
   1. `retry-after-ms`, then `retry-after` (seconds or an HTTP date);
   2. body `resets_in_seconds`, `retry_after` or `resets_at` (Codex's usage limit);
-  3. the latest `*ratelimit*reset*` header (OpenAI's durations, Anthropic's timestamps);
+  3. the latest `*ratelimit*reset*` header (OpenAI's durations, Anthropic's timestamps), passing
+     over a bucket whose `*-remaining` twin is above 0: those headers come for every bucket, full
+     or not;
   4. the message's "try again in …" wording.
 
   A number is read as seconds to wait, as a Unix time in seconds past 1e9, or in milliseconds past
@@ -418,14 +420,17 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
   With none, a growing default: 60 s, 180 s, then doubling, counted per provider or model and
   reset by a stated time or a success. pi's Google adapters refuse a custom `fetch`, so Google
   models always use the default.
-- **Applied by routing only, recorded always (principle VI).** Every request's 429 or 503 starts a
-  cooldown, so the state is visible. Only a chain whose `fallbackOn` names the class skips a
-  cooling candidate (`cooldownSkip`); a request that names a model calls it as before. The check
-  runs as the chain reaches each candidate, so a 429 met earlier in the same request skips that
-  provider's later models too. When the candidate and every one after it are cooling, the one of
-  those whose cooldown ends first is called, so a request is never answered without a call. The
-  comparison uses the state as each candidate is reached: a cooldown that a parallel request starts
-  or clears meanwhile can change which one that is.
+- **Applied by routing only, recorded always (principle VI).** Every request's 429 or 503 on the
+  proxy's login starts a cooldown, so the state is visible. A request with its own upstream key
+  records and clears nothing: its failures are about that key, not the login others share. Only a
+  chain whose `fallbackOn` names the class skips a cooling candidate (`cooldownSkip`); a request
+  that names a model calls it as before. The check runs as the chain reaches each candidate, so a
+  429 met earlier in the same request skips that provider's later models too. When the candidate
+  and every one after it are cooling, the one of those whose cooldown ends first is called (on a
+  tie, the earlier), so a request is never answered without a call. A candidate already skipped
+  is not reconsidered, even if it ends sooner. The comparison uses the state as each candidate is
+  reached: a cooldown that a parallel request starts or clears meanwhile can change which one
+  that is.
 - **Visible.** A skipped candidate is an `x_pi.attempts` entry with `skipped: true`. Each
   cooldown's start, end and skip is an info line. `/healthz/models` lists the active cooldowns
   (operator), and `/v1/switchboard/models` gives each model's `cooldown` (clients that pick models

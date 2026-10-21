@@ -27,6 +27,7 @@ import {
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
   finishChunk,
+  googleSse,
   type MockProvider,
   type MockReply,
   sse,
@@ -69,7 +70,8 @@ beforeAll(async () => {
   mock = await startMockProvider({
     'limited-mock': rateLimitedFor(answer),
     'sibling-mock': answer,
-    'answer-mock': answer
+    'answer-mock': answer,
+    'limited-gemini': rateLimitedFor(googleSse('ok'))
   })
   const provider = (models: string[]): Record<string, unknown> => ({
     baseUrl: `${mock.origin}/v1`,
@@ -81,7 +83,8 @@ beforeAll(async () => {
     modelsJson: {
       providers: {
         alpha: provider(['limited-mock', 'sibling-mock']),
-        beta: provider(['answer-mock'])
+        beta: provider(['answer-mock']),
+        google: { ...mock.provider('google-generative-ai'), models: [{ id: 'limited-gemini' }] }
       }
     }
   })
@@ -117,13 +120,17 @@ function setAliases(aliases: Record<string, AliasTarget>): void {
  * Sends one chat request and records which models the upstream was asked for.
  *
  * @param model - the request's `model`
+ * @param headers - extra request headers
  * @returns the status, the parsed body, and the upstream models in call order
  */
-async function ask(model: string): Promise<{ status: number; body: unknown; upstream: unknown[] }> {
+async function ask(
+  model: string,
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: unknown; upstream: unknown[] }> {
   const before = mock.requests.length
   const response = await createApp(testConfig(), fileConfigReader).request('/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Say ok' }] })
   })
   const body: unknown = await response.json()
@@ -221,5 +228,50 @@ describe('a 429 cools its provider down', () => {
     expect(byId.get('limited-mock')).toEqual({ reason: 'rate_limit', scope: 'provider', until })
     expect(byId.get('sibling-mock')).toEqual({ reason: 'rate_limit', scope: 'provider', until })
     expect(byId.get('answer-mock')).toBeNull()
+  })
+})
+
+/**
+ * Reads the active cooldowns `/healthz/models` lists.
+ *
+ * @returns the `cooldowns` list
+ */
+async function listedCooldowns(): Promise<unknown> {
+  return (await getJson('/healthz/models'))['cooldowns']
+}
+
+describe('what does not cool the shared login', () => {
+  // Catches a client's own key cooling the login every other client shares (fourth #181 review):
+  // its 429 is about that key, so nothing is recorded, and the chain still calls the provider.
+  test('a 429 on a request with its own upstream key', async () => {
+    setAliases({ chain: CHAIN })
+
+    const own = await ask('chain', {
+      'X-Switchboard-Upstream-Api-Key': 'notarealsecret-client-key'
+    })
+
+    expect(own.status).toBe(429)
+    expect(await listedCooldowns()).toEqual([])
+    expect((await ask('chain')).upstream).toEqual(['limited-mock', 'answer-mock'])
+  })
+})
+
+describe("Google's adapter", () => {
+  // Catches the capturing fetch passed to pi's Google adapter, which refuses any custom fetch and
+  // would fail every Google call; without it, a 429 still cools the provider, for the default 60 s.
+  test('cools down for the default time, as the proxy cannot read its response', async () => {
+    setAliases({
+      gchain: { targets: ['google/limited-gemini', 'beta/answer-mock'], fallbackOn: ['rate_limit'] }
+    })
+
+    expect((await ask('gchain')).status).toBe(200)
+    expect(await listedCooldowns()).toEqual([
+      expect.objectContaining({
+        provider: 'google',
+        reason: 'rate_limit',
+        source: 'backoff',
+        secondsLeft: 60
+      })
+    ])
   })
 })

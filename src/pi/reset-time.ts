@@ -202,16 +202,34 @@ function fromBodyFields(body: unknown, now: number): number | undefined {
 }
 
 /**
- * Reads the latest of the providers' reset headers.
+ * Says whether a reset header's bucket still has room, by its `*-remaining` twin
+ * (`x-ratelimit-reset-tokens` → `x-ratelimit-remaining-tokens`).
+ *
+ * @param headers - the response headers
+ * @param resetHeader - the reset header's name
+ * @returns whether the twin is present and above 0; a bucket with no twin may be the full one
+ */
+function bucketHasRoom(headers: Headers, resetHeader: string): boolean {
+  const remaining = headers.get(resetHeader.replace(/reset/i, 'remaining'))
+  return remaining !== null && PLAIN_NUMBER.test(remaining) && Number.parseFloat(remaining) > 0
+}
+
+/**
+ * Reads the latest of the providers' reset headers, for the buckets that may be full.
+ *
+ * @remarks
+ * OpenAI and Anthropic send a reset time for every bucket (requests, tokens, …), full or not, so
+ * a bucket whose `*-remaining` header is above 0 is passed over: its reset is not what the 429 is
+ * waiting on.
  *
  * @param headers - the response headers
  * @param now - the current time
- * @returns the longest wait any of them gives, or `undefined` when there is none
+ * @returns the longest wait those give, or `undefined` when there is none
  */
 function fromResetHeaders(headers: Headers, now: number): number | undefined {
   let latest: number | undefined
   for (const [headerName, headerValue] of headers) {
-    if (!/ratelimit.*reset/i.test(headerName)) continue
+    if (!/ratelimit.*reset/i.test(headerName) || bucketHasRoom(headers, headerName)) continue
     const wait = parseResetValue(headerValue, now)
     if (wait !== undefined && (latest === undefined || wait > latest)) latest = wait
   }
