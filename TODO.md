@@ -394,14 +394,15 @@ Analysis document: `docs/engineering/phase-3d-analysis.md`
 - [x] Header `X-Pi-Upstream-Api-Key` → `X-Switchboard-Upstream-Api-Key`; the old one answers 400
 - [x] README "Attribution" and "Coming from pi-openai-proxy"; LICENSE keeps the original copyright
 - [x] Versions restart at 0.1.0: `pi-switchboard-v${version}` tags, baseline tag on `main`, breaking → minor while 0.x
-- [ ] Publish to npm under the new name (#59; `npmPublish` is off until then), tracked in Phase 4
+- [x] Publish the package under the new name (#59): GitHub Packages, from each release tag
 
 The sections above are done and kept as history. The ones below follow `ROADMAP.md`'s numbering
 since the rename; each issue holds the detailed checklist.
 
 ## Phase 4 — Distribution
 
-- [ ] npm and `pi install` (#59)
+- [x] The pi package on GitHub Packages, `pi install npm:@vx-daniel/pi-switchboard` (#59)
+- [ ] The pi package on npmjs, so installing needs no token (later, by choice)
 - [x] Docker image (#60): built from source, published to Docker Hub and GHCR on each release
       (amd64, arm64)
 - [ ] Standalone binary (#61)

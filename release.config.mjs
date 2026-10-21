@@ -29,8 +29,8 @@ export default {
     [
       '@semantic-release/npm',
       {
-        // Off until npm trusted publishing is set up for @vx-daniel/pi-switchboard (#59); until
-        // then a release is a git tag, a GitHub release and the changelog.
+        // Only the version bump in package.json: the release workflow's `package` job publishes
+        // the release tag to GitHub Packages (package.yml, #59). npmjs comes later, by choice.
         npmPublish: false,
         pkgRoot: '.'
       }
