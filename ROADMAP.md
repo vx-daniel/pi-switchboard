@@ -147,7 +147,7 @@ What the name promises, under constitution principle VI (explicit, visible, expo
 - [x] Aliases: virtual model names (#66)
 - [x] Fallback chains for aliases (#67)
 - [x] Cooldowns after rate limits (#68); pi already makes no hidden SDK retries
-- [ ] Quota awareness from provider rate-limit headers (#69)
+- [ ] Quota awareness from provider rate-limit headers (#69): tracked and shown; routing on it to decide
 - [ ] Usage and cost by route (#70)
 
 ## Phase 6 — More of OpenAI's API

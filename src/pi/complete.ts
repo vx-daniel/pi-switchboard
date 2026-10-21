@@ -30,6 +30,7 @@ import {
   passthroughStrategy,
   patchGooglePayload
 } from '@proxy/pi/payload-fields'
+import { observingFetch } from '@proxy/pi/quota'
 import { getRuntime } from '@proxy/pi/registry'
 import { capturingFetch, type FailedResponse } from '@proxy/pi/reset-time'
 import { upstreamTemperature } from '@proxy/pi/temperature'
@@ -58,6 +59,8 @@ export interface CompletionOptions {
    * time (#68). pi's `onResponse` only sees successes, so this goes through pi's `fetch` option.
    */
   readonly onFailedResponse?: ((response: FailedResponse) => void) | undefined
+  /** Receives every response's headers, for the quota they report (#69). */
+  readonly onResponseHeaders?: ((headers: Headers) => void) | undefined
 }
 
 /**
@@ -165,10 +168,11 @@ function passthroughHook(
 }
 
 /**
- * Returns the `fetch` option that copies a failed response to `options.onFailedResponse` (#68).
+ * Returns the `fetch` option that copies a failed response to `options.onFailedResponse` (#68)
+ * and every response's headers to `options.onResponseHeaders` (#69).
  *
  * @param model - the pi model; pi's Google adapters refuse a custom fetch, so their 429s cool
- *   down for the default time instead
+ *   down for the default time instead, and they report no quota
  * @param options - the per-request options
  * @returns `{ fetch }`, or nothing to add
  */
@@ -176,9 +180,14 @@ function captureOptions(
   model: Model<Api>,
   options: CompletionOptions
 ): Pick<SimpleStreamOptions, 'fetch'> {
-  return options.onFailedResponse === undefined || isGoogleApi(model.api)
-    ? {}
-    : { fetch: capturingFetch(options.onFailedResponse) }
+  const { onFailedResponse, onResponseHeaders } = options
+  if (isGoogleApi(model.api)) return {}
+  const failures =
+    onFailedResponse === undefined ? globalThis.fetch : capturingFetch(onFailedResponse)
+  if (onResponseHeaders === undefined) {
+    return onFailedResponse === undefined ? {} : { fetch: failures }
+  }
+  return { fetch: observingFetch(onResponseHeaders, failures) }
 }
 
 /**

@@ -282,15 +282,19 @@ export function finishChunk(
  * Builds a complete SSE answer: status 200, each chunk as a `data:` event, then `[DONE]`.
  *
  * @param chunks - the chunks to send, in order
- * @param options - `intervalMs` to wait between chunks; omitted, they are sent back to back
+ * @param options - `intervalMs` to wait between chunks (omitted, they are sent back to back), and
+ *   `headers` to send with the answer, such as a provider's quota headers
  * @returns the reply
  */
 export function sse(
   chunks: readonly Record<string, unknown>[],
-  options: { readonly intervalMs?: number } = {}
+  options: {
+    readonly intervalMs?: number
+    readonly headers?: Readonly<Record<string, string>>
+  } = {}
 ): MockReply {
   return async (response) => {
-    response.writeHead(HTTP_OK, { 'content-type': 'text/event-stream' })
+    response.writeHead(HTTP_OK, { ...options.headers, 'content-type': 'text/event-stream' })
     for (const [chunkIndex, event] of chunks.entries()) {
       if (chunkIndex > 0 && options.intervalMs !== undefined) await sleep(options.intervalMs)
       response.write(`data: ${JSON.stringify(event)}\n\n`)
