@@ -64,7 +64,8 @@ describe('JSON Lines output', () => {
     expect(records()[0]).toMatchObject({
       level: 'INFO',
       logger: 'pi-switchboard.server.http',
-      // The rendered message quotes string values, so a value can never pose as message text.
+      // The rendered message quotes string values, so a client's value can never pose as message
+      // text: deliberate, PLAN "Observability" (#159).
       message: '"GET" "/v1/models" received',
       properties: { method: 'GET', path: '/v1/models' }
     })

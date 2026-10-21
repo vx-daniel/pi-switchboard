@@ -268,7 +268,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 
 The proxy logs with [LogTape](https://logtape.org) to stderr:
 - **Pretty** ([@logtape/pretty](https://jsr.io/@logtape/pretty)): readable, colored lines stamped with the local date, time and UTC offset (in a container, set `TZ`, e.g. `TZ=America/Chicago`). The default on a terminal.
-- **JSON** ([JSON Lines](https://jsonlines.org)): one object per record with `@timestamp` (UTC), `level`, `logger` (the category, e.g. `pi-switchboard.server.http`), `message` and `properties`. The default when stderr is piped or redirected, as in `docker logs`.
+- **JSON** ([JSON Lines](https://jsonlines.org)): one object per record with `@timestamp` (UTC), `level`, `logger` (the category, e.g. `pi-switchboard.server.http`), `message` and `properties`. The default when stderr is piped or redirected, as in `docker logs`. `message` quotes the string values it contains (`Listening on http://"0.0.0.0":4141`, `"GET" "/v1/models" received`) on purpose. Some values come from clients, such as the requested model, a path or a client request ID, and the quotes stop a crafted one from reading as message text. `properties` holds each value unquoted; read or query those. The pretty format prints values bare.
 
 `PI_SWITCHBOARD_LOG_FORMAT` (or `--log-format`) picks one regardless of the terminal, for example `pretty` for reading `docker compose logs` directly.
 
