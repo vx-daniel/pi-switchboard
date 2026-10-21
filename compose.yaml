@@ -12,7 +12,9 @@ services:
   proxy:
     # A released image, ghcr.io/vx-daniel/pi-switchboard:<version>, with PI_SWITCHBOARD_VERSION
     # set and `docker compose pull`; unset, `local`, which `docker compose build` makes from this
-    # checkout. Published tags are never overwritten, so a version always means the same image.
+    # checkout. Without a build first, `docker compose up` tries to pull `local`, prints the
+    # registry's refusal, and builds it. Published tags are never overwritten, so a version always
+    # means the same image.
     image: ghcr.io/vx-daniel/pi-switchboard:${PI_SWITCHBOARD_VERSION:-local}
     build:
       context: .
