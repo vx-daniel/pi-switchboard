@@ -113,7 +113,8 @@ async function listedIds(path: string): Promise<unknown[]> {
 }
 
 /**
- * Sends one chat request and records which model the upstream was asked for.
+ * Sends one chat request and records which model the upstream was asked for. A streamed request
+ * asks for the final usage chunk too, so every kind of chunk is in the stream.
  *
  * @param model - the request's `model`
  * @param stream - whether to ask for a stream
@@ -128,7 +129,12 @@ async function ask(
   const response = await app().request('/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, stream, messages: [{ role: 'user', content: 'Say ok' }] })
+    body: JSON.stringify({
+      model,
+      stream,
+      ...(stream ? { stream_options: { include_usage: true } } : {}),
+      messages: [{ role: 'user', content: 'Say ok' }]
+    })
   })
   const text = await response.text()
   const upstream = mock.requests.slice(before).at(0)
@@ -177,7 +183,9 @@ describe('a chat request for an alias', () => {
     expect(answer.status).toBe(HTTP_OK)
     expect(answer.upstreamModel).toBe('opus-mock')
     const streamed = chunks(answer.text)
-    expect(streamed.length).toBeGreaterThan(1)
+    // The content chunks, the finish chunk, and the final usage chunk.
+    expect(streamed.at(-1)).toHaveProperty('usage')
+    expect(streamed.length).toBeGreaterThan(2)
     for (const chunk of streamed) {
       expect(chunk).toMatchObject({ model: TARGET, x_pi: { alias: 'coding' } })
     }
