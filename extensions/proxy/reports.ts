@@ -148,7 +148,8 @@ function formatServerSettings(config: ProxyConfig): string[] {
 
 /**
  * Returns the `/proxy show` exposure-policy fields: ID and exposure mode, then the pi pattern
- * count, custom model count (custom mode only) and provider prefixes when there are any.
+ * count, custom model count (custom mode only), and provider prefixes and aliases (#66) when there
+ * are any.
  *
  * @param config - the loaded proxy config
  * @param enabledModels - pi's `enabledModels` setting; the caller reads it only in scoped mode
@@ -172,12 +173,14 @@ function formatExposurePolicy(
     )
     lines.push(`prefixes: ${pairs.join(', ')}`)
   }
+  const aliasPairs = Object.entries(config.aliases).map(([alias, target]) => `${alias}=${target}`)
+  if (aliasPairs.length > 0) lines.push(`aliases: ${aliasPairs.join(', ')}`)
   return lines
 }
 
 /**
- * Returns the `/proxy show` exposure-result fields: the exposed public IDs and any unresolved
- * scope patterns, or the exposure error.
+ * Returns the `/proxy show` exposure-result fields: the exposed public IDs, any unresolved scope
+ * patterns and any aliases left out, or the exposure error.
  *
  * @param outcome - the result of `computeModelExposure`
  * @returns one `name: value` string per field
@@ -190,6 +193,12 @@ function formatExposureOutcome(outcome: ModelExposureOutcome): string[] {
       (diagnostic) => `${diagnostic.pattern} (${diagnostic.code})`
     )
     lines.push(`unresolved: ${patterns.join(', ')}`)
+  }
+  if (outcome.aliasDiagnostics.length > 0) {
+    const ignored = outcome.aliasDiagnostics.map(
+      (diagnostic) => `${diagnostic.alias} (${diagnostic.code})`
+    )
+    lines.push(`aliases ignored: ${ignored.join(', ')}`)
   }
   return lines
 }

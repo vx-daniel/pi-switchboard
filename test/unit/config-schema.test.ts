@@ -147,6 +147,22 @@ describe('normalizeConfig', () => {
     expect(normalizeConfig({ providerPrefixes: 'not-object' }).providerPrefixes).toEqual({})
   })
 
+  // Catches one bad alias costing the others (a map keeps its valid entries), an empty name or
+  // target kept, or a name or target trimmed: exposure follows the config as written (#66).
+  test('keeps the valid aliases, verbatim', () => {
+    const result = normalizeConfig({
+      aliases: {
+        'coding': 'anthropic/opus',
+        ' padded ': 'openai/gpt ',
+        '': 'openai/gpt',
+        'empty': '',
+        'number': 5
+      }
+    })
+
+    expect(result.aliases).toEqual({ 'coding': 'anthropic/opus', ' padded ': 'openai/gpt ' })
+  })
+
   // Catches a valid field being dropped or replaced by its default during normalization.
   test('preserves all fields from a complete valid config', () => {
     const full = {
@@ -162,6 +178,7 @@ describe('normalizeConfig', () => {
       modelExposureMode: 'custom',
       customModels: ['openai/gpt-4o'],
       providerPrefixes: { openai: 'oai' },
+      aliases: { coding: 'openai/gpt-4o' },
       logLevel: 'debug',
       zed: { providerName: 'My Proxy', autoSync: true }
     }

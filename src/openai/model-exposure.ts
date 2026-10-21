@@ -20,12 +20,16 @@
  * In "scoped" an empty or missing `enabledModels` exposes every available model, as in pi. In
  * "custom" an empty `customModels` exposes none: the operator chose to pick models (#88).
  *
+ * Aliases (`@proxy/openai/model-aliases`, #66) are names for exposed models, listed beside them
+ * and resolved after the public and canonical IDs.
+ *
  * @packageDocumentation
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import type { ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { type AliasDiagnostic, exposeAliases } from '@proxy/openai/model-aliases'
 import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
 
 /** Logger for model exposure. */
@@ -37,7 +41,7 @@ const exposureLogger = proxyLogger('openai', 'exposure')
 
 /** An exposed model with its public and canonical IDs. */
 export interface ExposedModel {
-  /** The public ID exposed on the HTTP API. */
+  /** The public ID exposed on the HTTP API: for an alias, the alias. */
   readonly publicId: string
   /** The canonical internal ID: "provider/model-id". */
   readonly canonicalId: string
@@ -45,6 +49,8 @@ export interface ExposedModel {
   readonly model: Model<Api>
   /** The provider key. */
   readonly provider: string
+  /** The alias, when this entry is one: the target's model under a name from the config (#66). */
+  readonly alias?: string
 }
 
 /** The config inputs of {@link computeModelExposure}. */
@@ -61,6 +67,8 @@ export interface ModelExposureConfig {
   /** The proxy's own canonical IDs, used when modelExposureMode is "custom"; empty exposes none. */
   readonly customModels: readonly string[]
   readonly providerPrefixes: Readonly<Record<string, string>>
+  /** Alias -> the canonical ID of the model it names (#66). */
+  readonly aliases: Readonly<Record<string, string>>
 }
 
 /** A successful exposure computation: the exposed models and lookup maps. */
@@ -74,6 +82,12 @@ export interface ModelExposureResult {
   readonly byCanonicalId: ReadonlyMap<string, ExposedModel>
   /** `enabledModels` patterns that selected nothing, or not what they name ("scoped" only). */
   readonly scopeDiagnostics: readonly ScopeDiagnostic[]
+  /** The exposed aliases, each as its target under the alias: listed after {@link models}. */
+  readonly aliases: readonly ExposedModel[]
+  /** Alias -> its entry in {@link aliases}. */
+  readonly byAlias: ReadonlyMap<string, ExposedModel>
+  /** Configured aliases left out: named like an exposed model, or naming no exposed model. */
+  readonly aliasDiagnostics: readonly AliasDiagnostic[]
 }
 
 /** A failed exposure computation: a config conflict that makes public IDs ambiguous. */
@@ -509,7 +523,17 @@ export function computeModelExposure(
     }
   )
 
-  return { ok: true, models, byPublicId, byCanonicalId, scopeDiagnostics }
+  const aliased = exposeAliases(config.aliases, byPublicId, byCanonicalId)
+  return {
+    ok: true,
+    models,
+    byPublicId,
+    byCanonicalId,
+    scopeDiagnostics,
+    aliases: aliased.aliases,
+    byAlias: aliased.byAlias,
+    aliasDiagnostics: aliased.diagnostics
+  }
 }
 
 /**
@@ -519,10 +543,12 @@ export function computeModelExposure(
  * Resolution order:
  *   1. Exact public ID match
  *   2. Exact canonical ID match (only exposed models are in the map)
+ *   3. Exact alias match (#66): only aliases whose target is exposed, and none named like a model
  *
  * @param exposure - the exposure result
  * @param requestModelId - the request's `model`
- * @returns the exposed model, or `undefined` when it is not exposed
+ * @returns the exposed model (for an alias, its target with `alias` set), or `undefined` when it
+ *   is not exposed
  */
 export function resolveExposedModel(
   exposure: ModelExposureResult,
@@ -540,16 +566,26 @@ export function resolveExposedModel(
 
   // 2. Try canonical ID fallback (only for exposed models)
   const byCanonical = exposure.byCanonicalId.get(requestModelId)
-  if (byCanonical === undefined) {
+  if (byCanonical !== undefined) {
+    exposureLogger.debug('Resolved canonical model ID {requestedModel} (public ID {publicId})', {
+      requestedModel: requestModelId,
+      publicId: byCanonical.publicId
+    })
+    return byCanonical
+  }
+
+  // 3. Try an alias (#66)
+  const byAlias = exposure.byAlias.get(requestModelId)
+  if (byAlias === undefined) {
     exposureLogger.debug('Model {requestedModel} is not exposed', {
       requestedModel: requestModelId,
       exposedCount: exposure.models.length
     })
   } else {
-    exposureLogger.debug('Resolved canonical model ID {requestedModel} (public ID {publicId})', {
+    exposureLogger.debug('Resolved alias {requestedModel} to {canonicalId}', {
       requestedModel: requestModelId,
-      publicId: byCanonical.publicId
+      canonicalId: byAlias.canonicalId
     })
   }
-  return byCanonical
+  return byAlias
 }

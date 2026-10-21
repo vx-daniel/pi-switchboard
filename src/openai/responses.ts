@@ -111,9 +111,14 @@ export const openAIChatCompletionSchema = z
           total: z.number()
         }),
         cache_read_tokens: z.int(),
-        cache_write_tokens: z.int()
+        cache_write_tokens: z.int(),
+        alias: z.string().trim().optional().meta({
+          description: 'The alias the request named (#66); present only when it named one.'
+        })
       })
-      .meta({ description: "Not OpenAI's: pi's cost (USD) and cache token counts." })
+      .meta({
+        description: "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias used."
+      })
   })
   .meta({ id: 'ChatCompletion', description: 'A non-streaming chat completion.' })
 
@@ -188,12 +193,14 @@ export function mapUsage(usage: Usage): OpenAIUsage {
  * @param requestId - the response `id`
  * @param canonicalModelId - the model ID reported as `model`
  * @param message - pi's final assistant message
+ * @param alias - the alias the request named, reported as `x_pi.alias` (#66); none when absent
  * @returns the `chat.completion` object with a single choice
  */
 export function buildChatCompletion(
   requestId: string,
   canonicalModelId: string,
-  message: AssistantMessage
+  message: AssistantMessage,
+  alias?: string
 ): OpenAIChatCompletion {
   // Concatenate text content
   const textParts = message.content.filter((part): part is TextContent => part.type === 'text')
@@ -248,7 +255,8 @@ export function buildChatCompletion(
     x_pi: {
       cost: message.usage.cost,
       cache_read_tokens: message.usage.cacheRead,
-      cache_write_tokens: message.usage.cacheWrite
+      cache_write_tokens: message.usage.cacheWrite,
+      ...(alias === undefined ? {} : { alias })
     }
   }
 }

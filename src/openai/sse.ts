@@ -72,7 +72,13 @@ export const sseChunkSchema = z
     }),
     usage: openAIUsageSchema.nullable().optional().meta({
       description: 'Only in the final chunk, and only with `stream_options.include_usage`.'
-    })
+    }),
+    x_pi: z
+      .object({
+        alias: z.string().trim().meta({ description: 'The alias the request named (#66).' })
+      })
+      .optional()
+      .meta({ description: "Not OpenAI's: in every chunk, only when the request named an alias." })
   })
   .meta({ id: 'ChatCompletionChunk', description: 'One `data:` event of a streamed completion.' })
 
@@ -106,6 +112,18 @@ interface ChunkMeta {
   readonly id: string
   readonly created: number
   readonly model: string
+  /** The alias the request named (#66): sent as `x_pi.alias` in every chunk. */
+  readonly alias: string | undefined
+}
+
+/**
+ * Returns the `x_pi` a chunk carries: the alias, when the request named one (#66).
+ *
+ * @param meta - the shared chunk fields
+ * @returns `{ x_pi: { alias } }`, or nothing to add
+ */
+function aliasField(meta: ChunkMeta): Pick<SSEChunk, 'x_pi'> {
+  return meta.alias === undefined ? {} : { x_pi: { alias: meta.alias } }
 }
 
 /** Mutable state of one stream while events are encoded. */
@@ -142,7 +160,8 @@ function encodeChoiceChunk(
         delta,
         finish_reason: finishReason
       }
-    ]
+    ],
+    ...aliasField(meta)
   })
 }
 
@@ -386,13 +405,24 @@ function closingFrames(
         created: meta.created,
         model: meta.model,
         choices: [],
-        usage: mapUsage(state.finalUsage)
+        usage: mapUsage(state.finalUsage),
+        ...aliasField(meta)
       })
     )
   }
 
   frames.push(encodeDone())
   return frames
+}
+
+/** What every chunk of one stream reports, besides its events. */
+export interface StreamIdentity {
+  /** The chunk `id`. */
+  readonly requestId: string
+  /** The model ID reported in each chunk. */
+  readonly model: string
+  /** The alias the request named, reported as `x_pi.alias` in each chunk (#66). */
+  readonly alias: string | undefined
 }
 
 /**
@@ -403,19 +433,23 @@ function closingFrames(
  * `events` are rethrown after the end of the stream is logged.
  *
  * @param events - pi's event stream for one response
- * @param requestId - the chunk `id`
- * @param model - the model ID reported in each chunk
+ * @param identity - the request ID, model and alias every chunk reports
  * @param includeUsage - whether to send a final usage chunk
  * @returns an async generator of SSE frames
  * @throws whatever iterating `events` throws
  */
 export async function* streamToSSE(
   events: AsyncIterable<AssistantMessageEvent>,
-  requestId: string,
-  model: string,
+  identity: StreamIdentity,
   includeUsage: boolean
 ): AsyncGenerator<string> {
-  const meta: ChunkMeta = { id: requestId, created: Math.floor(Date.now() / MS_PER_SECOND), model }
+  const { requestId, model, alias } = identity
+  const meta: ChunkMeta = {
+    id: requestId,
+    created: Math.floor(Date.now() / MS_PER_SECOND),
+    model,
+    alias
+  }
   const state: StreamState = {
     sentFirstChunk: false,
     finishReason: null,

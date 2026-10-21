@@ -137,6 +137,11 @@ const ProxyConfigSchema = z.object({
   customModels: z.array(VerbatimNameSchema).readonly(),
   /** Provider key -> custom public prefix label. Default prefix = provider key. */
   providerPrefixes: z.record(z.string(), VerbatimNameSchema).readonly(),
+  /**
+   * Alias -> the canonical ID of the model it names (#66). Both verbatim and never empty: an
+   * alias is listed and resolved only while its target is exposed.
+   */
+  aliases: z.record(z.string().min(1), VerbatimNameSchema).readonly(),
   /** Lowest log level the proxy writes (LogTape levels). */
   logLevel: LogLevelSchema,
   zed: ZedSyncConfigSchema
@@ -183,6 +188,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   modelExposureMode: 'scoped',
   customModels: [],
   providerPrefixes: {},
+  aliases: {},
   logLevel: 'info',
   zed: {
     providerName: 'Pi Proxy',
@@ -245,6 +251,18 @@ function validNameEntries(value: unknown): Record<string, string> {
     if (parsed.success) result[key] = parsed.data
   }
   return result
+}
+
+/**
+ * Keeps the `aliases` entries the schema accepts: a non-empty name for a non-empty target.
+ *
+ * @param value - The field's raw value.
+ * @returns The valid entries; empty when `value` is not a plain object.
+ */
+function validAliases(value: unknown): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(validNameEntries(value)).filter(([alias]) => alias.length > 0)
+  )
 }
 
 /** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
@@ -363,6 +381,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     ),
     customModels: field('customModels', fields.customModels, validNames),
     providerPrefixes: field('providerPrefixes', fields.providerPrefixes, validNameEntries),
+    aliases: field('aliases', fields.aliases, validAliases),
     logLevel: field('logLevel', fields.logLevel, () => DEFAULT_CONFIG.logLevel),
     zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected)
   }

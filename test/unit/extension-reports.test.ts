@@ -116,6 +116,17 @@ describe('with models on two providers', () => {
       )
     })
 
+    // Catches `/proxy show` hiding the configured aliases, or an alias that the proxy ignores
+    // (named like a model) shown as if it worked (#66).
+    test('aliases, and the ones ignored', async () => {
+      const report = await buildConfigReport(
+        stateWith(agentDir, { aliases: { 'coding': 'alpha/a1', 'alpha/a2': 'alpha/a1' } })
+      )
+      expect(report).toEqual(
+        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: scoped | aliases: coding=alpha/a1, alpha/a2=alpha/a1 | exposed: ${ALL_EXPOSED_PREVIEW} | aliases ignored: alpha/a2 (shadows-model)`
+      )
+    })
+
     // Catches scoped mode with an empty pattern list printing an "enabled: 0" field.
     test('scoped with an empty pattern list', async () => {
       const report = await buildConfigReport(stateWith(agentDir, {}, []))

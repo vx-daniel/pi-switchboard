@@ -89,8 +89,7 @@ describe('streamToSSE', () => {
     const frames: string[] = []
     for await (const frame of streamToSSE(
       yieldEvents(events),
-      'req-1',
-      'openai/gpt-5.4-mini',
+      { requestId: 'req-1', model: 'openai/gpt-5.4-mini', alias: undefined },
       false
     )) {
       frames.push(frame)
@@ -116,8 +115,7 @@ describe('streamToSSE', () => {
     const frames: string[] = []
     for await (const frame of streamToSSE(
       yieldEvents(events),
-      'req-1',
-      'openai/gpt-5.4-mini',
+      { requestId: 'req-1', model: 'openai/gpt-5.4-mini', alias: undefined },
       false
     )) {
       frames.push(frame)
@@ -138,7 +136,11 @@ describe('streamToSSE', () => {
     ]
 
     const frames: string[] = []
-    for await (const frame of streamToSSE(yieldEvents(events), 'req-1', 'test/model', false)) {
+    for await (const frame of streamToSSE(
+      yieldEvents(events),
+      { requestId: 'req-1', model: 'test/model', alias: undefined },
+      false
+    )) {
       frames.push(frame)
     }
 
@@ -192,8 +194,7 @@ describe('streamToSSE', () => {
       const frames: string[] = []
       for await (const frame of streamToSSE(
         yieldEvents(events(message)),
-        'req-1',
-        'test/model',
+        { requestId: 'req-1', model: 'test/model', alias: undefined },
         false
       )) {
         frames.push(frame)
@@ -233,7 +234,11 @@ describe('upstream error logging', () => {
     configureLogging({ level, format: 'json', write: (line) => lines.push(line) })
     const echoed = makeErrorMessage('Invalid request: "echoed user prompt" is too long')
     const events: AssistantMessageEvent[] = [{ type: 'error', reason: 'error', error: echoed }]
-    for await (const frame of streamToSSE(yieldEvents(events), 'req-1', 'p/m', false)) {
+    for await (const frame of streamToSSE(
+      yieldEvents(events),
+      { requestId: 'req-1', model: 'p/m', alias: undefined },
+      false
+    )) {
       expect(frame.length).toBeGreaterThan(0)
     }
     return lines
