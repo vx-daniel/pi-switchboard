@@ -1195,8 +1195,9 @@ what only a status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 
 (429): …`), Google's `got status: 429.` or its error body's `error.code`. When a status is found it
 decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`, `overloaded`,
 `service unavailable`, …, checked in that order) is consulted only when no status is reported
-(Bedrock, network failures, the proxy's own idle timeout, pi's Codex usage limit), and a number elsewhere in the text never
-counts (#42). The client gets a fixed message and code, never the upstream text. A missing or broken
+(Bedrock, network failures, the proxy's own idle timeout, pi's Codex usage limit), and a number
+elsewhere in the text never counts (#42). The client gets a fixed message and code, never the
+upstream text. A missing or broken
 upstream credential is refused with `401` before any response starts, streamed or not
 (`checkRequestAuth`).
 

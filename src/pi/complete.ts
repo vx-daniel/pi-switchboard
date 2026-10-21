@@ -265,6 +265,7 @@ async function buildStreamOptions(
   const onPayload = passthroughHook(model, request)
   if (onPayload !== undefined) opts.onPayload = onPayload
 
+  // Last, so nothing set above can put Codex back on the WebSocket (#185).
   return { ...opts, ...captureOptions(model, options), ...transportOptions(model) }
 }
 
