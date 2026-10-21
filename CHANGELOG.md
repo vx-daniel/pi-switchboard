@@ -1,3 +1,111 @@
+# [0.1.0](https://github.com/vx-daniel/pi-switchboard/compare/pi-switchboard-v0.0.0...pi-switchboard-v0.1.0) (2026-10-21)
+
+
+* feat!: rename the env vars to PI_SWITCHBOARD_* and the upstream key header ([6b6e0c5](https://github.com/vx-daniel/pi-switchboard/commit/6b6e0c5cca0fdda49c8100be96e49253c5739c1f)), closes [#65](https://github.com/vx-daniel/pi-switchboard/issues/65)
+* feat!: rename the project to pi-switchboard ([33abb76](https://github.com/vx-daniel/pi-switchboard/commit/33abb7638c6ac1e1e309e289d727b5b4e020a7e8))
+* feat(server)!: move /v1/pi/models to /v1/switchboard/models ([e2b1ce3](https://github.com/vx-daniel/pi-switchboard/commit/e2b1ce3ef2e7380d283e2c8d8f6629435a599fd5))
+
+
+### Bug Fixes
+
+* accept a repeated ?verify= and document the trimmed model path (review on [#142](https://github.com/vx-daniel/pi-switchboard/issues/142)) ([ad55361](https://github.com/vx-daniel/pi-switchboard/commit/ad55361fa9925f7f6bc6c3e85bea0b4040454dcb))
+* accept an SDK-echoed assistant reply as sent (review on [#155](https://github.com/vx-daniel/pi-switchboard/issues/155)) ([acc549c](https://github.com/vx-daniel/pi-switchboard/commit/acc549cb93c8f7b9635bdbee26f588abcc465b1b))
+* answer a model the provider login cannot use with 404 model_not_found ([a300a36](https://github.com/vx-daniel/pi-switchboard/commit/a300a368da66eb790a98699a36126326ff5d84c4)), closes [#156](https://github.com/vx-daniel/pi-switchboard/issues/156)
+* answer provider refusals of a client's field as 400, log pi's Claude temperature drop ([#147](https://github.com/vx-daniel/pi-switchboard/issues/147)) ([fb8a322](https://github.com/vx-daniel/pi-switchboard/commit/fb8a3226ffa8c9b19edfea345a9f2d490ea9d50d)), closes [#128](https://github.com/vx-daniel/pi-switchboard/issues/128)
+* **auth:** fail closed when authToken in proxy-config.json is not a string ([9f77029](https://github.com/vx-daniel/pi-switchboard/commit/9f77029e3885a3f6198fa706ee26029e211c0d3a))
+* **auth:** fail closed with a clear error on an empty --auth-token or PI_PROXY_AUTH_TOKEN ([b9c7514](https://github.com/vx-daniel/pi-switchboard/commit/b9c7514633b08c8749f1a2846fbb95372fa6705e))
+* **auth:** keep pi's raw credential error out of the chat 401 and warn logs ([e01880b](https://github.com/vx-daniel/pi-switchboard/commit/e01880b705c9dafe6e5d4e5a26aaa6f1ff1f6054)), closes [#18](https://github.com/vx-daniel/pi-switchboard/issues/18)
+* **auth:** log the model with a failed chat credential lookup; drop the stray audit file ([95f0ce9](https://github.com/vx-daniel/pi-switchboard/commit/95f0ce9ad5ae22dde91d467a218af36c9c445fad))
+* **auth:** read the config file once per auth row; test reset and --auth-token ([108b204](https://github.com/vx-daniel/pi-switchboard/commit/108b20464acfc0cd820a40e66c4de6e7a0bbbb2b))
+* **auth:** refuse to start when proxy auth is set but cannot be applied ([8b9dd8a](https://github.com/vx-daniel/pi-switchboard/commit/8b9dd8ab330f958fadde2ac13c9afd356cc9626c)), closes [#99](https://github.com/vx-daniel/pi-switchboard/issues/99) [#82](https://github.com/vx-daniel/pi-switchboard/issues/82)
+* check Codex's model refusal before credential wording, pin its error log (review on [#157](https://github.com/vx-daniel/pi-switchboard/issues/157)) ([2d215b0](https://github.com/vx-daniel/pi-switchboard/commit/2d215b0c2f7e18ae777d9a60ac07fb5505509ff4))
+* **cli:** keep the issue number out of --help; say --config is not the effective config ([d871210](https://github.com/vx-daniel/pi-switchboard/commit/d871210f98a42de13a32e7db0ce262535b5eae5d))
+* **cli:** make the --help text match what the flags do ([44136e5](https://github.com/vx-daniel/pi-switchboard/commit/44136e5826a8ee42a47abbf954659dea03c6e05c)), closes [#109](https://github.com/vx-daniel/pi-switchboard/issues/109)
+* **codex:** drop temperature visibly; correct the tool_choice comments ([52154ca](https://github.com/vx-daniel/pi-switchboard/commit/52154ca852836559d1be4627275b866491329bcd)), closes [#49](https://github.com/vx-daniel/pi-switchboard/issues/49)
+* **codex:** log the first temperature drop per model at info, the rest at debug ([fca4be4](https://github.com/vx-daniel/pi-switchboard/commit/fca4be434bb082ce73a278318e16c9456655b1e1)), closes [#64](https://github.com/vx-daniel/pi-switchboard/issues/64)
+* **config:** derive the config types from Zod; repair bad fields with a warning ([e12d304](https://github.com/vx-daniel/pi-switchboard/commit/e12d304a9246fc00d6300438a167dd9aa45ccdc4))
+* **errors:** answer context overflows as 400 context_length_exceeded ([361faad](https://github.com/vx-daniel/pi-switchboard/commit/361faad1304a0082869b0c83df22671cee4ec541)), closes [#40](https://github.com/vx-daniel/pi-switchboard/issues/40)
+* **errors:** map upstream failures by reported status; map streamed errors too ([e422fdb](https://github.com/vx-daniel/pi-switchboard/commit/e422fdb4f18f2f30b0d2bcfcb6f258d402e93ad4)), closes [#42](https://github.com/vx-daniel/pi-switchboard/issues/42) [#54](https://github.com/vx-daniel/pi-switchboard/issues/54)
+* **errors:** read a leading status only where pi puts one; map stream errors once ([9929f82](https://github.com/vx-daniel/pi-switchboard/commit/9929f827a503ee5704002708bc83066ed4dccc7d)), closes [#56](https://github.com/vx-daniel/pi-switchboard/issues/56)
+* **exposure:** expose no model in custom mode with an empty list ([74fefd3](https://github.com/vx-daniel/pi-switchboard/commit/74fefd3ad1aa8d2dec21b60dea852d1438867c2f))
+* **exposure:** resolve enabledModels patterns as pi does ([edcbe62](https://github.com/vx-daniel/pi-switchboard/commit/edcbe6292e598518f7cb2171fc2a72c03184f463)), closes [#46](https://github.com/vx-daniel/pi-switchboard/issues/46)
+* **extension:** find pi's agent dir as pi does; say what stop and auto-sync really did ([093e108](https://github.com/vx-daniel/pi-switchboard/commit/093e108d228405905148c41c9be055175909abde))
+* **extension:** jump to the previous provider's first model on Left ([69e5375](https://github.com/vx-daniel/pi-switchboard/commit/69e53751852c4478ec9ff6570d67159fcc582361))
+* **extension:** keep another user's proxy in /proxy stop; say so on start ([f450fcb](https://github.com/vx-daniel/pi-switchboard/commit/f450fcb644bf9a4de81c60a786d9a4747e63eef9)), closes [#93](https://github.com/vx-daniel/pi-switchboard/issues/93) [#97](https://github.com/vx-daniel/pi-switchboard/issues/97)
+* **extension:** keep the PID file of another user's live proxy ([5ca8b5a](https://github.com/vx-daniel/pi-switchboard/commit/5ca8b5a9ed9caa1ee3073a7840f791b121375070))
+* **extension:** say [dry-run] once in /proxy zed-sync --dry-run ([9b1a5aa](https://github.com/vx-daniel/pi-switchboard/commit/9b1a5aa73c209a8e26c1fa668ca1ccd5b44bb94a))
+* **extension:** show the proxy token as a preview in /proxy show; add /proxy token ([0cd3ff0](https://github.com/vx-daniel/pi-switchboard/commit/0cd3ff0a5d22dbba3f024fce221b459b67959450))
+* **google:** set passthrough sampling fields flat on config, where @google/genai reads them ([e045a87](https://github.com/vx-daniel/pi-switchboard/commit/e045a870d07170464d8449ecffbaee02b0f84792))
+* **health:** keep the token endpoint's response out of verify errors ([1d1610b](https://github.com/vx-daniel/pi-switchboard/commit/1d1610bf3d8bb1ec50c8c945f798662e5e551fc6))
+* **health:** stricter verify error summary, 503 for a check that throws ([7e03c46](https://github.com/vx-daniel/pi-switchboard/commit/7e03c46360454ed334fb02bf6cc6ad761008159b))
+* **images:** cap a request's remote images at 15 MiB in all; fetch only after the credential check ([a299394](https://github.com/vx-daniel/pi-switchboard/commit/a299394c49b7cd62e47fd97382edce912994f8c3))
+* **images:** log the resolver's error code when an image host does not resolve ([721f4ad](https://github.com/vx-daniel/pi-switchboard/commit/721f4adc8012f0dfe0e2fd72e1b090ba0e652522))
+* keep a provider's credential 400 an auth failure (review on [#154](https://github.com/vx-daniel/pi-switchboard/issues/154)) ([75e2500](https://github.com/vx-daniel/pi-switchboard/commit/75e250092e7b07df947f9b5e5b087c35a34de81d))
+* keep whitespace in request text instead of trimming it ([#145](https://github.com/vx-daniel/pi-switchboard/issues/145)) ([cdf7bae](https://github.com/vx-daniel/pi-switchboard/commit/cdf7bae2259203b5a1d8f9a76e909b094612e458))
+* leave blank parts out of system and developer text ([#149](https://github.com/vx-daniel/pi-switchboard/issues/149) review) ([65efff5](https://github.com/vx-daniel/pi-switchboard/commit/65efff5d39e7673aef15e4076068a7d6f6baf6e4)), closes [#145](https://github.com/vx-daniel/pi-switchboard/issues/145)
+* **logging:** act on the PR [#11](https://github.com/vx-daniel/pi-switchboard/issues/11) review ([fb9cf22](https://github.com/vx-daniel/pi-switchboard/commit/fb9cf226b6f4407eff6c738a9d4a8a86fb578346))
+* **logging:** keep raw upstream error text at debug everywhere ([3c3ac91](https://github.com/vx-daniel/pi-switchboard/commit/3c3ac919b8304a3e3fce287da0eb5881aff1af39)), closes [#11](https://github.com/vx-daniel/pi-switchboard/issues/11)
+* **messages:** keep later system and developer messages in place ([7a3a782](https://github.com/vx-daniel/pi-switchboard/commit/7a3a782f0807e85977ce2a85759ca6fa7fcea631)), closes [#45](https://github.com/vx-daniel/pi-switchboard/issues/45)
+* **openai:** accept text-part content in system and developer messages ([e905b13](https://github.com/vx-daniel/pi-switchboard/commit/e905b137c9941cd930a22d5cf73bc3e241b7f87c))
+* **openai:** refuse a malformed required, put the role on the first chunk, word errors exactly ([7ca8eef](https://github.com/vx-daniel/pi-switchboard/commit/7ca8eefadafbf0873cb3c305914f5feab3a8a3ad))
+* **reasoning:** cheaper clamp detection; test /v1/pi/models auth and exposure ([c7fc610](https://github.com/vx-daniel/pi-switchboard/commit/c7fc61078fc309b78a7b6eaa040df8a3eb0a3934)), closes [#71](https://github.com/vx-daniel/pi-switchboard/issues/71)
+* **reasoning:** reasoning_effort none turns reasoning off ([3e79f9f](https://github.com/vx-daniel/pi-switchboard/commit/3e79f9f0b13a53e1daab8e1a5710dc79ba534880)), closes [#41](https://github.com/vx-daniel/pi-switchboard/issues/41)
+* **registry:** keep models.json content out of /healthz/models and the startup log ([c8ccab4](https://github.com/vx-daniel/pi-switchboard/commit/c8ccab4a43299e76908a457738e572fd089a83dc)), closes [#19](https://github.com/vx-daniel/pi-switchboard/issues/19)
+* **registry:** split pi's models.json error at the last file separator ([efe5016](https://github.com/vx-daniel/pi-switchboard/commit/efe5016e3982ffc736ecf77497073679000773ca))
+* **responses:** send choices[].logprobs as null, drop system_fingerprint ([2b544be](https://github.com/vx-daniel/pi-switchboard/commit/2b544be1dc4513903aa7e7d0fbebf39a5626efcb)), closes [#132](https://github.com/vx-daniel/pi-switchboard/issues/132)
+* **runtime:** drop the dead Codex and gemini-cli paths; look up Zed settings as Zed does ([f49223c](https://github.com/vx-daniel/pi-switchboard/commit/f49223c3746ee35d719c18590d5baf84f5cce33c))
+* **server:** answer unmatched routes with an OpenAI-style 404 ([aeb7fa6](https://github.com/vx-daniel/pi-switchboard/commit/aeb7fa69c26d233d782f3b3415b0293d65779f3f))
+* **server:** check the old upstream key header only on chat, after auth ([2f722df](https://github.com/vx-daniel/pi-switchboard/commit/2f722df4b414a68f83c8fc239e2eb94139541647))
+* settle the three [#95](https://github.com/vx-daniel/pi-switchboard/issues/95) oddities ([b8b6f9f](https://github.com/vx-daniel/pi-switchboard/commit/b8b6f9feff84ecf2bbf88f124ed4998f7813a130))
+* **stream:** close the upstream iterator early; client exit on a throw ([d081d17](https://github.com/vx-daniel/pi-switchboard/commit/d081d17562b3d01467faf2c251be7ce9539a7b26)), closes [#58](https://github.com/vx-daniel/pi-switchboard/issues/58)
+* strict message and part schemas, name and image detail listed drops ([#146](https://github.com/vx-daniel/pi-switchboard/issues/146)) ([03ae749](https://github.com/vx-daniel/pi-switchboard/commit/03ae7495418f4d65c04825a67e077a3de6ccf1f0))
+* **test:** load the fixture recorder under plain Node again ([69ca479](https://github.com/vx-daniel/pi-switchboard/commit/69ca4793e2d0d9af7ad23db712d8441c08c567a1)), closes [#101](https://github.com/vx-daniel/pi-switchboard/issues/101)
+* **timeout:** restart the idle wait on raw provider events ([63ab7e0](https://github.com/vx-daniel/pi-switchboard/commit/63ab7e08e3e294cabbaca27e9f85fd846cb6cb0b))
+* **tools:** apply strict through pi's constrained sampling on every API ([100d7f4](https://github.com/vx-daniel/pi-switchboard/commit/100d7f46256e2e25a56105424dddf5c328cf89a0)), closes [#44](https://github.com/vx-daniel/pi-switchboard/issues/44)
+* **tools:** carry a sibling type on anyOf and string enum constraints ([a573c50](https://github.com/vx-daniel/pi-switchboard/commit/a573c5081a99d87cea6f7cbf234988711e37a9e7)), closes [#52](https://github.com/vx-daniel/pi-switchboard/issues/52)
+* **tools:** keep tool schema constraints; reject keywords outside the subset ([461a00d](https://github.com/vx-daniel/pi-switchboard/commit/461a00d217ea5f46b7a5aaec15f5dcefb7ea01ef)), closes [#37](https://github.com/vx-daniel/pi-switchboard/issues/37)
+* **upstream:** end the relayed stream with an error if reading pi's stream throws ([01dc51a](https://github.com/vx-daniel/pi-switchboard/commit/01dc51a1ff0ec66d5b269b2753679dded405f190))
+* **upstream:** keep a client disconnect out of the timeout label, unref the timer ([12b6b74](https://github.com/vx-daniel/pi-switchboard/commit/12b6b74c2f6c3d2edbfdaf673aaf56e399a0c70c))
+* **upstream:** time out on silence, not on the length of the call ([49b68d1](https://github.com/vx-daniel/pi-switchboard/commit/49b68d1e97f3df22910a37c815239eb2d622dcff))
+* warn when no breakpoint could be placed on an OpenAI payload (review on [#151](https://github.com/vx-daniel/pi-switchboard/issues/151)) ([6ceac71](https://github.com/vx-daniel/pi-switchboard/commit/6ceac718fe4fd6b969f4ae371c8cb5a1b944f06d))
+* **zed:** leave settings that are not valid JSONC untouched ([406a8b9](https://github.com/vx-daniel/pi-switchboard/commit/406a8b9d7e6af33281913ac5683245f0d29a2c8f)), closes [#25](https://github.com/vx-daniel/pi-switchboard/issues/25)
+* **zed:** sync into empty settings again; report line and column ([ae88645](https://github.com/vx-daniel/pi-switchboard/commit/ae886457784d020271d113aa133fcfe6343b1b3d))
+
+
+### Features
+
+* accept prompt_cache_key and pass it to pi as sessionId ([#39](https://github.com/vx-daniel/pi-switchboard/issues/39)) ([1aebc57](https://github.com/vx-daniel/pi-switchboard/commit/1aebc575f4d277111aefaf5475f37dfb246dfacb)), closes [#129](https://github.com/vx-daniel/pi-switchboard/issues/129)
+* build the container image from this repo and publish it to GHCR on release ([7bb36d1](https://github.com/vx-daniel/pi-switchboard/commit/7bb36d1a9b1bf39d25dda66bf89a67a4c69fc4f2)), closes [#60](https://github.com/vx-daniel/pi-switchboard/issues/60) [#60](https://github.com/vx-daniel/pi-switchboard/issues/60)
+* **chat:** accept reasoning_effort "max" as pi's max thinking level ([07f2ea2](https://github.com/vx-daniel/pi-switchboard/commit/07f2ea208f11b52d575ef7777321f61397b5990b)), closes [#132](https://github.com/vx-daniel/pi-switchboard/issues/132)
+* forward prompt_cache_breakpoint to OpenAI, drop it elsewhere (constitution 3.1.0) ([327c37b](https://github.com/vx-daniel/pi-switchboard/commit/327c37bfe2bb247c62b02004562601f2c4b4317f)), closes [#149](https://github.com/vx-daniel/pi-switchboard/issues/149)
+* **images:** fetch remote image URLs behind remoteImages, SSRF-safe ([5c09d5c](https://github.com/vx-daniel/pi-switchboard/commit/5c09d5cd030bcb45f29d330a476cfa4184ddeb07))
+* **lint:** port the naming.grit Biome plugin to an Oxlint/ESLint plugin ([d2a895d](https://github.com/vx-daniel/pi-switchboard/commit/d2a895df1e924e564896ddb305f936a0eedddf27))
+* **logging:** local-time pretty output, a format override, quiet model polling ([2a79bfc](https://github.com/vx-daniel/pi-switchboard/commit/2a79bfc66aaaf8f3624336c04a339385e8824e76))
+* **logging:** log decisions across the proxy and the extension ([0a8f36f](https://github.com/vx-daniel/pi-switchboard/commit/0a8f36f64888172b689d559cdeaea37195b5ea27))
+* **logging:** move from console logging to LogTape ([911e307](https://github.com/vx-daniel/pi-switchboard/commit/911e307bce3e3e4646c9395cb44b50893e6db081))
+* publish the image to Docker Hub as well as GHCR, docs lead with Docker Hub ([b2889fa](https://github.com/vx-daniel/pi-switchboard/commit/b2889fadc31fe7da78dd87d59a2b97e321c8c8a9))
+* **reasoning:** clamp unsupported reasoning_effort; list supported efforts on /v1/pi/models ([17aafbe](https://github.com/vx-daniel/pi-switchboard/commit/17aafbee74c9b70252cd5cc20745973d6e8f5a7e))
+* **server:** /healthz liveness plus /healthz/models and /healthz/creds detail checks ([ec864bf](https://github.com/vx-daniel/pi-switchboard/commit/ec864bf39cad6a472670b5b36a1d512e6293b0a3))
+* **server:** docs page at /docs; the OpenAPI document covers every route ([a9fbdbc](https://github.com/vx-daniel/pi-switchboard/commit/a9fbdbc29637abc40b05d7a9ed3e5a8c7261e21b))
+* **server:** publish the API as an OpenAPI document, with opt-in Swagger UI ([08287e0](https://github.com/vx-daniel/pi-switchboard/commit/08287e00e7b6ea8885b1a5dbe6df732895a57f5a))
+* validate request parameters and bodies with hono-openapi's validator() ([0e0bde1](https://github.com/vx-daniel/pi-switchboard/commit/0e0bde187855de9ee93b2659b275863c5e094693))
+
+
+### BREAKING CHANGES
+
+* set PI_SWITCHBOARD_* instead of PI_PROXY_*, and send
+X-Switchboard-Upstream-Api-Key instead of X-Pi-Upstream-Api-Key.
+* the package is @vx-daniel/pi-switchboard and the bin is
+pi-switchboard; log categories start with pi-switchboard instead of
+pi-openai-proxy.
+
+Closes #65.
+* GET /v1/pi/models is gone; call
+GET /v1/switchboard/models instead.
+* **logging:** log lines use LogTape's JSON Lines shape (@timestamp,
+level, logger, message, properties) instead of {ts, level, event, ...},
+and --config prints to stdout.
+
 ## [4.9.6](https://github.com/victor-software-house/pi-openai-proxy/compare/v4.9.5...v4.9.6) (2026-06-08)
 
 
