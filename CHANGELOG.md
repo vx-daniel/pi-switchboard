@@ -1,3 +1,20 @@
+# [0.2.0](https://github.com/vx-daniel/pi-switchboard/compare/pi-switchboard-v0.1.0...pi-switchboard-v0.2.0) (2026-10-21)
+
+
+### Bug Fixes
+
+* drop unintended fallow config; smoke the built CLI in the gate (review on [#167](https://github.com/vx-daniel/pi-switchboard/issues/167)) ([5b645c6](https://github.com/vx-daniel/pi-switchboard/commit/5b645c649e76924202ea1a88786b83674f41852d))
+* name a missing pi package at CLI start; match pi on Windows (review on [#167](https://github.com/vx-daniel/pi-switchboard/issues/167)) ([38da439](https://github.com/vx-daniel/pi-switchboard/commit/38da43993d21d5fcc66122fd5e691df84ef78840))
+* print the package version for --version ([#168](https://github.com/vx-daniel/pi-switchboard/issues/168)) ([1c11196](https://github.com/vx-daniel/pi-switchboard/commit/1c111960b215a6c817d111a584ee8ab831e1dfb5))
+* retry every breakpoint refusal, not only the first (review on [#166](https://github.com/vx-daniel/pi-switchboard/issues/166)) ([fc31356](https://github.com/vx-daniel/pi-switchboard/commit/fc31356a04ce974682a8ed62d8efcb86094e87b4))
+* retry once without prompt_cache_breakpoint when a model refuses it, and remember it ([af5e757](https://github.com/vx-daniel/pi-switchboard/commit/af5e757cb9a78d91bc6c845a0cf76dea60f7e12e)), closes [#163](https://github.com/vx-daniel/pi-switchboard/issues/163) [#163](https://github.com/vx-daniel/pi-switchboard/issues/163)
+* stop loading a second copy of pi inside pi's process ([28320f7](https://github.com/vx-daniel/pi-switchboard/commit/28320f77eb3556e27f37b3ae3a730b064c5810e1)), closes [#165](https://github.com/vx-daniel/pi-switchboard/issues/165) [#165](https://github.com/vx-daniel/pi-switchboard/issues/165)
+
+
+### Features
+
+* publish the pi package to GitHub Packages from each release tag ([049204a](https://github.com/vx-daniel/pi-switchboard/commit/049204abf156fcc8f34d083ace022341ba65187d)), closes [#59](https://github.com/vx-daniel/pi-switchboard/issues/59) [#59](https://github.com/vx-daniel/pi-switchboard/issues/59)
+
 # [0.1.0](https://github.com/vx-daniel/pi-switchboard/compare/pi-switchboard-v0.0.0...pi-switchboard-v0.1.0) (2026-10-21)
 
 
