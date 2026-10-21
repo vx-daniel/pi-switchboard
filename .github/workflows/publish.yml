@@ -89,3 +89,13 @@ jobs:
     uses: ./.github/workflows/package.yml
     with:
       tag: ${{ needs.release.outputs.tag }}
+
+  # The standalone binaries for the release (#61), uploaded to its GitHub release, built from its tag.
+  binary:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    permissions:
+      contents: write
+    uses: ./.github/workflows/binary.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}

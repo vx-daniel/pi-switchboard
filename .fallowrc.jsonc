@@ -16,7 +16,9 @@
     "src/config/schema.ts",
     "src/openai/model-exposure.ts",
     "src/logging/index.ts",
-    "src/sync/zed.ts"
+    "src/sync/zed.ts",
+    // The standalone binary's entry, compiled by `scripts/build-binary.ts` (`bun build --compile`), not by tsdown.
+    "src/standalone/main.ts"
   ],
 
   "rules": {

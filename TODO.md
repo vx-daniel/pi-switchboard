@@ -406,6 +406,9 @@ since the rename; each issue holds the detailed checklist.
 - [x] Docker image (#60): built from source, published to Docker Hub and GHCR on each release
       (amd64, arm64)
 - [ ] Standalone binary (#61)
+  - [x] Bun-compiled binary for linux/darwin x64/arm64, tested in CI, uploaded to each release
+        with `SHA256SUMS` (ported from #86)
+  - [ ] Opt-in `pi-switchboard tui` console, with logins through pi's own screens
 
 ## Phase 5 — Routing across pi's logins
 

@@ -1,0 +1,88 @@
+name: Binary
+
+# Cross-compiles the standalone binary (#61) from a release tag for linux-x64, linux-arm64,
+# darwin-x64 and darwin-arm64 (`scripts/build-binary.ts --all`), and uploads the four files and
+# their SHA256SUMS to that tag's GitHub release. One Linux runner builds every target. Windows is
+# not a target yet, and the macOS binaries are unsigned. The release workflow calls it for each new
+# release; run it by hand to add binaries to a release that has none. An asset already on the
+# release is never overwritten.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to build, such as pi-switchboard-v0.1.0
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to build and upload, such as pi-switchboard-v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Two runs for one tag would both pass the overwrite check before either uploads.
+concurrency:
+  group: binary-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  binary:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ inputs.tag }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    steps:
+      - name: Check the tag is a release tag
+        run: |
+          version="${TAG#pi-switchboard-v}"
+          if [ "$version" = "$TAG" ] ||
+            ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$TAG' is not a release tag (pi-switchboard-v<version>)"
+            exit 1
+          fi
+
+      - name: Check out the release tag
+        uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      # Fails when the release does not exist, and refuses to replace binaries already on it.
+      - name: Refuse to overwrite release assets
+        run: |
+          assets="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
+          if printf '%s\n' "$assets" | grep -Eq '^(pi-switchboard-(linux|darwin)-|SHA256SUMS$)'; then
+            echo "::error::$TAG already has binaries; an asset is never overwritten"
+            exit 1
+          fi
+
+      # Node, pnpm and the frozen install, as in CI.
+      - name: Set up Vite+
+        uses: voidzero-dev/setup-vp@v1.21.2
+        with:
+          node-version: '24'
+          cache: true
+        env:
+          VP_GIT_HOOKS: '0'
+
+      # Bun is the compiler only (CONSTITUTION.md 3.5.0): the same version CI tests the binary with.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.3
+
+      # The release's tree is tested as a binary before it is cross-compiled: the host build runs
+      # against the fixtures (test/binary), then `--all` builds every target from the same tree.
+      - name: Test the binary
+        run: pnpm run test:binary
+
+      - name: Cross-compile every target
+        run: node scripts/build-binary.ts --all
+
+      - name: Upload to the release
+        run: gh release upload "$TAG" dist-bin/pi-switchboard-* dist-bin/SHA256SUMS

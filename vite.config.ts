@@ -449,7 +449,9 @@ export default defineConfig({
     // `offline` (unit + integration) runs everywhere and never sees a real pi login or provider
     // credentials: test/setup/offline.ts points pi at an empty agent dir. `live`
     // (test/conformance) calls real providers with the developer's login and spends quota, so it
-    // exists only on demand: `pnpm run test:live` sets PI_SWITCHBOARD_LIVE_TESTS=1.
+    // exists only on demand: `pnpm run test:live` sets PI_SWITCHBOARD_LIVE_TESTS=1. `binary`
+    // (test/binary) runs the compiled standalone binary, so it needs Bun and a build first:
+    // `pnpm run test:binary` does both and sets PI_SWITCHBOARD_BINARY_TESTS=1. Neither is in the gate.
     projects: [
       {
         extends: true,
@@ -461,6 +463,18 @@ export default defineConfig({
       },
       ...(process.env.PI_SWITCHBOARD_LIVE_TESTS === '1'
         ? [{ extends: true, test: { name: 'live', include: ['test/conformance/**/*.test.ts'] } }]
+        : []),
+      ...(process.env.PI_SWITCHBOARD_BINARY_TESTS === '1'
+        ? [
+            {
+              extends: true,
+              test: {
+                name: 'binary',
+                include: ['test/binary/**/*.test.ts'],
+                setupFiles: ['test/setup/offline.ts']
+              }
+            }
+          ]
         : [])
     ],
     // Off by default; the gate's test step turns it on (`test:ci`, `--coverage`). fallow scores each
