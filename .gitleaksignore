@@ -1,0 +1,6 @@
+# gitleaks findings reviewed and confirmed not to be secrets. One fingerprint per line
+# (commit:file:rule:line); the comment above each says what it is and why it is not a secret.
+
+# A fake auth token in a test, 'abcdef0123456789-existing', flagged by generic-api-key (PR #96). Never a
+# credential; the next commit replaced it with the repository's sentinel ('notarealsecret-existing-token').
+11a1b7c282569d05e632486de9392b79a73a9bdd:test/unit/extension-settings-panel.test.ts:generic-api-key:33

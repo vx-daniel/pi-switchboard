@@ -1,6 +1,6 @@
 # TODO
 
-Actionable implementation checklist for `pi-openai-proxy`.
+Actionable implementation checklist for `pi-switchboard`.
 
 Read `PLAN.md` first. This file should track concrete work items and decisions needed to implement that plan.
 
@@ -17,7 +17,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Authentication and headers
 
 - [x] Reserve `Authorization` for proxy authentication compatibility
-- [x] Choose the upstream override header name: `X-Pi-Upstream-Api-Key` (reserved, not yet implemented)
+- [x] Choose the upstream override header name: `X-Switchboard-Upstream-Api-Key` (implemented)
 - [x] Decide whether proxy auth exists in v1 or stays disabled by default
 - [x] Decide whether to accept and return `X-Client-Request-Id` / `X-Request-Id`
 
@@ -39,8 +39,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 ### Security policy
 
-- [x] Decide whether remote image URLs are enabled in the stable proxy
-- [x] If enabled, document SSRF protections and size limits
+- [x] Decide whether remote image URLs are enabled in the stable proxy (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-switchboard/issues/109))
+- [x] If enabled, document SSRF protections and size limits (PLAN.md, "Image URL fetching"; README, "Security defaults")
 - [x] Document bind-host defaults
 - [x] Document any future remote exposure guidance
 - [x] Mark agentic mode experimental and disabled by default
@@ -51,8 +51,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 - [x] Initialize `package.json`
 - [x] Configure `tsconfig.json` for strict TypeScript
-- [x] Configure Biome
-- [x] Configure oxlint
+- [x] Configure Biome (since replaced by Vite+, see Fork maintenance)
+- [x] Configure oxlint (now run through Vite+)
 - [x] Choose the npm build tool and align docs and config
 - [x] Add Hono
 - [x] Add `@earendil-works/pi-coding-agent`
@@ -70,8 +70,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 ### Core pi integration
 
-- [x] Create `AuthStorage` integration
-- [x] Create `ModelRegistry` integration
+- [x] Create `AuthStorage` integration (replaced by `ModelRuntime` in the Pi 1.x migration)
+- [x] Create `ModelRegistry` integration (replaced by `ModelRuntime` in the Pi 1.x migration)
 - [x] Surface model-registry load errors clearly at startup and in logs
 - [x] Implement model lookup by canonical ID
 - [x] Implement shorthand lookup with ambiguity detection
@@ -105,7 +105,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 
 ### Non-streaming completions
 
-- [x] Route non-streaming requests to `completeSimple()`
+- [x] Route non-streaming requests to `completeSimple()` (now `streamSimple()`, reading the stream's final message, as `completeSimple()` does)
 - [x] Build OpenAI-style non-streaming response objects
 - [x] Map finish reasons conservatively
 - [x] Map usage fields from pi `Usage`
@@ -153,7 +153,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] Convert OpenAI `tools` into pi tool definitions
 - [x] Convert assistant `tool_calls` history into pi tool-call content
 - [x] Convert `tool` role results back into pi tool-result messages
-- [x] Support `tool_choice` where compatible (passthrough via schema acceptance)
+- [x] Support `tool_choice` where compatible (forwarded per provider via `onPayload`, see Phase 3C)
 
 ### Streaming tool calls
 
@@ -181,8 +181,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Images
 
 - [x] Support base64 image data in user message parts
-- [x] Decide whether remote image URL fetching is enabled
-- [x] If enabled, implement SSRF protections, timeout, redirect, and size limits
+- [x] Decide whether remote image URL fetching is enabled (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-switchboard/issues/109))
+- [x] If enabled, implement SSRF protections, timeout, redirect, and size limits (`src/openai/remote-image-fetch.ts`: public addresses only with pinned DNS, 3 redirects, 5 s connect and 10 s total, 15 MiB streamed cap, image content types, 8 per request)
 - [x] Validate image MIME types and payload sizes
 
 ### Phase 2 tests
@@ -261,10 +261,10 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] Refactor `/proxy` extension config handling around a controller pattern
 - [x] Add public ID mode and exposure mode to the main settings panel
 - [x] Add `/proxy verify`
-- [x] Add provider selector UI for `scoped` mode
+- [x] Add provider selector UI for `scoped` mode (removed in 97db649: `scoped` now follows pi's `enabledModels`, set with `/scoped-models`)
 - [x] Add searchable model selector UI for `custom` mode
-- [x] Add prefix override editing flow
-- [x] Add effective public-ID preview to `/proxy show` and the settings UI
+- [x] Add prefix override editing flow (removed from the panel in 97db649; `providerPrefixes` is set in `proxy-config.json`)
+- [x] Add effective public-ID preview to `/proxy show` and the settings UI (`/proxy show` lists the exposed public IDs; the settings panel no longer shows a preview)
 
 ### Tests and docs
 
@@ -300,6 +300,8 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] `choices[0].message.content` is `string | null` (explicitly `null` when tool_calls present)
 - [x] `choices[0].message.tool_calls` shape: `id`, `type: "function"`, `function.name`, `function.arguments`
 - [x] `usage` fields are all numbers
+- [x] Every stable response, stream chunk and error body validates against OpenAI's published spec, pinned (#132)
+- [x] Request fields and enum values checked against OpenAI's request both ways; each one not accepted is listed (#132)
 
 ### SDK round-trip conformance (requires credentials, skip otherwise)
 
@@ -329,8 +331,9 @@ unsupported parameters clearly instead of silently ignoring them.
 
 ### `strict` on function tools silent drop
 
-- [x] Forward `strict` flag via `onPayload` by patching the upstream payload after pi SDK builds it
-- [x] Add unit tests for strict flag collection and payload patching
+- [x] ~~Forward `strict` flag via `onPayload` by patching the upstream payload~~ (reached chat completions only)
+- [x] Map `strict: true` to pi's `constrainedSampling` ("prefer"), applied per API by pi (#44)
+- [x] Integration tests per API family: completions, Responses, Anthropic, fallback, strict off
 
 ### PLAN.md documentation drift
 
@@ -383,36 +386,56 @@ Analysis document: `docs/engineering/phase-3d-analysis.md`
 - [x] Run the proxy on Node (`@hono/node-server`); the extension spawns it with pi's own runtime
 - [x] Remove stale `.specify/` scaffolding and `NEXT.md`
 
-## Phase 4 — Experimental agentic mode
+## Rename to pi-switchboard [DONE]
 
-### Contract
+- [x] Leave the fork network (issues and PRs kept) and rename the repo to `vx-daniel/pi-switchboard` (#65)
+- [x] Package `@vx-daniel/pi-switchboard`, bin `pi-switchboard`, log root category `pi-switchboard`
+- [x] Env vars `PI_PROXY_*` → `PI_SWITCHBOARD_*`; an old one still set is warned about, an old auth token refuses to start
+- [x] Header `X-Pi-Upstream-Api-Key` → `X-Switchboard-Upstream-Api-Key`; the old one answers 400
+- [x] README "Attribution" and "Coming from pi-openai-proxy"; LICENSE keeps the original copyright
+- [x] Versions restart at 0.1.0: `pi-switchboard-v${version}` tags, baseline tag on `main`, breaking → minor while 0.x
+- [ ] Publish to npm under the new name (#59; `npmPublish` is off until then), tracked in Phase 4
 
-- [ ] Decide whether experimental agentic mode uses a separate endpoint
-- [ ] If not, document the opt-in header and the compatibility tradeoff explicitly
-- [ ] Define the SSE event contract for agentic mode
-- [ ] Define the session identifier contract
+The sections above are done and kept as history. The ones below follow `ROADMAP.md`'s numbering
+since the rename; each issue holds the detailed checklist.
 
-### Session integration
+## Phase 4 — Distribution
 
-- [ ] Build `AgentSession` lifecycle wrapper
-- [ ] Bridge `AgentSession` events to SSE
-- [ ] Implement session persistence
-- [ ] Implement session resume
-- [ ] Clean up subscriptions and resources reliably
+- [ ] npm and `pi install` (#59)
+- [x] Docker image (#60): built from source, published to Docker Hub and GHCR on each release
+      (amd64, arm64)
+- [ ] Standalone binary (#61)
 
-### Security
+## Phase 5 — Routing across pi's logins
 
-- [ ] Define cwd allowlist policy
-- [ ] Prevent arbitrary client-controlled cwd escape
-- [ ] Disable extension loading by default
-- [ ] Add tool allowlist policy for agentic mode
+Constitution principle VI applies to each item: configured explicitly, exposure-bound, and the
+serving model and login reported under `x_pi` and in the log.
 
-### Experimental tests
+- [ ] Aliases (#66)
+- [ ] Fallback chains (#67)
+- [ ] Cooldowns after rate limits (#68)
+- [ ] Quota awareness (#69)
+- [ ] Usage and cost by route (#70)
 
-- [ ] Test session creation and resume
-- [ ] Test streamed tool execution events
-- [ ] Test cwd policy enforcement
-- [ ] Test extension policy enforcement
+## Phase 6 — More of OpenAI's API
+
+- [ ] Responses API, stateless (#140): experimental first, then added to PLAN's "Stable surface"
+- [x] `prompt_cache_key` → pi's `sessionId`, 64-character limit, Zed capability on (#39)
+
+## Open decisions
+
+- [ ] Proxy auth and upstream failure contract (#128): item 5 done (an upstream 400 or 422 is
+      `400 upstream_invalid_request`, #147); items 1–4 open
+
+## Later, not planned: experimental agentic mode
+
+Kept for when it is picked up: a separate opt-in endpoint, never under an OpenAI route (PLAN
+"Agentic mode" has the security requirements).
+
+- [ ] Define the endpoint, its SSE event contract and its session identifier contract
+- [ ] `AgentSession` lifecycle wrapper, events bridged to SSE, session persistence and resume
+- [ ] cwd allowlist with no client-controlled escape; extension loading off by default; tool allowlist
+- [ ] Tests for session creation and resume, streamed tool events, cwd and extension policy
 
 ## Documentation follow-through
 
@@ -421,3 +444,6 @@ Analysis document: `docs/engineering/phase-3d-analysis.md`
 - [x] Keep this file focused on concrete action items only
 - [x] Document all silent-drop fields and their resolution plan
 - [x] Add "Known gaps" tracking to `PLAN.md`
+- [x] Request parameters and the chat body validated and documented by hono-openapi's `validator()`, with the 400/422 split kept; `app.onError` answers thrown errors in OpenAI's shape
+- [x] Publish the API as an OpenAPI document at `/v1/switchboard/openapi.json`, committed as `openapi.json` and checked against the routes (#129)
+- [x] Opt-in Swagger UI at `/docs` (`docsUi`), Swagger UI pinned on the CDN; the document covers every route (#129)

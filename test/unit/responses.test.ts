@@ -1,112 +1,183 @@
-import type { AssistantMessage, StopReason } from "@earendil-works/pi-ai";
-import { describe, expect, test } from "vite-plus/test";
-import { buildChatCompletion, mapFinishReason, mapUsage } from "@proxy/openai/responses";
+import type { AssistantMessage, StopReason } from '@earendil-works/pi-ai'
+import { buildChatCompletion, mapFinishReason, mapUsage } from '@proxy/openai/responses'
+import { describe, expect, test } from 'vite-plus/test'
 
-describe("mapFinishReason", () => {
-	const cases: [StopReason, string][] = [
-		["stop", "stop"],
-		["length", "length"],
-		["toolUse", "tool_calls"],
-		["error", "stop"],
-		["aborted", "stop"],
-	];
+describe('mapFinishReason', () => {
+  const cases: [StopReason, string][] = [
+    ['stop', 'stop'],
+    ['length', 'length'],
+    ['toolUse', 'tool_calls'],
+    ['error', 'stop'],
+    ['aborted', 'stop']
+  ]
 
-	for (const [piReason, expected] of cases) {
-		test(`maps '${piReason}' -> '${expected}'`, () => {
-			expect(mapFinishReason(piReason)).toBe(expected);
-		});
-	}
-});
+  for (const [piReason, expected] of cases) {
+    test(`maps '${piReason}' -> '${expected}'`, () => {
+      expect(mapFinishReason(piReason)).toBe(expected)
+    })
+  }
+})
 
-describe("mapUsage", () => {
-	test("maps pi usage to OpenAI usage", () => {
-		const piUsage = {
-			input: 100,
-			output: 50,
-			cacheRead: 10,
-			cacheWrite: 5,
-			totalTokens: 165,
-			cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0002, total: 0.0033 },
-		};
-		const result = mapUsage(piUsage);
-		expect(result.prompt_tokens).toBe(115);
-		expect(result.completion_tokens).toBe(50);
-		expect(result.total_tokens).toBe(165);
-	});
-});
+describe('mapUsage', () => {
+  // Catches prompt_tokens reporting only Pi's uncached `input`: with prompt caching, a client
+  // that sizes its context from prompt_tokens would see a tiny fraction of the real prompt.
+  test('reports the whole prompt in prompt_tokens and breaks the cached part out', () => {
+    const result = mapUsage({
+      input: 100,
+      output: 50,
+      cacheRead: 10,
+      cacheWrite: 5,
+      totalTokens: 165,
+      cost: { input: 0.001, output: 0.002, cacheRead: 0.0001, cacheWrite: 0.0002, total: 0.0033 }
+    })
 
-describe("buildChatCompletion", () => {
-	test("builds a valid non-streaming response", () => {
-		const message: AssistantMessage = {
-			role: "assistant",
-			content: [{ type: "text", text: "Hello there!" }],
-			api: "openai-completions",
-			provider: "openai",
-			model: "gpt-4o",
-			usage: {
-				input: 10,
-				output: 5,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 15,
-				cost: { input: 0.001, output: 0.002, cacheRead: 0, cacheWrite: 0, total: 0.003 },
-			},
-			stopReason: "stop",
-			timestamp: Date.now(),
-		};
+    expect(result.prompt_tokens).toBe(115)
+    expect(result.prompt_tokens_details).toEqual({ cached_tokens: 10, cache_write_tokens: 5 })
+    expect(result.completion_tokens).toBe(50)
+    expect(result.total_tokens).toBe(165)
+  })
+})
 
-		const result = buildChatCompletion("req-123", "openai/gpt-4o", message);
-		expect(result.id).toBe("req-123");
-		expect(result.object).toBe("chat.completion");
-		expect(result.model).toBe("openai/gpt-4o");
-		expect(result.choices).toHaveLength(1);
+describe('buildChatCompletion', () => {
+  /**
+   * Builds an Anthropic assistant message with fixed usage that includes cache reads and writes.
+   *
+   * @param content - the message's content blocks
+   * @param stopReason - pi's stop reason for the message
+   * @returns the assistant message
+   */
+  function assistantMessage(
+    content: AssistantMessage['content'],
+    stopReason: StopReason
+  ): AssistantMessage {
+    return {
+      role: 'assistant',
+      content,
+      api: 'anthropic-messages',
+      provider: 'anthropic',
+      model: 'claude-haiku-5-5',
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 200,
+        cacheWrite: 30,
+        totalTokens: 245,
+        cost: { input: 0.001, output: 0.002, cacheRead: 0.0004, cacheWrite: 0.0003, total: 0.0037 }
+      },
+      stopReason,
+      timestamp: 0
+    }
+  }
 
-		const choice = result.choices[0];
-		expect(choice?.message.role).toBe("assistant");
-		expect(choice?.message.content).toBe("Hello there!");
-		expect(choice?.message.tool_calls).toBeUndefined();
-		expect(choice?.finish_reason).toBe("stop");
+  // Catches any drift in the public response: a field dropped or renamed, an extra field at the
+  // top level, or pi metadata leaving `x_pi` (AGENTS.md: pi-specific metadata goes under `x_pi`).
+  test('a text answer has exactly the OpenAI chat.completion shape, with pi metadata under x_pi', () => {
+    const result = buildChatCompletion(
+      'req-123',
+      'anthropic/claude-haiku-5-5',
+      assistantMessage([{ type: 'text', text: 'Hello there!' }], 'stop')
+    )
 
-		expect(result.usage.prompt_tokens).toBe(10);
-		expect(result.usage.completion_tokens).toBe(5);
-		expect(result.usage.total_tokens).toBe(15);
-	});
+    expect(result).toEqual({
+      id: 'req-123',
+      object: 'chat.completion',
+      created: expect.any(Number) as number,
+      model: 'anthropic/claude-haiku-5-5',
+      choices: [
+        {
+          index: 0,
+          message: { role: 'assistant', content: 'Hello there!' },
+          finish_reason: 'stop',
+          logprobs: null
+        }
+      ],
+      usage: {
+        prompt_tokens: 240,
+        completion_tokens: 5,
+        total_tokens: 245,
+        prompt_tokens_details: { cached_tokens: 200, cache_write_tokens: 30 }
+      },
+      x_pi: {
+        cost: { input: 0.001, output: 0.002, cacheRead: 0.0004, cacheWrite: 0.0003, total: 0.0037 },
+        cache_read_tokens: 200,
+        cache_write_tokens: 30
+      }
+    })
+  })
 
-	test("builds response with tool calls", () => {
-		const message: AssistantMessage = {
-			role: "assistant",
-			content: [
-				{
-					type: "toolCall",
-					id: "tc_1",
-					name: "get_weather",
-					arguments: { city: "SF" },
-				},
-			],
-			api: "openai-completions",
-			provider: "openai",
-			model: "gpt-4o",
-			usage: {
-				input: 10,
-				output: 20,
-				cacheRead: 0,
-				cacheWrite: 0,
-				totalTokens: 30,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			},
-			stopReason: "toolUse",
-			timestamp: Date.now(),
-		};
+  // Catches tool calls mis-shaped: arguments sent as an object instead of a JSON string, a call
+  // lost or reordered, text where OpenAI clients expect null, or the wrong finish reason.
+  test('tool calls have exactly the OpenAI shape, in order, with arguments as JSON text', () => {
+    const result = buildChatCompletion(
+      'req-456',
+      'anthropic/claude-haiku-5-5',
+      assistantMessage(
+        [
+          { type: 'toolCall', id: 'tc_1', name: 'get_weather', arguments: { city: 'Oslo' } },
+          { type: 'toolCall', id: 'tc_2', name: 'get_time', arguments: { zone: 'CET' } }
+        ],
+        'toolUse'
+      )
+    )
 
-		const result = buildChatCompletion("req-456", "openai/gpt-4o", message);
-		expect(result.choices[0]?.finish_reason).toBe("tool_calls");
-		expect(result.choices[0]?.message.content).toBeNull();
-		expect(result.choices[0]?.message.tool_calls).toHaveLength(1);
+    expect(result.choices).toEqual([
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: null,
+          tool_calls: [
+            {
+              id: 'tc_1',
+              type: 'function',
+              function: { name: 'get_weather', arguments: '{"city":"Oslo"}' }
+            },
+            {
+              id: 'tc_2',
+              type: 'function',
+              function: { name: 'get_time', arguments: '{"zone":"CET"}' }
+            }
+          ]
+        },
+        finish_reason: 'tool_calls',
+        logprobs: null
+      }
+    ])
+  })
 
-		const tc = result.choices[0]?.message.tool_calls?.[0];
-		expect(tc?.id).toBe("tc_1");
-		expect(tc?.type).toBe("function");
-		expect(tc?.function.name).toBe("get_weather");
-		expect(tc?.function.arguments).toBe('{"city":"SF"}');
-	});
-});
+  // Catches the text a model writes before calling a tool being dropped (content forced to null
+  // whenever tool calls exist), or text blocks split around the call not joined in order.
+  test('text around a tool call stays in content, next to the call', () => {
+    const result = buildChatCompletion(
+      'req-789',
+      'anthropic/claude-haiku-5-5',
+      assistantMessage(
+        [
+          { type: 'text', text: 'Checking the weather. ' },
+          { type: 'toolCall', id: 'tc_1', name: 'get_weather', arguments: { city: 'Oslo' } },
+          { type: 'text', text: 'One moment.' }
+        ],
+        'toolUse'
+      )
+    )
+
+    expect(result.choices).toEqual([
+      {
+        index: 0,
+        message: {
+          role: 'assistant',
+          content: 'Checking the weather. One moment.',
+          tool_calls: [
+            {
+              id: 'tc_1',
+              type: 'function',
+              function: { name: 'get_weather', arguments: '{"city":"Oslo"}' }
+            }
+          ]
+        },
+        finish_reason: 'tool_calls',
+        logprobs: null
+      }
+    ])
+  })
+})

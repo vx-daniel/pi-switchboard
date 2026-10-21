@@ -1,0 +1,141 @@
+name: Image
+
+# Builds the container image from a release tag and publishes it, for linux/amd64 and linux/arm64,
+# to Docker Hub (docker.io/vxdaniel/pi-switchboard, what the docs lead with) and GHCR
+# (ghcr.io/vx-daniel/pi-switchboard, linked to this repository and free of Docker Hub's pull
+# limits) (#60). Both get the same image in one push. The release workflow calls it for each new
+# release; run it by hand to publish a release whose image is missing. A published tag is never
+# overwritten, on either registry.
+#
+# Needs the DOCKERHUB_TOKEN secret: a Docker Hub personal access token of vxdaniel with read and
+# write access.
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: The release tag to build, such as pi-switchboard-v0.1.0
+        required: true
+        type: string
+    secrets:
+      DOCKERHUB_TOKEN:
+        required: true
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The release tag to build and publish, such as pi-switchboard-v0.1.0
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# Two runs for one tag would both pass the overwrite check before either pushes.
+concurrency:
+  group: image-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    env:
+      DOCKERHUB_USERNAME: vxdaniel
+      DOCKERHUB_IMAGE: docker.io/vxdaniel/pi-switchboard
+      GHCR_IMAGE: ghcr.io/vx-daniel/pi-switchboard
+      TAG: ${{ inputs.tag }}
+
+    steps:
+      - name: Read the version from the tag
+        id: version
+        run: |
+          version="${TAG#pi-switchboard-v}"
+          if [ "$version" = "$TAG" ] ||
+            ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'$TAG' is not a release tag (pi-switchboard-v<version>)"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Check out the release tag
+        uses: actions/checkout@v5
+        with:
+          ref: refs/tags/${{ inputs.tag }}
+
+      # The release commit sets package.json's version, so the two agree on every release tag.
+      - name: Check the tag matches package.json
+        id: source
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          package_version="$(node -p 'require("./package.json").version')"
+          if [ "$package_version" != "$VERSION" ]; then
+            echo "::error::package.json at $TAG says $package_version, not $VERSION"
+            exit 1
+          fi
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      # Both registries or neither: a missing token fails here, before anything is pushed.
+      - name: Check the Docker Hub token is set
+        env:
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [ -z "$DOCKERHUB_TOKEN" ]; then
+            echo "::error::set the DOCKERHUB_TOKEN secret (a Docker Hub access token of $DOCKERHUB_USERNAME, read and write)"
+            exit 1
+          fi
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v4
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # Only "not found" lets the build go ahead: any other failure to read a registry stops it,
+      # so an outage or a permission problem cannot turn into an overwrite.
+      - name: Refuse to overwrite a published tag
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for image in "$DOCKERHUB_IMAGE" "$GHCR_IMAGE"; do
+            if output="$(docker buildx imagetools inspect "$image:$VERSION" 2>&1)"; then
+              echo "::error::$image:$VERSION is already published; a tag is never overwritten"
+              exit 1
+            fi
+            if ! printf '%s' "$output" | grep -qi 'not found'; then
+              echo "::error::could not check $image:$VERSION: $output"
+              exit 1
+            fi
+          done
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          # The checked-out tag, not the Git context of the commit that started the workflow.
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.DOCKERHUB_IMAGE }}:${{ steps.version.outputs.version }}
+            ${{ env.GHCR_IMAGE }}:${{ steps.version.outputs.version }}
+          labels: |
+            org.opencontainers.image.title=pi-switchboard
+            org.opencontainers.image.description=A local OpenAI-compatible API for pi's models and logins
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
+            org.opencontainers.image.licenses=MIT

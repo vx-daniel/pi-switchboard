@@ -1,0 +1,506 @@
+/**
+ * Upstream failures end to end: the mock provider answers with a provider's error status and body,
+ * pi's real OpenAI and Anthropic clients turn that into an error, and the proxy answers the client.
+ * Also a stream the provider cuts off partway through.
+ *
+ * pi does not retry by default (`maxRetries` is 0 and the proxy does not set it), so each client
+ * request is one upstream attempt; the tests pin that, as a retry multiplies upstream calls.
+ */
+
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
+
+import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import {
+  cutOff,
+  httpError,
+  type MockProvider,
+  type MockReply,
+  startMockProvider
+} from '../fixtures/mock-provider'
+import { testApp } from '../helpers'
+
+const HTTP_OK = 200
+const HTTP_BAD_REQUEST = 400
+const HTTP_UNAUTHORIZED = 401
+const HTTP_FORBIDDEN = 403
+const HTTP_TOO_MANY_REQUESTS = 429
+const HTTP_INTERNAL_SERVER_ERROR = 500
+const HTTP_BAD_GATEWAY = 502
+const HTTP_SERVICE_UNAVAILABLE = 503
+const HTTP_ANTHROPIC_OVERLOADED = 529
+
+const APIS = ['openai-completions', 'anthropic-messages'] as const
+type Api = (typeof APIS)[number]
+
+/** The models.json provider name each API is served under. */
+const PROVIDER_NAMES: Readonly<Record<Api, string>> = {
+  'openai-completions': 'openai-mock',
+  'anthropic-messages': 'anthropic-mock'
+}
+
+const AUTH_FAILED = {
+  status: HTTP_BAD_GATEWAY,
+  body: {
+    error: {
+      message: 'Upstream authentication failed',
+      type: 'server_error',
+      param: null,
+      code: 'upstream_auth_error'
+    }
+  }
+}
+const PROVIDER_FAILED = {
+  status: HTTP_BAD_GATEWAY,
+  body: {
+    error: {
+      message: 'Upstream provider error',
+      type: 'server_error',
+      param: null,
+      code: 'upstream_error'
+    }
+  }
+}
+
+/** An upstream error status, what each provider sends with it, and what the client should get. */
+interface StatusCase {
+  /** Names the case and its mock model: several cases can share a status. */
+  readonly label: string
+  readonly status: number
+  readonly bodies: Readonly<Record<Api, unknown>>
+  readonly expected: { readonly status: number; readonly body: unknown }
+}
+
+const RATE_LIMITED = {
+  status: HTTP_TOO_MANY_REQUESTS,
+  body: {
+    error: {
+      message: 'Upstream rate limit exceeded',
+      type: 'server_error',
+      param: null,
+      code: 'rate_limit'
+    }
+  }
+}
+
+const STATUS_CASES: readonly StatusCase[] = [
+  {
+    label: 'invalid key',
+    status: HTTP_UNAUTHORIZED,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message: 'Incorrect API key provided: notareal***-key.',
+          type: 'invalid_request_error',
+          code: 'invalid_api_key'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: { type: 'authentication_error', message: 'invalid x-api-key' }
+      }
+    },
+    expected: AUTH_FAILED
+  },
+  {
+    label: 'no permission',
+    status: HTTP_FORBIDDEN,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message: 'You are not allowed to sample from this model',
+          type: 'invalid_request_error',
+          code: 'model_not_permitted'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: {
+          type: 'permission_error',
+          message: 'Your API key does not have permission to use the specified resource.'
+        }
+      }
+    },
+    expected: AUTH_FAILED
+  },
+  {
+    label: 'rate limit',
+    status: HTTP_TOO_MANY_REQUESTS,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message:
+            'Rate limit reached for gpt-4o on tokens per min (TPM): Limit 30000, Used 30000, Requested 120. Please try again in 240ms.',
+          type: 'tokens',
+          code: 'rate_limit_exceeded'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: {
+          type: 'rate_limit_error',
+          message:
+            'Number of request tokens has exceeded your per-minute rate limit. Please try again later.'
+        }
+      }
+    },
+    expected: RATE_LIMITED
+  },
+  // The status decides, not the wording: neither body says "rate" and "limit" (#42).
+  {
+    label: 'quota exhausted',
+    status: HTTP_TOO_MANY_REQUESTS,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message: 'You exceeded your current quota, please check your plan and billing details.',
+          type: 'insufficient_quota',
+          code: 'insufficient_quota'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: { type: 'api_error', message: 'Too many requests' }
+      }
+    },
+    expected: RATE_LIMITED
+  },
+  // A 401 whose text mentions a rate limit is still an auth failure (#42).
+  {
+    label: 'invalid key mentioning a rate limit',
+    status: HTTP_UNAUTHORIZED,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message: 'Invalid API key for the rate limit tier of this organization.',
+          type: 'invalid_request_error',
+          code: 'invalid_api_key'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: {
+          type: 'authentication_error',
+          message: 'invalid x-api-key (rate limit headers omitted)'
+        }
+      }
+    },
+    expected: AUTH_FAILED
+  },
+  {
+    label: 'server error',
+    status: HTTP_INTERNAL_SERVER_ERROR,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message: 'The server had an error while processing your request. Sorry about that!',
+          type: 'server_error',
+          code: null
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: { type: 'api_error', message: 'Internal server error' }
+      }
+    },
+    expected: PROVIDER_FAILED
+  },
+  {
+    label: 'unavailable',
+    status: HTTP_SERVICE_UNAVAILABLE,
+    bodies: {
+      'openai-completions': {
+        error: { message: 'Service Unavailable', type: 'server_error', code: 'service_unavailable' }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: { type: 'api_error', message: 'Service unavailable' }
+      }
+    },
+    expected: {
+      status: HTTP_SERVICE_UNAVAILABLE,
+      body: {
+        error: {
+          message: 'Upstream provider is unavailable',
+          type: 'server_error',
+          param: null,
+          code: 'provider_unavailable'
+        }
+      }
+    }
+  },
+  {
+    label: 'overloaded',
+    status: HTTP_ANTHROPIC_OVERLOADED,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message: 'The server is overloaded or not ready yet.',
+          type: 'server_error',
+          code: null
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: { type: 'overloaded_error', message: 'Overloaded' }
+      }
+    },
+    expected: {
+      status: HTTP_SERVICE_UNAVAILABLE,
+      body: {
+        error: {
+          message: 'Upstream provider is overloaded',
+          type: 'server_error',
+          param: null,
+          code: 'provider_overloaded'
+        }
+      }
+    }
+  },
+  // The conversation is longer than the context window, in each provider's words (#40).
+  {
+    label: 'context overflow',
+    status: HTTP_BAD_REQUEST,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message:
+            "This model's maximum context length is 128000 tokens. However, your messages resulted in 131072 tokens. Please reduce the length of the messages.",
+          type: 'invalid_request_error',
+          param: 'messages',
+          code: 'context_length_exceeded'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: {
+          type: 'invalid_request_error',
+          message: 'prompt is too long: 210000 tokens > 200000 maximum'
+        }
+      }
+    },
+    expected: {
+      status: HTTP_BAD_REQUEST,
+      body: {
+        error: {
+          message:
+            "The messages exceed the model's context window. Shorten or summarize them and try again.",
+          type: 'invalid_request_error',
+          param: 'messages',
+          code: 'context_length_exceeded'
+        }
+      }
+    }
+  },
+  // A rate limit in words pi's overflow check would match ("too many tokens") is still a rate
+  // limit: the reported 429 decides (#40).
+  {
+    label: 'token rate limit',
+    status: HTTP_TOO_MANY_REQUESTS,
+    bodies: {
+      'openai-completions': {
+        error: {
+          message: 'Too many tokens per minute for this organization. Please slow down.',
+          type: 'tokens',
+          code: 'tokens_exceeded'
+        }
+      },
+      'anthropic-messages': {
+        type: 'error',
+        error: {
+          type: 'rate_limit_error',
+          message: 'Too many tokens in the last minute, please retry later.'
+        }
+      }
+    },
+    expected: RATE_LIMITED
+  }
+]
+
+const TRUNCATED_MODEL = 'truncated'
+
+/**
+ * Names the mock model that answers `api` requests as this case says.
+ *
+ * @param api - the API whose error body the model sends
+ * @param statusCase - the case whose status and body the model sends
+ * @returns the model ID, `<api>-<label with dashes>`
+ */
+function failingModel(api: Api, statusCase: StatusCase): string {
+  return `${api}-${statusCase.label.replaceAll(' ', '-')}`
+}
+
+let mock: MockProvider
+let agentDir: FixtureAgentDir
+
+beforeAll(async () => {
+  const replies: Record<string, MockReply> = { [TRUNCATED_MODEL]: cutOff('Hel', 'lo') }
+  for (const statusCase of STATUS_CASES) {
+    for (const api of APIS) {
+      replies[failingModel(api, statusCase)] = httpError(statusCase.status, statusCase.bodies[api])
+    }
+  }
+  mock = await startMockProvider(replies)
+  agentDir = await loadFixtureAgentDir({
+    modelsJson: {
+      providers: {
+        [PROVIDER_NAMES['openai-completions']]: mock.provider('openai-completions'),
+        [PROVIDER_NAMES['anthropic-messages']]: mock.provider('anthropic-messages')
+      }
+    }
+  })
+})
+
+afterAll(async () => {
+  vi.unstubAllEnvs()
+  agentDir.remove()
+  await mock.close()
+})
+
+/** What the client got for one chat request, and how many requests reached the provider. */
+interface ChatOutcome {
+  readonly status: number
+  readonly contentType: string | null
+  readonly text: string
+  readonly attempts: number
+}
+
+/**
+ * Asks `model` through the proxy and records what the client got.
+ *
+ * @param model - the public model ID to ask
+ * @param stream - whether to request a streamed answer
+ * @returns the response status, content type and body text, and the upstream request count
+ */
+async function chat(model: string, stream: boolean): Promise<ChatOutcome> {
+  const before = mock.requests.length
+  const response = await testApp().request('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model, stream, messages: [{ role: 'user', content: 'Hi' }] })
+  })
+  const text = await response.text()
+  return {
+    status: response.status,
+    contentType: response.headers.get('content-type'),
+    text,
+    attempts: mock.requests.length - before
+  }
+}
+
+/**
+ * Parses an SSE body into its events' data.
+ *
+ * @param text - the whole SSE response body
+ * @returns each event's data: parsed JSON, or the `[DONE]` sentinel as is
+ * @throws Error when an event is not a `data:` event
+ */
+function dataEvents(text: string): unknown[] {
+  return text
+    .split('\n\n')
+    .filter((event) => event !== '')
+    .map((event): unknown => {
+      if (!event.startsWith('data: ')) throw new Error(`not an SSE data event: ${event}`)
+      const data = event.slice('data: '.length)
+      return data === '[DONE]' ? data : JSON.parse(data)
+    })
+}
+
+/**
+ * Builds one streamed text chunk as the proxy sends it, with matchers for the id and clock.
+ *
+ * @param model - the public model ID the chunk names
+ * @param delta - the choice's `delta`
+ * @returns the expected chunk, its one choice not finished
+ */
+function textChunk(model: string, delta: Record<string, unknown>): unknown {
+  return {
+    id: expect.any(String),
+    object: 'chat.completion.chunk',
+    created: expect.any(Number),
+    model,
+    choices: [{ index: 0, delta, finish_reason: null }]
+  }
+}
+
+describe.each(APIS)('upstream HTTP error through %s', (api) => {
+  const providerName = PROVIDER_NAMES[api]
+
+  // Catches an upstream failure answered with the wrong status or code (a rate limit the client
+  // cannot back off from, an auth failure blamed on the client, an overload reported as a crash),
+  // the provider's raw error text reaching the client, or pi starting to retry each failure.
+  test.each(STATUS_CASES)(
+    '$label: upstream $status is answered as $expected.status, in one attempt',
+    async (statusCase) => {
+      const outcome = await chat(`${providerName}/${failingModel(api, statusCase)}`, false)
+      const body: unknown = JSON.parse(outcome.text)
+
+      expect({
+        status: outcome.status,
+        body,
+        attempts: outcome.attempts
+      }).toEqual({ ...statusCase.expected, attempts: 1 })
+    }
+  )
+
+  // Catches a refused streaming request answered as HTTP 200 with an error event: OpenAI answers it
+  // with the status, and clients key retries, backoff and compaction on it (#40). The body is the
+  // non-streaming one: a fixed message that never quotes the provider (#54).
+  test.each(STATUS_CASES)(
+    '$label: upstream $status refuses a streaming request with the same status and body',
+    async (statusCase) => {
+      const outcome = await chat(`${providerName}/${failingModel(api, statusCase)}`, true)
+      const body: unknown = JSON.parse(outcome.text)
+
+      expect({
+        status: outcome.status,
+        contentType: outcome.contentType,
+        body,
+        attempts: outcome.attempts
+      }).toEqual({
+        status: statusCase.expected.status,
+        contentType: 'application/json',
+        body: statusCase.expected.body,
+        attempts: 1
+      })
+    }
+  )
+})
+
+describe('upstream stream cut off before it finished', () => {
+  const model = `${PROVIDER_NAMES['openai-completions']}/${TRUNCATED_MODEL}`
+
+  // Catches a truncated answer passed off as complete: a `stop` finish after the partial text, or
+  // the stream ending without an error event, so the client keeps half an answer as the whole.
+  test('streams the text that arrived, then an error event and [DONE], with no finish reason', async () => {
+    const outcome = await chat(model, true)
+
+    expect({
+      status: outcome.status,
+      events: dataEvents(outcome.text),
+      attempts: outcome.attempts
+    }).toEqual({
+      status: HTTP_OK,
+      events: [
+        textChunk(model, { role: 'assistant' }),
+        textChunk(model, { content: 'Hel' }),
+        textChunk(model, { content: 'lo' }),
+        PROVIDER_FAILED.body,
+        '[DONE]'
+      ],
+      attempts: 1
+    })
+  })
+
+  // Catches the partial text returned as a successful completion when the upstream connection
+  // dropped partway.
+  test('answers a non-streaming request with 502 and none of the partial text', async () => {
+    const outcome = await chat(model, false)
+    const body: unknown = JSON.parse(outcome.text)
+
+    expect({
+      status: outcome.status,
+      body,
+      attempts: outcome.attempts
+    }).toEqual({ ...PROVIDER_FAILED, attempts: 1 })
+  })
+})

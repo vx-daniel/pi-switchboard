@@ -1,6 +1,12 @@
 # Client Model Sync — Design Notes
 
-Design for a modular sync system that pushes pi-openai-proxy's exposed models
+> Status: design notes from 2026-03-25 (`fb469c4`). The package split, the `SyncTarget`
+> contracts, the Continue target and `x_pi` were not built. The sync shipped as one Zed target:
+> `src/sync/zed.ts`, run by `extensions/proxy/zed-sync.ts` with the models the extension's own
+> exposure computes, not over HTTP. The "Target: Zed" and "Extension commands" sections describe
+> that code.
+
+Design for a modular sync system that pushes pi-switchboard's exposed models
 into editor/tool configuration files. Follows pi-maestro's monorepo patterns:
 contracts for plugin boundaries, per-client adapters, thin extension wiring.
 
@@ -40,7 +46,7 @@ packages/
 
 ### Comparison with pi-maestro
 
-| pi-maestro | pi-openai-proxy sync |
+| pi-maestro | pi-switchboard sync |
 |---|---|
 | `core/contracts` (ProviderAdapter, SecretBackend) | `sync/contracts` (SyncTarget) |
 | `core/engine` (AccountManager, selection) | `sync/engine` (fetch, diff, orchestrate) |
@@ -129,7 +135,9 @@ interface ReadResult {
 
 ## Proxy model metadata
 
-Add `x_pi` to `GET /v1/models` and `GET /v1/models/{model}` responses:
+Proposed: add `x_pi` to `GET /v1/models` and `GET /v1/models/{model}` responses. Not built:
+`/v1/models` keeps the plain OpenAI model object, and what pi knows beyond it goes on
+`GET /v1/switchboard/models` (`src/openai/models.ts`). The proposal was:
 
 ```json
 {
@@ -147,8 +155,8 @@ Add `x_pi` to `GET /v1/models` and `GET /v1/models/{model}` responses:
 }
 ```
 
-This is the only change needed in the proxy package itself. The sync engine
-reads this and maps to `ModelInfo[]`.
+This was to be the only change in the proxy package. The sync engine would read it and map it to
+`ModelInfo[]`.
 
 ### Field mapping: pi Model -> x_pi
 
@@ -165,12 +173,12 @@ reads this and maps to `ModelInfo[]`.
 ### Config format
 
 ```jsonc
-// ~/.config/zed/settings.json (JSONC with comments)
+// ~/.config/zed/settings.json (JSONC with comments; see "Settings file discovery")
 {
   "language_models": {
     "openai_compatible": {
       "Pi Proxy": {
-        "api_url": "http://127.0.0.1:4141/v1",
+        "api_url": "http://127.0.0.1:4141/v1",  // http://<host>:<port>/v1 from proxy-config.json
         "available_models": [
           {
             "name": "anthropic/claude-sonnet-4-20250514",
@@ -180,7 +188,7 @@ reads this and maps to `ModelInfo[]`.
             "capabilities": {
               "tools": true,
               "images": true,
-              "parallel_tool_calls": false,
+              "parallel_tool_calls": true,
               "prompt_cache_key": false,
               "chat_completions": true
             }
@@ -192,37 +200,54 @@ reads this and maps to `ModelInfo[]`.
 }
 ```
 
-### Field mapping: ModelInfo -> Zed AvailableModel
+The provider name is `zed.providerName` in the proxy config (default `"Pi Proxy"`).
+
+### Field mapping: exposed model -> Zed AvailableModel
+
+`toZedModel()` maps each model the exposure config exposes (`ExposedModel`, holding the pi
+`Model`):
 
 | Zed field | Source |
 |---|---|
-| `name` | `ModelInfo.id` |
-| `display_name` | `ModelInfo.displayName` |
-| `max_tokens` | `ModelInfo.contextWindow` |
-| `max_output_tokens` | `ModelInfo.maxOutputTokens` |
-| `capabilities.tools` | `ModelInfo.supportsTools` |
-| `capabilities.images` | `ModelInfo.supportsImages` |
-| `capabilities.parallel_tool_calls` | `false` |
+| `name` | public model ID (`ExposedModel.publicId`) |
+| `display_name` | `Model.name` |
+| `max_tokens` | `Model.contextWindow` |
+| `max_output_tokens` | `Model.maxTokens` |
+| `capabilities.tools` | `true` |
+| `capabilities.images` | `Model.input` includes `"image"` |
+| `capabilities.parallel_tool_calls` | `true` |
 | `capabilities.prompt_cache_key` | `false` |
 | `capabilities.chat_completions` | `true` |
 
 ### JSONC handling
 
-Use `jsonc-parser` (Microsoft's parser with `modify()` for surgical edits that
-preserve comments and formatting). Replace only the `available_models` array at
-the correct JSON path.
+The sync uses `jsonc-parser` (Microsoft's parser, with `modify()` for surgical edits that keep
+comments and formatting elsewhere in the file). It replaces the whole
+`language_models.openai_compatible.<providerName>` value with `api_url` and `available_models`;
+any other key in that provider block is dropped. The rest of the file is untouched.
+
+It parses the file as Zed does, with trailing commas allowed. An empty file, or one holding only
+comments, is treated as `{}`. Any other parse error leaves the file untouched and fails with
+`Zed settings.json has syntax errors (<error> at line <n>, column <n>); fix them in Zed, then sync
+again`.
 
 ### Settings file discovery
 
+`findZedSettings()` checks these paths in order and uses the first that exists:
+
 ```
-macOS:  ~/.config/zed/settings.json
-        ~/Library/Application Support/Zed/settings.json
-Linux:  $XDG_CONFIG_HOME/zed/settings.json
-        ~/.config/zed/settings.json
+1. $CUSTOM_DATA_DIR/settings.json
+2. $XDG_CONFIG_HOME/zed/settings.json
+3. $HOME/.config/zed/settings.json
 ```
 
-Check both paths, prefer whichever exists. Support Zed Preview via a separate
-config directory.
+An unset or empty variable adds no path. It never creates the file. With none found, the sync
+fails with `Zed settings.json not found. Checked <each path above, once>`. There is no
+`~/Library/Application Support/Zed` path and no Zed Preview path.
+
+2 and 3 follow Zed: on Linux it reads `$XDG_CONFIG_HOME` when set, else `~/.config`, and on macOS
+`~/.config`. `$CUSTOM_DATA_DIR` is the proxy's own override, not a Zed setting: Zed's
+`--user-data-dir` puts settings in `<dir>/config/settings.json`, and no env var sets it.
 
 ## Target: Continue.dev (future)
 
@@ -244,12 +269,36 @@ Same `ModelInfo` input, different serialization target.
 
 ## Extension commands
 
+Proposed:
+
 ```
 /proxy sync           Sync to all detected targets
 /proxy sync zed       Sync to Zed only
 /proxy sync --dry-run Preview without writing
 /proxy sync --list    Show detected targets and their config paths
 ```
+
+Built instead:
+
+```
+/proxy zed-sync           Write the exposed models to Zed's settings.json
+/proxy zed-sync --dry-run Report what would change without writing
+```
+
+Both reload the proxy config first. With no models exposed they fail with `No models exposed.
+Nothing to sync.` The result is a notification that counts model names: added, removed and
+unchanged, or `no changes`, then the settings path. A dry run prefixes the counts with `[dry-run]`:
+
+```
+Zed sync: [dry-run] 2 added, 1 removed, 5 unchanged (/home/me/.config/zed/settings.json)
+```
+
+Counts compare names only: a model whose fields change, or a changed `api_url`, still counts as
+unchanged.
+
+With `zed.autoSync` on (default off), the extension also syncs, without a dry run, at session
+start and after each change in the `/proxy config` settings panel. A successful auto-sync notifies
+`Zed auto-sync: …`; a failed one is only logged.
 
 ## Implementation phases
 

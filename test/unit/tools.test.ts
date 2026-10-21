@@ -1,179 +1,255 @@
-import { describe, expect, test } from "vite-plus/test";
-import { convertTools } from "@proxy/openai/tools";
+import { convertTools } from '@proxy/openai/tools'
+import { assert, describe, expect, test } from 'vite-plus/test'
 
-function schemaValue(schema: unknown, key: string): unknown {
-	if (schema === null || typeof schema !== "object" || Array.isArray(schema)) {
-		return undefined;
-	}
-	return Object.getOwnPropertyDescriptor(schema, key)?.value;
-}
+describe('convertTools', () => {
+  /**
+   * Round-trips a value through JSON, giving the schema as pi sends it upstream.
+   *
+   * @remarks
+   * TypeBox adds symbol keys that never leave the process; JSON drops them.
+   *
+   * @param schema - the converted value: a TypeBox schema or a whole conversion result
+   * @returns the JSON-parsed copy
+   */
+  function asJson(schema: unknown): unknown {
+    return JSON.parse(JSON.stringify(schema))
+  }
 
-describe("convertTools", () => {
-	test("converts a simple function tool", () => {
-		const result = convertTools([
-			{
-				type: "function",
-				function: {
-					name: "get_weather",
-					description: "Get the weather for a city",
-					parameters: {
-						type: "object",
-						properties: {
-							city: { type: "string", description: "The city name" },
-							unit: { type: "string", enum: ["celsius", "fahrenheit"] },
-						},
-						required: ["city"],
-					},
-				},
-			},
-		]);
-		expect(result.ok).toBe(true);
-		if (!result.ok) return;
-		expect(result.tools).toHaveLength(1);
-		const tool = result.tools[0];
-		expect(tool).toBeDefined();
-		if (tool === undefined) return;
-		expect(tool.name).toBe("get_weather");
-		expect(tool.description).toBe("Get the weather for a city");
-		expect(schemaValue(tool.parameters, "type")).toBe("object");
-	});
+  // Catches a converter that ignores `parameters` (an empty object schema would pass a type check),
+  // drops `required` or descriptions, or encodes an enum as something other than const branches.
+  // Constraint keywords are locked per type in json-schema-to-typebox.test.ts.
+  test('converts a function tool into exactly the schema sent upstream', () => {
+    const result = convertTools([
+      {
+        type: 'function',
+        function: {
+          name: 'get_weather',
+          description: 'Get the weather for a city',
+          parameters: {
+            type: 'object',
+            properties: {
+              city: { type: 'string', description: 'The city name' },
+              unit: { type: 'string', enum: ['celsius', 'fahrenheit'] },
+              days: { type: 'integer' },
+              tags: { type: 'array', items: { type: 'string' } }
+            },
+            required: ['city']
+          }
+        }
+      }
+    ])
+    assert(result.ok, 'expected the tool to convert')
+    const [tool] = result.tools
 
-	test("converts a tool without parameters", () => {
-		const result = convertTools([
-			{
-				type: "function",
-				function: {
-					name: "list_all",
-					description: "List everything",
-				},
-			},
-		]);
-		expect(result.ok).toBe(true);
-		if (!result.ok) return;
-		expect(result.tools).toHaveLength(1);
-		const tool = result.tools[0];
-		expect(tool).toBeDefined();
-		if (tool === undefined) return;
-		expect(tool.name).toBe("list_all");
-		expect(schemaValue(tool.parameters, "type")).toBe("object");
-	});
+    expect(tool?.name).toBe('get_weather')
+    expect(tool?.description).toBe('Get the weather for a city')
+    expect(asJson(tool?.parameters)).toEqual({
+      type: 'object',
+      required: ['city'],
+      properties: {
+        city: { type: 'string', description: 'The city name' },
+        unit: {
+          anyOf: [
+            { type: 'string', const: 'celsius' },
+            { type: 'string', const: 'fahrenheit' }
+          ]
+        },
+        days: { type: 'integer' },
+        tags: { type: 'array', items: { type: 'string' } }
+      }
+    })
+  })
 
-	test("converts multiple tools", () => {
-		const result = convertTools([
-			{
-				type: "function",
-				function: {
-					name: "tool_a",
-					description: "Tool A",
-					parameters: { type: "object", properties: {} },
-				},
-			},
-			{
-				type: "function",
-				function: {
-					name: "tool_b",
-					description: "Tool B",
-					parameters: { type: "object", properties: { x: { type: "number" } } },
-				},
-			},
-		]);
-		expect(result.ok).toBe(true);
-		if (!result.ok) return;
-		expect(result.tools).toHaveLength(2);
-	});
+  // Catches a tool without `parameters` sent with no schema, which providers reject.
+  test('gives a tool without parameters an empty object schema', () => {
+    const result = convertTools([
+      { type: 'function', function: { name: 'list_all', description: 'List everything' } }
+    ])
+    assert(result.ok, 'expected the tool to convert')
 
-	test("rejects tools with unsupported JSON Schema", () => {
-		const result = convertTools([
-			{
-				type: "function",
-				function: {
-					name: "bad_tool",
-					description: "Bad tool",
-					parameters: {
-						type: "object",
-						properties: {
-							data: { $ref: "#/definitions/Data" },
-						},
-					},
-				},
-			},
-		]);
-		expect(result.ok).toBe(false);
-		if (result.ok) return;
-		expect(result.message).toContain("$ref");
-		expect(result.param).toContain("tools[0]");
-	});
+    expect(asJson(result.tools[0]?.parameters)).toEqual({ type: 'object', properties: {} })
+  })
 
-	test("handles tool with empty description", () => {
-		const result = convertTools([
-			{
-				type: "function",
-				function: {
-					name: "no_desc",
-					parameters: { type: "object" },
-				},
-			},
-		]);
-		expect(result.ok).toBe(true);
-		if (!result.ok) return;
-		const tool = result.tools[0];
-		expect(tool).toBeDefined();
-		if (tool === undefined) return;
-		expect(tool.description).toBe("");
-	});
+  // Catches a converter that drops, reorders, or merges tools when several are sent.
+  test('converts multiple tools', () => {
+    const result = convertTools([
+      {
+        type: 'function',
+        function: {
+          name: 'tool_a',
+          description: 'Tool A',
+          parameters: { type: 'object', properties: {} }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'tool_b',
+          description: 'Tool B',
+          parameters: { type: 'object', properties: { amount: { type: 'number' } } }
+        }
+      }
+    ])
+    assert(result.ok, 'expected the tools to convert')
 
-	test("converts tools with nested object parameters", () => {
-		const result = convertTools([
-			{
-				type: "function",
-				function: {
-					name: "create_user",
-					description: "Create a user",
-					parameters: {
-						type: "object",
-						properties: {
-							name: { type: "string" },
-							address: {
-								type: "object",
-								properties: {
-									street: { type: "string" },
-									city: { type: "string" },
-									zip: { type: "string" },
-								},
-								required: ["street", "city"],
-							},
-						},
-						required: ["name"],
-					},
-				},
-			},
-		]);
-		expect(result.ok).toBe(true);
-		if (!result.ok) return;
-		expect(result.tools).toHaveLength(1);
-	});
+    expect(asJson(result)).toEqual({
+      ok: true,
+      tools: [
+        {
+          name: 'tool_a',
+          description: 'Tool A',
+          parameters: { type: 'object', properties: {} }
+        },
+        {
+          name: 'tool_b',
+          description: 'Tool B',
+          parameters: { type: 'object', properties: { amount: { type: 'number' } } }
+        }
+      ]
+    })
+  })
 
-	test("converts tools with array parameters", () => {
-		const result = convertTools([
-			{
-				type: "function",
-				function: {
-					name: "process_items",
-					description: "Process items",
-					parameters: {
-						type: "object",
-						properties: {
-							items: {
-								type: "array",
-								items: { type: "string" },
-								description: "List of items to process",
-							},
-						},
-						required: ["items"],
-					},
-				},
-			},
-		]);
-		expect(result.ok).toBe(true);
-	});
-});
+  // Catches an unsupported `$ref` slipping through to the provider, or an error that no longer
+  // names the offending tool parameter.
+  test('rejects tools with unsupported JSON Schema', () => {
+    const result = convertTools([
+      {
+        type: 'function',
+        function: {
+          name: 'bad_tool',
+          description: 'Bad tool',
+          parameters: {
+            type: 'object',
+            properties: {
+              data: { $ref: '#/definitions/Data' }
+            }
+          }
+        }
+      }
+    ])
+
+    expect(result).toEqual({
+      ok: false,
+      message: "Unsupported JSON Schema keyword '$ref' at tools[0].function.parameters.data",
+      param: 'tools[0].function.parameters.data'
+    })
+  })
+
+  // Catches a missing description sent as undefined (some providers reject it) instead of ''.
+  test('handles tool with empty description', () => {
+    const result = convertTools([
+      {
+        type: 'function',
+        function: {
+          name: 'no_desc',
+          parameters: { type: 'object' }
+        }
+      }
+    ])
+
+    expect(asJson(result)).toEqual({
+      ok: true,
+      tools: [{ name: 'no_desc', description: '', parameters: { type: 'object', properties: {} } }]
+    })
+  })
+
+  // Catches nested object properties or their `required` list being flattened or dropped.
+  test('converts tools with nested object parameters', () => {
+    const result = convertTools([
+      {
+        type: 'function',
+        function: {
+          name: 'create_user',
+          description: 'Create a user',
+          parameters: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' },
+              address: {
+                type: 'object',
+                properties: {
+                  street: { type: 'string' },
+                  city: { type: 'string' },
+                  zip: { type: 'string' }
+                },
+                required: ['street', 'city']
+              }
+            },
+            required: ['name']
+          }
+        }
+      }
+    ])
+
+    expect(asJson(result)).toEqual({
+      ok: true,
+      tools: [
+        {
+          name: 'create_user',
+          description: 'Create a user',
+          parameters: {
+            type: 'object',
+            required: ['name'],
+            properties: {
+              name: { type: 'string' },
+              address: {
+                type: 'object',
+                required: ['street', 'city'],
+                properties: {
+                  street: { type: 'string' },
+                  city: { type: 'string' },
+                  zip: { type: 'string' }
+                }
+              }
+            }
+          }
+        }
+      ]
+    })
+  })
+
+  // Catches array item types or array descriptions lost in conversion.
+  test('converts tools with array parameters', () => {
+    const result = convertTools([
+      {
+        type: 'function',
+        function: {
+          name: 'process_items',
+          description: 'Process items',
+          parameters: {
+            type: 'object',
+            properties: {
+              items: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'List of items to process'
+              }
+            },
+            required: ['items']
+          }
+        }
+      }
+    ])
+
+    expect(asJson(result)).toEqual({
+      ok: true,
+      tools: [
+        {
+          name: 'process_items',
+          description: 'Process items',
+          parameters: {
+            type: 'object',
+            required: ['items'],
+            properties: {
+              items: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'List of items to process'
+              }
+            }
+          }
+        }
+      ]
+    })
+  })
+})

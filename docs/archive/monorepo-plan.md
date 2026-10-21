@@ -1,5 +1,11 @@
 # Architecture Plan: Two Repos
 
+> Status: plan from 2026-03-25 (`6cf2e98`–`28f7929`); not carried out. The repo is still one
+> package, now `@vx-daniel/pi-switchboard` (it started as a fork of
+> `victor-software-house/pi-openai-proxy` and was renamed and detached, #65), with
+> the server in `src/` and the extension in `extensions/proxy/`; the Zed sync lives in
+> `src/sync/zed.ts`, with no `@pi-proxy/*` packages and no `x_pi` metadata.
+
 ## Overview
 
 Two repositories. One monorepo publishes independent packages under `@pi-proxy/*`.
@@ -15,7 +21,7 @@ Like pi-mono. Lockstep-versioned, independently published packages under the
 `@pi-proxy` npm org. Anyone can `pnpm add` individual packages and build
 on top.
 
-### Repo 2: `pi-openai-proxy` (EXISTING — becomes thin aggregator)
+### Repo 2: `pi-switchboard` (EXISTING — becomes thin aggregator)
 
 ```
 github.com/victor-software-house/pi-openai-proxy
@@ -263,12 +269,12 @@ GitHub Actions:
 
 ---
 
-## Repo 2: `pi-openai-proxy` (aggregator)
+## Repo 2: `pi-switchboard` (aggregator)
 
 ### Structure
 
 ```text
-pi-openai-proxy/
+pi-switchboard/
 ├── extensions/
 │   └── proxy.ts                    The pi extension (wiring + UI)
 ├── package.json                    @victor-software-house/pi-openai-proxy
@@ -290,7 +296,7 @@ pi-openai-proxy/
   },
   "keywords": ["pi-package", "openai", "proxy", "llm", "gateway"],
   "bin": {
-    "pi-openai-proxy": "./node_modules/@pi-proxy/server/dist/index.mjs"
+    "pi-switchboard": "./node_modules/@pi-proxy/server/dist/index.mjs"
   },
   "exports": {
     "./config":   { "import": "@pi-proxy/server/config",   "types": "@pi-proxy/server/config" },
@@ -379,9 +385,9 @@ Nobody needs to install the aggregator extension to use individual packages.
 8. Add CI workflow and release script
 9. Publish `@pi-proxy/server@0.1.0` (the rest can be `0.1.0` placeholders)
 
-### Phase 2: Convert `pi-openai-proxy` to aggregator
+### Phase 2: Convert `pi-switchboard` to aggregator
 
-1. Remove `src/`, `test/`, `tsdown.config.ts` from pi-openai-proxy
+1. Remove `src/`, `test/`, `tsdown.config.ts` from pi-switchboard
 2. Update `package.json` — drop direct deps (hono, typebox, citty, zod),
    add `@pi-proxy/server` dependency
 3. Update `extensions/proxy.ts` — change imports from
@@ -397,7 +403,7 @@ Nobody needs to install the aggregator extension to use individual packages.
 1. In `pi-proxy` monorepo: implement sync-contracts, sync-engine, target-zed
 2. Add `x_pi` metadata to `@pi-proxy/server` model endpoints
 3. Publish new versions of all `@pi-proxy/*` packages
-4. In `pi-openai-proxy`: add `@pi-proxy/sync-engine` + `@pi-proxy/target-zed`
+4. In `pi-switchboard`: add `@pi-proxy/sync-engine` + `@pi-proxy/target-zed`
    deps, wire `/proxy sync` commands in the extension
 5. Publish new version of aggregator
 

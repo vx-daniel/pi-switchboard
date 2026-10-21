@@ -1,101 +1,356 @@
 /**
- * Server configuration loading.
+ * Server configuration loading for the proxy process.
  *
- * Priority: CLI args > env vars > JSON config file > defaults.
+ * @remarks
+ * Priority: CLI args > env vars > JSON config file > defaults. Not every setting has every
+ * source: agentic mode is env-only (`PI_SWITCHBOARD_AGENTIC`), and model exposure, public model
+ * IDs, custom models and provider prefixes come from the config file only.
  *
- * The JSON config file (~/.pi/agent/proxy-config.json) is the shared config
- * written by the pi extension's /proxy config panel. Env vars and CLI args
+ * The env vars were `PI_PROXY_*` before the rename to pi-switchboard (#65). The old names are not
+ * read; one that is still set is warned about, and an old auth token refuses to start
+ * ({@link UnusableProxyAuthError}), since ignoring it would quietly turn auth off.
+ *
+ * The JSON config file (`proxy-config.json` in `$PI_CODING_AGENT_DIR`, default `~/.pi/agent`) is
+ * the shared config written by the pi extension's /proxy config panel. Env vars and CLI args
  * override it for one-off adjustments or container use.
+ *
+ * @packageDocumentation
  */
 
-import type { ModelExposureMode, PublicModelIdMode } from "@proxy/config/schema";
-import { BYTES_PER_MB, loadConfigFromFile, MS_PER_SECOND } from "@proxy/config/schema";
+import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
+import type { ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
+import {
+  BYTES_PER_MB,
+  configFileAuthTokenInvalid,
+  loadConfigFromFile,
+  MS_PER_SECOND
+} from '@proxy/config/schema'
+import { proxyLogger } from '@proxy/logging'
 
-export interface ServerConfig {
-	/** Host to bind to. */
-	readonly host: string;
-	/** Port to listen on. */
-	readonly port: number;
-	/** Optional proxy auth bearer token. Undefined = no auth. */
-	readonly proxyAuthToken: string | undefined;
-	/** Whether agentic mode is enabled. */
-	readonly agenticEnabled: boolean;
-	/** Whether remote image URL fetching is enabled. */
-	readonly remoteImagesEnabled: boolean;
-	/** Maximum request body size in bytes. */
-	readonly maxBodySize: number;
-	/** Upstream request timeout in milliseconds. */
-	readonly upstreamTimeoutMs: number;
-	/** How public model IDs are generated. */
-	readonly publicModelIdMode: PublicModelIdMode;
-	/** Which models are exposed. */
-	readonly modelExposureMode: ModelExposureMode;
-	/** Canonical model IDs for "custom" exposure mode. */
-	readonly customModels: readonly string[];
-	/** Provider key -> custom public prefix label. */
-	readonly providerPrefixes: Readonly<Record<string, string>>;
-}
+/** Logger for config resolution (`config` category). */
+const configLogger = proxyLogger('config')
 
-function parsePositiveInt(raw: string | undefined, fallback: number): number {
-	if (raw === undefined) return fallback;
-	const n = Number.parseInt(raw, 10);
-	if (!Number.isFinite(n) || n <= 0) return fallback;
-	return n;
-}
+/** Where an override token came from: the flag wins over the env var. */
+type OverrideSource = '--auth-token' | 'PI_SWITCHBOARD_AUTH_TOKEN'
 
-export interface CliOverrides {
-	host?: string | undefined;
-	port?: number | undefined;
-	authToken?: string | undefined;
-	remoteImages?: boolean | undefined;
-	maxBodySizeMb?: number | undefined;
-	upstreamTimeoutSec?: number | undefined;
+/** A token set by flag or env var, which wins over the config file's. */
+interface TokenOverride {
+  readonly source: OverrideSource
+  readonly value: string
 }
 
 /**
- * Load config with priority: CLI args > env vars > JSON file > defaults.
+ * Why proxy auth is set but cannot be applied:
+ * - `file-token-not-string`: `authToken` in proxy-config.json is not a string (#82);
+ * - `empty-override`: `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN` is set but empty, a token
+ *   nothing can match (#99). The file's token is not used instead: that would ignore what was set;
+ * - `renamed-env-var`: the old `PI_PROXY_AUTH_TOKEN` is set and neither the flag nor
+ *   `PI_SWITCHBOARD_AUTH_TOKEN` is (#65). It is no longer read, so starting would drop the token.
+ */
+export type InvalidAuthCause =
+  | { readonly cause: 'file-token-not-string' }
+  | { readonly cause: 'empty-override'; readonly source: OverrideSource }
+  | { readonly cause: 'renamed-env-var' }
+
+/**
+ * Thrown by {@link loadConfig} when proxy auth is set but cannot be applied. The proxy refuses to
+ * start: repairing the setting to auth off would turn a requested token into an open proxy, and
+ * starting to refuse every request hides the mistake behind a running process.
+ */
+export class UnusableProxyAuthError extends Error {
+  /** Why the configured auth cannot be applied. */
+  readonly invalid: InvalidAuthCause
+
+  /**
+   * Creates the error.
+   *
+   * @param invalid - why the configured auth cannot be applied
+   */
+  constructor(invalid: InvalidAuthCause) {
+    super(`Proxy auth cannot be applied (${invalid.cause})`)
+    this.name = 'UnusableProxyAuthError'
+    this.invalid = invalid
+  }
+}
+
+/**
+ * Proxy auth, as configured:
+ * - `off`: every request is let through;
+ * - `token`: a request needs `Authorization: Bearer <token>`.
+ */
+export type ProxyAuth =
+  | { readonly kind: 'off' }
+  | { readonly kind: 'token'; readonly token: string }
+
+/**
+ * Picks the override token, if any: the flag's, else the env var's.
+ *
+ * @param flagToken - the `--auth-token` value, or `undefined` when not given
+ * @param envToken - `PI_SWITCHBOARD_AUTH_TOKEN`, or `undefined` when unset
+ * @returns the override with its source, or `undefined` when neither is set
+ */
+function tokenOverride(
+  flagToken: string | undefined,
+  envToken: string | undefined
+): TokenOverride | undefined {
+  if (flagToken !== undefined) return { source: '--auth-token', value: flagToken }
+  if (envToken !== undefined) return { source: 'PI_SWITCHBOARD_AUTH_TOKEN', value: envToken }
+  return undefined
+}
+
+/**
+ * Resolves proxy auth: a flag or env token wins, else the config file's token.
+ *
+ * @param override - the flag or env token, or `undefined` when neither is set
+ * @param fileToken - The config file's (normalized) `authToken`; '' means off.
+ * @returns `token` for a non-empty override or file token; else `off`.
+ * @throws UnusableProxyAuthError for an empty override (#99), or a file `authToken` that is set
+ *   but not a string (#82)
+ */
+function resolveProxyAuth(override: TokenOverride | undefined, fileToken: string): ProxyAuth {
+  if (override !== undefined) {
+    if (override.value === '') {
+      throw new UnusableProxyAuthError({ cause: 'empty-override', source: override.source })
+    }
+    return { kind: 'token', token: override.value }
+  }
+  if (configFileAuthTokenInvalid()) {
+    throw new UnusableProxyAuthError({ cause: 'file-token-not-string' })
+  }
+  return fileToken.length > 0 ? { kind: 'token', token: fileToken } : { kind: 'off' }
+}
+
+/** The proxy server's resolved configuration, from {@link loadConfig}. */
+export interface ServerConfig {
+  /** Host to bind to. */
+  readonly host: string
+  /** Port to listen on. */
+  readonly port: number
+  /** Whether and how requests must authenticate; see `ProxyAuth`. */
+  readonly proxyAuth: ProxyAuth
+  /** Whether agentic mode is enabled. */
+  readonly agenticEnabled: boolean
+  /** Whether remote image URL fetching is enabled. */
+  readonly remoteImagesEnabled: boolean
+  /** Whether the Swagger UI docs page is served. */
+  readonly docsUiEnabled: boolean
+  /** Maximum request body size in bytes. */
+  readonly maxBodySize: number
+  /**
+   * Milliseconds the upstream provider may send nothing before a call is aborted; not a cap on the
+   * call.
+   */
+  readonly upstreamTimeoutMs: number
+  /** How public model IDs are generated. */
+  readonly publicModelIdMode: PublicModelIdMode
+  /** Which models are exposed. */
+  readonly modelExposureMode: ModelExposureMode
+  /** Canonical model IDs for "custom" exposure mode. */
+  readonly customModels: readonly string[]
+  /** Provider key -> custom public prefix label. */
+  readonly providerPrefixes: Readonly<Record<string, string>>
+  /** Lowest log level written. */
+  readonly logLevel: LogLevel
+}
+
+/** The prefix of the proxy's env vars. */
+const ENV_PREFIX = 'PI_SWITCHBOARD_'
+/** The prefix they had before the rename to pi-switchboard (#65). */
+const OLD_ENV_PREFIX = 'PI_PROXY_'
+
+/**
+ * Every runtime env var the proxy and its extension read, by the name after the prefix: the one
+ * list the config debug line and the rename warnings both come from.
+ */
+const RUNTIME_ENV_SUFFIXES = [
+  'HOST',
+  'PORT',
+  'AUTH_TOKEN',
+  'REMOTE_IMAGES',
+  'DOCS_UI',
+  'MAX_BODY_SIZE',
+  'UPSTREAM_TIMEOUT_MS',
+  'AGENTIC',
+  'LOG_LEVEL',
+  'LOG_FORMAT',
+  'EXTENSION_LOG_FILE'
+] as const
+
+/**
+ * Warns about each old `PI_PROXY_*` env var that is still set: it is not read, so the setting it
+ * meant does not apply. Names only, never values (an old auth token is a secret).
+ */
+function warnAboutRenamedEnvVars(): void {
+  for (const suffix of RUNTIME_ENV_SUFFIXES) {
+    const oldName = `${OLD_ENV_PREFIX}${suffix}`
+    if (process.env[oldName] === undefined) continue
+    configLogger.warn(
+      '{oldName} is set but no longer read: it is {newName} since the rename (#65)',
+      {
+        oldName,
+        newName: `${ENV_PREFIX}${suffix}`
+      }
+    )
+  }
+}
+
+/**
+ * Resolves the log level from `PI_SWITCHBOARD_LOG_LEVEL`, warning when the variable names no
+ * level.
+ *
+ * @param raw - The `PI_SWITCHBOARD_LOG_LEVEL` value, or `undefined` when unset.
+ * @param fallback - The level from the config file.
+ * @returns `raw` when it names a LogTape level, otherwise `fallback`.
+ */
+function envLogLevel(raw: string | undefined, fallback: LogLevel): LogLevel {
+  if (raw === undefined) return fallback
+  if (isLogLevel(raw)) return raw
+  configLogger.warn(
+    'Ignoring PI_SWITCHBOARD_LOG_LEVEL={value}: not one of {levels}; using {fallback}',
+    {
+      value: raw,
+      levels: getLogLevels(),
+      fallback
+    }
+  )
+  return fallback
+}
+
+/**
+ * Parses a positive integer env var, warning and using `fallback` when it is not one.
+ *
+ * @param name - The env var's name, for the warning.
+ * @param raw - The env var's value, or `undefined` when unset.
+ * @param fallback - The value to use when `raw` is unset or invalid.
+ * @returns The parsed integer, or `fallback`.
+ */
+function parsePositiveInt(name: string, raw: string | undefined, fallback: number): number {
+  if (raw === undefined) return fallback
+  const parsed = Number.parseInt(raw, 10)
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    configLogger.warn('Ignoring {name}={value}: not a positive integer; using {fallback}', {
+      name,
+      value: raw,
+      fallback
+    })
+    return fallback
+  }
+  return parsed
+}
+
+/**
+ * Parses a boolean env var: only `true` is true.
+ *
+ * @remarks
+ * Any value other than `true` or `false` is warned about and treated as false, not as `fallback`.
+ *
+ * @param name - The env var's name, for the warning.
+ * @param raw - The env var's value, or `undefined` when unset.
+ * @param fallback - The value to use when `raw` is unset.
+ * @returns `fallback` when unset, else whether `raw` is `true`.
+ */
+function parseBoolean(name: string, raw: string | undefined, fallback: boolean): boolean {
+  if (raw === undefined) return fallback
+  if (raw !== 'true' && raw !== 'false') {
+    configLogger.warn('{name}={value} is not "true" or "false"; treating it as false', {
+      name,
+      value: raw
+    })
+  }
+  return raw === 'true'
+}
+
+/** Settings given as CLI flags; `undefined` means the flag was not given. */
+export interface CliOverrides {
+  host?: string | undefined
+  port?: number | undefined
+  authToken?: string | undefined
+  remoteImages?: boolean | undefined
+  docsUi?: boolean | undefined
+  maxBodySizeMb?: number | undefined
+  upstreamTimeoutSec?: number | undefined
+  logLevel?: LogLevel | undefined
+}
+
+/**
+ * Loads the server config with priority: CLI args > env vars > JSON file > defaults.
+ *
+ * @param cli - Settings from CLI flags; defaults to none.
+ * @returns The resolved config.
+ * @throws UnusableProxyAuthError when proxy auth is set but cannot be applied: the proxy must not
+ *   start, with auth off or otherwise.
  */
 export function loadConfig(cli: CliOverrides = {}): ServerConfig {
-	const file = loadConfigFromFile();
+  const file = loadConfigFromFile()
+  warnAboutRenamedEnvVars()
 
-	const host = cli.host ?? process.env.PI_PROXY_HOST ?? file.host;
-	const port = cli.port ?? parsePositiveInt(process.env.PI_PROXY_PORT, file.port);
+  configLogger.debug('Config overrides: CLI {cliOverrides}, env {envOverrides}', {
+    cliOverrides: Object.entries(cli)
+      .filter(([, value]) => value !== undefined)
+      .map(([name]) => name),
+    envOverrides: RUNTIME_ENV_SUFFIXES.map((suffix) => `${ENV_PREFIX}${suffix}`).filter(
+      (envVar) => process.env[envVar] !== undefined
+    )
+  })
 
-	// Auth token: CLI > env > file (empty string in file = disabled)
-	const fileToken = file.authToken.length > 0 ? file.authToken : undefined;
-	const proxyAuthToken = cli.authToken ?? process.env.PI_PROXY_AUTH_TOKEN ?? fileToken;
+  const host = cli.host ?? process.env.PI_SWITCHBOARD_HOST ?? file.host
+  const port =
+    cli.port ?? parsePositiveInt('PI_SWITCHBOARD_PORT', process.env.PI_SWITCHBOARD_PORT, file.port)
 
-	const envRemoteImages = process.env.PI_PROXY_REMOTE_IMAGES;
-	const remoteImagesEnabled =
-		cli.remoteImages ??
-		(envRemoteImages === undefined ? file.remoteImages : envRemoteImages === "true");
+  // Auth: CLI > env > file. A file token that is not a string, an override that is set but empty,
+  // or a token left in the old env var refuses to start rather than run with auth off (#82, #99,
+  // #65).
+  const override = tokenOverride(cli.authToken, process.env.PI_SWITCHBOARD_AUTH_TOKEN)
+  if (override === undefined && process.env[`${OLD_ENV_PREFIX}AUTH_TOKEN`] !== undefined) {
+    throw new UnusableProxyAuthError({ cause: 'renamed-env-var' })
+  }
+  const proxyAuth = resolveProxyAuth(override, file.authToken)
 
-	const maxBodySize =
-		cli.maxBodySizeMb === undefined
-			? parsePositiveInt(process.env.PI_PROXY_MAX_BODY_SIZE, file.maxBodySizeMb * BYTES_PER_MB)
-			: cli.maxBodySizeMb * BYTES_PER_MB;
+  const remoteImagesEnabled =
+    cli.remoteImages ??
+    parseBoolean(
+      'PI_SWITCHBOARD_REMOTE_IMAGES',
+      process.env.PI_SWITCHBOARD_REMOTE_IMAGES,
+      file.remoteImages
+    )
 
-	const upstreamTimeoutMs =
-		cli.upstreamTimeoutSec === undefined
-			? parsePositiveInt(
-					process.env.PI_PROXY_UPSTREAM_TIMEOUT_MS,
-					file.upstreamTimeoutSec * MS_PER_SECOND,
-				)
-			: cli.upstreamTimeoutSec * MS_PER_SECOND;
+  const docsUiEnabled =
+    cli.docsUi ??
+    parseBoolean('PI_SWITCHBOARD_DOCS_UI', process.env.PI_SWITCHBOARD_DOCS_UI, file.docsUi)
 
-	const agenticEnabled = process.env.PI_PROXY_AGENTIC === "true";
+  const maxBodySize =
+    cli.maxBodySizeMb === undefined
+      ? parsePositiveInt(
+          'PI_SWITCHBOARD_MAX_BODY_SIZE',
+          process.env.PI_SWITCHBOARD_MAX_BODY_SIZE,
+          file.maxBodySizeMb * BYTES_PER_MB
+        )
+      : cli.maxBodySizeMb * BYTES_PER_MB
 
-	return {
-		host,
-		port,
-		proxyAuthToken,
-		agenticEnabled,
-		remoteImagesEnabled,
-		maxBodySize,
-		upstreamTimeoutMs,
-		publicModelIdMode: file.publicModelIdMode,
-		modelExposureMode: file.modelExposureMode,
-		customModels: file.customModels,
-		providerPrefixes: file.providerPrefixes,
-	};
+  const upstreamTimeoutMs =
+    cli.upstreamTimeoutSec === undefined
+      ? parsePositiveInt(
+          'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
+          process.env.PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS,
+          file.upstreamTimeoutSec * MS_PER_SECOND
+        )
+      : cli.upstreamTimeoutSec * MS_PER_SECOND
+
+  const agenticEnabled = process.env.PI_SWITCHBOARD_AGENTIC === 'true'
+
+  return {
+    host,
+    port,
+    proxyAuth,
+    agenticEnabled,
+    remoteImagesEnabled,
+    docsUiEnabled,
+    maxBodySize,
+    upstreamTimeoutMs,
+    publicModelIdMode: file.publicModelIdMode,
+    modelExposureMode: file.modelExposureMode,
+    customModels: file.customModels,
+    providerPrefixes: file.providerPrefixes,
+    logLevel: cli.logLevel ?? envLogLevel(process.env.PI_SWITCHBOARD_LOG_LEVEL, file.logLevel)
+  }
 }

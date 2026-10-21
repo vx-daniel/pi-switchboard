@@ -27,7 +27,7 @@ Deliver the minimum production-capable proxy.
 - [x] Implement request IDs, structured logs, and disconnect cancellation
 - [x] Implement OpenAI-style errors
 - [x] Add unit and integration tests for the stable contract
-- [x] Align strict tooling with pi-acp (oxlintrc, biome, lefthook, commitlint, Zod v4)
+- [x] Align strict tooling with pi-acp (oxlintrc, biome, lefthook, commitlint, Zod v4); since replaced by Vite+, see Fork maintenance
 
 ## Phase 2 — Tools and richer compatibility [DONE]
 
@@ -36,11 +36,11 @@ Add the supported compatibility surface deliberately.
 - [x] Support OpenAI function tools subset (JSON Schema -> TypeBox)
 - [x] Support assistant `tool_calls` and `tool` role messages
 - [x] Support `stream_options.include_usage`
-- [x] Support base64 image inputs (remote URLs rejected by default)
+- [x] Support base64 image inputs
 - [x] Support `reasoning_effort` (mapped to pi ThinkingLevel)
 - [x] Add passthrough parameters: `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`
 - [x] Add JSON Schema conversion and tool acceptance/rejection tests
-- [ ] Remote image URL support (deferred — requires SSRF protections)
+- [x] Remote image URL support, behind the remote-images setting (off by default) with SSRF protections ([#109](https://github.com/vx-daniel/pi-switchboard/issues/109))
 
 ## Phase 3 — Hardening and packaging [DONE]
 
@@ -49,10 +49,10 @@ Prepare the stable proxy for release.
 - [x] Add request size limits (50 MB default, configurable)
 - [x] Add upstream timeout defaults (120s, configurable)
 - [x] Add graceful shutdown (SIGTERM/SIGINT with 10s drain)
-- [x] Add per-request upstream API key override (`X-Pi-Upstream-Api-Key`)
+- [x] Add per-request upstream API key override (`X-Switchboard-Upstream-Api-Key`)
 - [x] Add image MIME type and payload size validation
 - [x] Add CI gates (GitHub Actions: typecheck, lint, test, build, package)
-- [x] Package for npm release (`@victor-software-house/pi-openai-proxy`)
+- [x] Package for npm release (`@victor-software-house/pi-openai-proxy` upstream; `@vx-daniel/pi-switchboard` here, since the rename below)
 - [ ] Run compatibility smoke tests with target clients (Open WebUI, Continue, Aider)
 
 ## Phase 3A — Model exposure and identifier controls [DONE]
@@ -106,7 +106,7 @@ Research-backed decisions on deferred compatibility and resilience items. Analys
 - [x] Document resilience architecture as intentional (no concurrency limiter, no circuit breaker, no retry)
 - [x] Add structured `upstream_overload` warn-level logging for 429 and 503 responses
 - [x] Add API-aware payload translation for Anthropic (tool_choice, stop, parallel_tool_calls, user, top_p)
-- [x] Add nested generationConfig patching for Google (topP, stopSequences, seed, frequencyPenalty, presencePenalty, tool_choice)
+- [x] Add generation-config patching for Google (topP, stopSequences, seed, frequencyPenalty, presencePenalty, tool_choice); written flat on `config` since #110, where `@google/genai` reads them
 - [x] Add restricted passthrough for Codex Responses API (tool_choice + parallel_tool_calls only)
 - [x] Verified with real providers: Claude, Gemini, gpt-5.4-mini
 - [ ] Run compatibility smoke tests with target clients (Open WebUI, Continue, Aider)
@@ -116,62 +116,54 @@ Research-backed decisions on deferred compatibility and resilience items. Analys
 - [x] Add a `chat_request` log line naming the requested and the resolved model of each chat request
 - [x] Consolidate tooling on Vite+ (Oxfmt, Oxlint + tsgolint, Vitest, tsdown, `vp` hooks) and run on Node instead of Bun
 - [x] Adopt the Viaanix lint rules (copied into `vite.config.ts`) with zero warnings
+- [x] Rename the package to `@vx-daniel/pi-openai-proxy` (GitHub Packages scope must match the repo owner)
 
-## Phase 4 — Monorepo and proper CLI
+## Rename to pi-switchboard [DONE]
 
-Split into two packages in a pnpm/turborepo monorepo (reference: pi-maestro structure).
+- [x] Leave the fork network; rename the repo to `vx-daniel/pi-switchboard` (#65)
+- [x] Rename the package, bin, log categories, env vars (`PI_SWITCHBOARD_*`) and the upstream key header (`X-Switchboard-Upstream-Api-Key`), with no aliases; old names warned about or rejected
+- [x] Credit the original project (README "Attribution", LICENSE)
+- [x] Restart versions at 0.1.0 (`pi-switchboard-v` tags); npm publishing waits for #59
 
-### Package split
+The phases above are done and kept as history. The phases below are the plan since the rename
+(constitution 3.0.0, "Scope"): stay OpenAI-compatible, grow toward more of OpenAI's API and toward
+routing across pi's logins. `TODO.md` uses the same numbering.
 
-```text
-packages/
-├── proxy/           pi-proxy -- standalone CLI + HTTP server + config schema
-└── pi-extension/    @pi-openai-proxy/pi-extension -- pi package (depends on pi-proxy)
-```
+## Phase 4 — Distribution
 
-- `pi-proxy` is the primary deliverable: proper CLI binary with args, help, shell completions
-- Config schema (types, defaults, normalization, JSON I/O) lives in `pi-proxy` and is exported via `pi-proxy/config`
-- `@pi-openai-proxy/pi-extension` imports config from `pi-proxy/config`, spawns `pi-proxy` binary
-- People who only want the proxy install `pi-proxy`. Pi users install the extension.
+Get 0.1.0 into people's hands under the new name.
 
-### CLI (`pi-proxy`)
+- [ ] Publish to npm so `pi install npm:@vx-daniel/pi-switchboard` works; turn `npmPublish` back on (#59)
+- [x] Docker image built from this repo and published on release (#60); the first is published
+      with the next release
+- [ ] Standalone binary with an opt-in TUI for logs, status and accounts (#61)
 
-Proper CLI with a framework (citty or cleye) — the current binary has no argument parsing.
+## Phase 5 — Routing across pi's logins
 
-```bash
-pi-proxy                          Start the proxy server (foreground)
-pi-proxy --port 8080              Override port
-pi-proxy --host 0.0.0.0           Override bind address
-pi-proxy --auth-token <token>     Enable proxy auth
-pi-proxy --config                 Show effective config (JSON file + env overrides)
-pi-proxy --help                   Full help with all options
-pi-proxy --version                Version
-pi-proxy completions              Generate shell completions (bash/zsh/fish)
-```
+What the name promises, under constitution principle VI (explicit, visible, exposure-bound).
 
-CLI args > env vars > JSON config file (`~/.pi/agent/proxy-config.json`) > defaults.
+- [ ] Aliases: virtual model names (#66)
+- [ ] Fallback chains for aliases (#67)
+- [ ] Cooldowns after rate limits; stop the SDK sleeping on retries (#68)
+- [ ] Quota awareness from provider rate-limit headers (#69)
+- [ ] Usage and cost by route (#70)
 
-### Config SSOT
+## Phase 6 — More of OpenAI's API
 
-- [ ] Config schema defined once in `pi-proxy` (types, defaults, normalize, JSON I/O)
-- [ ] Server reads JSON config as defaults, env vars override, CLI args override both
-- [ ] Extension imports schema from `pi-proxy/config` — no duplication
-- [ ] JSON config file is the shared persistence layer written by both CLI and extension
+Routes OpenAI defines that pi can back, each experimental first and then promoted to PLAN's
+"Stable surface" once it meets principle I.
 
-### Workspace setup
+- [ ] Responses API, stateless (`POST /v1/responses`, #140)
+- [x] `prompt_cache_key` → pi's `sessionId` (#39)
 
-- [ ] pnpm workspace for package management
-- [ ] Turborepo for task orchestration
-- [ ] Shared tsconfig.base.json and root `vite.config.ts` lint/fmt blocks
-- [ ] Per-package build, test, typecheck tasks
-- [ ] CI workflow updated for monorepo
+## Open decisions
 
-## Phase 5 — Experimental agentic mode
+- [ ] Proxy auth and upstream failure contract, 5 points (#128); point 5 done (#147)
 
-Ship agentic behavior only after the stable proxy is solid.
+## Later, not planned
 
-- [ ] Design a separate experimental contract
-- [ ] Bridge `AgentSession` events to SSE
-- [ ] Add session persistence and resume
-- [ ] Enforce strict cwd and extension policy
-- [ ] Decide whether to use a separate endpoint
+- Experimental agentic mode: a separate opt-in endpoint (`/v1/switchboard/agent/…`), never under an
+  OpenAI route. PLAN "Agentic mode" keeps the security requirements; `PI_SWITCHBOARD_AGENTIC` is
+  read but does nothing yet.
+- Splitting into packages (the March 2026 plan, `docs/archive/monorepo-plan.md`): dropped for now.
+  One package serves the CLI, the library entry points and the pi extension.

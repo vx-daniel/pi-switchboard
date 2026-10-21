@@ -1,20 +1,39 @@
 /**
- * Typed environment variables for the proxy.
- * Allows dot-notation access without noPropertyAccessFromIndexSignature errors.
+ * Typed environment variables read by the proxy, its pi extension, its scripts and its test config.
+ *
+ * @remarks
+ * Declaring them allows dot-notation access under `noPropertyAccessFromIndexSignature`.
+ *
+ * @packageDocumentation
  */
 
 declare namespace NodeJS {
-	interface ProcessEnv {
-		HOME?: string | undefined;
-		XDG_CONFIG_HOME?: string | undefined;
-		CUSTOM_DATA_DIR?: string | undefined;
-		PI_CODING_AGENT_DIR?: string | undefined;
-		PI_PROXY_HOST?: string | undefined;
-		PI_PROXY_PORT?: string | undefined;
-		PI_PROXY_AUTH_TOKEN?: string | undefined;
-		PI_PROXY_AGENTIC?: string | undefined;
-		PI_PROXY_REMOTE_IMAGES?: string | undefined;
-		PI_PROXY_MAX_BODY_SIZE?: string | undefined;
-		PI_PROXY_UPSTREAM_TIMEOUT_MS?: string | undefined;
-	}
+  interface ProcessEnv {
+    HOME?: string | undefined
+    XDG_CONFIG_HOME?: string | undefined
+    CUSTOM_DATA_DIR?: string | undefined
+    PI_CODING_AGENT_DIR?: string | undefined
+    PI_SWITCHBOARD_HOST?: string | undefined
+    PI_SWITCHBOARD_PORT?: string | undefined
+    PI_SWITCHBOARD_AUTH_TOKEN?: string | undefined
+    PI_SWITCHBOARD_AGENTIC?: string | undefined
+    PI_SWITCHBOARD_REMOTE_IMAGES?: string | undefined
+    PI_SWITCHBOARD_DOCS_UI?: string | undefined
+    PI_SWITCHBOARD_MAX_BODY_SIZE?: string | undefined
+    PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS?: string | undefined
+    PI_SWITCHBOARD_LOG_LEVEL?: string | undefined
+    PI_SWITCHBOARD_LOG_FORMAT?: string | undefined
+    /** Opt-in: a file path the pi extension writes its logs to. Unset or empty: no log. */
+    PI_SWITCHBOARD_EXTENSION_LOG_FILE?: string | undefined
+    /** `1` turns on the `live` test project (test/conformance); set by `pnpm run test:live`. */
+    PI_SWITCHBOARD_LIVE_TESTS?: string | undefined
+    /** scripts/record-fixtures.ts: the pi agent dir holding the login used for recording. */
+    PI_SWITCHBOARD_RECORD_AGENT_DIR?: string | undefined
+    /** scripts/record-fixtures.ts: where recordings are saved (default test/fixtures/recordings). */
+    PI_SWITCHBOARD_RECORD_OUT_DIR?: string | undefined
+    /** scripts/record-fixtures.ts: where the recorder forwards to (default api.anthropic.com). */
+    PI_SWITCHBOARD_RECORD_UPSTREAM?: string | undefined
+    /** Set by the package manager running a script; read by `scripts/gate.ts`. */
+    npm_config_user_agent?: string | undefined
+  }
 }

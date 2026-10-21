@@ -1,120 +1,188 @@
-import type { ServerConfig } from "@proxy/config/env";
-import { createApp } from "@proxy/server/app";
-import type { ExposureConfigReader } from "@proxy/server/routes";
-import { isRecord } from "@proxy/utils/guards";
+/**
+ * Shared test helpers: type guards for the proxy's OpenAI-shaped response bodies, and a proxy app
+ * built from a fixed config instead of the user's config file.
+ *
+ * @packageDocumentation
+ */
+
+import type { ServerConfig } from '@proxy/config/env'
+import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
+import { createApp } from '@proxy/server/app'
+import type { ExposureConfigReader } from '@proxy/server/routes'
+import { isRecord } from '@proxy/utils/guards'
 
 // ---------------------------------------------------------------------------
-// OpenAI model list response shape (used across integration tests)
+// OpenAI response body shapes and their type guards (used across unit and integration tests)
 // ---------------------------------------------------------------------------
 
+/** One model object, as `GET /v1/models` lists it and `GET /v1/models/:id` returns it. */
 interface OpenAIModelObject {
-	readonly id: string;
-	readonly object: string;
-	readonly created: number;
-	readonly owned_by: string;
+  readonly id: string
+  readonly object: string
+  readonly created: number
+  readonly owned_by: string
 }
 
+/** The body of `GET /v1/models`. */
 export interface OpenAIModelListBody {
-	readonly object: string;
-	readonly data: readonly OpenAIModelObject[];
+  readonly object: string
+  readonly data: readonly OpenAIModelObject[]
 }
 
+/** An OpenAI error body. */
 export interface OpenAIErrorBody {
-	readonly error: {
-		readonly message: string;
-		readonly type: string;
-		readonly code: string | null;
-	};
+  readonly error: {
+    readonly message: string
+    readonly type: string
+    readonly code: string | null
+  }
 }
 
 /**
- * Narrow an unknown JSON body to an OpenAI model list shape.
+ * Narrows an unknown JSON body to an OpenAI model list shape.
+ *
+ * @remarks
+ * Checks `object: 'list'` and that `data` is an array; the array's items are not checked.
+ *
+ * @param value - the parsed response body
+ * @returns whether `value` is a model list
  */
 export function isModelListBody(value: unknown): value is OpenAIModelListBody {
-	if (!isRecord(value)) return false;
-	if (!Array.isArray(value["data"])) return false;
-	return value["object"] === "list";
+  if (!isRecord(value)) return false
+  if (!Array.isArray(value['data'])) return false
+  return value['object'] === 'list'
 }
 
 /**
- * Narrow an unknown JSON body to an OpenAI error shape.
+ * Narrows an unknown JSON body to an OpenAI error shape.
+ *
+ * @remarks
+ * Checks that `error.message` is a string and `error.code` is a string or `null`; `error.type` is
+ * not checked.
+ *
+ * @param value - the parsed response body
+ * @returns whether `value` is an error body
  */
 export function isErrorBody(value: unknown): value is OpenAIErrorBody {
-	if (!isRecord(value)) return false;
-	const err = value["error"];
-	if (!isRecord(err)) return false;
-	if (typeof err["message"] !== "string") return false;
-	// code can be string or null in OpenAI error responses
-	const code = err["code"];
-	return typeof code === "string" || code === null;
+  if (!isRecord(value)) return false
+  const err = value['error']
+  if (!isRecord(err)) return false
+  if (typeof err['message'] !== 'string') return false
+  // code can be string or null in OpenAI error responses
+  const code = err['code']
+  return typeof code === 'string' || code === null
 }
 
 /**
- * Narrow to an OpenAI model object (single model detail).
+ * Narrows an unknown JSON body to an OpenAI model object (single model detail).
+ *
+ * @param value - the parsed response body
+ * @returns whether `value` has a string `id` and `object: 'model'`
  */
 export function isModelObject(value: unknown): value is OpenAIModelObject {
-	if (!isRecord(value)) return false;
-	return typeof value["id"] === "string" && value["object"] === "model";
+  if (!isRecord(value)) return false
+  return typeof value['id'] === 'string' && value['object'] === 'model'
 }
 
-/**
- * Narrow to an error-like response with at least `error.message`.
- * Looser than `isErrorBody` -- used when only `.message` is checked.
- */
+/** An error-like body with at least `error.message`; any other fields of `error` are `unknown`. */
 export interface OpenAIErrorLike {
-	readonly error: {
-		readonly message: string;
-		readonly [key: string]: unknown;
-	};
-}
-
-export function isErrorLike(value: unknown): value is OpenAIErrorLike {
-	if (!isRecord(value)) return false;
-	const err = value["error"];
-	if (!isRecord(err)) return false;
-	return typeof err["message"] === "string";
+  readonly error: {
+    readonly message: string
+    readonly [key: string]: unknown
+  }
 }
 
 /**
- * Parse JSON response body for test assertions.
- * Returns `unknown` -- callers must narrow with type guards.
+ * Narrows an unknown JSON body to an error-like body with at least a string `error.message`.
+ *
+ * @remarks
+ * Looser than {@link isErrorBody}: `error.code` may be missing, so it fits bodies whose `code`
+ * is not checked, and gives typed access to extra fields such as `error['param']`.
+ *
+ * @param value - the parsed response body
+ * @returns whether `value` has a string `error.message`
  */
-export async function jsonBody(res: Response): Promise<unknown> {
-	return res.json();
+export function isErrorLike(value: unknown): value is OpenAIErrorLike {
+  if (!isRecord(value)) return false
+  const err = value['error']
+  if (!isRecord(err)) return false
+  return typeof err['message'] === 'string'
 }
 
 /**
- * Build a test-safe ServerConfig that does not read from the user's config file.
- * Auth is disabled, defaults are used for all settings.
+ * Parses a response body as JSON for test assertions.
+ *
+ * @param response - the response to read
+ * @returns the parsed body, as `unknown`: narrow it with a type guard
+ * @throws SyntaxError when the body is not JSON
+ */
+export async function jsonBody(response: Response): Promise<unknown> {
+  return response.json()
+}
+
+/**
+ * Builds a test-safe {@link ServerConfig} that does not read the user's config file or
+ * environment.
+ *
+ * @remarks
+ * Auth is off and agentic mode is disabled; every other setting is the default from
+ * `DEFAULT_CONFIG` (`src/config/schema.ts`).
+ *
+ * @returns the config
  */
 export function testConfig(): ServerConfig {
-	return {
-		host: "127.0.0.1",
-		port: 4141,
-		proxyAuthToken: undefined,
-		agenticEnabled: false,
-		remoteImagesEnabled: false,
-		maxBodySize: 52428800,
-		upstreamTimeoutMs: 120000,
-		publicModelIdMode: "collision-prefixed",
-		modelExposureMode: "scoped",
-		customModels: [],
-		providerPrefixes: {},
-	};
+  return {
+    host: '127.0.0.1',
+    port: 4141,
+    proxyAuth: { kind: 'off' },
+    agenticEnabled: false,
+    remoteImagesEnabled: false,
+    docsUiEnabled: false,
+    maxBodySize: 52428800,
+    upstreamTimeoutMs: 120000,
+    publicModelIdMode: 'collision-prefixed',
+    modelExposureMode: 'scoped',
+    customModels: [],
+    providerPrefixes: {},
+    logLevel: 'info'
+  }
 }
 
 /**
- * Create a test app that uses the given ServerConfig for both server
- * settings and exposure config. Never reads from the user's config file.
+ * Creates a proxy app that uses one config for both server settings and model exposure. Never
+ * reads the user's config file or pi's `enabledModels` setting.
+ *
+ * @param config - the config to serve with; {@link testConfig} when omitted
+ * @param remoteImageFetch - how remote images are fetched when the config enables them; the
+ *   strict production policy when omitted
+ * @returns the Hono app; drive it with `app.request(…)`
  */
-export function testApp(config?: ServerConfig): ReturnType<typeof createApp> {
-	const c = config ?? testConfig();
-	const reader: ExposureConfigReader = () => ({
-		publicModelIdMode: c.publicModelIdMode,
-		modelExposureMode: c.modelExposureMode,
-		enabledModels: undefined,
-		customModels: c.customModels,
-		providerPrefixes: c.providerPrefixes,
-	});
-	return createApp(c, reader);
+export function testApp(
+  config?: ServerConfig,
+  remoteImageFetch?: RemoteImageFetchOptions
+): ReturnType<typeof createApp> {
+  const serverConfig = config ?? testConfig()
+  const reader: ExposureConfigReader = () => ({
+    publicModelIdMode: serverConfig.publicModelIdMode,
+    modelExposureMode: serverConfig.modelExposureMode,
+    enabledModels: undefined,
+    customModels: serverConfig.customModels,
+    providerPrefixes: serverConfig.providerPrefixes
+  })
+  return createApp(serverConfig, reader, remoteImageFetch)
+}
+
+/**
+ * Returns `value`, or fails the test when it is missing. Use instead of
+ * `if (value === undefined) return`, which passes a test that checked nothing.
+ *
+ * @typeParam T - the value's type when present
+ * @param value - the value to check
+ * @param what - what the value is, for the error message
+ * @returns `value`, when it is not `undefined`
+ * @throws Error when `value` is `undefined`
+ */
+export function present<T>(value: T | undefined, what: string): T {
+  if (value === undefined) throw new Error(`expected ${what}, got nothing`)
+  return value
 }

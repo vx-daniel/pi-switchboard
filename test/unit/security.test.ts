@@ -1,140 +1,116 @@
 /**
- * Security tests for image URL handling.
+ * Security tests for image URL handling with the default config: remote URLs are blocked (the
+ * `remoteImages` setting is off; `test/integration/remote-images.test.ts` covers it on), oversized
+ * payloads are rejected, and only supported MIME types are accepted.
  *
- * Validates that remote image URLs are blocked, oversized payloads are
- * rejected, and only supported MIME types are accepted.
- * No credentials needed.
+ * The model is served by a local mock provider (`startMockProvider`): the rejected requests are
+ * refused before any upstream call, the accepted one reaches only the mock, and no login is needed.
  */
 
-import { beforeAll, describe, expect, test } from "vite-plus/test";
-import { getAvailableModels, initRegistry } from "@proxy/pi/registry";
-import { isErrorLike, jsonBody, testApp } from "../helpers";
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
-let app: ReturnType<typeof testApp>;
-let modelId: string | undefined;
+import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import {
+  finishChunk,
+  type MockProvider,
+  sse,
+  startMockProvider,
+  textChunks
+} from '../fixtures/mock-provider'
+import { isErrorLike, jsonBody, testApp } from '../helpers'
+
+const MODEL_ID = 'security-fixture/vision-model'
+/** A base64 payload of 21 MiB of text, over the 20 MiB limit on an image's base64 data. */
+const OVERSIZED_BASE64 = 'A'.repeat(21 * 1024 * 1024)
+
+let mock: MockProvider
+let agentDir: FixtureAgentDir
 
 beforeAll(async () => {
-	await initRegistry();
-	app = testApp();
-	const models = getAvailableModels();
-	const first = models[0];
-	if (first !== undefined) {
-		modelId = `${first.provider}/${first.id}`;
-	}
-});
+  mock = await startMockProvider({
+    'vision-model': sse([...textChunks('A small PNG.'), finishChunk('stop')])
+  })
+  agentDir = await loadFixtureAgentDir({
+    modelsJson: {
+      providers: {
+        'security-fixture': {
+          ...mock.provider(),
+          models: [{ id: 'vision-model', input: ['text', 'image'] }]
+        }
+      }
+    }
+  })
+})
 
-function chatRequestWithImage(imageUrl: string): string {
-	return JSON.stringify({
-		model: modelId ?? "unavailable/model",
-		messages: [
-			{
-				role: "user",
-				content: [
-					{ type: "text", text: "What is this?" },
-					{ type: "image_url", image_url: { url: imageUrl } },
-				],
-			},
-		],
-	});
+afterAll(async () => {
+  vi.unstubAllEnvs()
+  await mock.close()
+  agentDir.remove()
+})
+
+/**
+ * Sends a chat completion to the fixture model with one text part and one image part.
+ *
+ * @param imageUrl - the `image_url.url` to send: a remote URL or a data URI
+ * @returns the proxy's response
+ */
+async function sendImage(imageUrl: string): Promise<Response> {
+  return testApp().request('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: MODEL_ID,
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: 'What is this?' },
+            { type: 'image_url', image_url: { url: imageUrl } }
+          ]
+        }
+      ]
+    })
+  })
 }
 
-describe("image URL security", () => {
-	test("rejects remote HTTP URL", async () => {
-		if (modelId === undefined) return;
-		const res = await app.request("/v1/chat/completions", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: chatRequestWithImage("http://example.com/image.png"),
-		});
-		expect(res.status).toBe(400);
-		const body = await jsonBody(res);
-		expect(isErrorLike(body)).toBe(true);
-		if (!isErrorLike(body)) return;
-		expect(body.error.message).toContain("Remote image URLs are not supported");
-	});
+describe('image URL security', () => {
+  // Catches an image the proxy must not fetch or forward getting through: a remote URL (which the
+  // proxy would have to fetch, server-side), a payload over the size limit, a type the providers do
+  // not take, or a malformed data URI.
+  test.each([
+    ['a remote HTTP URL', 'http://example.com/image.png', 'Remote image URLs are disabled'],
+    ['a remote HTTPS URL', 'https://example.com/image.png', 'Remote image URLs are disabled'],
+    ['a localhost URL', 'http://localhost:8080/image.png', 'Remote image URLs are disabled'],
+    ['a private-range URL', 'http://192.168.1.1/image.png', 'Remote image URLs are disabled'],
+    [
+      'an oversized base64 payload',
+      `data:image/png;base64,${OVERSIZED_BASE64}`,
+      'base64 characters'
+    ],
+    [
+      'an unsupported MIME type',
+      'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+      'Unsupported image MIME type'
+    ],
+    ['a malformed data URI', 'data:not-valid', 'Invalid base64 data URI']
+  ])('rejects %s with 400', async (_case, imageUrl, reason) => {
+    const upstreamCallsBefore = mock.requests.length
+    const response = await sendImage(imageUrl)
+    const body = await jsonBody(response)
 
-	test("rejects remote HTTPS URL", async () => {
-		if (modelId === undefined) return;
-		const res = await app.request("/v1/chat/completions", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: chatRequestWithImage("https://example.com/photo.jpg"),
-		});
-		expect(res.status).toBe(400);
-		const body = await jsonBody(res);
-		expect(isErrorLike(body)).toBe(true);
-		if (!isErrorLike(body)) return;
-		expect(body.error.message).toContain("Remote image URLs are not supported");
-	});
+    expect(response.status).toBe(400)
+    expect(isErrorLike(body) ? body.error.message : body).toEqual(expect.stringContaining(reason))
+    // Refused before the provider was asked anything.
+    expect(mock.requests.length).toBe(upstreamCallsBefore)
+  })
 
-	test("rejects localhost URL", async () => {
-		if (modelId === undefined) return;
-		const res = await app.request("/v1/chat/completions", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: chatRequestWithImage("http://localhost:8080/secret.png"),
-		});
-		expect(res.status).toBe(400);
-		const body = await jsonBody(res);
-		expect(isErrorLike(body)).toBe(true);
-		if (!isErrorLike(body)) return;
-		expect(body.error.message).toContain("Remote image URLs are not supported");
-	});
+  // Catches the cases above passing because the model, not the image, was refused: the same
+  // request with a valid image is answered, and the image reaches the provider.
+  test('accepts a valid base64 PNG and forwards it, so the rejections above are about the image', async () => {
+    const png = 'data:image/png;base64,iVBORw0KGgo='
+    const response = await sendImage(png)
 
-	test("rejects private-range IP URL", async () => {
-		if (modelId === undefined) return;
-		const res = await app.request("/v1/chat/completions", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: chatRequestWithImage("http://192.168.1.1/image.png"),
-		});
-		expect(res.status).toBe(400);
-		const body = await jsonBody(res);
-		expect(isErrorLike(body)).toBe(true);
-		if (!isErrorLike(body)) return;
-		expect(body.error.message).toContain("Remote image URLs are not supported");
-	});
-
-	test("rejects oversized base64 payload", async () => {
-		if (modelId === undefined) return;
-		const oversizedData = "A".repeat(21 * 1024 * 1024);
-		const res = await app.request("/v1/chat/completions", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: chatRequestWithImage(`data:image/png;base64,${oversizedData}`),
-		});
-		expect(res.status).toBe(400);
-		const body = await jsonBody(res);
-		expect(isErrorLike(body)).toBe(true);
-		if (!isErrorLike(body)) return;
-		expect(body.error.message).toContain("exceeds maximum size");
-	});
-
-	test("rejects unsupported MIME type", async () => {
-		if (modelId === undefined) return;
-		const res = await app.request("/v1/chat/completions", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: chatRequestWithImage("data:image/svg+xml;base64,PHN2Zz48L3N2Zz4="),
-		});
-		expect(res.status).toBe(400);
-		const body = await jsonBody(res);
-		expect(isErrorLike(body)).toBe(true);
-		if (!isErrorLike(body)) return;
-		expect(body.error.message).toContain("Unsupported image MIME type");
-	});
-
-	test("rejects invalid data URI format", async () => {
-		if (modelId === undefined) return;
-		const res = await app.request("/v1/chat/completions", {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: chatRequestWithImage("data:not-valid"),
-		});
-		expect(res.status).toBe(400);
-		const body = await jsonBody(res);
-		expect(isErrorLike(body)).toBe(true);
-		if (!isErrorLike(body)) return;
-		expect(body.error.message).toContain("Invalid base64 data URI");
-	});
-});
+    expect(response.status).toBe(200)
+    expect(JSON.stringify(mock.requests.at(-1)?.body)).toContain(png)
+  })
+})

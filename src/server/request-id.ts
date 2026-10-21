@@ -1,13 +1,22 @@
 /**
- * Per-request proxy request ID generation.
+ * Per-request proxy request IDs.
  *
- * Format: "piproxy-{random}" to be easily distinguishable from upstream IDs.
+ * @remarks
+ * Format: `piproxy-<24 hex chars>`, easy to tell apart from upstream IDs.
+ *
+ * @packageDocumentation
  */
 
-import { randomBytes } from "node:crypto";
+import { randomBytes } from 'node:crypto'
 
-const REQUEST_ID_BYTES = 12;
+/** Random bytes in a request ID; hex-encoded, they give 24 characters. */
+const REQUEST_ID_BYTES = 12
 
+/**
+ * Generates a new proxy request ID.
+ *
+ * @returns `piproxy-` followed by 24 random hex characters
+ */
 export function generateRequestId(): string {
-	return `piproxy-${randomBytes(REQUEST_ID_BYTES).toString("hex")}`;
+  return `piproxy-${randomBytes(REQUEST_ID_BYTES).toString('hex')}`
 }

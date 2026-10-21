@@ -1,142 +1,150 @@
 /**
- * Integration tests for GET /v1/models and GET /v1/models/:model
+ * Integration tests for GET /v1/models and GET /v1/models/:model, through pi's real model runtime
+ * and the model-exposure engine, against fixture providers:
  *
- * These tests use pi's real ModelRegistry and the model-exposure engine.
- * Only available (auth-configured) models are exposed through the API.
+ * - `alpha` and `beta` both have `shared-model`, so in the default `collision-prefixed` mode every
+ *   model of both is listed with its provider prefix.
+ * - `gamma` has `org/model-x`, a model ID with a slash (as on OpenRouter), listed bare because it
+ *   collides with nothing. Its canonical ID, `gamma/org/model-x`, has two slashes, which is why
+ *   `GET /v1/models/{model}` must take URL-encoded IDs (AGENTS.md).
  */
 
-import { beforeAll, describe, expect, test } from "vite-plus/test";
-import { getAvailableModels, initRegistry } from "@proxy/pi/registry";
-import { isErrorBody, isModelListBody, isModelObject, jsonBody, testApp } from "../helpers";
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
-let app: ReturnType<typeof testApp>;
+import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
+import { isErrorBody, isModelListBody, isModelObject, jsonBody, present, testApp } from '../helpers'
+
+let agentDir: FixtureAgentDir
 
 beforeAll(async () => {
-	await initRegistry();
-	app = testApp();
-});
+  agentDir = await loadFixtureAgentDir({
+    modelsJson: {
+      providers: {
+        alpha: offlineProvider('shared-model', 'alpha-only'),
+        beta: offlineProvider('shared-model'),
+        gamma: offlineProvider('org/model-x')
+      }
+    }
+  })
+})
 
-describe("GET /v1/models", () => {
-	test("returns OpenAI-compatible list shape", async () => {
-		const res = await app.request("/v1/models");
-		expect(res.status).toBe(200);
+afterAll(() => {
+  vi.unstubAllEnvs()
+  agentDir.remove()
+})
 
-		const body = await jsonBody(res);
-		expect(isModelListBody(body)).toBe(true);
-		if (!isModelListBody(body)) return;
+/**
+ * Sends a GET to the test app and reads the JSON body.
+ *
+ * @param path - the request path, query string included
+ * @returns the response status and parsed JSON body
+ */
+async function getJson(path: string): Promise<{ status: number; body: unknown }> {
+  const response = await testApp().request(path)
+  return { status: response.status, body: await jsonBody(response) }
+}
 
-		expect(body.object).toBe("list");
-		expect(body.data).toBeInstanceOf(Array);
+describe('GET /v1/models', () => {
+  // Catches a model missing from the list, a collision left unprefixed, or a prefix applied to a
+  // provider that collides with nothing.
+  test('lists every exposed model under its public ID, in the OpenAI list shape', async () => {
+    const { status, body } = await getJson('/v1/models')
 
-		for (const first of body.data.slice(0, 1)) {
-			expect(first.object).toBe("model");
-			expect(first.owned_by).toBeDefined();
-			expect(first.created).toBeTypeOf("number");
-		}
-	});
+    expect(status).toBe(200)
+    expect(isModelListBody(body)).toBe(true)
+    const list = isModelListBody(body) ? body.data : []
+    expect(list.map((model) => model.id).toSorted()).toEqual([
+      'alpha/alpha-only',
+      'alpha/shared-model',
+      'beta/shared-model',
+      'org/model-x'
+    ])
+    expect(list).toEqual(
+      list.map(
+        (): unknown =>
+          expect.objectContaining({
+            object: 'model',
+            created: expect.any(Number) as number,
+            owned_by: expect.any(String) as string
+          }) as unknown
+      )
+    )
+  })
+})
 
-	test("model items have correct shape when auth is configured", async () => {
-		const models = getAvailableModels();
-		if (models.length === 0) return;
+describe('GET /v1/models/:model', () => {
+  // Catches a public ID that the list advertises but the detail route cannot resolve, above all
+  // one with a slash that only works URL-encoded.
+  test.each(['alpha/shared-model', 'beta/shared-model', 'org/model-x'])(
+    'returns %s by its URL-encoded public ID',
+    async (publicId) => {
+      const { status, body } = await getJson(`/v1/models/${encodeURIComponent(publicId)}`)
 
-		const listRes = await app.request("/v1/models");
-		const listBody = await jsonBody(listRes);
-		if (!isModelListBody(listBody)) return;
-		if (listBody.data.length === 0) return;
+      expect(status).toBe(200)
+      expect(isModelObject(body)).toBe(true)
+      expect(body).toMatchObject({ id: publicId, object: 'model' })
+    }
+  )
 
-		const first = listBody.data[0];
-		if (first === undefined) return;
-		const publicId = first.id;
-		const encodedId = encodeURIComponent(publicId);
+  // Catches the canonical-ID fallback breaking for a model whose public ID differs from it.
+  test('returns a model by its canonical ID, URL-encoded', async () => {
+    const { status, body } = await getJson(`/v1/models/${encodeURIComponent('gamma/org/model-x')}`)
 
-		const res = await app.request(`/v1/models/${encodedId}`);
-		expect(res.status).toBe(200);
+    expect(status).toBe(200)
+    expect(body).toMatchObject({ object: 'model', owned_by: 'gamma' })
+  })
 
-		const body = await jsonBody(res);
-		expect(isModelObject(body)).toBe(true);
-		if (!isModelObject(body)) return;
+  // Catches the route only matching one path segment, so an unencoded ID with slashes is a 404.
+  test('returns a model by its canonical ID unencoded, slashes and all', async () => {
+    const { status, body } = await getJson('/v1/models/gamma/org/model-x')
 
-		expect(body.id).toBe(publicId);
-		expect(body.object).toBe("model");
-		expect(body.created).toBeTypeOf("number");
-		expect(body.owned_by).toBeTypeOf("string");
-	});
-});
+    expect(status).toBe(200)
+    expect(body).toMatchObject({ object: 'model', owned_by: 'gamma' })
+  })
 
-describe("GET /v1/models/:model", () => {
-	test("returns model by public ID", async () => {
-		const models = getAvailableModels();
-		if (models.length === 0) return;
+  // Catches the detail route and the chat body disagreeing on an ID with surrounding spaces: the
+  // chat body's `model` is trimmed, so the same ID must resolve here too.
+  test('trims spaces around the requested ID, as the chat body does', async () => {
+    const { status, body } = await getJson(`/v1/models/${encodeURIComponent(' org/model-x ')}`)
 
-		const listRes = await app.request("/v1/models");
-		const listBody = await jsonBody(listRes);
-		if (!isModelListBody(listBody)) return;
-		if (listBody.data.length === 0) return;
+    expect(status).toBe(200)
+    expect(body).toMatchObject({ id: 'org/model-x', object: 'model' })
+  })
 
-		const first = listBody.data[0];
-		if (first === undefined) return;
-		const publicId = first.id;
-		const encodedId = encodeURIComponent(publicId);
+  test('returns 404 model_not_found for an unknown model', async () => {
+    const { status, body } = await getJson('/v1/models/nonexistent%2Fmodel')
 
-		const res = await app.request(`/v1/models/${encodedId}`);
-		expect(res.status).toBe(200);
+    expect(status).toBe(404)
+    expect(isErrorBody(body)).toBe(true)
+    expect(present(isErrorBody(body) ? body.error : undefined, 'an error body')).toMatchObject({
+      type: 'invalid_request_error',
+      code: 'model_not_found'
+    })
+  })
 
-		const body = await jsonBody(res);
-		expect(isModelObject(body)).toBe(true);
-		if (!isModelObject(body)) return;
+  // Catches the trailing-slash path falling through to Hono's plain-text 404 once the detail
+  // route needs a non-empty ID.
+  test('returns 404 model_not_found for /v1/models/ with no ID', async () => {
+    const { status, body } = await getJson('/v1/models/')
 
-		expect(body.id).toBe(publicId);
-		expect(body.object).toBe("model");
-		expect(body.owned_by).toBe(first.owned_by);
-	});
+    expect(status).toBe(404)
+    expect(isErrorBody(body) ? body.error.code : undefined).toBe('model_not_found')
+  })
 
-	test("returns model by canonical ID fallback for exposed models", async () => {
-		const models = getAvailableModels();
-		if (models.length === 0) return;
+  // Catches a malformed percent escape thrown as a 500 (decodeURIComponent's URIError) instead of
+  // answered as the unknown model it is.
+  test('returns 404 model_not_found for an ID with a malformed escape', async () => {
+    const { status, body } = await getJson('/v1/models/org%E0%A4%A')
 
-		const first = models[0];
-		if (first === undefined) return;
-		const canonicalId = `${first.provider}/${first.id}`;
-		const encodedId = encodeURIComponent(canonicalId);
+    expect(status).toBe(404)
+    expect(isErrorBody(body) ? body.error.code : undefined).toBe('model_not_found')
+  })
 
-		const res = await app.request(`/v1/models/${encodedId}`);
-		expect(res.status).toBe(200);
+  // Catches the ID decoded twice: `%252F` is a literal `%2F` in the ID, not a slash.
+  test('decodes the ID once', async () => {
+    const { status, body } = await getJson('/v1/models/gamma%252Forg%252Fmodel-x')
 
-		const body = await jsonBody(res);
-		expect(isModelObject(body)).toBe(true);
-		if (!isModelObject(body)) return;
-
-		expect(body.object).toBe("model");
-		expect(body.owned_by).toBe(first.provider);
-	});
-
-	test("returns model by unencoded path with slashes", async () => {
-		const models = getAvailableModels();
-		if (models.length === 0) return;
-
-		const first = models[0];
-		if (first === undefined) return;
-		const canonicalId = `${first.provider}/${first.id}`;
-
-		const res = await app.request(`/v1/models/${canonicalId}`);
-		expect(res.status).toBe(200);
-
-		const body = await jsonBody(res);
-		expect(isModelObject(body)).toBe(true);
-		if (!isModelObject(body)) return;
-
-		expect(body.object).toBe("model");
-	});
-
-	test("returns 404 for unknown model", async () => {
-		const res = await app.request("/v1/models/nonexistent%2Fmodel");
-		expect(res.status).toBe(404);
-
-		const body = await jsonBody(res);
-		expect(isErrorBody(body)).toBe(true);
-		if (!isErrorBody(body)) return;
-
-		expect(body.error.type).toBe("invalid_request_error");
-		expect(body.error.code).toBe("model_not_found");
-	});
-});
+    expect(status).toBe(404)
+    expect(isErrorBody(body) ? body.error.message : undefined).toContain('gamma%2Forg%2Fmodel-x')
+  })
+})
