@@ -182,12 +182,12 @@ function captureOptions(
 ): Pick<SimpleStreamOptions, 'fetch'> {
   const { onFailedResponse, onResponseHeaders } = options
   if (isGoogleApi(model.api)) return {}
-  const failures =
-    onFailedResponse === undefined ? globalThis.fetch : capturingFetch(onFailedResponse)
-  if (onResponseHeaders === undefined) {
-    return onFailedResponse === undefined ? {} : { fetch: failures }
+  let fetch: typeof globalThis.fetch | undefined
+  if (onFailedResponse !== undefined) fetch = capturingFetch(onFailedResponse)
+  if (onResponseHeaders !== undefined) {
+    fetch = observingFetch(onResponseHeaders, fetch ?? globalThis.fetch)
   }
-  return { fetch: observingFetch(onResponseHeaders, failures) }
+  return fetch === undefined ? {} : { fetch }
 }
 
 /**

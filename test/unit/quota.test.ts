@@ -103,4 +103,16 @@ describe('the latest report per provider', () => {
     expect(afterPrimary?.windows.map((window) => window.name)).toEqual(['secondary'])
     expect(providerQuota('openai-codex', 1_793_118_505_000)).toBeUndefined()
   })
+
+  // Catches an overall status outliving the window it came from (#189 review): once Anthropic's
+  // 5-hour window resets, `allowed` (or `rejected`) may no longer hold, so it is shown as unknown.
+  test('once a window has reset, the overall status is unknown', () => {
+    recordQuota('anthropic', ANTHROPIC, NOW)
+
+    expect(providerQuota('anthropic', NOW)?.status).toBe('allowed')
+    expect(providerQuota('anthropic', 1_792_639_800_000)).toMatchObject({
+      status: undefined,
+      windows: [{ name: '7d' }]
+    })
+  })
 })

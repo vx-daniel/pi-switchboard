@@ -497,9 +497,13 @@ Copilot wasn't logged in, so it is unknown.
   Google adapters refuse a custom `fetch`, so Google reports none.
 - **Never made up.** A provider that reports nothing shows `null`, not zeros. A response without
   quota headers leaves the last report. A window whose reset has passed is left out, as its
-  share is no longer known; with none left, the provider shows `null`.
+  share is no longer known; with none left, the provider shows `null`. Once one window has
+  reset, the overall `status` is shown as unknown, as it may have been that window's.
 - **The shared login only.** A request with its own upstream key records nothing, as for
   cooldowns: its headers report that key's account.
+- **Keyed by provider.** pi has one login per provider, so a provider's report is its login's.
+  Routing one provider over several logins would need the reports keyed by login, or two
+  accounts would overwrite each other; that is a precondition for a reserve (#189 review).
 - **No recordings yet.** Tests use the probe's header names and formats, with fake identifying
   values (`test/fixtures/quota-headers.ts`). Recording them needs a login made for recording
   (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).

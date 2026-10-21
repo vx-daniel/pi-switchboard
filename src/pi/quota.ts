@@ -219,7 +219,8 @@ export function recordQuota(provider: string, headers: Headers, now: number = Da
 
 /**
  * Returns a provider's latest quota, without the windows that have reset since: their share used
- * is no longer known.
+ * is no longer known. Once one has, the overall status is unknown too, as it may have been that
+ * window's (#189 review).
  *
  * @param provider - the provider
  * @param now - the current time
@@ -234,7 +235,8 @@ export function providerQuota(
   const windows = quota.windows.filter(
     (window) => window.resetsAt === undefined || window.resetsAt > now
   )
-  return windows.length === 0 ? undefined : { ...quota, windows }
+  if (windows.length === 0) return undefined
+  return windows.length === quota.windows.length ? quota : { ...quota, status: undefined, windows }
 }
 
 /** Forgets every report, as a restart does. Tests share this process-wide state. */
