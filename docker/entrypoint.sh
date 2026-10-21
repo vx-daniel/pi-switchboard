@@ -1,0 +1,16 @@
+#!/bin/sh
+# Starts the proxy in the container image (#60), refusing to run without a bearer token.
+#
+# The image binds 0.0.0.0, so anything that can reach the port can use the pi login in the volume.
+# The proxy itself only warns when it binds off-loopback with auth off (README, "Logging"); the image
+# is shared, so it enforces the token here instead of trusting every `docker run`. The proxy's own
+# auth semantics are unchanged for everyone else (#60, "Decision needed").
+set -eu
+
+if [ -z "${PI_SWITCHBOARD_AUTH_TOKEN:-}" ]; then
+  echo 'pi-switchboard: set PI_SWITCHBOARD_AUTH_TOKEN. This image listens on every interface and' \
+    'serves the pi login in its volume, so it does not start without a bearer token.' >&2
+  exit 64
+fi
+
+exec node /app/dist/index.mjs "$@"

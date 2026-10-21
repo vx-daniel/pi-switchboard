@@ -402,7 +402,8 @@ since the rename; each issue holds the detailed checklist.
 ## Phase 4 — Distribution
 
 - [ ] npm and `pi install` (#59)
-- [ ] Docker image (#60)
+- [x] Docker image (#60): built from source, published to Docker Hub and GHCR on each release
+      (amd64, arm64)
 - [ ] Standalone binary (#61)
 
 ## Phase 5 — Routing across pi's logins

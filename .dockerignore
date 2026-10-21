@@ -1,0 +1,10 @@
+# An allowlist: the image is built from source, and nothing else in the checkout (tests, local
+# files, a pi login) can reach the build context.
+*
+!package.json
+!pnpm-lock.yaml
+!pnpm-workspace.yaml
+!tsconfig.json
+!vite.config.ts
+!src/
+!docker/entrypoint.sh
