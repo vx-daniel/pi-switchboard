@@ -134,7 +134,8 @@ routing across pi's logins. `TODO.md` uses the same numbering.
 Get 0.1.0 into people's hands under the new name.
 
 - [ ] Publish to npm so `pi install npm:@vx-daniel/pi-switchboard` works; turn `npmPublish` back on (#59)
-- [ ] Docker image built from this repo and published on release (#60)
+- [x] Docker image built from this repo and published on release (#60); the first is published
+      with the next release
 - [ ] Standalone binary with an opt-in TUI for logs, status and accounts (#61)
 
 ## Phase 5 — Routing across pi's logins

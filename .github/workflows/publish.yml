@@ -19,6 +19,8 @@ jobs:
       issues: write
       pull-requests: write
       id-token: write
+    outputs:
+      tag: ${{ steps.released.outputs.tag }}
 
     steps:
       - name: Check out repository
@@ -44,7 +46,30 @@ jobs:
       - name: Verify package contents
         run: vp pm pack --json --pack-destination /tmp
 
+      - name: Record the release tags
+        run: git tag --list 'pi-switchboard-v*' | sort > "$RUNNER_TEMP/tags-before"
+
       - name: Release
         run: vp exec semantic-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # semantic-release tags the release commit in this checkout before it pushes, so a new tag
+      # here is this run's release; none means the commits since the last one released nothing.
+      - name: Find this run's release tag
+        id: released
+        run: |
+          git tag --list 'pi-switchboard-v*' | sort > "$RUNNER_TEMP/tags-after"
+          tag="$(comm -13 "$RUNNER_TEMP/tags-before" "$RUNNER_TEMP/tags-after")"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+  # The container image for the release (#60), built from its tag.
+  image:
+    needs: release
+    if: needs.release.outputs.tag != ''
+    permissions:
+      contents: read
+      packages: write
+    uses: ./.github/workflows/image.yml
+    with:
+      tag: ${{ needs.release.outputs.tag }}

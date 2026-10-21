@@ -1,0 +1,52 @@
+# pi-switchboard in a container (#60). README.md, "Docker", has the steps: build or pull, log in
+# through pi, start.
+#
+#   export PI_SWITCHBOARD_AUTH_TOKEN="$(openssl rand -hex 32)"
+#   docker compose build           # from this checkout; or set PI_SWITCHBOARD_VERSION and pull
+#   docker compose run --rm --no-deps --entrypoint pi proxy \
+#     --no-session --no-tools --no-extensions --offline      # then /login inside pi
+#   docker compose up --wait
+name: pi-switchboard
+
+services:
+  proxy:
+    # A released image, ghcr.io/vx-daniel/pi-switchboard:<version>, with PI_SWITCHBOARD_VERSION
+    # set and `docker compose pull`; unset, `local`, which `docker compose build` makes from this
+    # checkout. Published tags are never overwritten, so a version always means the same image.
+    image: ghcr.io/vx-daniel/pi-switchboard:${PI_SWITCHBOARD_VERSION:-local}
+    build:
+      context: .
+    # Forwards signals to the proxy and reaps children.
+    init: true
+    environment:
+      # A local bearer secret that protects the proxy, not a provider key. The image refuses to
+      # start without one (docker/entrypoint.sh), and so does Compose.
+      PI_SWITCHBOARD_AUTH_TOKEN: '${PI_SWITCHBOARD_AUTH_TOKEN:?Export a proxy bearer token first}'
+      # Passed through only when set in the shell or an .env file: Compose leaves a bare key out of
+      # the container when nothing sets it. A default here would always set the variable, and an
+      # environment variable beats proxy-config.json, so that file's logLevel and
+      # upstreamTimeoutSec could never take effect. Unset, the proxy's defaults apply: info, JSON
+      # lines (no terminal), a 120 s upstream idle timeout, and UTC (set TZ for local time).
+      PI_SWITCHBOARD_LOG_LEVEL:
+      PI_SWITCHBOARD_LOG_FORMAT:
+      PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS:
+      TZ:
+    # Loopback only: the proxy listens on every interface inside the container, and this publishes
+    # it to this machine alone.
+    ports:
+      - '127.0.0.1:${PI_SWITCHBOARD_PUBLISH_PORT:-4141}:4141'
+    # pi's login, its token refreshes and the proxy's proxy-config.json. Never seed it by copying a
+    # host auth.json: a refresh rotates the refresh token under the other copy, which then fails.
+    volumes:
+      - pi-agent:/home/node/.pi/agent
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    # The healthcheck is the image's own: GET /healthz, which needs no token.
+
+volumes:
+  pi-agent:

@@ -1122,6 +1122,33 @@ token), and a refusal logs a warning naming the reason. The address policy, reso
 are parameters of the fetch (`createApp`'s `remoteImageFetch`) so tests can reach a local server;
 no setting loosens them.
 
+### Container image
+
+The `Dockerfile` builds the proxy from this repository's source (#60), replacing number-5's
+private build from a release tarball. pi comes only through the proxy's own lockfile, so the login
+command and the server run the same pi on one `auth.json`.
+
+- **Token guard in the image, not the proxy.** The image binds `0.0.0.0`, so its entrypoint
+  (`docker/entrypoint.sh`) refuses to start without `PI_SWITCHBOARD_AUTH_TOKEN`, exiting `64`
+  before it listens. The proxy itself still only warns when it binds off loopback with auth off.
+  Moving the refusal into the proxy would change auth semantics for every non-container user, so
+  it stays an image rule (#60, "Decision needed"); the token comes from the environment only.
+- **Writes only to the volume.** UID 1000, `/app` owned by root, and in `compose.yaml` a
+  read-only root filesystem, `/tmp` as tmpfs, `cap_drop: ALL` and `no-new-privileges`. pi's login
+  and its refreshes, and the proxy's `proxy-config.json`, live in the volume at
+  `PI_CODING_AGENT_DIR=/home/node/.pi/agent`. The volume is never seeded from a host `auth.json`,
+  since a refresh rotates the refresh token under the other copy.
+- **No install scripts.** Dependencies install with `--ignore-scripts`. The build output is
+  JavaScript, built once on the builder's platform; production dependencies install on the target
+  platform, as some ship per-platform binaries.
+- **Published once per version.** The release workflow's `image` job calls `image.yml` with each
+  new release tag. It builds that tag for `linux/amd64` and `linux/arm64` and pushes
+  `ghcr.io/vx-daniel/pi-switchboard:<version>`. It refuses a tag that is already published, and
+  any registry error other than "not found", so a version always means one image. There is no
+  `latest`. `image.yml` can be run by hand for a release whose image is missing.
+- **Port published on loopback.** Compose publishes `127.0.0.1:4141` only, keeping the
+  local-first default for the host.
+
 ### Agentic mode
 
 Later, not planned (ROADMAP "Later, not planned"). Agentic mode is experimental and not built.
