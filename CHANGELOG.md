@@ -1,3 +1,23 @@
+# [0.3.0](https://github.com/vx-daniel/pi-switchboard/compare/pi-switchboard-v0.2.0...pi-switchboard-v0.3.0) (2026-10-21)
+
+
+### Bug Fixes
+
+* a success clears only cooldowns that started before it was sent ([5aa1567](https://github.com/vx-daniel/pi-switchboard/commit/5aa1567d133c1894d7fc2d59bc5fad70b85e7743)), closes [#181](https://github.com/vx-daniel/pi-switchboard/issues/181)
+* address the [#181](https://github.com/vx-daniel/pi-switchboard/issues/181) review of cooldowns ([fd63a56](https://github.com/vx-daniel/pi-switchboard/commit/fd63a568b39a10a209780768282540b8367dca40))
+* keep a cooldown's end within what a Date can hold ([1441ff9](https://github.com/vx-daniel/pi-switchboard/commit/1441ff9fcd8012abda19f5e19210985671b35138)), closes [#181](https://github.com/vx-daniel/pi-switchboard/issues/181)
+* keep own-key requests out of shared cooldowns; skip non-full buckets ([7cc7030](https://github.com/vx-daniel/pi-switchboard/commit/7cc7030a92992f973fc83ba8bbc723cf97424c30)), closes [#181](https://github.com/vx-daniel/pi-switchboard/issues/181)
+* read reset times in epoch milliseconds, and only real dates ([60b7576](https://github.com/vx-daniel/pi-switchboard/commit/60b7576ef377a6386875b976d0d218cd7e848cbd)), closes [#181](https://github.com/vx-daniel/pi-switchboard/issues/181)
+* read retry-after-ms strictly, and apart from retry-after ([5f69d4b](https://github.com/vx-daniel/pi-switchboard/commit/5f69d4b8ced057932bc7f075a8185b5451aed67c)), closes [#181](https://github.com/vx-daniel/pi-switchboard/issues/181)
+
+
+### Features
+
+* catalogue data on /v1/switchboard/models ([#173](https://github.com/vx-daniel/pi-switchboard/issues/173)) ([abf4705](https://github.com/vx-daniel/pi-switchboard/commit/abf4705c8599999c2208991a2a1f0b544676c554))
+* cooldowns after rate limits ([#68](https://github.com/vx-daniel/pi-switchboard/issues/68)) ([e291d34](https://github.com/vx-daniel/pi-switchboard/commit/e291d344d81e564f808343ffceb63f3d70473546))
+* fallback chains for aliases ([#67](https://github.com/vx-daniel/pi-switchboard/issues/67)) ([7b74213](https://github.com/vx-daniel/pi-switchboard/commit/7b7421315e4186d429ef198e07d2eecfc035d4d9))
+* model aliases, names for exposed models ([#66](https://github.com/vx-daniel/pi-switchboard/issues/66)) ([35d89d1](https://github.com/vx-daniel/pi-switchboard/commit/35d89d16007b40df02191ea95871614434e9ebc2))
+
 # [0.2.0](https://github.com/vx-daniel/pi-switchboard/compare/pi-switchboard-v0.1.0...pi-switchboard-v0.2.0) (2026-10-21)
 
 
