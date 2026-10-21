@@ -16,7 +16,10 @@ import * as z from 'zod'
 
 /** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
 const MS_PER_SECOND = 1000
-/** Unix timestamp (seconds) from when the module was first loaded. */
+/**
+ * Unix timestamp (seconds) from when the module was first loaded: every model's `created`. pi's
+ * catalogue has no release dates (#176), and OpenAI's model object requires the field.
+ */
 const MODULE_CREATED = Math.floor(Date.now() / MS_PER_SECOND)
 
 /** An OpenAI model object, as on `/v1/models`. Documents the response; never parsed. */
@@ -24,7 +27,11 @@ export const openAIModelSchema = z
   .object({
     id: z.string().trim().meta({ description: 'The public model ID; may contain `/`.' }),
     object: z.literal('model'),
-    created: z.int().meta({ description: 'Unix time (seconds) the proxy started.' }),
+    created: z.int().meta({
+      description:
+        'Unix time (seconds) the proxy started, the same for every model: not a release date, ' +
+        "since pi's catalogue has none. `GET /v1/switchboard/models` has what pi knows per model."
+    }),
     owned_by: z.string().trim().meta({ description: "The model's pi provider." })
   })
   .meta({ id: 'Model', description: 'An OpenAI model object.' })

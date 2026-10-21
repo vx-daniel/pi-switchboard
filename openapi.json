@@ -329,7 +329,7 @@
             "type": "integer",
             "minimum": -9007199254740991,
             "maximum": 9007199254740991,
-            "description": "Unix time (seconds) the proxy started."
+            "description": "Unix time (seconds) the proxy started, the same for every model: not a release date, since pi's catalogue has none. `GET /v1/switchboard/models` has what pi knows per model."
           },
           "owned_by": {
             "type": "string",
@@ -1234,7 +1234,7 @@
                       "type": "integer",
                       "minimum": -9007199254740991,
                       "maximum": 9007199254740991,
-                      "description": "Unix time (seconds) the proxy started."
+                      "description": "Unix time (seconds) the proxy started, the same for every model: not a release date, since pi's catalogue has none. `GET /v1/switchboard/models` has what pi knows per model."
                     },
                     "owned_by": {
                       "type": "string",

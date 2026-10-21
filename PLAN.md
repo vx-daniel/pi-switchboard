@@ -972,7 +972,7 @@ Return the OpenAI-compatible list shape:
     {
       "id": "gpt-5.4-mini",
       "object": "model",
-      "created": 0,
+      "created": 1792599474,
       "owned_by": "openai"
     }
   ]
@@ -984,6 +984,7 @@ Compatibility rule:
 - keep the stable response strictly to the standard OpenAI model object fields
 - do not attach capability metadata such as context window, max tokens, reasoning support, or modality support to the standard `/v1/models` path
 - if richer metadata is exposed, use a separate non-standard endpoint rather than `x_pi` on the standard model object: `GET /v1/switchboard/models` (below)
+- `created` is the Unix time the proxy started, the same for every model: OpenAI requires the field, and pi's catalogue has no release dates (#176). pi-ai generates its catalogue from models.dev, which has a `release_date`, but drops it, and pi will not keep it. A proxy-side snapshot of the dates was rejected: a second catalogue to keep in step with pi's, for a field no known client reads. Clients must not read it as recency.
 
 Availability rule:
 

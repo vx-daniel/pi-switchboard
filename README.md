@@ -343,7 +343,7 @@ List all models the proxy exposes (filtered by the active exposure mode):
 curl http://localhost:4141/v1/models | jq '.data[].id'
 ```
 
-Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owned_by`) with no proprietary extensions.
+Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owned_by`) with no proprietary extensions. `created` is the Unix time the proxy started, the same for every model, because pi's catalogue has no release dates and OpenAI requires the field. Don't read it as a model's age; choose models by what `GET /v1/switchboard/models` reports.
 
 `GET /v1/switchboard/models` (not part of OpenAI's API; proxy token, if set) lists what pi knows about each exposed model beyond that. Today: `reasoning_efforts`, the `reasoning_effort` values the model runs at as asked, lowest first (`["none"]` for a model without reasoning). Any other value is accepted and clamped. It was `GET /v1/pi/models` before this release; the old path is gone.
 
