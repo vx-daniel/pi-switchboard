@@ -30,3 +30,5 @@ export const HTTP_BAD_GATEWAY = 502
 export const HTTP_SERVICE_UNAVAILABLE = 503
 /** HTTP 504 Gateway Timeout. */
 export const HTTP_GATEWAY_TIMEOUT = 504
+/** HTTP 529, Anthropic's "overloaded". */
+export const HTTP_OVERLOADED = 529

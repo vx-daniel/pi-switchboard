@@ -26,10 +26,15 @@
  * @packageDocumentation
  */
 
-import { ModelExposureModeSchema, PublicModelIdModeSchema } from '@proxy/config/schema'
+import {
+  ModelExposureModeSchema,
+  MS_PER_SECOND,
+  PublicModelIdModeSchema
+} from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { aliasDiagnosticSchema } from '@proxy/openai/model-aliases'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
+import { activeCooldowns } from '@proxy/pi/cooldowns'
 import { scopeDiagnosticSchema } from '@proxy/pi/model-scope'
 import {
   getAvailableModels,
@@ -85,6 +90,31 @@ const modelsHealthSchema = z
         'Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the ' +
         'check fail), or naming no exposed model (`target-not-exposed`).'
     }),
+    cooldowns: z
+      .array(
+        z.object({
+          scope: z.enum(['provider', 'model']),
+          provider: z.string().trim(),
+          model: z
+            .string()
+            .trim()
+            .nullable()
+            .meta({ description: 'The canonical ID, for a model.' }),
+          reason: z.enum(['rate_limit', 'unavailable']),
+          until: z.string().trim().meta({ description: 'When it ends, as an ISO 8601 time.' }),
+          secondsLeft: z.int().nonnegative(),
+          source: z.enum(['response', 'backoff']).meta({
+            description:
+              'Whether the failed response gave the time, or the growing default did (60 s, ' +
+              '180 s, then doubling).'
+          })
+        })
+      )
+      .meta({
+        description:
+          'Active cooldowns after a 429 (the provider) or a 503/529 (the model), soonest end ' +
+          'first (#68). They do not fail the check.'
+      }),
     modelsJsonError: z.string().trim().nullable().meta({
       description: 'Why `models.json` did not load; a parse error says only where, never what.'
     })
@@ -216,6 +246,16 @@ async function checkModels(
     scopeDiagnostics: exposure.ok ? [...exposure.scopeDiagnostics] : [],
     // Alias names and their targets come from the config file: model names, not secrets.
     aliasDiagnostics,
+    // Provider and model names only, never a credential.
+    cooldowns: activeCooldowns().map((cooldown) => ({
+      scope: cooldown.scope,
+      provider: cooldown.provider,
+      model: cooldown.model ?? null,
+      reason: cooldown.reason,
+      until: new Date(cooldown.until).toISOString(),
+      secondsLeft: Math.max(0, Math.ceil((cooldown.until - Date.now()) / MS_PER_SECOND)),
+      source: cooldown.source
+    })),
     modelsJsonError: getModelsJsonError() ?? null
   }
   if (!healthy) {

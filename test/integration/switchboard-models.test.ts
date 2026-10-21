@@ -70,7 +70,8 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       input: ['text', 'image'],
       context_window: 400000,
       max_output_tokens: 64000,
-      cost: { input: 2.5, output: 15, cache_read: 0.25, cache_write: 3.125 }
+      cost: { input: 2.5, output: 15, cache_read: 0.25, cache_write: 3.125 },
+      cooldown: null
     })
   })
 
@@ -94,7 +95,8 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       input: ['text'],
       context_window: expect.any(Number),
       max_output_tokens: expect.any(Number),
-      cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 }
+      cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
+      cooldown: null
     })
   })
 })

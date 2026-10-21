@@ -29,7 +29,9 @@ import { type Attempt, buildChatCompletion, type ResponseRoute } from '@proxy/op
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
+import { clearCooldowns } from '@proxy/pi/cooldowns'
 import { getRequestAuth } from '@proxy/pi/registry'
+import type { FailedResponse } from '@proxy/pi/reset-time'
 import {
   authenticationError,
   type MappedUpstreamError,
@@ -46,6 +48,7 @@ import {
   HTTP_TOO_MANY_REQUESTS,
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
+import { cooldownSkip, recordCooldown } from '@proxy/server/route-cooldowns'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
@@ -310,6 +313,7 @@ export async function findCredentialedStart(
 ): Promise<CredentialedStart> {
   const attempts: Attempt[] = []
   for (const [position, candidate] of route.candidates.entries()) {
+    if (skipCooling({ ...route, alias }, position, attempts)) continue
     const refused = await checkCredential(candidate.model, upstreamApiKey)
     if (refused === undefined) {
       return { kind: 'ready', candidates: route.candidates.slice(position), attempts }
@@ -542,20 +546,21 @@ async function attemptComplete(
 
 /**
  * Runs one candidate: its credential check (the first's was done before images were fetched),
- * then the streamed or non-streamed call.
+ * then the streamed or non-streamed call, keeping a copy of a 429 or 503 response for its reset
+ * time (#68).
  *
  * @param honoContext - the request's Hono context
  * @param candidate - the model to call
  * @param job - the pi context, request and call options
  * @param checkFirst - whether to check the candidate's credential before calling it
- * @returns how the attempt ended
+ * @returns how the attempt ended, and the failed response the provider sent, if any
  */
 async function runAttempt(
   honoContext: ProxyContext,
   candidate: ExposedModel,
   job: DispatchJob,
   checkFirst: boolean
-): Promise<AttemptOutcome> {
+): Promise<{ outcome: AttemptOutcome; captured: FailedResponse | undefined }> {
   chatLogger.debug('Dispatching {model} as {mode}', {
     model: candidate.canonicalId,
     mode: job.request.stream === true ? 'stream' : 'complete',
@@ -566,11 +571,61 @@ async function runAttempt(
     : undefined
   if (refused !== undefined) {
     // checkCredential already logged why.
-    return { kind: 'failed', answer: refused, detail: undefined, report: () => undefined }
+    const outcome: AttemptOutcome = {
+      kind: 'failed',
+      answer: refused,
+      detail: undefined,
+      report: () => undefined
+    }
+    return { outcome, captured: undefined }
   }
-  return job.request.stream === true
-    ? attemptStream(honoContext, candidate, job)
-    : attemptComplete(honoContext, candidate, job)
+  let captured: FailedResponse | undefined
+  const capturing: DispatchJob = {
+    ...job,
+    options: {
+      ...job.options,
+      // pi makes one call per attempt (its retries are off, PLAN "Cooldowns"); were it to retry,
+      // the last failure is the one that says when to come back.
+      onFailedResponse: (response) => {
+        captured = response
+      }
+    }
+  }
+  const outcome = await (job.request.stream === true
+    ? attemptStream(honoContext, candidate, capturing)
+    : attemptComplete(honoContext, candidate, capturing))
+  return { outcome, captured }
+}
+
+/**
+ * Skips a candidate while it cools down (#68), when the chain names its class: logs the skip and
+ * lists it in `attempts`.
+ *
+ * @param chain - the candidates, the classes the alias names, and the alias
+ * @param chain.candidates - the chain's candidates
+ * @param chain.fallbackOn - the failure classes the alias names
+ * @param chain.alias - the alias whose chain it is
+ * @param position - the candidate's index in `chain.candidates`
+ * @param attempts - the attempts so far; a skip is added to them
+ * @returns whether the candidate is skipped
+ */
+function skipCooling(
+  chain: Pick<ChatRoute, 'candidates' | 'fallbackOn'> & { alias: string | undefined },
+  position: number,
+  attempts: Attempt[]
+): boolean {
+  const cooldown = cooldownSkip(chain.candidates, position, chain.fallbackOn)
+  const candidate = chain.candidates[position]
+  if (cooldown === undefined || candidate === undefined) return false
+  chatLogger.info('Alias {alias}: skipping {model}, cooling down after {reason} until {until}', {
+    alias: chain.alias,
+    model: candidate.canonicalId,
+    reason: cooldown.reason,
+    until: new Date(cooldown.until).toISOString(),
+    scope: cooldown.scope
+  })
+  attempts.push({ model: candidate.canonicalId, reason: cooldown.reason, skipped: true })
+  return true
 }
 
 /**
@@ -632,10 +687,19 @@ function fallbackFor(
  */
 export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob): Promise<Response> {
   const attempts = [...job.attempts]
+  // A request with its own upstream key isn't using the proxy's login, so its 429s and successes
+  // say nothing about the login other clients share (#181 review).
+  const sharedLogin = job.options.upstreamApiKey === undefined
   for (const [position, candidate] of job.candidates.entries()) {
-    const outcome = await runAttempt(honoContext, candidate, job, position > 0)
+    if (skipCooling(job, position, attempts)) continue
+    const sentAt = Date.now()
+    const { outcome, captured } = await runAttempt(honoContext, candidate, job, position > 0)
     if (outcome.kind === 'final') return outcome.response
-    if (outcome.kind === 'answered') return answerWith(outcome.respond, candidate, job, attempts)
+    if (outcome.kind === 'answered') {
+      if (sharedLogin) clearCooldowns(candidate, sentAt)
+      return answerWith(outcome.respond, candidate, job, attempts)
+    }
+    if (sharedLogin) recordCooldown(candidate, failureClass(outcome.answer), captured)
     const next = job.candidates[position + 1]
     const failure = fallbackFor(outcome.answer, next, job.fallbackOn)
     if (failure === undefined || next === undefined) {
