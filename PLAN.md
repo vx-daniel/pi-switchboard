@@ -1140,7 +1140,12 @@ command and the server run the same pi on one `auth.json`.
   since a refresh rotates the refresh token under the other copy.
 - **No install scripts.** Dependencies install with `--ignore-scripts`. The build output is
   JavaScript, built once on the builder's platform; production dependencies install on the target
-  platform, as some ship per-platform binaries.
+  platform, as some ship per-platform binaries. Source maps, type declarations and TypeScript
+  sources are deleted from them, since none is executed: 398 MB to 314 MB unpacked, 101 MB to
+  91 MB to pull (2026-10-21).
+- **Base: `node:<version>-bookworm-slim`.** Alpine was measured as well: pruned, 73 MB to pull and
+  252 MB unpacked. It was not taken, because the 18 MB saved is not worth musl (pi's TUI ships
+  glibc-only native prebuilds) or the risk of a future native dependency without a musl build.
 - **Published once per version.** The release workflow's `image` job calls `image.yml` with each
   new release tag. It builds that tag for `linux/amd64` and `linux/arm64` and pushes
   `ghcr.io/vx-daniel/pi-switchboard:<version>`. It refuses a tag that is already published, and

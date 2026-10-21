@@ -26,7 +26,12 @@ FROM ${NODE_IMAGE} AS dependencies
 ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-RUN corepack enable && pnpm install --prod --frozen-lockfile --ignore-scripts
+# Source maps, type declarations and TypeScript sources are never executed: about half of the
+# dependencies' size on disk (163 MB to 79 MB measured on 2026-10-21), for 10 MB less to pull.
+# Markdown stays, as some licenses ship as LICENSE.md. The runtime stage copies node_modules from
+# here, so the deleted files never reach the image.
+RUN corepack enable && pnpm install --prod --frozen-lockfile --ignore-scripts && \
+    find node_modules/.pnpm -type f \( -name '*.map' -o -name '*.ts' -o -name '*.mts' -o -name '*.cts' \) -delete
 
 FROM ${NODE_IMAGE}
 # pi keeps its login in PI_CODING_AGENT_DIR, the one writable place (a volume); the proxy reads
