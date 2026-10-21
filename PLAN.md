@@ -1463,7 +1463,8 @@ extension logs to a file only when `PI_SWITCHBOARD_EXTENSION_LOG_FILE` is set.
 A JSON line's `message` keeps LogTape's rendering, which quotes every string value
 (`Listening on http://"0.0.0.0":4141`). This is deliberate (#159): values such as the requested
 model, a path or `X-Client-Request-Id` come from clients, and the quotes keep a crafted one from
-passing for message text. JSON encoding already keeps a value from forging a second line.
+passing for message text. JSON encoding already keeps a value from forging a second line
+(`test/unit/logging.test.ts`, "keeps a property containing a newline on a single line").
 `properties` carries the values unquoted for anything that parses logs. People reading by eye use
 `pretty`, which prints values bare. Bare strings in JSON, and template-only messages, were
 considered and not taken.
