@@ -72,6 +72,21 @@ pi-switchboard
 pi-switchboard --version
 ```
 
+### The console: logs, logins and status at a terminal
+
+```bash
+pi-switchboard tui            # takes the same flags as pi-switchboard
+```
+
+`pi-switchboard tui` runs the proxy with a full-screen console. Quitting it (`q` or Ctrl+C) stops the proxy. It needs a terminal; from a script or a service, run `pi-switchboard` without `tui`.
+
+- **Logs (`1`).** The live log, in the pretty format, redacted as on stderr. It follows new lines; `↑` `↓` `PgUp` `PgDn` scroll back, `End` follows again. The console keeps the last 5000 lines.
+- **Accounts (`2`).** Each provider pi has a credential for: account or API key, where pi found it, and how many of its models are available. `v` verifies them, which may refresh an account's token.
+- **Status line.** The address, whether proxy auth is on, how many models are exposed and available, active cooldowns, and a `models.json` error if there is one.
+- **Log in (`n`) and log out (`x`) through pi.** `n` opens pi's own login list: every account and API key login pi offers. The login runs on pi's own screens and pi stores the credential in its `auth.json`, exactly as `pi /login` does, and the proxy serves the provider's models at once, without a restart. A browser sign-in waits for the browser, or takes the pasted redirect URL when the browser is on another machine; `Ctrl+X` copies the sign-in URL and `Esc` cancels. `x` removes a credential pi stored; one from an environment variable or `models.json` stays.
+
+Logins are only ever offered in this local console, never over HTTP.
+
 ### List available models
 
 ```bash

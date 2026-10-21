@@ -406,6 +406,9 @@ since the rename; each issue holds the detailed checklist.
 - [x] Docker image (#60): built from source, published to Docker Hub and GHCR on each release
       (amd64, arm64)
 - [ ] Standalone binary (#61)
+- [x] Console, `pi-switchboard tui` (#61): logs, status, accounts, and logins through pi's own
+      screens, in one process with the server
+- [ ] The console's per-route stats, once #70's totals land (#61)
 
 ## Phase 5 — Routing across pi's logins
 

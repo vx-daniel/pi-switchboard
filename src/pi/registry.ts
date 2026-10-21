@@ -136,6 +136,17 @@ function getSettingsManager(): SettingsManager {
 }
 
 /**
+ * Returns this installation's device ID, created on first use and kept in pi's settings, as pi's
+ * own `/login` does. Sign in with ChatGPT refuses to start without one.
+ *
+ * @returns the device ID (a UUID)
+ * @throws Error when {@link initRegistry} has not run
+ */
+export function getLoginDeviceId(): string {
+  return getSettingsManager().getOrCreateDeviceId()
+}
+
+/**
  * Returns every model available (with auth configured).
  *
  * @remarks
