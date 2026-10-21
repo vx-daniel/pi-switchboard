@@ -150,21 +150,35 @@ function parseResetValue(value: unknown, now: number): number | undefined {
   return parseDuration(trimmed) ?? parseDate(trimmed, now)
 }
 
+/** A plain non-negative number, as `retry-after` and `retry-after-ms` write one. */
+const PLAIN_NUMBER = /^\s*\d+(?:\.\d+)?\s*$/
+
 /**
- * Reads the wait from the standard `retry-after-ms` and `retry-after` headers.
+ * Reads the wait from the `retry-after-ms` header (OpenAI's SDKs send and read it).
+ *
+ * @param headers - the response headers
+ * @returns the wait in milliseconds, or `undefined` when the header is absent or not a number
+ */
+function fromRetryAfterMs(headers: Headers): number | undefined {
+  const retryAfterMs = headers.get('retry-after-ms')
+  return retryAfterMs !== null && PLAIN_NUMBER.test(retryAfterMs)
+    ? Number.parseFloat(retryAfterMs)
+    : undefined
+}
+
+/**
+ * Reads the wait from the standard `retry-after` header: seconds, or an HTTP date.
  *
  * @param headers - the response headers
  * @param now - the current time
  * @returns the wait in milliseconds, or `undefined`
  */
 function fromRetryAfter(headers: Headers, now: number): number | undefined {
-  const retryAfterMs = Number.parseFloat(headers.get('retry-after-ms') ?? '')
-  if (Number.isFinite(retryAfterMs)) return retryAfterMs
   const retryAfter = headers.get('retry-after')
   if (retryAfter === null) return undefined
-  const seconds = Number.parseFloat(retryAfter)
-  if (/^\s*\d+(?:\.\d+)?\s*$/.test(retryAfter)) return seconds * MS_PER_SECOND
-  return parseDate(retryAfter, now)
+  return PLAIN_NUMBER.test(retryAfter)
+    ? Number.parseFloat(retryAfter) * MS_PER_SECOND
+    : parseDate(retryAfter, now)
 }
 
 /**
@@ -245,6 +259,7 @@ export function resetAfterMs(
   now: number = Date.now()
 ): number | undefined {
   const sources: readonly (() => number | undefined)[] = [
+    () => fromRetryAfterMs(response.headers),
     () => fromRetryAfter(response.headers, now),
     () => fromBodyFields(parseJson(response.body), now),
     () => fromResetHeaders(response.headers, now),

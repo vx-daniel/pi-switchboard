@@ -85,7 +85,11 @@ describe('resetAfterMs', () => {
         'x-ratelimit-reset-requests': '2m'
       }),
       120_000
-    ]
+    ],
+    // `retry-after-ms` is checked as strictly as `retry-after` (third #181 review).
+    ['retry-after-ms: 5abc', failed({ 'retry-after-ms': '5abc', 'retry-after': '30' }), 30_000],
+    ['retry-after-ms: -5', failed({ 'retry-after-ms': '-5', 'retry-after': '30' }), 30_000],
+    ['retry-after-ms: 0', failed({ 'retry-after-ms': '0', 'retry-after': '30' }), 30_000]
   ])('%s falls through to the next source', (_case, response, expected) => {
     expect(resetAfterMs(response, NOW)).toBe(expected)
   })

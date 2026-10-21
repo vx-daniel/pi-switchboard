@@ -124,4 +124,13 @@ describe('cooldownSkip', () => {
     expect(cooldownSkip(chain, 0, named, NOW)).toBeDefined()
     expect(cooldownSkip(chain, 1, named, NOW)).toBeUndefined()
   })
+
+  // Catches a tie going against the alias's order (third #181 review): when two cooldowns end at
+  // the same time, the chain keeps its preference and calls the earlier one.
+  test('a tie goes to the earlier candidate in the chain', () => {
+    startCooldown(OPUS, 'rate_limit', MINUTE, NOW)
+    startCooldown(SOL, 'rate_limit', MINUTE, NOW)
+
+    expect(cooldownSkip([OPUS, SOL], 0, new Set(['rate_limit'] as const), NOW)).toBeUndefined()
+  })
 })
