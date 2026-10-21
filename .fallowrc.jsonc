@@ -29,7 +29,17 @@
     // by `package.json`.
     "unused-catalog-entries": "off"
   },
-
+  "duplicates": {
+    "mode": "mild",
+    "minTokens": 50,
+    "minLines": 5,
+    "threshold": 10
+  },
+  "similarCode": {
+    "threshold": 0.8,
+    "minLines": 3,
+    "ignore": ["src/generated/**"]
+  },
   "health": {
     // Tests repeat setup on purpose, and coverage measures only the source trees (`test.coverage.include` in
     // `vite.config.ts`), so their CRAP scores would only be estimates.
