@@ -182,6 +182,23 @@ function captureOptions(
 }
 
 /**
+ * Returns the transport option: SSE for Codex (#185).
+ *
+ * @remarks
+ * pi's Codex adapter tries a WebSocket first, and `fetch` sees nothing of it: a usage limit's
+ * reset time and Codex's quota headers never reach the proxy. Over SSE they do. Measured live on
+ * 2026-10-21 (`gpt-6-luna`): SSE was faster to the first event on short calls (median 954 ms vs
+ * 1,522 ms) and even at a 31k-token history (1,071 ms vs 1,049 ms), where the WebSocket sends
+ * only the new turns. PLAN "Cooldowns (#68)" has the numbers.
+ *
+ * @param model - the pi model
+ * @returns `{ transport: 'sse' }` for Codex, or nothing to add
+ */
+function transportOptions(model: Model<Api>): Pick<SimpleStreamOptions, 'transport'> {
+  return model.api === 'openai-codex-responses' ? { transport: 'sse' } : {}
+}
+
+/**
  * Builds pi's `SimpleStreamOptions` from an OpenAI request.
  *
  * @param model - the pi model
@@ -248,7 +265,7 @@ async function buildStreamOptions(
   const onPayload = passthroughHook(model, request)
   if (onPayload !== undefined) opts.onPayload = onPayload
 
-  return { ...opts, ...captureOptions(model, options) }
+  return { ...opts, ...captureOptions(model, options), ...transportOptions(model) }
 }
 
 /**

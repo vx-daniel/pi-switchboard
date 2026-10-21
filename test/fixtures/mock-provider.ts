@@ -50,6 +50,11 @@ export interface MockProvider {
   provider(
     api?: 'openai-completions' | 'anthropic-messages' | 'google-generative-ai'
   ): Record<string, unknown>
+  /**
+   * How many WebSocket upgrades were asked for. The mock refuses each by closing the socket, as a
+   * server without WebSocket support does: pi's Codex adapter then falls back to SSE.
+   */
+  readonly upgrades: number
   /** Drops open connections and stops the server. */
   close(): Promise<void>
 }
@@ -159,11 +164,19 @@ export async function startMockProvider(
       void reply(response, request)
     })
   })
+  let upgrades = 0
+  server.on('upgrade', (_incoming, socket) => {
+    upgrades += 1
+    socket.destroy()
+  })
   const origin = await listenOnLoopback(server)
 
   return {
     origin,
     requests,
+    get upgrades() {
+      return upgrades
+    },
     provider: (api = 'openai-completions') => ({
       baseUrl: api === 'openai-completions' ? `${origin}/v1` : origin,
       api,
