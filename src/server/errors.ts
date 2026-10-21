@@ -12,11 +12,11 @@
  * - 404: model not found, unsupported endpoint, any other route (`Invalid URL (<method> <path>)`)
  * - 413: request body over the size limit
  * - 422: unsupported or unknown request field, unsupported tool
- * - 429: upstream rate limit
+ * - 429: upstream rate limit or usage limit
  * - 500: anything thrown inside the proxy, an invalid model exposure config included
  *   (`internalError`, answered by `app.onError`)
  * - 502: upstream authentication failure (401, 403), any other upstream error
- * - 503: upstream unavailable (503) or overloaded (529), failed health check
+ * - 503: upstream unavailable (503), overloaded (529) or out of capacity, failed health check
  * - 504: upstream timeout (408, 504, idle timeout)
  *
  * @packageDocumentation
@@ -319,13 +319,28 @@ function upstreamStatusIn(message: string): number | undefined {
 
 /**
  * Wording that identifies a failure when the message carries no status: Bedrock, network
- * failures, and the proxy's own upstream idle timeout. Checked in this order.
+ * failures, the proxy's own upstream idle timeout, Codex's usage limit and capacity messages.
+ * Checked in this order.
+ *
+ * @remarks
+ * pi's Codex adapter reports Codex's 429 for a ChatGPT login over its usage limit with no status:
+ * "You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min." (#190). The usage-limit
+ * pattern has no leading word boundary, so it also matches `usage_limit_reached` and
+ * `subscription_sharing_usage_limit_exceeded`; it ends where a letter would follow, so "usage
+ * limitations" is not one. The capacity wordings are ones pi's own retry
+ * classifier treats as transient (`pi-ai/utils/retry`).
  */
 const BY_WORDING: readonly (readonly [RegExp, MappedUpstreamError])[] = [
-  [/\brate[\s_-]?limit|\btoo many requests\b|\bresource[\s_-]?exhausted\b/i, RATE_LIMITED],
+  [
+    /\brate[\s_-]?limit|\btoo many requests\b|\bresource[\s_-]?exhausted\b|usage[\s_-]?limits?(?![a-z])/i,
+    RATE_LIMITED
+  ],
   [/\btime[ds]?[\s_-]?out\b|\bETIMEDOUT\b/i, TIMED_OUT],
   [/\bunauthori[sz]ed\b/i, AUTH_FAILED],
-  [/\boverloaded\b/i, OVERLOADED],
+  [
+    /\boverloaded\b|\bat capacity\b|\bserver[\s_-]?busy\b|\bservers are currently busy\b|\bhigh demand\b/i,
+    OVERLOADED
+  ],
   [/\bservice[\s_-]?unavailable\b/i, UNAVAILABLE]
 ]
 

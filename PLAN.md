@@ -1160,12 +1160,12 @@ Use an OpenAI-style shape:
   (`Invalid URL (<METHOD> <path>)`)
 - `413` request body larger than `maxBodySize`
 - `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
-- `429` upstream rate limit (`rate_limit`)
+- `429` upstream rate limit or usage limit (`rate_limit`)
 - `500` internal proxy failure, including an invalid model exposure config
 - `502` upstream auth failure (`upstream_auth_error`), or any other upstream failure
   (`upstream_error`), such as an upstream 404 or 500
 - `503` provider unavailable (`provider_unavailable`, upstream 503) or overloaded
-  (`provider_overloaded`, upstream 529)
+  (`provider_overloaded`, upstream 529, or no status and wording that says it is out of capacity)
 - `504` upstream timeout (`timeout`): an upstream 408 or 504, or the provider sent nothing for
   `upstreamTimeoutMs` (an idle timeout that restarts on every upstream event, raw provider events included (#50), not a cap on the call;
   `src/pi/upstream-idle.ts`)
@@ -1176,12 +1176,20 @@ is read from the fixed positions pi 1.3.0's messages put it in: leading, and onl
 what only a status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 status code (no body)`;
 `429 tokens…` is not a status), after a label (`OpenAI API error (429): …`, `Mistral API error
 (429): …`), Google's `got status: 429.` or its error body's `error.code`. When a status is found it
-decides; the wording (`rate limit`, `too many requests`, `timed out`, `overloaded`,
-`service unavailable`, …, checked in that order) is consulted only when no status is reported
-(Bedrock, network failures, the proxy's own idle timeout), and a number elsewhere in the text never
-counts (#42). The client gets a fixed message and code, never the upstream text. A missing or broken
-upstream credential is refused with `401` before any response starts, streamed or not
-(`checkRequestAuth`).
+decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`, `overloaded`,
+`at capacity`, `servers are currently busy`, `high demand`, `service unavailable`, …, checked in that
+order) is consulted only when no status is reported (Bedrock, network failures, the proxy's own idle
+timeout, Codex's usage limit), and a number elsewhere in the text never counts (#42). The client
+gets a fixed message and code, never the upstream text. A missing or broken upstream credential is
+refused with `401` before any response starts, streamed or not (`checkRequestAuth`).
+
+Codex's usage limit (#190): pi's Codex adapter reports Codex's 429 for a ChatGPT login over its
+usage limit as "You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.", with no
+status. The `usage limit` wording makes it `429 rate_limit`, so a fallback chain that names
+`rate_limit` moves past it and its provider cools down for as long as Codex's body says
+(`resets_in_seconds`, read from the captured response). The capacity wordings are ones pi's own
+retry classifier (`pi-ai/utils/retry`) treats as transient; with no status they answer `503
+provider_overloaded`, whose class `unavailable` cools the model down.
 
 Context overflow (#40): `mapFailedCall` runs pi's `isContextOverflow` on the failed call's final
 message, which recognizes overflow wording from about 15 providers (Anthropic, OpenAI, Google,

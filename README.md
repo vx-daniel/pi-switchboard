@@ -348,8 +348,8 @@ An alias can name several models, tried in order, and the failures that move to 
 
 | Class | Failure before the response starts |
 |---|---|
-| `rate_limit` | 429 |
-| `unavailable` | 503, or 529 overloaded |
+| `rate_limit` | 429, or a usage limit (a ChatGPT login's Codex limit) |
+| `unavailable` | 503, 529 overloaded, or a provider saying it is out of capacity |
 | `timeout` | 504, or the upstream idle timeout |
 | `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve) |
 | `refused` | The login can't run the model (`404 model_not_found`) |

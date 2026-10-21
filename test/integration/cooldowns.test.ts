@@ -25,9 +25,11 @@ import {
 } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { FAKE_CODEX_TOKEN } from '../fixtures/codex-token'
 import {
   finishChunk,
   googleSse,
+  httpError,
   type MockProvider,
   type MockReply,
   sse,
@@ -39,6 +41,21 @@ import { testConfig } from '../helpers'
 const MOCK_KEY = 'notarealsecret-mock-provider-key'
 /** How long the rate-limited model says to wait, in seconds. */
 const RETRY_AFTER_SECONDS = 30
+/** How long Codex's usage-limit body says to wait, in seconds. */
+const CODEX_RESET_SECONDS = 3600
+
+/**
+ * Codex's answer to a ChatGPT login over its usage limit: a 429 whose body says when it resets,
+ * with no `retry-after`. pi's Codex adapter reports it with no status (#190).
+ */
+const CODEX_USAGE_LIMIT = httpError(429, {
+  error: {
+    type: 'usage_limit_reached',
+    message: 'The usage limit has been reached',
+    plan_type: 'plus',
+    resets_in_seconds: CODEX_RESET_SECONDS
+  }
+})
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
@@ -75,7 +92,8 @@ beforeAll(async () => {
     'limited-gemini': failingWith(429, googleSse('ok')),
     'unavailable-mock': failingWith(503, answer),
     'overloaded-mock': failingWith(529, answer),
-    'steady-mock': answer
+    'steady-mock': answer,
+    'limited-codex': CODEX_USAGE_LIMIT
   })
   const provider = (models: string[]): Record<string, unknown> => ({
     baseUrl: `${mock.origin}/v1`,
@@ -89,7 +107,13 @@ beforeAll(async () => {
         alpha: provider(['limited-mock', 'sibling-mock']),
         beta: provider(['answer-mock']),
         gamma: provider(['unavailable-mock', 'overloaded-mock', 'steady-mock']),
-        google: { ...mock.provider('google-generative-ai'), models: [{ id: 'limited-gemini' }] }
+        google: { ...mock.provider('google-generative-ai'), models: [{ id: 'limited-gemini' }] },
+        codex: {
+          baseUrl: mock.origin,
+          api: 'openai-codex-responses',
+          apiKey: FAKE_CODEX_TOKEN,
+          models: [{ id: 'limited-codex' }]
+        }
       }
     }
   })
@@ -278,6 +302,42 @@ describe("Google's adapter", () => {
         secondsLeft: 60
       })
     ])
+  })
+})
+
+describe("Codex's adapter", () => {
+  // Catches a ChatGPT usage limit answered as an outage (#190): pi reports Codex's 429 as "You have
+  // hit your ChatGPT usage limit" with no status, so its words must make it a rate limit, which the
+  // chain falls back past and which cools the provider for as long as Codex's body says.
+  test('a usage limit falls back and cools the provider until it resets', async () => {
+    setAliases({
+      cchain: { targets: ['codex/limited-codex', 'beta/answer-mock'], fallbackOn: ['rate_limit'] }
+    })
+
+    const answer = await ask('cchain')
+
+    expect(answer.status).toBe(200)
+    // pi's Codex adapter tries a WebSocket first; its upgrade request has no body, so no model.
+    expect(answer.upstream.filter((model) => model !== undefined)).toEqual([
+      'limited-codex',
+      'answer-mock'
+    ])
+    expect(await listedCooldowns()).toEqual([
+      expect.objectContaining({
+        provider: 'codex',
+        reason: 'rate_limit',
+        source: 'response',
+        secondsLeft: CODEX_RESET_SECONDS
+      })
+    ])
+  })
+
+  // Catches the client reading a quota limit as an outage it should retry at once.
+  test('a request that names the model gets 429 rate_limit', async () => {
+    const answer = await ask('codex/limited-codex')
+
+    expect(answer.status).toBe(429)
+    expect(answer.body).toMatchObject({ error: { code: 'rate_limit' } })
   })
 })
 
