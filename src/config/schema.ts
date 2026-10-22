@@ -168,6 +168,20 @@ export type RoutingConfig = z.infer<typeof RoutingConfigSchema>
 /** Provider -> the share of each usage window to keep free, from 0 to 1 (`routing.reserve`). */
 export type Reserve = RoutingConfig['reserve']
 
+/** Fewest logins an `accounts` entry may give: the base one and one extra. */
+const MIN_ACCOUNTS = 2
+/** Most logins one provider may have (`accounts`), counting the base login. */
+const MAX_ACCOUNTS = 10
+/**
+ * How many logins a provider has (#227): the base one, plus `{provider}-account-N` for N from 2
+ * to this count. Each extra login is its own provider, with its own credential in pi's store.
+ */
+const AccountCountSchema = z.int().min(MIN_ACCOUNTS).max(MAX_ACCOUNTS)
+/** Provider -> how many logins it has; see {@link AccountCountSchema}. */
+const AccountsSchema = z.record(z.string().min(1), AccountCountSchema).readonly()
+/** Provider -> how many logins it has (`accounts`). */
+export type Accounts = z.infer<typeof AccountsSchema>
+
 /** The JSON config file's fields and the values each accepts. */
 const ProxyConfigSchema = z.object({
   /** Bind address. Surrounding whitespace is a typo; empty means unset. */
@@ -198,6 +212,11 @@ const ProxyConfigSchema = z.object({
    * empty: an alias is listed and resolved only while one of its targets is exposed.
    */
   aliases: z.record(z.string().min(1), AliasTargetSchema).readonly(),
+  /**
+   * Provider -> how many logins it has, the base one included (#227): `{ "anthropic": 2 }` adds
+   * `anthropic-account-2`, a provider of its own that pi logs into and stores separately.
+   */
+  accounts: AccountsSchema,
   /** Lowest log level the proxy writes (LogTape levels). */
   logLevel: LogLevelSchema,
   routing: RoutingConfigSchema,
@@ -247,6 +266,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   customModels: [],
   providerPrefixes: {},
   aliases: {},
+  accounts: {},
   logLevel: 'info',
   routing: { reserve: {} },
   zed: {
@@ -313,36 +333,30 @@ function validNameEntries(value: unknown): Record<string, string> {
 }
 
 /**
- * Keeps the `aliases` entries the schema accepts: a non-empty name for a valid target.
+ * Returns a repairer that keeps the map entries with a non-empty key and a value `schema` accepts.
  *
- * @param value - The field's raw value.
- * @returns The valid entries; empty when `value` is not a plain object.
+ * @typeParam T - The value type.
+ * @param schema - The schema each value must pass.
+ * @returns The repairer: the valid entries, empty when the value is not a plain object.
  */
-function validAliases(value: unknown): Record<string, AliasTarget> {
-  if (!isRecord(value)) return {}
-  const entries: Record<string, AliasTarget> = {}
-  for (const [alias, candidate] of Object.entries(value)) {
-    const parsed = AliasTargetSchema.safeParse(candidate)
-    if (alias.length > 0 && parsed.success) entries[alias] = parsed.data
+function validEntries<T>(schema: z.ZodType<T>): (value: unknown) => Record<string, T> {
+  return (value) => {
+    if (!isRecord(value)) return {}
+    const entries: Record<string, T> = {}
+    for (const [key, candidate] of Object.entries(value)) {
+      const parsed = schema.safeParse(candidate)
+      if (key.length > 0 && parsed.success) entries[key] = parsed.data
+    }
+    return entries
   }
-  return entries
 }
 
-/**
- * Keeps the `routing.reserve` entries the schema accepts: a provider name and a share from 0 to 1.
- *
- * @param value - The field's raw value.
- * @returns The valid entries; empty when `value` is not a plain object.
- */
-function validReserves(value: unknown): Record<string, number> {
-  if (!isRecord(value)) return {}
-  const entries: Record<string, number> = {}
-  for (const [provider, candidate] of Object.entries(value)) {
-    const parsed = ReserveShareSchema.safeParse(candidate)
-    if (provider.length > 0 && parsed.success) entries[provider] = parsed.data
-  }
-  return entries
-}
+/** Keeps the `aliases` entries the schema accepts: a non-empty name for a valid target. */
+const validAliases = validEntries(AliasTargetSchema)
+/** Keeps the `routing.reserve` entries the schema accepts: a provider and a share from 0 to 1. */
+const validReserves = validEntries(ReserveShareSchema)
+/** Keeps the `accounts` entries the schema accepts: a provider and a count from 2 up. */
+const validAccounts = validEntries(AccountCountSchema)
 
 /** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
 type FieldReader<Key extends string> = <T>(
@@ -474,6 +488,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     customModels: field('customModels', fields.customModels, validNames),
     providerPrefixes: field('providerPrefixes', fields.providerPrefixes, validNameEntries),
     aliases: field('aliases', fields.aliases, validAliases),
+    accounts: field('accounts', fields.accounts, validAccounts),
     logLevel: field('logLevel', fields.logLevel, () => DEFAULT_CONFIG.logLevel),
     routing: normalizeRoutingConfig(isRecord(raw) ? raw['routing'] : undefined, corrected),
     zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected)
