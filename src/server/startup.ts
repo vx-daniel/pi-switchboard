@@ -29,6 +29,7 @@ import {
 } from '@proxy/logging'
 import { getAvailableModels } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
+import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { recordStatsToFile } from '@proxy/stats/recorder'
 
 /** Logger for process lifecycle (`server` category). */
@@ -98,7 +99,7 @@ export interface CliArgs {
  * @param host - The bind address.
  * @returns Whether `host` is `localhost`, `::1` or in `127.0.0.0/8`.
  */
-function isLoopbackHost(host: string): boolean {
+export function isLoopbackHost(host: string): boolean {
   return host === 'localhost' || host === '::1' || host.startsWith('127.')
 }
 
@@ -300,11 +301,16 @@ export function logEffectiveConfig(config: ServerConfig): void {
  * `error` event.
  *
  * @param config - the resolved server config
+ * @param proxyAuth - the proxy auth the server applies; by default one made from
+ *   `config.proxyAuth`. The console passes its own, to change auth without a restart
  * @returns the listening server
  * @throws Error when the server cannot listen, such as `EADDRINUSE`
  */
-export async function listen(config: ServerConfig): Promise<ServerType> {
-  const app = createApp(config)
+export async function listen(
+  config: ServerConfig,
+  proxyAuth?: ProxyAuthSwitch
+): Promise<ServerType> {
+  const app = createApp(config, undefined, undefined, proxyAuth)
   const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host })
   await new Promise<void>((resolve, reject) => {
     const failed = (error: Error): void => {

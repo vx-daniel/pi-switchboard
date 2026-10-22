@@ -18,6 +18,7 @@ import {
   HTTP_PAYLOAD_TOO_LARGE,
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
+import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { generateRequestId } from '@proxy/server/request-id'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { MiddlewareHandler } from 'hono'
@@ -152,27 +153,32 @@ function matchesToken(token: string, expected: Buffer): boolean {
 }
 
 /**
- * Creates the proxy auth middleware for `config.proxyAuth`.
+ * Creates the proxy auth middleware, which applies the switch's auth to each request.
  *
  * @remarks
  * `off` lets everything through; `token` needs `Authorization: Bearer <token>` and answers 401 for
  * a missing header or a wrong token. The scheme is matched in any case, with one or more spaces
  * before the token, as RFC 7235 §2.1 allows; the token itself is matched exactly (#128 item 2).
+ * The switch is read on every request, so a change from the console applies to the next one.
  * Auth that cannot be applied never gets here: the proxy refuses to start
  * (`UnusableProxyAuthError`).
  *
- * @param config - the server config; only `proxyAuth` is read, once, when the middleware is made
+ * @param proxyAuth - the server's proxy auth switch
  * @returns the middleware
  */
-export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<ProxyEnv> {
-  const proxyAuth = config.proxyAuth
-  // Hashed once: every request compares against the same digest.
-  const expected = proxyAuth.kind === 'token' ? tokenDigest(proxyAuth.token) : undefined
+export function proxyAuthMiddleware(proxyAuth: ProxyAuthSwitch): MiddlewareHandler<ProxyEnv> {
+  // Hashed once per token: every request compares against the same digest until it changes.
+  let hashed: { readonly token: string; readonly digest: Buffer } | undefined
   return async (context, next) => {
-    if (expected === undefined) {
+    const applied = proxyAuth.current()
+    if (applied.kind === 'off') {
       await next()
       return undefined
     }
+    if (hashed?.token !== applied.token) {
+      hashed = { token: applied.token, digest: tokenDigest(applied.token) }
+    }
+    const expected = hashed.digest
 
     const authHeader = context.req.header('authorization')
     if (authHeader === undefined) {

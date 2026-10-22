@@ -8,6 +8,7 @@
 import type { ServerConfig } from '@proxy/config/env'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
 import { createApp } from '@proxy/server/app'
+import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import type { ExposureConfigReader } from '@proxy/server/routes'
 import { isRecord } from '@proxy/utils/guards'
 
@@ -157,11 +158,14 @@ export function testConfig(): ServerConfig {
  * @param config - the config to serve with; {@link testConfig} when omitted
  * @param remoteImageFetch - how remote images are fetched when the config enables them; the
  *   strict production policy when omitted
+ * @param proxyAuth - the app's proxy auth switch, to change auth after the app is built; one made
+ *   from `config.proxyAuth` when omitted
  * @returns the Hono app; drive it with `app.request(…)`
  */
 export function testApp(
   config?: ServerConfig,
-  remoteImageFetch?: RemoteImageFetchOptions
+  remoteImageFetch?: RemoteImageFetchOptions,
+  proxyAuth?: ProxyAuthSwitch
 ): ReturnType<typeof createApp> {
   const serverConfig = config ?? testConfig()
   const reader: ExposureConfigReader = () => ({
@@ -172,7 +176,7 @@ export function testApp(
     providerPrefixes: serverConfig.providerPrefixes,
     aliases: serverConfig.aliases
   })
-  return createApp(serverConfig, reader, remoteImageFetch)
+  return createApp(serverConfig, reader, remoteImageFetch, proxyAuth)
 }
 
 /**

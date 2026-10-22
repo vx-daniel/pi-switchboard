@@ -27,6 +27,7 @@ import {
   openAPIDocumentDescription,
   SWAGGER_UI_VERSION
 } from '@proxy/server/openapi'
+import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { createRoutes, type ExposureConfigReader, fileConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
 import { errorCode } from '@proxy/utils/guards'
@@ -57,12 +58,15 @@ const httpLogger = proxyLogger('server', 'http')
  *   file and pi's settings on each request ({@link fileConfigReader})
  * @param remoteImageFetch - how remote images are fetched when `remoteImagesEnabled` is on;
  *   `undefined` is the strict production policy. Only tests pass another, to reach a local server
+ * @param proxyAuth - the proxy auth the app applies, read on every request; by default one made
+ *   from `config.proxyAuth`. The console passes its own, to change auth without a restart
  * @returns the assembled app, ready to serve
  */
 export function createApp(
   config: ServerConfig,
   configReader?: ExposureConfigReader,
-  remoteImageFetch?: RemoteImageFetchOptions
+  remoteImageFetch?: RemoteImageFetchOptions,
+  proxyAuth: ProxyAuthSwitch = createProxyAuthSwitch(config.proxyAuth)
 ): Hono<ProxyEnv> {
   const app = new Hono<ProxyEnv>()
 
@@ -96,13 +100,14 @@ export function createApp(
     )
   }
 
-  app.use('/v1/*', proxyAuthMiddleware(config))
+  const authMiddleware = proxyAuthMiddleware(proxyAuth)
+  app.use('/v1/*', authMiddleware)
   // The old upstream key header (#65), on the one route that reads the key, after proxy auth: an
   // unauthenticated caller gets the 401 first, and probes of the open paths are not affected.
   app.use('/v1/chat/completions', renamedHeaderMiddleware())
   // `/healthz` itself stays open for liveness probes; its detail endpoints name providers and
   // models. Not `/healthz/*`: Hono's wildcard also matches the bare `/healthz`.
-  app.use('/healthz/:check{.+}', proxyAuthMiddleware(config))
+  app.use('/healthz/:check{.+}', authMiddleware)
 
   // Routes
   app.route('/', createHealthRoutes(configReader ?? fileConfigReader))
@@ -142,7 +147,7 @@ export function createApp(
   lifecycleLogger.debug(
     'App wired: proxy auth {authMode}, exposure config from {exposureSource}, docs UI {docsUi}',
     {
-      authMode: config.proxyAuth.kind,
+      authMode: proxyAuth.current().kind,
       exposureSource: configReader === undefined ? 'config file' : 'custom reader',
       docsUi: config.docsUiEnabled ? 'on' : 'off'
     }

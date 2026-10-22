@@ -3,6 +3,7 @@
  * a token accepts.
  */
 
+import { createProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { testApp, testConfig } from '../helpers'
@@ -69,5 +70,28 @@ describe('proxy auth', () => {
     expect(await refusal({ Authorization: `Bearer ${TOKEN}x` })).toEqual(
       body('Invalid proxy authentication token')
     )
+  })
+
+  // Catches the console's auth change (`p`) not reaching the running server, or a replaced token
+  // still accepted: the middleware must read the switch on every request, not the token it was
+  // built with.
+  test('applies a change of auth from the next request on', async () => {
+    const proxyAuth = createProxyAuthSwitch({ kind: 'off' })
+    const app = testApp(testConfig(), undefined, proxyAuth)
+    const status = async (headers: Record<string, string>): Promise<number> => {
+      const response = await app.request('/v1/responses', { headers })
+      await response.text()
+      return response.status
+    }
+    const withToken = { Authorization: `Bearer ${TOKEN}` }
+
+    expect(await status({})).toBe(PAST_AUTH)
+    proxyAuth.set({ kind: 'token', token: TOKEN })
+    expect(await status({})).toBe(401)
+    expect(await status(withToken)).toBe(PAST_AUTH)
+    proxyAuth.set({ kind: 'token', token: `${TOKEN}-replaced` })
+    expect(await status(withToken)).toBe(401)
+    proxyAuth.set({ kind: 'off' })
+    expect(await status({})).toBe(PAST_AUTH)
   })
 })
