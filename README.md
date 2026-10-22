@@ -188,7 +188,7 @@ Neither route needs the proxy token, even with proxy auth on: a browser cannot s
 
 ### Usage over HTTP
 
-`GET /v1/switchboard/usage` (not part of OpenAI's API; proxy token, if set) answers what the console's Stats view shows, for a proxy run without the console, such as the Docker image. It reads the [stats file](#configuration), so it covers every proxy that writes to the same agent dir and survives restarts.
+`GET /v1/switchboard/usage` (not part of OpenAI's API; proxy token, if set) answers what the console's Stats view shows, for a proxy run without the console, such as the Docker image. It reads the [stats file](#configuration), so it covers every proxy that writes to the same agent dir and survives restarts. Like the file, which the proxy writes every 5 seconds, an answer can be up to 5 seconds old: one window's answer is reused that long, so polling it costs one read.
 
 ```bash
 curl -s "http://localhost:4141/v1/switchboard/usage?window=week" -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" | jq '.aliases'

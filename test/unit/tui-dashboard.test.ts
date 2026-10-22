@@ -185,6 +185,11 @@ describe('dashboardRows', () => {
           requests: 9 - index
         })
       ),
+      // With the ALIASES panel too, so both tables have to share a short screen.
+      aliases: Array.from({ length: 5 }, (_, aliasIndex) => ({
+        ...modelStats({ model: '', requests: 5 - aliasIndex }),
+        alias: `route-${String(aliasIndex)}`
+      })),
       errors: { failures: [{ failureClass: 'rate_limit', count: 4 }], rejected: [] }
     })
     const rows = dashboardRows(data, { height, width })

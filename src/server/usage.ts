@@ -34,6 +34,11 @@ const usageLogger = proxyLogger('stats')
 
 /** Minutes per timeline bucket, by window: 24 hours, 28 quarter days, 30 days. */
 const BUCKET_MINUTES: Readonly<Record<StatsWindow, number>> = { today: 60, week: 360, all: 1440 }
+/**
+ * How long one window's answer is reused, in milliseconds: the recorder writes every 5 s, so a
+ * fresher read shows nothing new, and a burst of requests costs one read of the file.
+ */
+const SNAPSHOT_MS = 5000
 
 /** The store's methods the route reads. */
 export type UsageStore = Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors' | 'close'>
@@ -166,8 +171,25 @@ function readUsage(store: UsageStore, window: StatsWindow, now: number): Usage {
 type UsageUnavailable = 'stats-off' | 'unreadable'
 
 /**
+ * Closes a store whose read failed, logging rather than throwing: the request still gets its 503.
+ *
+ * @param store - the store, if one was open
+ */
+function closeQuietly(store: UsageStore | undefined): void {
+  try {
+    store?.close()
+  } catch (error) {
+    usageLogger.debug('Could not close the stats file after a failed read: {reason}', {
+      reason: error instanceof Error ? error.message : String(error)
+    })
+  }
+}
+
+/**
  * Creates the route's reader of the stats file: it opens the file on the first request and keeps
- * it open; a file that won't open or read is closed and tried again on the next request.
+ * it open; a file that won't open or read is closed and tried again on the next request. One
+ * window's answer is reused for a few seconds ({@link SNAPSHOT_MS}), since the reads are
+ * synchronous, on the thread that serves requests.
  *
  * @param statsEnabled - whether the proxy keeps stats (`--no-stats` turns them off)
  * @param open - opens the stats file at a path
@@ -178,14 +200,20 @@ function createUsageReader(
   open: (path: string) => UsageStore
 ): (window: StatsWindow, now: number) => Usage | UsageUnavailable {
   let store: UsageStore | undefined
+  let cached:
+    | { readonly window: StatsWindow; readonly at: number; readonly usage: Usage }
+    | undefined
   return (window, now) => {
     if (!statsEnabled) return 'stats-off'
+    if (cached?.window === window && now - cached.at < SNAPSHOT_MS) return cached.usage
     try {
       store ??= open(statsFilePath())
-      return readUsage(store, window, now)
+      const usage = readUsage(store, window, now)
+      cached = { window, at: now, usage }
+      return usage
     } catch (error) {
       // Closed and opened again on the next request: the file may have been fixed or unlocked.
-      store?.close()
+      closeQuietly(store)
       store = undefined
       usageLogger.warn('Could not read usage from the stats file: {reason}', {
         reason: error instanceof Error ? error.message : String(error)
