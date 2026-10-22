@@ -57,7 +57,8 @@ import {
   recordRouteFailure,
   recordRouteFallback,
   recordRouteUsage,
-  type RouteKey
+  routeKey,
+  streamFailureCounter
 } from '@proxy/server/route-totals'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { Context } from 'hono'
@@ -103,17 +104,6 @@ export function failureClass(answer: FailedAnswer): FailureClass | undefined {
     return 'auth'
   }
   return FAILURE_BY_STATUS[answer.status]
-}
-
-/**
- * Names the route an attempt runs on, for its totals (#70).
- *
- * @param alias - the alias the request named, or `undefined`
- * @param candidate - the model the attempt goes to
- * @returns the alias (`null` for none), the provider and the canonical model ID
- */
-function routeKey(alias: string | undefined, candidate: ExposedModel): RouteKey {
-  return { alias: alias ?? null, provider: candidate.model.provider, model: candidate.canonicalId }
 }
 
 /**
@@ -441,23 +431,19 @@ async function* startingWith<T>(
 }
 
 /**
- * Relays a started stream's events, counting a failure on the route for an `error` event the
- * client did not cause (#70): the attempt was answered, but the answer broke off.
+ * Relays a started stream's events, counting a failure for an `error` event: the attempt was
+ * answered, but the answer broke off.
  *
  * @param events - the stream's events, from its first
- * @param key - the attempt's route
- * @param signal - the client's disconnect signal
+ * @param countFailure - the stream's {@link streamFailureCounter}
  * @returns a generator that yields every event unchanged
  */
 async function* countingFailures(
   events: AsyncIterable<AssistantMessageEvent>,
-  key: RouteKey,
-  signal: AbortSignal | undefined
+  countFailure: (failure: FailureClass | undefined) => void
 ): AsyncGenerator<AssistantMessageEvent> {
   for await (const event of events) {
-    if (event.type === 'error' && signal?.aborted !== true) {
-      recordRouteFailure(key, failureClass(mapFailedCall(event.error)))
-    }
+    if (event.type === 'error') countFailure(failureClass(mapFailedCall(event.error)))
     yield event
   }
 }
@@ -519,9 +505,10 @@ async function attemptStream(
     })
     return honoStream(honoContext, async (stream) => {
       let frameCount = 0
+      const countFailure = streamFailureCounter(key, options.signal)
       try {
         for await (const frame of streamToSSE(
-          countingFailures(startingWith(first, events), key, options.signal),
+          countingFailures(startingWith(first, events), countFailure),
           { requestId, route },
           includeUsage
         )) {
@@ -535,7 +522,7 @@ async function attemptStream(
         })
       } catch (err: unknown) {
         const mapped = reportThrownFailure(err)
-        if (options.signal?.aborted !== true) recordRouteFailure(key, failureClass(mapped))
+        countFailure(failureClass(mapped))
         chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
           frameCount,
           durationMs: Math.round(performance.now() - start)

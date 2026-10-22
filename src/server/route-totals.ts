@@ -18,11 +18,25 @@
 import type { Usage } from '@earendil-works/pi-ai'
 import type { FailureClass } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import type { ExposedModel } from '@proxy/openai/model-exposure'
 
 /** Logger for a listener that throws: the chat route's category, as the dispatcher records here. */
 const totalsLogger = proxyLogger('server', 'chat')
 
-/** One route's running totals. */
+/**
+ * One route's running totals.
+ *
+ * @remarks
+ * Rows are never pruned: a row for an alias that was renamed or removed from the config (read per
+ * request) stays until restart or {@link clearRouteTotals}. Their number is bounded by the aliases
+ * and models ever used, alias × model.
+ *
+ * The tokens and cost are per upstream call, `requests` per attempt. A model that refuses
+ * `prompt_cache_breakpoint` (#163) is called twice in one attempt, the second time without the
+ * field, and both calls' usage is added to the one request. The refusal is a 400, which reports
+ * no tokens from the providers seen so far, but a provider that did report some would make those
+ * rows' tokens per request look higher than one call's.
+ */
 export interface RouteTotals {
   /** The alias the request named, or `null` for a request that named a model. */
   readonly alias: string | null
@@ -168,6 +182,38 @@ export function recordRouteUsage(key: RouteKey, usage: Usage): void {
 }
 
 /**
+ * Names the route an attempt runs on.
+ *
+ * @param alias - the alias the request named, or `undefined`
+ * @param candidate - the model the attempt goes to
+ * @returns the alias (`null` for none), the provider and the canonical model ID
+ */
+export function routeKey(alias: string | undefined, candidate: ExposedModel): RouteKey {
+  return { alias: alias ?? null, provider: candidate.model.provider, model: candidate.canonicalId }
+}
+
+/**
+ * Builds the failure counter for one started stream: it counts at most one failure on the route,
+ * and none once the client has left. An `error` event and a throw out of the relay can both end
+ * the same stream (a write failing after the error event, say), and the attempt failed once.
+ *
+ * @param key - the attempt's route
+ * @param signal - the client's disconnect signal
+ * @returns a function that counts the stream's failure, given its class, the first time only
+ */
+export function streamFailureCounter(
+  key: RouteKey,
+  signal: AbortSignal | undefined
+): (failure: FailureClass | undefined) => void {
+  let counted = false
+  return (failure) => {
+    if (counted || signal?.aborted === true) return
+    counted = true
+    recordRouteFailure(key, failure)
+  }
+}
+
+/**
  * Orders rows by alias (requests without one first), then model.
  *
  * @param left - one row
@@ -217,8 +263,12 @@ export function onRouteTotalsChange(listener: () => void): () => void {
   }
 }
 
-/** Drops every row and starts counting again now; listeners stay subscribed. */
+/**
+ * Drops every row and starts counting again now, then tells the listeners, which stay
+ * subscribed: a console that resets the totals shows the empty table at once.
+ */
 export function clearRouteTotals(): void {
   rows.clear()
   since = Date.now()
+  notify()
 }
