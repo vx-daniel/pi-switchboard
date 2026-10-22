@@ -117,8 +117,8 @@ export type ZedSyncConfig = z.infer<typeof ZedSyncConfigSchema>
 /**
  * The upstream failures an alias's fallback chain can name (#67). A failure before the response
  * starts moves to the next target only when the alias names its class:
- * - `rate_limit`: 429
- * - `unavailable`: 503, or 529 overloaded
+ * - `rate_limit`: 429, or a usage limit (a ChatGPT login's Codex limit, #190)
+ * - `unavailable`: 503, 529 overloaded, or a provider saying it is out of capacity
  * - `timeout`: 504, or the upstream idle timeout
  * - `auth`: the credential fails (no credential pi can resolve, or the provider's 401 or 403)
  * - `refused`: the login can't run the model (`404 model_not_found`, #156)
