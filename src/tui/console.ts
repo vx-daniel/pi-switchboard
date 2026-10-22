@@ -74,7 +74,7 @@ import {
 import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
 import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
-import { installConsoleTheme, paint, strong } from '@proxy/tui/theme'
+import { chrome, installConsoleTheme, paint, strong } from '@proxy/tui/theme'
 
 import packageJson from '../../package.json' with { type: 'json' }
 
@@ -291,6 +291,20 @@ function sidebarInput(context: ConsoleContext): SidebarInput {
 }
 
 /**
+ * Renders the sidebar on the chrome's background, down to the bottom of the screen: the rows
+ * below its last panel are background too.
+ *
+ * @param context - the console
+ * @param height - the rows the sidebar covers, from the tab bar to the footer
+ * @param width - the sidebar's columns
+ * @returns the rows
+ */
+function sidebarChrome(context: ConsoleContext, height: number, width: number): string[] {
+  const rows = sidebarRows(sidebarInput(context), { height, width })
+  return Array.from({ length: height }, (_, row) => chrome(rows[row] ?? '', width))
+}
+
+/**
  * Creates the console's root component: the header, then the tab bar over the current view with
  * the sidebar beside them on a wide enough terminal, and the footer on the screen's last row.
  *
@@ -312,26 +326,30 @@ function createRootView(
       const mainWidth = side === undefined ? width : width - side - 1
       const body = viewRows(context, { height, width: mainWidth })
       const main = [
-        tabsLine(state.view),
+        chrome(tabsLine(state.view), mainWidth),
         ...body,
         ...Array.from({ length: Math.max(0, height - body.length) }, () => '')
       ]
       const middle =
         side === undefined
           ? main
-          : besideSidebar(
-              main,
-              sidebarRows(sidebarInput(context), { height: main.length, width: side }),
-              mainWidth
-            )
+          : besideSidebar(main, sidebarChrome(context, main.length, side), mainWidth)
       const rows = [
-        headerLine(config, state.status, side !== undefined),
+        chrome(headerLine(config, state.status, side !== undefined), width),
         ...middle,
         footerLine(state.view, sidebarWidth(width) !== undefined)
       ]
       return rows.map((row) => truncateToWidth(row, width))
     },
     handleInput,
+    handleMouse(event) {
+      // The wheel scrolls the log view, as ↑ and ↓ do; negative is up, back in the log.
+      if (event.type !== 'wheel' || event.wheelDelta === undefined) return undefined
+      const { state } = context
+      if (state.view !== 'logs') return undefined
+      state.logView = scrollLogView(state.logView, context.logs, -event.wheelDelta)
+      return { handled: true }
+    },
     invalidate() {
       // Nothing is cached between renders.
     }
@@ -670,7 +688,8 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
   const server = await listen(config)
   const statsView = openStatsView(config.statsEnabled)
   const terminal = new ProcessTerminal()
-  const tui = new TuiAltScreen(terminal)
+  // `auto` moves further on a fast wheel spin, for terminals that send one event per notch.
+  const tui = new TuiAltScreen(terminal, undefined, undefined, { wheelScrollLines: 'auto' })
   const stopped = settleable()
   let crash: unknown
   const crashed = (error: unknown): void => {

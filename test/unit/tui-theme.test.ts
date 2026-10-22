@@ -1,5 +1,5 @@
-import { stripTerminalSequences } from '@earendil-works/pi-tui'
-import { highlight, installConsoleTheme, paint, strong } from '@proxy/tui/theme'
+import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
+import { activeTab, chrome, highlight, installConsoleTheme, paint, strong } from '@proxy/tui/theme'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
 /** Where pi keeps its global theme. */
@@ -44,6 +44,33 @@ describe('the console theme', () => {
     installConsoleTheme('1')
 
     expect(piThemeName()).not.toBe('tokyonight-storm')
-    expect([paint('error', 'x'), strong('x'), highlight('x')]).toEqual(['x', 'x', 'x'])
+    expect([paint('error', 'x'), strong('x'), highlight('x'), activeTab('x')]).toEqual([
+      'x',
+      'x',
+      'x',
+      'x'
+    ])
+    expect(chrome('x', 20)).toBe('x')
+  })
+
+  // Catches the header or sidebar background ending part-way along a row: a reset inside the row
+  // (from a highlighted item, a bold title or a cut line) must not leave the rest uncolored.
+  test('the chrome background covers the whole row, through resets inside it', () => {
+    vi.stubEnv('NO_COLOR', '')
+    installConsoleTheme()
+    const row = `${highlight('tab')} plain \u001b[0mafter`
+    const painted = chrome(row, 30)
+
+    expect(visibleWidth(painted)).toBe(30)
+    expect(stripTerminalSequences(painted).trimEnd()).toBe('tab plain after')
+    // The chrome's own background sequence opens the row: an escape ending at the first `m`.
+    const background = painted.slice(0, painted.indexOf('m') + 1)
+    expect(background.startsWith('\u001b[')).toBe(true)
+    // Every end of a background inside the row is followed by the chrome's background again;
+    // only the row's own final reset is not.
+    const body = painted.slice(0, -'\u001b[49m'.length)
+    for (const end of ['\u001b[0m', '\u001b[49m']) {
+      for (const part of body.split(end).slice(1)) expect(part.startsWith(background)).toBe(true)
+    }
   })
 })
