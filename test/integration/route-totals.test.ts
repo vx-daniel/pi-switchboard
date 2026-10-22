@@ -392,15 +392,15 @@ describe('route totals', () => {
   })
 
   // Catches a credential refusal left out of the totals: no call is made, but it is an attempt
-  // that failed `auth` (`x_pi.attempts` lists it), whether it ends the request with a 401 or the
-  // chain moves on, before the first call or between two.
+  // that failed `auth` (`x_pi.attempts` lists it), whether it ends the request with a 502 or the
+  // chain moves on, before the first call or between two. The 502 is still `auth` (#128).
   test.each([
     ['before the first call', 'guarded'],
     ['between two calls', 'guarded-later']
   ])(
     'count a credential refusal as an auth failure, and the fallback past it: %s',
     async (_when, alias) => {
-      expect(await ask('locked-mock')).toBe(401)
+      expect(await ask('locked-mock')).toBe(502)
       expect(await ask(alias)).toBe(200)
 
       const locked = { ...EMPTY, provider: 'keyless', model: 'keyless/locked-mock', requests: 1 }
@@ -422,7 +422,7 @@ describe('route totals', () => {
   // Catches a refusal that ends the chain (its alias does not name `auth`) counted as a fallback,
   // or the next target counted though it was never tried (third #194 review).
   test('count a credential refusal that ends an alias chain, with no fallback', async () => {
-    expect(await ask('guarded-strict')).toBe(401)
+    expect(await ask('guarded-strict')).toBe(502)
 
     const credentialClass: FailureClass = 'auth'
     expect(routeTotals()).toEqual([

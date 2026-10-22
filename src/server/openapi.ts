@@ -216,8 +216,8 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
         '(`upstream_invalid_request`), or the old `X-Pi-Upstream-Api-Key` header.'
     ),
     401: errorResponse(
-      'Proxy auth failed, or pi has no credential for the model and no ' +
-        '`X-Switchboard-Upstream-Api-Key` was sent.'
+      'Proxy auth failed, or the provider rejected the key sent in ' +
+        '`X-Switchboard-Upstream-Api-Key` (`upstream_api_key_invalid`).'
     ),
     404: errorResponse(
       'No exposed model has this ID, or the provider refused the model for the login the proxy ' +
@@ -226,7 +226,11 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
     413: errorResponse('The body is over the size limit.'),
     422: errorResponse('A field the proxy does not accept (`unsupported_parameter`).'),
     429: errorResponse('The provider rate-limited the request.'),
-    502: errorResponse('The provider refused the credential, or failed.'),
+    502: errorResponse(
+      "The provider refused pi's stored credential (`upstream_auth_error`), pi has no " +
+        "credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent " +
+        '(`upstream_credentials_missing`), or the provider failed.'
+    ),
     503: errorResponse('The provider is unavailable or overloaded.'),
     504: errorResponse('The provider timed out, or sent nothing for the upstream timeout.')
   }

@@ -325,6 +325,24 @@ describe('a fallback chain stops', () => {
     expect(answer.upstream).toEqual(['limited-mock'])
   })
 
+  // Catches a client's own key, refused by the provider, moving down a chain that names `auth`:
+  // the refusal is class `auth`, but the key is one provider's, so the request runs on the first
+  // model only and the client gets the 401 that says its key is wrong (#128).
+  test('for a request whose own upstream key the provider refuses, though `auth` is named', async () => {
+    setChain({ targets: ['alpha/unauthorized-mock', 'beta/answer-mock'], fallbackOn: ['auth'] })
+
+    const answer = await ask('chain', {
+      headers: { 'X-Switchboard-Upstream-Api-Key': 'notarealsecret-client-key' }
+    })
+    const body: unknown = JSON.parse(answer.text)
+
+    expect(answer.status).toBe(401)
+    expect(isRecord(body) && isRecord(body['error']) ? body['error']['code'] : undefined).toBe(
+      'upstream_api_key_invalid'
+    )
+    expect(answer.upstream).toEqual(['unauthorized-mock'])
+  })
+
   // Catches routing applied to a request that named a model, not an alias: it behaves as without
   // routing (principle VI), with no attempts reported.
   test('never for a request that names a model', async () => {

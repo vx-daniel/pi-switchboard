@@ -369,13 +369,18 @@ interface ChatOutcome {
  *
  * @param model - the public model ID to ask
  * @param stream - whether to request a streamed answer
+ * @param headers - more request headers, such as `X-Switchboard-Upstream-Api-Key`
  * @returns the response status, content type and body text, and the upstream request count
  */
-async function chat(model: string, stream: boolean): Promise<ChatOutcome> {
+async function chat(
+  model: string,
+  stream: boolean,
+  headers: Readonly<Record<string, string>> = {}
+): Promise<ChatOutcome> {
   const before = mock.requests.length
   const response = await testApp().request('/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ model, stream, messages: [{ role: 'user', content: 'Hi' }] })
   })
   const text = await response.text()
@@ -464,6 +469,48 @@ describe.each(APIS)('upstream HTTP error through %s', (api) => {
       })
     }
   )
+})
+
+/** The answer for a key the client sent that the provider refused (#128). */
+const CLIENT_KEY_REJECTED = {
+  status: HTTP_UNAUTHORIZED,
+  body: {
+    error: {
+      message: 'The provider rejected the API key in X-Switchboard-Upstream-Api-Key.',
+      type: 'authentication_error',
+      param: null,
+      code: 'upstream_api_key_invalid'
+    }
+  }
+}
+const CLIENT_KEY = 'notarealsecret-client-upstream-key'
+
+describe.each(APIS)('upstream credential refusal through %s', (api) => {
+  // The `invalid key` case's model: the provider answers it with a 401.
+  const model = `${PROVIDER_NAMES[api]}/${api}-invalid-key`
+
+  // Catches the client's own key, refused by the provider, answered as the proxy's fault (502),
+  // which tells the client nothing it can fix, or with the provider's text, which can quote the
+  // key (#128).
+  test.each([false, true])(
+    'a key the client sent is answered 401 upstream_api_key_invalid (stream %s)',
+    async (stream) => {
+      const outcome = await chat(model, stream, { 'X-Switchboard-Upstream-Api-Key': CLIENT_KEY })
+
+      expect({ status: outcome.status, body: JSON.parse(outcome.text) }).toEqual(
+        CLIENT_KEY_REJECTED
+      )
+      expect(outcome.text).not.toContain(CLIENT_KEY)
+    }
+  )
+
+  // Catches pi's stored credential, refused by the provider, answered with the client-key 401:
+  // the client did nothing wrong, the proxy's login is bad.
+  test("pi's stored credential refused is still 502 upstream_auth_error", async () => {
+    const outcome = await chat(model, false)
+
+    expect({ status: outcome.status, body: JSON.parse(outcome.text) }).toEqual(AUTH_FAILED)
+  })
 })
 
 describe('upstream stream cut off before it finished', () => {

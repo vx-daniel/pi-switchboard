@@ -160,7 +160,7 @@ Routes OpenAI defines that pi can back, each experimental first and then promote
 
 ## Open decisions
 
-- [ ] Proxy auth and upstream failure contract, 5 points (#128); point 5 done (#147)
+- [x] Proxy auth and upstream failure contract (#128): constant-time token compare and RFC 7235 Bearer scheme (items 1–2); a client's own key refused upstream answers `401 upstream_api_key_invalid`, a missing pi login `502 upstream_credentials_missing` (items 3–4); an upstream 400/422 answers `400 upstream_invalid_request` (item 5, #147)
 
 ## Later, not planned
 

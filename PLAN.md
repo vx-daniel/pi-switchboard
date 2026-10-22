@@ -375,7 +375,7 @@ A string alias, and a request that names a model, never fall back.
 | 429 | `rate_limit` |
 | 503 (and 529, mapped to 503) | `unavailable` |
 | 504 (and the idle timeout) | `timeout` |
-| 401 (no credential), 502 `upstream_auth_error` | `auth` |
+| 401 `upstream_api_key_invalid`, 502 `upstream_auth_error`, 502 `upstream_credentials_missing` | `auth` |
 | 404 `model_not_found` (the login refuses the model, #156) | `refused` |
 | any other 502 | `upstream_error` |
 | 400 | none: never falls back |
@@ -636,12 +636,14 @@ Completions run through `ModelRuntime.streamSimple()` (a non-streaming request r
 final message, as `completeSimple()` would), which resolves
 request auth themselves on every request: API keys, OAuth with refresh, model-specific headers,
 provider environment and an auth-resolved base URL (`ModelRuntime.prepareRequest`). The proxy
-only pre-checks that auth resolves (`getRequestAuth()`), so a route can answer 401 before a
-response starts. A per-request `X-Switchboard-Upstream-Api-Key` overrides the resolved key.
+only pre-checks that auth resolves (`getRequestAuth()`), so a route can answer
+`502 upstream_credentials_missing` before a response starts (#128). A per-request
+`X-Switchboard-Upstream-Api-Key` overrides the resolved key.
 
-When resolution fails, the 401 and the warning carry only pi's summary of the failure
-(`summarizeAuthError`): pi's OAuth errors go on to quote the token endpoint's response and a stack
-with install paths, which reach the log at `debug` at most, as on `/healthz/creds?verify=true`.
+When resolution fails, the answer has fixed text and the warning carries only pi's summary of the
+failure (`summarizeAuthError`): pi's OAuth errors go on to quote the token endpoint's response and
+a stack with install paths, which reach the log at `debug` at most, as on
+`/healthz/creds?verify=true`.
 The summary is pi's own first clause, so it can still quote operator config: for a `models.json`
 key command that resolves to nothing, pi's message names the command
 (`… from shell command: <command>`). Keep secrets out of key commands themselves (read them from a
@@ -1280,7 +1282,9 @@ Use an OpenAI-style shape:
   context window (`invalid_request_error`, `param: "messages"`, `context_length_exceeded`, as
   OpenAI answers it); or the provider refused the request as invalid, its 400 or 422
   (`invalid_request_error`, `upstream_invalid_request`, #147)
-- `401` proxy auth failure or no upstream credential for target provider
+- `401` proxy auth failure (`authentication_error`, no code), or the provider rejected the key the
+  client sent in `X-Switchboard-Upstream-Api-Key` (`authentication_error`,
+  `upstream_api_key_invalid`, #128)
 - `404` model not found (`model_not_found`): no exposed model has the ID, or the provider refused
   the model for the login the proxy uses (#156); an unsupported endpoint, or any other route
   (`Invalid URL (<METHOD> <path>)`)
@@ -1288,8 +1292,10 @@ Use an OpenAI-style shape:
 - `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
 - `429` upstream rate limit or usage limit (`rate_limit`)
 - `500` internal proxy failure, including an invalid model exposure config
-- `502` upstream auth failure (`upstream_auth_error`), or any other upstream failure
-  (`upstream_error`), such as an upstream 404 or 500
+- `502` the provider rejected pi's stored credential (`upstream_auth_error`), pi has no usable
+  credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent
+  (`upstream_credentials_missing`, #128), or any other upstream failure (`upstream_error`), such as
+  an upstream 404 or 500
 - `503` provider unavailable (`provider_unavailable`, upstream 503) or overloaded
   (`provider_overloaded`, upstream 529, or no status and wording that says it is out of capacity)
 - `504` upstream timeout (`timeout`): an upstream 408 or 504, or the provider sent nothing for
@@ -1311,8 +1317,21 @@ the text never counts (#42). `usage limit` also matches `usage_limit_reached` an
 wordings are the phrases pi's own retry classifier (`pi-ai/utils/retry`) treats as transient;
 with no status they answer `503 provider_overloaded`, whose class `unavailable` cools the model
 down. The client gets a fixed message and code, never the upstream text. A missing or broken
-upstream credential is refused with `401` before any response starts, streamed or not
-(`checkRequestAuth`).
+upstream credential is refused with `502 upstream_credentials_missing` before any response starts,
+streamed or not (`checkCredential`, `src/server/chat-dispatch.ts`).
+
+Credential answers (#128 items 3 and 4, principle I): a `401` tells a client its own credential is
+wrong, so only the proxy token and a client's own key get one.
+
+- The provider refuses a key the request sent in `X-Switchboard-Upstream-Api-Key`: `401
+  authentication_error`, code `upstream_api_key_invalid`, with fixed text naming the header
+  (`forClientKey`). The provider's text is never quoted; it can carry the key.
+- The provider refuses pi's stored credential: `502 upstream_auth_error`, as before; the client
+  did nothing wrong.
+- pi has no usable credential for the model's provider: `502 upstream_credentials_missing`, fixed
+  text telling the operator to log in with pi on the proxy's host. pi's reason is logged as a
+  warning, not answered. `failureClass` reads the code as `auth`, so an alias whose `fallbackOn`
+  names `auth` still moves past it.
 
 Context overflow (#40): `mapFailedCall` runs pi's `isContextOverflow` on the failed call's final
 message, which recognizes overflow wording from about 15 providers (Anthropic, OpenAI, Google,
@@ -1328,9 +1347,10 @@ invalid_request_error`, code `upstream_invalid_request`, with fixed text ("The p
 the request as invalid. Check the fields this model accepts."), so a client does not retry a
 request that cannot succeed. The provider's own message stays out of the response, as it can quote
 the request, and reaches the log at `debug` only; the route's line for it is a warning, not an
-error. An upstream 401 or 403 is still `upstream_auth_error` (#128 item 3 decides it), and so is a
-400 whose wording is about credentials (an API key, authentication, an access token): Google
-answers a bad API key with `400 INVALID_ARGUMENT`, which the client cannot fix. The wording check
+error. An upstream 401 or 403 is still `upstream_auth_error` for pi's stored credential (a
+client's own key gets `401 upstream_api_key_invalid`, above), and so is a 400 whose wording is
+about credentials (an API key, authentication, an access token): Google answers a bad API key
+with `400 INVALID_ARGUMENT`, which the client cannot fix. The wording check
 reads the provider's whole message, which can quote the request, so a refusal that quotes a prompt
 mentioning an API key would answer `502 upstream_auth_error` too; that errs toward the operator.
 
@@ -1399,8 +1419,8 @@ is a request the proxy's host makes for a client, so every hop is held to:
 - **Credentials:** a plain GET with the proxy's user agent; no client header, cookie or
   `Authorization` is forwarded.
 
-Images are fetched only after the model's upstream credential is checked (`checkRequestAuth`): a
-request that cannot reach the provider gets its `401` without the proxy fetching anything.
+Images are fetched only after the model's upstream credential is checked (`checkCredential`): a
+request that cannot reach the provider gets its `502` without the proxy fetching anything.
 
 A refusal answers `400` `invalid_request_error` at that part's `param` with a fixed message per
 reason; it never quotes the remote server's response. The reasons differ, though (`blocked`,

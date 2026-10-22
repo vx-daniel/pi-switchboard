@@ -368,7 +368,7 @@ An alias can name several models, tried in order, and the failures that move to 
 | `rate_limit` | 429, or a usage limit (a ChatGPT login's Codex limit) |
 | `unavailable` | 503, 529 overloaded, or a provider saying it is out of capacity |
 | `timeout` | 504, or the upstream idle timeout |
-| `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve) |
+| `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve: `502` `upstream_credentials_missing`) |
 | `refused` | The login can't run the model (`404 model_not_found`) |
 | `upstream_error` | Any other upstream failure, a network failure included |
 
@@ -461,6 +461,8 @@ curl http://localhost:4141/v1/chat/completions \
   -d '{"model": "openai/gpt-4o", "messages": [{"role": "user", "content": "Hi"}]}'
 ```
 
+If the provider rejects that key, the proxy answers `401` `authentication_error` with code `upstream_api_key_invalid` and a fixed message naming the header: the key is yours to fix. A rejected stored pi login stays `502` `upstream_auth_error`, as the client did nothing wrong.
+
 ### Proxy authentication
 
 Set `PI_SWITCHBOARD_AUTH_TOKEN` to require a bearer token for every request except the `GET /healthz` liveness check:
@@ -488,6 +490,17 @@ Coming from Anthropic's own OpenAI-compatible endpoint? [docs/reference/claude-o
 Upstream failures before a response starts get an HTTP status, streamed or not, as OpenAI answers them: `400` `context_length_exceeded` when the conversation is longer than the model's context window (agent clients compact on it), `400` `upstream_invalid_request` when the provider refused a field the request sent (its 400 or 422, such as `top_p` on Claude 4.7 and later; a 400 about the provider credential, such as Google's bad API key, is `502` `upstream_auth_error` instead), `429` `rate_limit`, `502`, `503`, `504` `timeout`, each with a fixed message that never quotes the provider. A stream that already started ends with an error event carrying the same body. See [Error mapping](PLAN.md#error-mapping).
 
 So a streaming response sends nothing, headers included, until the provider has accepted the request: as with OpenAI itself, the first byte takes the provider's own response time. A client or reverse proxy in front of the proxy needs a header timeout longer than that; the proxy's upstream timeout (`PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS`, 120 s) caps the wait.
+
+Credential answers (#128):
+
+| Situation | Answer |
+|---|---|
+| The proxy token is missing or wrong | `401` `authentication_error`, no code |
+| The provider rejected the key sent in `X-Switchboard-Upstream-Api-Key` | `401` `authentication_error`, code `upstream_api_key_invalid` |
+| The provider rejected pi's stored login | `502` `server_error`, code `upstream_auth_error` |
+| pi has no usable credential for the model's provider, and no key was sent | `502` `server_error`, code `upstream_credentials_missing`: log in with pi on the proxy's host |
+
+So a client that asks its user for a new key on `401` only does so when the key was its own. The last row is answered before any call, and an alias whose `fallbackOn` names `auth` moves past it.
 
 The proxy describes its own API as an OpenAPI document (see [API documentation](#api-documentation)). For what each field means, the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat/create) is the primary documentation, noting the supported subset listed in this README.
 
@@ -631,7 +644,7 @@ Requires Pi 1.x (`^1.3.0`). Pi 1.0 is the first release whose Anthropic client i
   - sends a plain GET: no client header, cookie or credential;
   - and a request may carry at most 8 remote images, of 15 MiB in all.
 
-  Images are fetched only after the provider credential is checked, so a request that would get `401` fetches nothing.
+  Images are fetched only after the provider credential is checked, so a request that would get `502` `upstream_credentials_missing` fetches nothing.
 
   A refused image fails the request with `400` at that part's `param`, with a fixed message that never quotes the remote server.
 - Request body size limited to 50 MB by default
