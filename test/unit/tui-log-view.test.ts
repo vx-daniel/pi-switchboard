@@ -1,5 +1,5 @@
 import { createLogBuffer, type LogBuffer } from '@proxy/tui/log-buffer'
-import { logViewRows, scrollLogView } from '@proxy/tui/log-view'
+import { logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
 import { describe, expect, test } from 'vite-plus/test'
 
 /** Three rows of a wide terminal, where no test line wraps. */
@@ -81,6 +81,25 @@ describe('the console log view', () => {
 
     expect(scrollLogView(up, buffer, -4)).toBeUndefined()
     expect(scrollLogView(up, buffer, -100)).toBeUndefined()
+  })
+
+  // Catches an inverted wheel: pi-tui reports wheel-up as a negative delta, which must go back in
+  // the log (older lines), and wheel-down must come back to following the newest.
+  test('the mouse wheel scrolls up into older lines and back down to following', () => {
+    const buffer = bufferWith(10)
+    const up = wheelLogView(undefined, buffer, { type: 'wheel', wheelDelta: -4 })
+
+    expect(logViewRows(up, buffer, THREE_ROWS)).toEqual(['line 4', 'line 5', 'line 6'])
+    expect(wheelLogView(up, buffer, { type: 'wheel', wheelDelta: 4 })).toBeUndefined()
+  })
+
+  // Catches a click or a drag in the log view moving it.
+  test('mouse events other than the wheel leave the view where it is', () => {
+    const buffer = bufferWith(10)
+    const view = scrollLogView(undefined, buffer, 2)
+
+    expect(wheelLogView(view, buffer, { type: 'click' })).toBe(view)
+    expect(wheelLogView(undefined, buffer, { type: 'drag' })).toBeUndefined()
   })
 
   // Catches scrolling past the oldest line into blank rows.

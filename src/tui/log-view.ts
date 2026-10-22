@@ -9,7 +9,7 @@
  * @packageDocumentation
  */
 
-import { wrapTextWithAnsi } from '@earendil-works/pi-tui'
+import { type TuiMouseEvent, wrapTextWithAnsi } from '@earendil-works/pi-tui'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 
 /** `undefined` follows new lines; `{ end }` shows the lines before absolute line `end`. */
@@ -29,6 +29,25 @@ export function scrollLogView(view: LogViewport, buffer: LogBuffer, lines: numbe
   const end = (view?.end ?? total) - lines
   if (end >= total) return undefined
   return { end: Math.max(end, Math.min(buffer.dropped() + 1, total)) }
+}
+
+/**
+ * Scrolls the log view by a mouse event: the wheel moves it as the arrow keys do, up (a negative
+ * `wheelDelta` in pi-tui) back in the log and down toward the newest line. Any other event leaves
+ * it where it is.
+ *
+ * @param view - where the view is
+ * @param buffer - the log buffer
+ * @param event - the mouse event
+ * @returns where the view is now
+ */
+export function wheelLogView(
+  view: LogViewport,
+  buffer: LogBuffer,
+  event: Pick<TuiMouseEvent, 'type' | 'wheelDelta'>
+): LogViewport {
+  if (event.type !== 'wheel' || event.wheelDelta === undefined) return view
+  return scrollLogView(view, buffer, -event.wheelDelta)
 }
 
 /** What a wrapped line's later rows start with, so they do not read as new lines. */

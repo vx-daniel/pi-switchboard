@@ -1703,9 +1703,12 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   whole line at a time, marked `[stderr]`, instead of corrupting the screen (`stderr-capture.ts`).
   A line wider than the terminal wraps (pi-tui's `wrapTextWithAnsi`); scrolling still moves by
   log line. A log shorter than the screen starts at the top. The view follows new lines; scrolled
-  back with the arrow and page keys (`log-view.ts`), it stays on the same lines while new ones
-  arrive, and follows again at the newest line or on `End`. The screen's own viewport scrolling
-  would take PgUp and PgDn first, so the console unbinds them there.
+  back with the mouse wheel, the arrow keys or the page keys (`log-view.ts`), it stays on the same
+  lines while new ones arrive, and follows again at the newest line or on `End`. The wheel reaches
+  the console's root component as a `TuiMouseEvent` (pi-tui's alternate screen captures the mouse
+  by default), moving further on a fast spin (`wheelScrollLines: 'auto'`); it scrolls the log view
+  only. The screen's own viewport scrolling would take PgUp and PgDn first, so the console unbinds
+  them there.
 - **Status.** The header shows the address, proxy auth (`token` or `off`), exposed and available
   models (exposure computed as `/healthz/models` does), active cooldowns and a models.json error,
   read every 5 s and after each login or logout. With the sidebar shown, the header keeps the
@@ -1792,8 +1795,13 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   on (`Symbol.for('@earendil-works/pi-coding-agent:theme')`), and pi's dialogs (login, selectors)
   draw with it. That key is pi's, not public API: the console calls `initTheme()` first, so a pi
   that moves it keeps its system theme in the dialogs. The console's own text is colored by role
-  (`paint`, `strong`, `highlight`). A non-empty `NO_COLOR` turns all of it off: plain text, pi's
-  system theme, and an uncolored log view.
+  (`paint`, `strong`, `highlight`, `activeTab`), and its chrome (the header, the tab bar, the
+  sidebar to the footer) sits on `bgHighlight` (`chrome()`). A chrome row may already be styled,
+  so the background is set again after every reset inside it. The current tab is inverted accent,
+  a pill on that background; inversion and bold go through pi-tui's `styleText`, because the
+  theme's own `inverse` and `bold` go through chalk, which emits nothing in the console. A
+  non-empty `NO_COLOR` turns all of it off: plain text, pi's system theme, and an uncolored log
+  view.
 
 ### Stats store (`src/stats/`, #216)
 

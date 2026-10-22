@@ -6,7 +6,7 @@
  */
 
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
-import { highlight, paint } from '@proxy/tui/theme'
+import { activeTab, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */
 export const VIEWS = ['logs', 'accounts', 'stats'] as const
@@ -88,7 +88,7 @@ export function tabsLine(view: View): string {
     ['accounts', ' 2 Accounts '],
     ['stats', ' 3 Stats ']
   ]
-  const shown = tabs.map(([tab, label]) => (tab === view ? highlight(label) : label))
+  const shown = tabs.map(([tab, label]) => (tab === view ? activeTab(label) : label))
   return ` ${shown.join(' ')}`
 }
 
