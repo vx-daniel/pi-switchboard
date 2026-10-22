@@ -17,7 +17,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
-import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
+import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
@@ -52,6 +52,19 @@ let agentDir: FixtureAgentDir
 let httpsProxy: Server
 const proxyConnects: string[] = []
 const children: ChildProcess[] = []
+/** Temporary home directories, removed after each test once its binary has exited. */
+const homes: string[] = []
+
+/**
+ * A fresh temporary directory for the binary's home, removed after the test.
+ *
+ * @returns its path
+ */
+function tempHome(): string {
+  const home = mkdtempSync(join(tmpdir(), 'pi-proxy-binary-home-'))
+  homes.push(home)
+  return home
+}
 
 /**
  * The TCP port a listening server got.
@@ -154,12 +167,19 @@ beforeAll(async () => {
   await once(httpsProxy, 'listening')
 })
 
-afterEach(() => {
-  for (const child of children.splice(0)) child.kill()
+afterEach(async () => {
+  await Promise.all(
+    children.splice(0).map(async (child) => {
+      if (child.exitCode !== null || child.signalCode !== null) return
+      const exited = once(child, 'exit')
+      child.kill()
+      await exited
+    })
+  )
+  for (const home of homes.splice(0)) rmSync(home, { recursive: true, force: true })
 })
 
 afterAll(async () => {
-  vi.unstubAllEnvs()
   agentDir.remove()
   await mock.close()
   httpsProxy.close()
@@ -169,83 +189,65 @@ describe('standalone binary', () => {
   // Catches a binary that starts but cannot answer: the bundle missing pi's provider code, or the
   // proxy's own routes.
   test('answers a chat completion from a fixture provider', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'pi-proxy-binary-home-'))
-    try {
-      const binary = await startBinary(baseEnv(home))
-      const response = await fetch(`${binary.url}/v1/chat/completions`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          model: 'binary-mock/echo',
-          messages: [{ role: 'user', content: 'hi' }]
-        })
+    const binary = await startBinary(baseEnv(tempHome()))
+    const response = await fetch(`${binary.url}/v1/chat/completions`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'binary-mock/echo',
+        messages: [{ role: 'user', content: 'hi' }]
       })
-      expect(response.status).toBe(200)
-      expect(await response.json()).toMatchObject({
-        choices: [{ message: { role: 'assistant', content: 'compiled hello' } }]
-      })
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-    }
+    })
+    expect(response.status).toBe(200)
+    expect(await response.json()).toMatchObject({
+      choices: [{ message: { role: 'assistant', content: 'compiled hello' } }]
+    })
   })
 
   // Catches the OAuth flows left out of the bundle (pi-ai loads them by a variable specifier): the
   // binary would then serve until a token expired and fail every request after. A refresh that
   // reaches the network, here the recording proxy, proves the flow was loaded.
   test('refreshes an expired OAuth login with the flow embedded', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'pi-proxy-binary-home-'))
-    try {
-      const binary = await startBinary({
-        ...baseEnv(home),
-        HTTPS_PROXY: `http://127.0.0.1:${String(portOf(httpsProxy))}`,
-        NO_PROXY: '127.0.0.1,localhost'
-      })
-      const response = await fetch(`${binary.url}/healthz/creds?verify=true`)
-      const body = await response.text()
-      expect(body).toContain('"provider":"anthropic"')
-      expect(body).not.toContain('Cannot find module')
-      expect(proxyConnects).toContain('platform.claude.com:443')
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-    }
+    const binary = await startBinary({
+      ...baseEnv(tempHome()),
+      HTTPS_PROXY: `http://127.0.0.1:${String(portOf(httpsProxy))}`,
+      NO_PROXY: '127.0.0.1,localhost'
+    })
+    const response = await fetch(`${binary.url}/healthz/creds?verify=true`)
+    const body = await response.text()
+    expect(body).toContain('"provider":"anthropic"')
+    expect(body).not.toContain('Cannot find module')
+    expect(proxyConnects).toContain('platform.claude.com:443')
   })
 
   // Catches the compile flags dropped: a compiled Bun binary otherwise reads `.env` from the
   // directory it starts in, and a stray one could turn proxy auth on, off, or to a known token.
   // Auth staying off shows it: no token and a wrong token are both let through.
   test('ignores a .env in its working directory', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'pi-proxy-binary-home-'))
-    try {
-      writeFileSync(join(home, '.env'), 'PI_SWITCHBOARD_AUTH_TOKEN=from-dotenv\n')
-      const binary = await startBinary(baseEnv(home), home)
-      expect((await fetch(`${binary.url}/v1/models`)).status).toBe(200)
-      const wrongToken = await fetch(`${binary.url}/v1/models`, {
-        headers: { Authorization: 'Bearer not-the-token' }
-      })
-      expect(wrongToken.status).toBe(200)
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-    }
+    const home = tempHome()
+    writeFileSync(join(home, '.env'), 'PI_SWITCHBOARD_AUTH_TOKEN=from-dotenv\n')
+    const binary = await startBinary(baseEnv(home), home)
+    expect((await fetch(`${binary.url}/v1/models`)).status).toBe(200)
+    const wrongToken = await fetch(`${binary.url}/v1/models`, {
+      headers: { Authorization: 'Bearer not-the-token' }
+    })
+    expect(wrongToken.status).toBe(200)
   })
 
   // Catches `--no-compile-autoload-bunfig` dropped: a compiled Bun binary otherwise reads
   // `bunfig.toml` from the directory it starts in, and its `preload` runs code in the proxy's
   // process. This preload leaves a marker file and turns proxy auth on; neither may happen.
   test('ignores a bunfig.toml in its working directory', async () => {
-    const home = mkdtempSync(join(tmpdir(), 'pi-proxy-binary-home-'))
-    try {
-      const marker = join(home, 'preload-ran')
-      writeFileSync(
-        join(home, 'preload.js'),
-        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')\n` +
-          "process.env.PI_SWITCHBOARD_AUTH_TOKEN = 'from-bunfig'\n"
-      )
-      writeFileSync(join(home, 'bunfig.toml'), 'preload = ["./preload.js"]\n')
-      const binary = await startBinary(baseEnv(home), home)
-      expect((await fetch(`${binary.url}/v1/models`)).status).toBe(200)
-      expect(existsSync(marker)).toBe(false)
-    } finally {
-      rmSync(home, { recursive: true, force: true })
-    }
+    const home = tempHome()
+    const marker = join(home, 'preload-ran')
+    writeFileSync(
+      join(home, 'preload.js'),
+      `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')\n` +
+        "process.env.PI_SWITCHBOARD_AUTH_TOKEN = 'from-bunfig'\n"
+    )
+    writeFileSync(join(home, 'bunfig.toml'), 'preload = ["./preload.js"]\n')
+    const binary = await startBinary(baseEnv(home), home)
+    expect((await fetch(`${binary.url}/v1/models`)).status).toBe(200)
+    expect(existsSync(marker)).toBe(false)
   })
 })
