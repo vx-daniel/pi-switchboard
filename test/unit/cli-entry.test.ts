@@ -295,6 +295,59 @@ describe('--version and --help', () => {
   })
 })
 
+describe('starting', () => {
+  // Catches a port already in use surfacing as an uncaught exception with a stack trace (and, in
+  // the console, after it took over the terminal): it is a fatal line naming the address, exit 1.
+  test('a port in use refuses to start with a fatal line and exit 1', async () => {
+    const occupied = createServer()
+    const origin = await listenOnLoopback(occupied)
+    writeConfigFile({ port: Number(new URL(origin).port) })
+
+    try {
+      await runCli([])
+      await vi.waitFor(() => {
+        expect(process.exitCode).toBe(1)
+      })
+    } finally {
+      occupied.close()
+    }
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        level: 'FATAL',
+        message: expect.stringContaining('Cannot listen on') as unknown
+      })
+    )
+  })
+})
+
+describe('tui', () => {
+  // Catches the console started where there is no terminal to draw on (a script, a service),
+  // which would hang or corrupt its output: it refuses and names the headless command.
+  test.each([
+    ['tui', ['tui']],
+    ['tui after flags', ['--port', '4999', 'tui']],
+    ['tui after a --flag=value', ['--log-level=info', 'tui']]
+  ])('%s without a terminal refuses with exit 1', async (_case, args) => {
+    await runCli(args)
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect(stderr.join('')).toContain('pi-switchboard tui needs an interactive terminal')
+  })
+
+  // Catches a flag's value taken for the subcommand: `--log-format tui` is the headless CLI with
+  // an invalid format, not the console (third #195 review).
+  test('a flag whose value is tui stays headless', async () => {
+    await runCli(['--log-format', 'tui'])
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect(stderr).toEqual(['--log-format must be one of: pretty, json\n'])
+  })
+})
+
 describe('--config', () => {
   // Catches the effective-config output, which users paste into issues, leaking the auth token.
   test('prints the config file path and the config with the auth token masked', async () => {

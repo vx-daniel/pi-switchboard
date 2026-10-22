@@ -1468,9 +1468,9 @@ share it widely. npmjs comes later, by choice.
     resolver with pi's, so a dedup that differs from pi's fails there.
     `test/unit/library-entry-points.test.ts` loads the four entry points with every pi package
     mocked to throw.
-  - **`pi-tui` is an optional `peerDependency` (`*`)**, a dev dependency for the extension's
-    tests. Only the extension uses it, and pi's loader gives the extension the host's copy;
-    optional, so npm installs no copy for a standalone user.
+  - **`pi-tui` is an `optionalDependency`**, like pi's other packages: the console
+    (`pi-switchboard tui`, #61) needs it in the CLI's own process. In pi's process, pi's loader
+    still gives the extension the host's copy.
   - **`pi-ai` and `pi-coding-agent` are `optionalDependencies`.** The proxy that `/proxy start`
     runs, the standalone CLI and the image need them in their own process; with pi's bundled
     build there is no host copy on disk to use. npm, pnpm and pi's own install add optional
@@ -1558,7 +1558,8 @@ Module layout:
 
 ```text
 src/
-├── index.ts            -- entry point, CLI bootstrap (citty)
+├── index.ts            -- entry point: loads the CLI, names a missing pi package
+├── cli.ts              -- citty CLI: the headless proxy, or `tui` for the console
 ├── env.d.ts            -- typed process.env
 ├── config/
 │   ├── schema.ts         -- ProxyConfig Zod schema and types, defaults, repair, JSON I/O (exported via ./config)
@@ -1573,6 +1574,7 @@ src/
 │   ├── errors.ts         -- OpenAI-style error helpers, upstream error mapping
 │   ├── request-id.ts     -- piproxy-{random} generation
 │   ├── http-status.ts    -- named HTTP status codes
+│   ├── startup.ts        -- server flags, config with logging, listener (CLI and console)
 │   └── types.ts          -- Hono ProxyEnv type
 ├── openai/
 │   ├── schemas.ts              -- Zod v4 request schemas
@@ -1594,8 +1596,67 @@ src/
 │   └── upstream-idle.ts  -- upstream idle timeout, relayed over pi's event stream
 ├── sync/
 │   └── zed.ts            -- Zed settings.json model sync
+├── tui/
+│   ├── command.ts        -- `pi-switchboard tui` (citty)
+│   ├── console.ts        -- the console: pi-tui screen, server in the same process
+│   ├── log-buffer.ts     -- the log view's bounded line buffer
+│   ├── log-view.ts       -- the log view's position: following, or pinned when scrolled back
+│   ├── login.ts          -- pi's login flow routed to pi's own screens
+│   ├── status-refresh.ts -- the status and accounts reads: newest wins, no stale verification
+│   └── stderr-capture.ts -- stray stderr writes to the log view, a whole line at a time
 └── utils/
     └── guards.ts         -- isRecord() and other type guards
+```
+
+### Console (`pi-switchboard tui`, #61)
+
+An opt-in console for running the proxy at a terminal. One process holds the HTTP server, a
+full-screen pi-tui view (`TuiAltScreen`) and the proxy's `ModelRuntime`, so the console reads
+everything in memory and needs no HTTP surface of its own. Quitting it stops the proxy.
+
+- **Entry.** `src/cli.ts` finds `tui` as the first argument that is neither a flag nor a flag's
+  value (`pi-switchboard --port 4000 tui` works), and dispatches it before citty: citty's
+  `subCommands` would run the headless `main` after the subcommand. The console module is
+  imported dynamically, so the headless proxy never loads pi's interactive UI. Both share
+  `src/server/startup.ts`: the server flags, the config with its logging, and the listener,
+  which waits until the server listens. Without a terminal on stdin and stdout, `tui` refuses to
+  start (exit 1) and names the headless command.
+- **Failures.** The server listens before the console takes over the terminal, so a port in use
+  fails with the terminal untouched. Once the screen is up, any way out (quit, a signal, an
+  error, an uncaught exception) stops the screen, restores stderr and closes the server; on a
+  failure the command prints the reason after the last 20 log lines and exits 1. The headless
+  CLI reports a port in use as a fatal log line and exit 1.
+- **Logs.** LogTape writes the pretty format into a bounded buffer (`log-buffer.ts`, 5000 lines)
+  instead of stderr, with the same redaction. While the console runs, a stray stderr write (one
+  that bypasses LogTape) goes into the buffer a whole line at a time, marked `[stderr]`, instead
+  of corrupting the screen (`stderr-capture.ts`).
+  Lines are truncated to the terminal width. The view follows new lines; scrolled back with the
+  arrow and page keys (`log-view.ts`), it stays on the same lines while new ones arrive, and
+  follows again at the newest line or on `End`. The screen's own viewport scrolling would take
+  PgUp and PgDn first, so the console unbinds them there.
+- **Status.** The header shows the address, proxy auth (`token` or `off`), exposed and available
+  models (exposure computed as `/healthz/models` does), active cooldowns and a models.json error,
+  read every 5 s and after each login or logout.
+- **Accounts.** The providers pi has a credential for (`getCredentialStatuses`, as
+  `/healthz/creds`): login type, source and model count; never the credential. `v` verifies them,
+  which may refresh an OAuth token, and the result stays until that provider's next login or
+  logout. A verification still running when a provider's login changes drops its result for
+  that provider, which was about the old credential (`status-refresh.ts`).
+- **Logins** (constitution 3.5.0: Scope and principle III). pi runs every flow and stores every
+  credential; the console only shows pi's own screens, in a local terminal, never over HTTP.
+  `n` opens pi's provider selector (`OAuthSelectorComponent`, every account and API-key login pi
+  offers); the login runs on pi's `LoginDialogComponent`, with pi's `ExtensionSelectorComponent`
+  for a choice such as the login method, driving `ModelRuntime.login` on the runtime the server
+  answers from, so the provider's models are served at once, with no restart. pi keeps the
+  routing from its prompts and events to those screens private, so `login.ts` repeats it, with
+  pi's installation device ID (Sign in with ChatGPT refuses to start without one) and pi's catalog
+  refresh after the login. pi's sign-in callback servers (such as `127.0.0.1:1455` for ChatGPT)
+  and its paste-the-URL fallback work unchanged; Esc cancels and closes them. `x` logs out of a
+  credential pi stored (`ModelRuntime.logout`). pi's dialog shows a typed API key as it is typed,
+  as pi's own `/login` does. The console binds pi's `app.message.copy` key (Ctrl+X, as in pi), so
+  the dialog's sign-in URL can be copied.
+- **Theme.** `initTheme()` with no name: pi's system theme, which reads no theme file. Named
+  themes are JSON files in pi's package directory, which a compiled binary does not have.
 
 ### Dead code
 

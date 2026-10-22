@@ -197,7 +197,7 @@ export interface LoggingOptions {
    *
    * @param line - One formatted log line, including its trailing newline.
    */
-  readonly write?: (line: string) => void
+  readonly write?: ((line: string) => void) | undefined
 }
 
 /**

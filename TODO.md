@@ -408,7 +408,9 @@ since the rename; each issue holds the detailed checklist.
 - [ ] Standalone binary (#61)
   - [x] Bun-compiled binary for linux/darwin x64/arm64, tested in CI, uploaded to each release
         with `SHA256SUMS` (ported from #86)
-  - [ ] Opt-in `pi-switchboard tui` console, with logins through pi's own screens
+  - [x] Opt-in `pi-switchboard tui` console: logs, status, accounts, and logins through pi's own
+        screens, in one process with the server
+  - [ ] The console's per-route stats, once #70's totals land
 
 ## Phase 5 — Routing across pi's logins
 

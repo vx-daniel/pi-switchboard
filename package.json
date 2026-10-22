@@ -90,7 +90,6 @@
   "devDependencies": {
     "@commitlint/cli": "^20.5.3",
     "@commitlint/config-conventional": "^20.5.3",
-    "@earendil-works/pi-tui": "^1.3.0",
     "@limegrass/eslint-plugin-import-alias": "^1.6.1",
     "@logtape/lint": "^2.4.1",
     "@semantic-release/changelog": "^6.0.3",
@@ -107,17 +106,10 @@
     "typescript": "^6.0.3",
     "vite-plus": "catalog:"
   },
-  "peerDependencies": {
-    "@earendil-works/pi-tui": "*"
-  },
-  "peerDependenciesMeta": {
-    "@earendil-works/pi-tui": {
-      "optional": true
-    }
-  },
   "optionalDependencies": {
     "@earendil-works/pi-ai": "^1.3.0",
-    "@earendil-works/pi-coding-agent": "^1.3.0"
+    "@earendil-works/pi-coding-agent": "^1.3.0",
+    "@earendil-works/pi-tui": "^1.3.0"
   },
   "engines": {
     "node": ">=24.0.0"
