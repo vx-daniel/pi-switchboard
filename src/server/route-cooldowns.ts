@@ -44,6 +44,23 @@ function skippableCooldown(
 }
 
 /**
+ * Checks whether the chain would skip a candidate for its cooldown, so another check (the quota
+ * reserve, #69) does not count it as an alternative.
+ *
+ * @param candidate - the candidate
+ * @param fallbackOn - the classes the alias names
+ * @param now - the current time
+ * @returns whether it is cooling down for a class the alias names
+ */
+export function coolingForChain(
+  candidate: ExposedModel,
+  fallbackOn: ReadonlySet<FailureClass>,
+  now: number
+): boolean {
+  return skippableCooldown(candidate, fallbackOn, now) !== undefined
+}
+
+/**
  * Decides whether the chain skips the candidate at `position` because it is cooling down.
  *
  * @param candidates - the chain's candidates, in order

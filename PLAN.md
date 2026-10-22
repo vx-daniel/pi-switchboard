@@ -520,11 +520,12 @@ fallback chain skips a provider that is close to its limit, before it refuses:
   less than that share left. The share left is rounded to six places, so `1 - 0.8` is `0.2` and
   a provider with exactly its reserve left is not below it.
 - **Chains only.** A request that names a model is always sent; a chain's last candidate is too.
-  Only candidates of an alias's chain are skipped, after the cooldown check (#68); the two are
-  independent, so a chain can skip one candidate for each.
-- **Never skip them all.** When every remaining candidate is below its reserve, the one with the
-  most left is called, as cooldowns call the one that ends first: a reserve never fails a request
-  by itself.
+  Only candidates of an alias's chain are skipped, after the cooldown check (#68).
+- **Never skip them all.** A provider below its reserve is skipped only when a later candidate is
+  a real alternative: one above its reserve and not cooling down for a class the alias names (a
+  candidate the chain will skip for its cooldown is none). When every alternative is below its
+  reserve, or there is none, the one with the most left is called, the earlier on a tie, as
+  cooldowns call the one that ends first: a reserve never fails a request by itself.
 - **Needs a report.** A provider with no quota known (not reported yet, every window reset, or
   one that never reports, such as Google and API keys) is not below any reserve.
 - **Reported.** The skip is in `x_pi.attempts` as `reason: "quota"` with `skipped: true`, and an

@@ -16,7 +16,7 @@
  */
 
 import type { ServerConfig } from '@proxy/config/env'
-import { loadConfigFromFile } from '@proxy/config/schema'
+import { loadConfigFromFile, type Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { type ConversionSuccess, convertMessages } from '@proxy/openai/messages'
 import {
@@ -54,7 +54,6 @@ import {
   SWITCHBOARD_PREFIX,
   UNSUPPORTED_ENDPOINTS
 } from '@proxy/server/openapi'
-import type { Reserve } from '@proxy/server/route-reserve'
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
 import { describeRoute, validator } from 'hono-openapi'

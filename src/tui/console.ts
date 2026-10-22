@@ -34,6 +34,7 @@ import {
   TUI_KEYBINDINGS
 } from '@earendil-works/pi-tui'
 import type { ServerConfig } from '@proxy/config/env'
+import type { Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
@@ -48,7 +49,7 @@ import {
   type ProviderCredentialStatus,
   summarizeAuthError
 } from '@proxy/pi/registry'
-import { providerBelowReserve, type Reserve } from '@proxy/server/route-reserve'
+import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'

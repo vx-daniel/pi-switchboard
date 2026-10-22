@@ -24,7 +24,7 @@
  */
 
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai'
-import type { FailureClass } from '@proxy/config/schema'
+import type { FailureClass, Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ConversionSuccess } from '@proxy/openai/messages'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
@@ -53,7 +53,7 @@ import {
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
 import { recordCooldown, skipCooling } from '@proxy/server/route-cooldowns'
-import { type Reserve, skipBelowReserve } from '@proxy/server/route-reserve'
+import { skipBelowReserve } from '@proxy/server/route-reserve'
 import {
   recordRouteAttempt,
   recordRouteFailure,

@@ -15,16 +15,15 @@
  * @packageDocumentation
  */
 
+import type { FailureClass, Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import type { Attempt } from '@proxy/openai/responses'
 import { providerQuota } from '@proxy/pi/quota'
+import { coolingForChain } from '@proxy/server/route-cooldowns'
 
 /** Logger for routing decisions, as for the chat route's other skips. */
 const chatLogger = proxyLogger('server', 'chat')
-
-/** Provider -> the share of each usage window to keep free, from 0 to 1 (`routing.reserve`). */
-export type Reserve = Readonly<Record<string, number>>
 
 /**
  * Steps the share left is rounded to: `1 - 0.8` is `0.19999999999999996` in floating point, which
@@ -103,24 +102,34 @@ function belowReserve(
  * Decides whether the chain skips the candidate at `position` because its provider is below its
  * reserve.
  *
+ * @remarks
+ * A later candidate the chain will skip for its cooldown (#68) is not an alternative: with
+ * `[below its reserve, cooling down]`, the first one is called rather than skipped for one the
+ * chain would not call either.
+ *
  * @param candidates - the chain's candidates, in order
  * @param position - the candidate's position
- * @param reserve - the reserve per provider
+ * @param rules - the reserve per provider, and the classes the alias names (for its cooldowns)
+ * @param rules.reserve - the reserve per provider
+ * @param rules.fallbackOn - the failure classes the alias names
  * @param now - the current time; `Date.now()` by default
  * @returns why it is skipped, or `undefined` to call it
  */
 export function reserveSkip(
   candidates: readonly ExposedModel[],
   position: number,
-  reserve: Reserve,
+  rules: { readonly reserve: Reserve; readonly fallbackOn: ReadonlySet<FailureClass> },
   now: number = Date.now()
 ): ReserveSkip | undefined {
+  const { reserve, fallbackOn } = rules
   const own = belowReserve(candidates[position], reserve, now)
   if (own === undefined) return undefined
-  const remaining = candidates.slice(position + 1)
-  if (remaining.some((later) => belowReserve(later, reserve, now) === undefined)) return own
-  // Every remaining candidate is below its reserve too: call the one with the most left.
-  const mostLeft = remaining.every(
+  const alternatives = candidates
+    .slice(position + 1)
+    .filter((later) => !coolingForChain(later, fallbackOn, now))
+  if (alternatives.some((later) => belowReserve(later, reserve, now) === undefined)) return own
+  // Every alternative is below its reserve too, or there is none: call the one with the most left.
+  const mostLeft = alternatives.every(
     (later) => (belowReserve(later, reserve, now)?.left ?? 0) <= own.left
   )
   return mostLeft ? undefined : own
@@ -130,8 +139,10 @@ export function reserveSkip(
  * Skips a candidate whose provider is below its reserve: logs the skip at `info` and lists it in
  * `attempts` (`reason: "quota"`, `skipped: true`), as a cooldown skip is.
  *
- * @param chain - the candidates, the reserve per provider, and the alias
+ * @param chain - the candidates, the classes the alias names, the reserve per provider, and the
+ *   alias
  * @param chain.candidates - the chain's candidates
+ * @param chain.fallbackOn - the failure classes the alias names, for the cooldowns it skips by
  * @param chain.reserve - the reserve per provider
  * @param chain.alias - the alias whose chain it is
  * @param position - the candidate's index in `chain.candidates`
@@ -141,13 +152,14 @@ export function reserveSkip(
 export function skipBelowReserve(
   chain: {
     readonly candidates: readonly ExposedModel[]
+    readonly fallbackOn: ReadonlySet<FailureClass>
     readonly reserve: Reserve
     readonly alias: string | undefined
   },
   position: number,
   attempts: Attempt[]
 ): boolean {
-  const skip = reserveSkip(chain.candidates, position, chain.reserve)
+  const skip = reserveSkip(chain.candidates, position, chain)
   const candidate = chain.candidates[position]
   if (skip === undefined || candidate === undefined) return false
   chatLogger.info(

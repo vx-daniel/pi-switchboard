@@ -3,7 +3,9 @@
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
+import type { FailureClass } from '@proxy/config/schema'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
+import { clearAllCooldowns, startCooldown } from '@proxy/pi/cooldowns'
 import { clearAllQuotas, recordQuota } from '@proxy/pi/quota'
 import { reserveSkip } from '@proxy/server/route-reserve'
 import { beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -60,8 +62,25 @@ const OPUS = exposed('anthropic', 'opus')
 const SOL = exposed('openai-codex', 'sol')
 const FLASH = exposed('google', 'flash')
 
+/** The chain's fallback classes in these tests: a 429 cooldown is skipped. */
+const RATE_LIMITS: ReadonlySet<FailureClass> = new Set(['rate_limit'])
+
+/**
+ * The reserve rules for a chain that falls back on rate limits.
+ *
+ * @param reserve - provider -> the share to keep free
+ * @returns the rules
+ */
+function keeping(reserve: Record<string, number>): {
+  reserve: Record<string, number>
+  fallbackOn: ReadonlySet<FailureClass>
+} {
+  return { reserve, fallbackOn: RATE_LIMITS }
+}
+
 beforeEach(() => {
   clearAllQuotas()
+  clearAllCooldowns()
 })
 
 describe('reserveSkip', () => {
@@ -70,7 +89,7 @@ describe('reserveSkip', () => {
   test('skips a provider whose worst window is below its reserve', () => {
     reported('anthropic', { fiveHour: 0.1, sevenDay: 0.85 })
 
-    const skip = reserveSkip([OPUS, SOL], 0, { anthropic: 0.2 }, NOW)
+    const skip = reserveSkip([OPUS, SOL], 0, keeping({ anthropic: 0.2 }), NOW)
 
     expect(skip).toMatchObject({ provider: 'anthropic', window: '7d', reserve: 0.2 })
     expect(skip?.left).toBeCloseTo(0.15)
@@ -81,23 +100,49 @@ describe('reserveSkip', () => {
   test('calls a provider at or above its reserve, without one, or without quota', () => {
     reported('anthropic', { fiveHour: 0.5, sevenDay: 0.8 })
 
-    expect(reserveSkip([OPUS, SOL], 0, { anthropic: 0.2 }, NOW)).toBeUndefined()
-    expect(reserveSkip([OPUS, SOL], 0, { 'openai-codex': 0.9 }, NOW)).toBeUndefined()
-    expect(reserveSkip([FLASH, SOL], 0, { google: 0.5 }, NOW)).toBeUndefined()
+    expect(reserveSkip([OPUS, SOL], 0, keeping({ anthropic: 0.2 }), NOW)).toBeUndefined()
+    expect(reserveSkip([OPUS, SOL], 0, keeping({ 'openai-codex': 0.9 }), NOW)).toBeUndefined()
+    expect(reserveSkip([FLASH, SOL], 0, keeping({ google: 0.5 }), NOW)).toBeUndefined()
+  })
+
+  // Catches the bounds read wrongly: a reserve of 0 never skips (nothing can have less than none
+  // left), and a reserve of 1 skips as soon as any share of a window is used.
+  test('a reserve of 0 never skips; a reserve of 1 skips on any use', () => {
+    reported('anthropic', { fiveHour: 1, sevenDay: 0.01 })
+
+    expect(reserveSkip([OPUS, SOL], 0, keeping({ anthropic: 0 }), NOW)).toBeUndefined()
+    expect(reserveSkip([OPUS, SOL], 0, keeping({ anthropic: 1 }), NOW)).toMatchObject({
+      window: '5h'
+    })
   })
 
   // Catches a reserve that fails a request on its own: the last candidate, and a chain whose
   // remaining candidates are all below their reserve, still make a call, to the one with the
-  // most left.
+  // most left; with as much left, the earlier one.
   test('when every remaining candidate is below its reserve, calls the one with the most left', () => {
     reported('anthropic', { fiveHour: 0.9, sevenDay: 0.1 })
     reported('openai-codex', { fiveHour: 0.95, sevenDay: 0.1 })
-    const reserve = { 'anthropic': 0.2, 'openai-codex': 0.2 }
+    const rules = keeping({ 'anthropic': 0.2, 'openai-codex': 0.2 })
 
-    expect(reserveSkip([OPUS], 0, reserve, NOW)).toBeUndefined()
-    expect(reserveSkip([OPUS, SOL], 0, reserve, NOW)).toBeUndefined()
-    expect(reserveSkip([SOL, OPUS], 0, reserve, NOW)).toMatchObject({ provider: 'openai-codex' })
-    expect(reserveSkip([SOL, OPUS], 1, reserve, NOW)).toBeUndefined()
+    expect(reserveSkip([OPUS], 0, rules, NOW)).toBeUndefined()
+    expect(reserveSkip([OPUS, SOL], 0, rules, NOW)).toBeUndefined()
+    expect(reserveSkip([SOL, OPUS], 0, rules, NOW)).toMatchObject({ provider: 'openai-codex' })
+    expect(reserveSkip([SOL, OPUS], 1, rules, NOW)).toBeUndefined()
+
+    reported('openai-codex', { fiveHour: 0.9, sevenDay: 0.1 })
+    expect(reserveSkip([SOL, OPUS], 0, rules, NOW)).toBeUndefined()
+  })
+
+  // Catches a provider below its reserve skipped for one the chain will skip anyway (second #208
+  // review): a later candidate cooling down after a 429 is no alternative, so the first is called.
+  test('a later candidate that is cooling down is no alternative', () => {
+    reported('anthropic', { fiveHour: 0.9, sevenDay: 0.1 })
+    startCooldown(SOL, 'rate_limit', 60_000, NOW)
+
+    expect(reserveSkip([OPUS, SOL], 0, keeping({ anthropic: 0.2 }), NOW)).toBeUndefined()
+    expect(reserveSkip([OPUS, SOL, FLASH], 0, keeping({ anthropic: 0.2 }), NOW)).toMatchObject({
+      provider: 'anthropic'
+    })
   })
 
   // Catches a stale report holding a provider back after its window reset: a window whose reset
@@ -105,6 +150,8 @@ describe('reserveSkip', () => {
   test('ignores a window that has reset since it was reported', () => {
     reported('anthropic', { fiveHour: 0.99, sevenDay: 0.99 })
 
-    expect(reserveSkip([OPUS, SOL], 0, { anthropic: 0.2 }, NOW + 3_600_001)).toBeUndefined()
+    expect(
+      reserveSkip([OPUS, SOL], 0, keeping({ anthropic: 0.2 }), NOW + 3_600_001)
+    ).toBeUndefined()
   })
 })

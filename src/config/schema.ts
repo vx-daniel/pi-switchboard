@@ -165,6 +165,8 @@ const RoutingConfigSchema = z.object({
 })
 /** The `routing` section: see {@link RoutingConfigSchema}. */
 export type RoutingConfig = z.infer<typeof RoutingConfigSchema>
+/** Provider -> the share of each usage window to keep free, from 0 to 1 (`routing.reserve`). */
+export type Reserve = RoutingConfig['reserve']
 
 /** The JSON config file's fields and the values each accepts. */
 const ProxyConfigSchema = z.object({
