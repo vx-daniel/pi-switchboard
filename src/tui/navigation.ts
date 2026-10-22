@@ -106,11 +106,7 @@ const FOOTER: Readonly<Record<View, readonly string[]>> = {
     'n login',
     'x logout'
   ],
-  stats: [
-    'q quit (stops the proxy)',
-    '←→ views',
-    'per alias and served model, since the proxy started'
-  ]
+  stats: ['q quit (stops the proxy)', '←→ views', 't today', 'w week', 'a all 30 days']
 }
 /** The hints before the sidebar's: quitting and moving between views. */
 const HINTS_BEFORE_SIDEBAR = 2
