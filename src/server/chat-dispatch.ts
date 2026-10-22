@@ -36,6 +36,7 @@ import { clearCooldowns } from '@proxy/pi/cooldowns'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
+import { type ActiveRequestHandle, requestOutcome } from '@proxy/server/active-requests'
 import {
   CREDENTIALS_MISSING,
   forClientKey,
@@ -64,6 +65,7 @@ import {
   streamFailureCounter
 } from '@proxy/server/route-totals'
 import type { ProxyEnv } from '@proxy/server/types'
+import { startingWith } from '@proxy/utils/async-iterables'
 import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
 
@@ -367,6 +369,11 @@ export interface DispatchJob {
   readonly context: PiContext
   readonly request: ChatCompletionRequest
   readonly options: CompletionOptions
+  /**
+   * The request's entry among those in flight (the console's sidebar): told each attempt's model,
+   * and ended by a stream when it closes. The caller ends it otherwise, once this returns.
+   */
+  readonly active: ActiveRequestHandle
 }
 
 /** How one attempt ended. */
@@ -422,32 +429,6 @@ function wantsUsage(request: ChatCompletionRequest): boolean {
 }
 
 /**
- * Joins the first result of an event iterator and the rest of it into one async iterable.
- *
- * @remarks
- * Ending it early (the client left mid-stream) ends the rest too.
- *
- * @typeParam T - the event type
- * @param first - the result already read from `rest`
- * @param rest - the iterator `first` came from
- * @returns a generator that yields `first`'s value (unless it is done), then the rest
- */
-async function* startingWith<T>(
-  first: IteratorResult<T>,
-  rest: AsyncIterator<T>
-): AsyncGenerator<T> {
-  try {
-    if (first.done === true) return
-    yield first.value
-    for (let next = await rest.next(); next.done !== true; next = await rest.next()) {
-      yield next.value
-    }
-  } finally {
-    await rest.return?.()
-  }
-}
-
-/**
  * Relays a started stream's events, counting a failure for an `error` event: the attempt was
  * answered, but the answer broke off.
  *
@@ -485,7 +466,7 @@ async function attemptStream(
   candidate: ExposedModel,
   job: DispatchJob
 ): Promise<AttemptOutcome> {
-  const { requestId, context, request, options } = job
+  const { requestId, context, request, options, active } = job
   const start = performance.now()
   // The client's own departure aborts the call, which then fails: not an upstream failure, and
   // nobody is waiting for the answer.
@@ -525,11 +506,18 @@ async function attemptStream(
       includeUsage
     })
     return honoStream(honoContext, async (stream) => {
+      // Hono starts this before `honoStream` returns, so the dispatch's `settled` sees the stream
+      // and leaves its end to the `finally` below; were it never to run, `settled` ends it.
+      active.streaming()
       let frameCount = 0
+      let failed = false
       const countFailure = streamFailureCounter(key, options.signal)
       try {
         for await (const frame of streamToSSE(
-          countingFailures(startingWith(first, events), countFailure),
+          countingFailures(startingWith(first, events), (failure) => {
+            failed = true
+            countFailure(failure)
+          }),
           { requestId, route },
           includeUsage
         )) {
@@ -543,6 +531,7 @@ async function attemptStream(
         })
       } catch (err: unknown) {
         const mapped = reportThrownFailure(err)
+        failed = true
         countFailure(failureClass(mapped))
         chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
           frameCount,
@@ -550,6 +539,8 @@ async function attemptStream(
         })
         await stream.write(`data: ${JSON.stringify(mapped.body)}\n\n`)
         await stream.write('data: [DONE]\n\n')
+      } finally {
+        active.end(requestOutcome(failed, options.signal))
       }
     })
   }
@@ -757,6 +748,7 @@ export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob):
     if (skipsCandidate(job, position, attempts)) continue
     const sentAt = Date.now()
     const key = routeKey(job.alias, candidate)
+    job.active.attempt(candidate.canonicalId, attempts.length + 1)
     recordRouteAttempt(key)
     const { outcome, captured } = await runAttempt(honoContext, candidate, job, {
       checkFirst: position > 0,

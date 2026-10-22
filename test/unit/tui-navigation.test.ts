@@ -1,7 +1,9 @@
+import { stripTerminalSequences } from '@earendil-works/pi-tui'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import {
   accountActions,
   clampSelection,
+  footerLine,
   moveSelection,
   stepView,
   VIEWS
@@ -46,5 +48,18 @@ describe('console navigation', () => {
       action: 'login',
       label: 'Enter a new API key'
     })
+  })
+
+  // Catches the footer offering the sidebar key on a terminal too narrow for the sidebar, where it
+  // does nothing, or hiding it where it works; and quitting pushed off the front, where a narrow
+  // terminal keeps it.
+  test('offers the sidebar key only where the sidebar fits, after quitting and views', () => {
+    for (const view of VIEWS) {
+      const narrow = stripTerminalSequences(footerLine(view, false))
+      const wide = stripTerminalSequences(footerLine(view, true))
+
+      expect(narrow).not.toContain('s sidebar')
+      expect(wide.startsWith(' q quit (stops the proxy) · ←→ views · s sidebar')).toBe(true)
+    }
   })
 })

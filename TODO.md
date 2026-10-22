@@ -411,6 +411,8 @@ since the rename; each issue holds the detailed checklist.
   - [x] Opt-in `pi-switchboard tui` console: logs, status, accounts, and logins through pi's own
         screens, in one process with the server
   - [x] The console's per-route stats from #70's totals
+  - [x] The console's sidebar: proxy status, logins with quota and cooldowns, requests in flight,
+        traffic
 
 ## Phase 5 — Routing across pi's logins
 

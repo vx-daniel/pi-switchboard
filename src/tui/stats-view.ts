@@ -111,7 +111,7 @@ function failureClasses(totals: RouteTotals): string {
  * @param totals - every route
  * @returns the sums
  */
-function sum(totals: readonly RouteTotals[]): Counts {
+export function sum(totals: readonly RouteTotals[]): Counts {
   const zero: Counts = {
     requests: 0,
     failures: 0,
@@ -158,7 +158,7 @@ function routeWidth(width: number): number {
  * @param width - the column's width
  * @returns the label, exactly `width` columns wide
  */
-function fitLabel(text: string, width: number): string {
+export function fitLabel(text: string, width: number): string {
   let kept = text
   if (visibleWidth(kept) > width) {
     const graphemes = Array.from(GRAPHEMES.segment(text), (part) => part.segment)

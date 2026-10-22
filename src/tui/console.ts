@@ -33,11 +33,13 @@ import {
   setKeybindings,
   TUI_KEYBINDINGS
 } from '@earendil-works/pi-tui'
+import type { ServerType } from '@hono/node-server'
 import type { ServerConfig } from '@proxy/config/env'
 import type { Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
+import { providerQuota } from '@proxy/pi/quota'
 import {
   getAvailableModels,
   getCredentialStatuses,
@@ -48,6 +50,12 @@ import {
   type ProviderCredentialStatus,
   summarizeAuthError
 } from '@proxy/pi/registry'
+import {
+  activeRequests,
+  finishedRequests,
+  onActiveRequestsChange
+} from '@proxy/server/active-requests'
+import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
@@ -59,10 +67,13 @@ import {
   type AccountAction,
   accountActions,
   clampSelection,
+  footerLine,
   moveSelection,
   stepView,
+  tabsLine,
   type View
 } from '@proxy/tui/navigation'
+import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
 import { statsRows } from '@proxy/tui/stats-view'
 import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
@@ -74,6 +85,8 @@ const consoleLogger = proxyLogger('tui')
 
 /** How often the status line and the accounts list are read again. */
 const STATUS_REFRESH_MS = 5000
+/** How often the sidebar's clocks (uptime, elapsed, time left) and connection count move on. */
+const TICK_MS = 1000
 /** How long a logout may take. */
 const LOGOUT_TIMEOUT_MS = 15_000
 /** Lines a page key scrolls the log view by. */
@@ -99,6 +112,10 @@ interface ConsoleState extends RefreshState<Status> {
   logView: LogViewport
   /** The selected row of the accounts view; the row after the accounts opens the login. */
   selected: number
+  /** Open client connections, counted every tick; `undefined` before the first count. */
+  connections: number | undefined
+  /** Whether the operator hid the sidebar (`s`). */
+  sidebarHidden: boolean
 }
 
 /** What the key handlers and the login flow need. */
@@ -107,6 +124,8 @@ interface ConsoleContext {
   readonly logs: LogBuffer
   readonly tui: TuiAltScreen
   readonly state: ConsoleState
+  /** When the console started the proxy, in milliseconds since the epoch. */
+  readonly startedAt: number
   /**
    * Reads the status and accounts again, then redraws.
    *
@@ -175,47 +194,25 @@ function statusParts(status: Status): string[] {
 }
 
 /**
- * Renders the header: version, address, auth and the status line.
+ * Renders the header: version and address, then auth and the status line unless the sidebar shows
+ * them.
  *
  * @param config - the server config
  * @param status - the last status read, or `undefined` before the first
+ * @param withSidebar - whether the sidebar is shown, with the status in its PROXY panel
  * @returns the header line, untruncated
  */
-function headerLine(config: ServerConfig, status: Status | undefined): string {
+function headerLine(
+  config: ServerConfig,
+  status: Status | undefined,
+  withSidebar: boolean
+): string {
   const title = styleText('bold', ` pi-switchboard ${packageJson.version}`)
   const address = `${config.host}:${String(config.port)}`
+  if (withSidebar) return [title, address].join(' · ')
   const parts = [title, address, `auth ${config.proxyAuth.kind}`]
   if (status !== undefined) parts.push(...statusParts(status))
   return parts.join(' · ')
-}
-
-/**
- * Renders the tab bar, marking the current view.
- *
- * @param view - the current view
- * @returns the tab bar line
- */
-function tabsLine(view: View): string {
-  const tabs: readonly (readonly [View, string])[] = [
-    ['logs', ' 1 Logs '],
-    ['accounts', ' 2 Accounts '],
-    ['stats', ' 3 Stats ']
-  ]
-  const shown = tabs.map(([tab, label]) =>
-    tab === view ? styleText(['bold', 'inverse'], label) : label
-  )
-  return ` ${shown.join(' ')}`
-}
-
-/**
- * The footer's key hints for each view, quitting first: a narrow terminal cuts the end of the line.
- */
-const FOOTER: Readonly<Record<View, string>> = {
-  logs: ' q quit (stops the proxy) · ←→ views · ↑↓ PgUp PgDn scroll · End follow · n login',
-  accounts:
-    ' q quit (stops the proxy) · ←→ views · ↑↓ select · Enter actions · v verify all · n login · x logout',
-  stats:
-    ' q quit (stops the proxy) · ←→ views · per alias and served model, since the proxy started'
 }
 
 /**
@@ -255,8 +252,45 @@ function viewRows(
 }
 
 /**
- * Creates the console's root component: header, tab bar, the current view, and the footer on the
- * screen's last row.
+ * Gathers what the sidebar shows, now: the proxy's status, each login with its quota, the
+ * cooldowns, the requests in flight and the route totals.
+ *
+ * @param context - the console
+ * @returns the snapshot
+ */
+function sidebarInput(context: ConsoleContext): SidebarInput {
+  const { config, state } = context
+  const now = Date.now()
+  const status: Partial<Status> = state.status ?? {}
+  const reserve = status.reserve ?? {}
+  return {
+    now,
+    proxy: {
+      address: `${config.host}:${String(config.port)}`,
+      proxyAuth: config.proxyAuth.kind,
+      startedAt: context.startedAt,
+      connections: state.connections,
+      exposed: status.exposed,
+      available: status.available,
+      modelsJsonError: status.modelsJsonError !== undefined
+    },
+    accounts: state.accounts.map((account) => ({
+      provider: account.provider,
+      type: account.type,
+      models: account.availableModelCount,
+      quota: providerQuota(account.provider, now),
+      belowReserve: providerBelowReserve(account.provider, reserve, now) !== undefined
+    })),
+    cooldowns: activeCooldowns(now),
+    active: activeRequests(),
+    finished: finishedRequests(),
+    totals: routeTotals()
+  }
+}
+
+/**
+ * Creates the console's root component: the header, then the tab bar over the current view with
+ * the sidebar beside them on a wide enough terminal, and the footer on the screen's last row.
  *
  * @param context - the console
  * @param terminal - the terminal, for its height
@@ -272,13 +306,26 @@ function createRootView(
     render(width) {
       const height = Math.max(1, terminal.rows - CHROME_ROWS)
       const { state, config } = context
-      const body = viewRows(context, { height, width })
-      const rows = [
-        headerLine(config, state.status),
+      const side = state.sidebarHidden ? undefined : sidebarWidth(width)
+      const mainWidth = side === undefined ? width : width - side - 1
+      const body = viewRows(context, { height, width: mainWidth })
+      const main = [
         tabsLine(state.view),
         ...body,
-        ...Array.from({ length: Math.max(0, height - body.length) }, () => ''),
-        styleText('dim', FOOTER[state.view])
+        ...Array.from({ length: Math.max(0, height - body.length) }, () => '')
+      ]
+      const middle =
+        side === undefined
+          ? main
+          : besideSidebar(
+              main,
+              sidebarRows(sidebarInput(context), { height: main.length, width: side }),
+              mainWidth
+            )
+      const rows = [
+        headerLine(config, state.status, side !== undefined),
+        ...middle,
+        footerLine(state.view, sidebarWidth(width) !== undefined)
       ]
       return rows.map((row) => truncateToWidth(row, width))
     },
@@ -505,6 +552,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['n', () => openLogin(context)],
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
+    ['s', () => (state.sidebarHidden = !state.sidebarHidden)],
     [Key.up, () => moveWithin(context, -1)],
     [Key.down, () => moveWithin(context, 1)],
     [Key.pageUp, () => moveWithin(context, -PAGE_LINES)],
@@ -529,23 +577,35 @@ function settleable(): { promise: Promise<void>; settle: () => void } {
 
 /**
  * Starts what keeps the screen current: a redraw on every log line and every change to the route
- * totals, the status read every few seconds, and stray stderr writes sent to the log view.
+ * totals or the requests in flight, the open connections counted and the sidebar's clocks moved on
+ * every second, the status read every few seconds, and stray stderr writes sent to the log view.
  *
  * @param context - the console
+ * @param server - the proxy's server, whose open connections the sidebar shows
  * @returns a function that stops them all
  */
-function startUpdates(context: ConsoleContext): () => void {
-  const unsubscribeLogs = context.logs.onChange(() => context.tui.requestRender())
-  const unsubscribeTotals = onRouteTotalsChange(() => context.tui.requestRender())
+function startUpdates(context: ConsoleContext, server: ServerType): () => void {
+  const redraw = (): void => context.tui.requestRender()
+  const unsubscribeLogs = context.logs.onChange(redraw)
+  const unsubscribeTotals = onRouteTotalsChange(redraw)
+  const unsubscribeActive = onActiveRequestsChange(redraw)
   const timer = setInterval(
     () => inBackground(context.refresh(), 'Reading the status'),
     STATUS_REFRESH_MS
   )
+  const ticker = setInterval(() => {
+    server.getConnections((error, count) => {
+      if (error === null) context.state.connections = count
+      redraw()
+    })
+  }, TICK_MS)
   const restoreStderr = captureWrites(process.stderr, context.logs)
   return () => {
     clearInterval(timer)
+    clearInterval(ticker)
     unsubscribeLogs()
     unsubscribeTotals()
+    unsubscribeActive()
     restoreStderr()
   }
 }
@@ -614,13 +674,16 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     accounts: [],
     verification: new Map(),
     credentialChanges: new Map(),
-    selected: 0
+    selected: 0,
+    connections: undefined,
+    sidebarHidden: false
   }
   const context: ConsoleContext = {
     config,
     logs,
     tui,
     state,
+    startedAt: Date.now(),
     refresh: createRefresh(state, { status: readStatus, accounts: getCredentialStatuses }, () =>
       tui.requestRender()
     ),
@@ -631,7 +694,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     actions.find(([key]) => matchesKey(data, key))?.[1]()
     tui.requestRender()
   })
-  const stopUpdates = startUpdates(context)
+  const stopUpdates = startUpdates(context, server)
   const stopListening = listenForStops(stopped.settle, crashed)
 
   try {
