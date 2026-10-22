@@ -338,7 +338,7 @@ const BY_WORDING: readonly (readonly [RegExp, MappedUpstreamError])[] = [
   [/\btime[ds]?[\s_-]?out\b|\bETIMEDOUT\b/i, TIMED_OUT],
   [/\bunauthori[sz]ed\b/i, AUTH_FAILED],
   [
-    /\boverloaded\b|\bat capacity\b|\bserver[\s_-]?busy\b|\bservers are currently busy\b|\bhigh demand\b/i,
+    /\boverloaded\b|\bmodel is at capacity\b|\bserver[\s_-]?busy\b|\bservers are currently busy\b|\bexperiencing high demand\b/i,
     OVERLOADED
   ],
   [/\bservice[\s_-]?unavailable\b/i, UNAVAILABLE]

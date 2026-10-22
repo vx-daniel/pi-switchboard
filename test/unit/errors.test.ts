@@ -304,10 +304,18 @@ describe('mapUpstreamError', () => {
       RATE_LIMITED
     ],
     ['"usage limitations" is not a limit', 'Read the usage limitations first', PROVIDER_FAILED],
+    ['usage limits, plural', 'You have reached your usage limits for today', RATE_LIMITED],
     ['a model at capacity', 'The model is at capacity, please try again later', OVERLOADED],
     ['busy servers', 'Servers are currently busy', OVERLOADED],
     ['a server_busy code', '{"error":{"type":"server_busy"}}', OVERLOADED],
     ['high demand', 'We are currently experiencing high demand', OVERLOADED],
+    // Only pi's own phrases: the words alone say nothing about the provider's load.
+    ['"capacity" alone is not overload', 'Context capacity planning failed', PROVIDER_FAILED],
+    [
+      '"high demand" alone is not overload',
+      'Feature in high demand is unavailable here',
+      PROVIDER_FAILED
+    ],
     [
       'a 500 that mentions a usage limit',
       '500: {"message":"usage limit lookup failed"}',

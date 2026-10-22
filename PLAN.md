@@ -1177,7 +1177,7 @@ what only a status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 
 `429 tokens…` is not a status), after a label (`OpenAI API error (429): …`, `Mistral API error
 (429): …`), Google's `got status: 429.` or its error body's `error.code`. When a status is found it
 decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`, `overloaded`,
-`at capacity`, `servers are currently busy`, `high demand`, `service unavailable`, …, checked in that
+`model is at capacity`, `servers are currently busy`, `experiencing high demand`, `service unavailable`, …, checked in that
 order) is consulted only when no status is reported (Bedrock, network failures, the proxy's own idle
 timeout, Codex's usage limit), and a number elsewhere in the text never counts (#42). The client
 gets a fixed message and code, never the upstream text. A missing or broken upstream credential is
