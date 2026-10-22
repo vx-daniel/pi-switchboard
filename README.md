@@ -555,7 +555,7 @@ curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141
 
 ## Standalone binary
 
-Each GitHub release after 0.3.0 carries the proxy as one executable for Linux and macOS (x64 and arm64): `pi-switchboard-linux-x64`, `pi-switchboard-linux-arm64`, `pi-switchboard-darwin-x64`, `pi-switchboard-darwin-arm64`, and a `SHA256SUMS` file. It needs no Node and no pi install: pi is compiled in. Windows is not built yet. 0.3.0 and earlier have no binaries: their source predates it.
+Each GitHub release after 0.3.0 carries the proxy as one executable for Linux and macOS (x64 and arm64): `pi-switchboard-linux-x64`, `pi-switchboard-linux-arm64`, `pi-switchboard-darwin-x64`, `pi-switchboard-darwin-arm64`, and a `SHA256SUMS` file. It needs no Node and no pi install: pi is compiled in. Windows builds (`pi-switchboard-windows-x64.exe`, `pi-switchboard-windows-arm64.exe` and `SHA256SUMS-windows`) are added to a release by hand, so not every release has them. 0.3.0 and earlier have no binaries: their source predates it.
 
 ```bash
 version=<version>   # a release after 0.3.0
@@ -567,9 +567,10 @@ chmod +x pi-switchboard-linux-x64
 ./pi-switchboard-linux-x64 --port 4141
 ```
 
-Every binary is run (`--version`) on its own platform, Linux and macOS on x64 and arm64, before the release workflow uploads it, and each asset has a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) that `gh attestation verify` checks.
+Every binary is run (`--version`) on its own platform (Linux and macOS, and Windows when it is built, on x64 and arm64) before the workflow uploads it, and each asset has a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) that `gh attestation verify` checks.
 
 - **macOS.** The binaries are not signed with a Developer ID, so Gatekeeper blocks the first run. After checking the checksum, remove the quarantine flag: `xattr -d com.apple.quarantine pi-switchboard-darwin-arm64`. Apple Silicon also needs a valid code signature. Bun writes an ad-hoc one when it compiles for macOS, and the release workflow runs the arm64 binary on macOS before uploading it, but if the shell only prints `killed` when you start it, the signature is missing or broken: sign it ad hoc yourself with `codesign --sign - ./pi-switchboard-darwin-arm64` (add `--force` to replace a broken one) and run it again.
+- **Windows.** Check the download in PowerShell with `Get-FileHash .\pi-switchboard-windows-x64.exe` against the line in `SHA256SUMS-windows`, then run `.\pi-switchboard-windows-x64.exe --port 4141`. The binaries are unsigned, so SmartScreen warns on the first run (**More info**, then **Run anyway**). Use the arm64 build on Windows on Arm.
 - **Logins come from pi's `auth.json`.** The binary reads the same `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) as the npm package: log in with pi, or in the binary's own console, `./pi-switchboard-linux-x64 tui` ([The console](#the-console-logs-logins-and-status-at-a-terminal)).
 - **Same options.** Flags, `PI_SWITCHBOARD_*` variables and `proxy-config.json` work as in [Configuration](#configuration). The binary never reads a `.env` or `bunfig.toml` from the directory it starts in.
 

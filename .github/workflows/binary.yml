@@ -1,21 +1,28 @@
 name: Binary
 
-# Cross-compiles the standalone binary (#61) from a release tag for linux-x64, linux-arm64,
-# darwin-x64 and darwin-arm64 (`scripts/build-binary.ts --all`), runs each one on a native runner,
-# and uploads the four files and their SHA256SUMS to that tag's GitHub release with a build
-# provenance attestation. One Linux runner builds every target. Windows is not a target yet, and
-# the macOS binaries are unsigned. The release workflow calls it for each new release; run it by
-# hand with the tag to finish or redo a release's binaries. A tag from before the binary existed
-# (0.3.0 and earlier, with no scripts/build-binary.ts) fails at once: its tree cannot build one.
+# Cross-compiles the standalone binary (#61) and runs each target on a native runner. Two sets:
+#
+# - unix (the default): linux-x64, linux-arm64, darwin-x64 and darwin-arm64
+#   (`scripts/build-binary.ts --all`), with SHA256SUMS. The release workflow calls it for each new
+#   release. The macOS binaries are unsigned.
+# - windows: windows-x64 and windows-arm64 (`--windows`), with SHA256SUMS-windows. Run by hand
+#   only, to save Actions minutes: the release workflow never builds it. The full binary test
+#   suite also runs on a Windows runner, since only the binary tests show the compiled binary
+#   works there. The binaries are unsigned.
+#
+# With a tag, it uploads the set's files and checksum file to that tag's GitHub release, with a
+# build provenance attestation. One Linux runner builds every target. A tag from before the binary
+# existed (0.3.0 and earlier, with no scripts/build-binary.ts) fails at once: its tree cannot build
+# one. Run by hand with the tag to finish or redo a release's binaries, or to add Windows ones.
 #
 # Run by hand with no tag, it builds and smoke-tests the branch it runs on, every target on its
 # own platform, and uploads nothing: the way to check this workflow before a release. The branch
 # needs scripts/build-binary.ts too, as a tag does.
 #
-# Retryable, never overwriting: the upload adds only the expected assets the release is missing.
-# An asset already there is kept, and must be byte-identical to this build (the compile is
-# deterministic for one tree and Bun version), or the run fails before uploading anything. When
-# all five are already there, the run succeeds without uploading. SHA256SUMS goes up last.
+# Retryable, never overwriting: the upload adds only the set's expected assets the release is
+# missing. An asset already there is kept, and must be byte-identical to this build (the compile
+# is deterministic for one tree and Bun version), or the run fails before uploading anything. When
+# all are already there, the run succeeds without uploading. The checksum file goes up last.
 on:
   workflow_call:
     inputs:
@@ -30,13 +37,21 @@ on:
         required: false
         default: ''
         type: string
+      platforms:
+        description: Which binaries to build
+        required: false
+        default: unix
+        type: choice
+        options:
+          - unix
+          - windows
 
 permissions:
   contents: read
 
-# Two runs for one tag would both see an asset missing and both upload it.
+# Two runs for one tag and set would both see an asset missing and both upload it.
 concurrency:
-  group: binary-${{ inputs.tag || github.ref }}
+  group: binary-${{ inputs.platforms || 'unix' }}-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -44,8 +59,12 @@ jobs:
     runs-on: ubuntu-latest
     env:
       TAG: ${{ inputs.tag }}
+      PLATFORMS: ${{ inputs.platforms || 'unix' }}
     outputs:
       version: ${{ steps.version.outputs.version }}
+      sums: ${{ steps.plan.outputs.sums }}
+      assets: ${{ steps.plan.outputs.assets }}
+      smoke: ${{ steps.plan.outputs.smoke }}
 
     steps:
       # Before anything is checked out: the tag must name a release.
@@ -58,6 +77,42 @@ jobs:
             echo "::error::'$TAG' is not a release tag (pi-switchboard-v<version>)"
             exit 1
           fi
+
+      # What the set builds, where it runs, and what a release gets: the build flag, the checksum
+      # file, the assets in upload order (the checksum file last), and the smoke matrix.
+      - name: Plan the set
+        id: plan
+        run: |
+          case "$PLATFORMS" in
+            unix)
+              flag=--all
+              sums=SHA256SUMS
+              # macos-13 is retired; macos-15-intel is GitHub's remaining x64 macOS image.
+              smoke='{"include":[
+                {"target":"linux-x64","file":"pi-switchboard-linux-x64","runner":"ubuntu-latest"},
+                {"target":"linux-arm64","file":"pi-switchboard-linux-arm64","runner":"ubuntu-24.04-arm"},
+                {"target":"darwin-arm64","file":"pi-switchboard-darwin-arm64","runner":"macos-14"},
+                {"target":"darwin-x64","file":"pi-switchboard-darwin-x64","runner":"macos-15-intel"}]}'
+              ;;
+            windows)
+              flag=--windows
+              sums=SHA256SUMS-windows
+              smoke='{"include":[
+                {"target":"windows-x64","file":"pi-switchboard-windows-x64.exe","runner":"windows-latest"},
+                {"target":"windows-arm64","file":"pi-switchboard-windows-arm64.exe","runner":"windows-11-arm"}]}'
+              ;;
+            *)
+              echo "::error::'$PLATFORMS' is not a set of binaries (unix or windows)"
+              exit 1
+              ;;
+          esac
+          files="$(printf '%s' "$smoke" | jq -r '[.include[].file] | join(" ")')"
+          {
+            echo "flag=$flag"
+            echo "sums=$sums"
+            echo "assets=$files $sums"
+            echo "smoke=$(printf '%s' "$smoke" | jq -c .)"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Check out the release tag, or this branch
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
@@ -98,12 +153,13 @@ jobs:
           bun-version: 1.4.3
 
       # The release's tree is tested as a binary before it is cross-compiled: the host build runs
-      # against the fixtures (test/binary), then `--all` builds every target from the same tree.
+      # against the fixtures (test/binary). The windows set runs these tests on Windows instead.
       - name: Test the binary
+        if: env.PLATFORMS == 'unix'
         run: pnpm run test:binary
 
-      - name: Cross-compile every target
-        run: node scripts/build-binary.ts --all
+      - name: Cross-compile every target of the set
+        run: node scripts/build-binary.ts ${{ steps.plan.outputs.flag }}
 
       - name: Keep the binaries for the next jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -111,9 +167,42 @@ jobs:
           name: binaries
           path: |
             dist-bin/pi-switchboard-*
-            dist-bin/SHA256SUMS
+            dist-bin/SHA256SUMS*
           if-no-files-found: error
           retention-days: 7
+
+  # The binary test suite on Windows: the host build (`pi-switchboard.exe`) against the fixtures,
+  # as the build job does on Linux for the unix set.
+  test-windows:
+    if: inputs.platforms == 'windows'
+    runs-on: windows-latest
+    steps:
+      - name: Check out the release tag, or this branch
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+        with:
+          ref: ${{ inputs.tag != '' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Set up Vite+
+        uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+        with:
+          node-version: '24'
+          cache: true
+        env:
+          VP_GIT_HOOKS: '0'
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      # The steps of `pnpm run test:binary`, whose `VAR=1 command` form cmd.exe does not run.
+      - name: Build the host binary
+        run: node scripts/build-binary.ts
+
+      - name: Test the binary
+        run: vp test --project binary
+        env:
+          PI_SWITCHBOARD_BINARY_TESTS: '1'
 
   # Each target runs on its own platform before anything is uploaded: `--version` must exit 0
   # and print the release's version.
@@ -121,20 +210,10 @@ jobs:
     needs: build
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - target: linux-x64
-            runner: ubuntu-latest
-          - target: linux-arm64
-            runner: ubuntu-24.04-arm
-          - target: darwin-arm64
-            runner: macos-14
-          # macos-13 is retired; macos-15-intel is GitHub's remaining x64 macOS image.
-          - target: darwin-x64
-            runner: macos-15-intel
+      matrix: ${{ fromJSON(needs.build.outputs.smoke) }}
     runs-on: ${{ matrix.runner }}
     env:
-      FILE: pi-switchboard-${{ matrix.target }}
+      FILE: ${{ matrix.file }}
       VERSION: ${{ needs.build.outputs.version }}
 
     steps:
@@ -143,7 +222,9 @@ jobs:
         with:
           name: binaries
 
+      # bash on every runner, Windows included (Git Bash), so the check is one script.
       - name: Run --version
+        shell: bash
         run: |
           chmod +x "$FILE"
           output="$(./"$FILE" --version)"
@@ -153,10 +234,10 @@ jobs:
           fi
           echo "$FILE --version: $output"
 
-  # A build-only run (no tag) stops after the smoke tests.
+  # A build-only run (no tag) stops after the tests.
   release:
-    if: inputs.tag != ''
-    needs: [build, smoke]
+    if: inputs.tag != '' && !cancelled() && !failure()
+    needs: [build, smoke, test-windows]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -164,6 +245,8 @@ jobs:
       attestations: write
     env:
       TAG: ${{ inputs.tag }}
+      SUMS: ${{ needs.build.outputs.sums }}
+      ASSETS: ${{ needs.build.outputs.assets }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       GH_REPO: ${{ github.repository }}
 
@@ -173,25 +256,24 @@ jobs:
         with:
           name: binaries
 
-      - name: Check the binaries against SHA256SUMS
-        run: sha256sum --check SHA256SUMS
+      - name: Check the binaries against their checksum file
+        run: sha256sum --check "$SUMS"
 
       - name: Attest build provenance
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:
           subject-path: |
             pi-switchboard-*
-            SHA256SUMS
+            SHA256SUMS*
 
       # Fails when the release does not exist. Every check runs before any upload, so a mismatch
       # leaves the release as it was.
       - name: Upload the missing assets
         run: |
-          expected="pi-switchboard-linux-x64 pi-switchboard-linux-arm64 pi-switchboard-darwin-x64 pi-switchboard-darwin-arm64 SHA256SUMS"
           present="$(gh release view "$TAG" --json assets --jq '.assets[].name')"
           missing=""
           mkdir -p .published
-          for asset in $expected; do
+          for asset in $ASSETS; do
             if printf '%s\n' "$present" | grep -Fxq "$asset"; then
               gh release download "$TAG" --pattern "$asset" --dir .published
               if ! cmp -s "$asset" ".published/$asset"; then
@@ -204,10 +286,10 @@ jobs:
             fi
           done
           if [ -z "$missing" ]; then
-            echo "$TAG already has every binary and SHA256SUMS"
+            echo "$TAG already has every binary of the set and $SUMS"
             exit 0
           fi
-          # SHA256SUMS is last in `expected`, so it goes up after the binaries it lists.
+          # The checksum file is last in ASSETS, so it goes up after the binaries it lists.
           for asset in $missing; do
             gh release upload "$TAG" "$asset"
           done

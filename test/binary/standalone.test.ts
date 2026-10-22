@@ -27,8 +27,12 @@ import {
   startMockProvider,
   textChunks
 } from '../fixtures/mock-provider'
+import { platformEnv } from '../fixtures/platform-env'
 
-const BINARY = resolve('dist-bin/pi-switchboard')
+/** The host binary `pnpm run build:binary` writes, with Windows' `.exe`. */
+const BINARY = resolve(
+  process.platform === 'win32' ? 'dist-bin/pi-switchboard.exe' : 'dist-bin/pi-switchboard'
+)
 const READY_TIMEOUT_MS = 5000
 const READY_POLL_MS = 50
 
@@ -133,6 +137,9 @@ async function startBinary(env: Record<string, string>, cwd = tmpdir()): Promise
  * The environment a binary gets: the fixture agent dir and nothing inherited, so no credentials
  * and no `PATH` (the proxy runs no commands).
  *
+ * @remarks
+ * On Windows a few platform variables come along ({@link platformEnv}).
+ *
  * @param home - the fixture agent dir
  * @returns the variables to start the binary with
  */
@@ -140,7 +147,8 @@ function baseEnv(home: string): Record<string, string> {
   return {
     HOME: home,
     PI_CODING_AGENT_DIR: agentDir.path,
-    PI_SWITCHBOARD_LOG_FORMAT: 'json'
+    PI_SWITCHBOARD_LOG_FORMAT: 'json',
+    ...platformEnv(home)
   }
 }
 
