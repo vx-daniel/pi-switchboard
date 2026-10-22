@@ -1536,8 +1536,16 @@ release workflow, never in `check:all` or the pre-commit hook.
   all five already there it succeeds without uploading. So a run that failed partway is fixed by
   running `binary.yml` again by hand with the tag. Third-party actions in `binary.yml` and the CI
   `binary` job are pinned by commit SHA.
-- **Logins.** Until the TUI (#61) can log in through pi's own screens, the binary uses the logins
-  in pi's `auth.json` (`~/.pi/agent`, or `PI_CODING_AGENT_DIR`), made by pi or the image's pi.
+- **Releases before the binary.** A tag whose tree has no `scripts/build-binary.ts` (0.3.0 and
+  earlier) fails in the `build` job's first steps with that reason: its tree cannot build one, and
+  building it with a newer tree's scripts would attest binaries the tag's source did not produce.
+  The first release with binaries is the first one after 0.3.0.
+- **Build-only runs.** `binary.yml` run by hand with no tag builds the branch it runs on, tests
+  it, and smoke-tests every target on its own platform against `package.json`'s version; the
+  `release` job is skipped, so nothing is uploaded. That is how the workflow is checked before a
+  release.
+- **Logins.** The binary uses the logins in pi's `auth.json` (`~/.pi/agent`, or
+  `PI_CODING_AGENT_DIR`), made by pi, the image's pi, or the binary's own console (`tui`, below).
 
 ### Agentic mode
 

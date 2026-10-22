@@ -5,7 +5,12 @@ name: Binary
 # and uploads the four files and their SHA256SUMS to that tag's GitHub release with a build
 # provenance attestation. One Linux runner builds every target. Windows is not a target yet, and
 # the macOS binaries are unsigned. The release workflow calls it for each new release; run it by
-# hand with the tag to finish or redo a release's binaries.
+# hand with the tag to finish or redo a release's binaries. A tag from before the binary existed
+# (0.3.0 and earlier, with no scripts/build-binary.ts) fails at once: its tree cannot build one.
+#
+# Run by hand with no tag, it builds and smoke-tests the branch it runs on, every target on its
+# own platform, and uploads nothing: the way to check this workflow before a release. The branch
+# needs scripts/build-binary.ts too, as a tag does.
 #
 # Retryable, never overwriting: the upload adds only the expected assets the release is missing.
 # An asset already there is kept, and must be byte-identical to this build (the compile is
@@ -21,8 +26,9 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: The release tag to build and upload, such as pi-switchboard-v0.1.0
-        required: true
+        description: The release tag to build and upload, such as pi-switchboard-v0.4.0; empty to build and test this branch without uploading
+        required: false
+        default: ''
         type: string
 
 permissions:
@@ -30,7 +36,7 @@ permissions:
 
 # Two runs for one tag would both see an asset missing and both upload it.
 concurrency:
-  group: binary-${{ inputs.tag }}
+  group: binary-${{ inputs.tag || github.ref }}
   cancel-in-progress: false
 
 jobs:
@@ -42,8 +48,9 @@ jobs:
       version: ${{ steps.version.outputs.version }}
 
     steps:
-      - name: Read the version from the tag
-        id: version
+      # Before anything is checked out: the tag must name a release.
+      - name: Check the release tag
+        if: inputs.tag != ''
         run: |
           version="${TAG#pi-switchboard-v}"
           if [ "$version" = "$TAG" ] ||
@@ -51,12 +58,29 @@ jobs:
             echo "::error::'$TAG' is not a release tag (pi-switchboard-v<version>)"
             exit 1
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Check out the release tag
+      - name: Check out the release tag, or this branch
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
-          ref: refs/tags/${{ inputs.tag }}
+          ref: ${{ inputs.tag != '' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Check that this tree can build the binary
+        run: |
+          if [ ! -f scripts/build-binary.ts ]; then
+            echo "::error::${TAG:-This tree} predates the standalone binary (#61): it has no scripts/build-binary.ts, so it cannot build one. Binaries start with the first release after 0.3.0"
+            exit 1
+          fi
+
+      # A release's version is its tag's; a build-only run's is package.json's.
+      - name: Read the version
+        id: version
+        run: |
+          if [ -n "$TAG" ]; then
+            version="${TAG#pi-switchboard-v}"
+          else
+            version="$(jq -r .version package.json)"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       # Node, pnpm and the frozen install, as in CI.
       - name: Set up Vite+
@@ -129,7 +153,9 @@ jobs:
           fi
           echo "$FILE --version: $output"
 
+  # A build-only run (no tag) stops after the smoke tests.
   release:
+    if: inputs.tag != ''
     needs: [build, smoke]
     runs-on: ubuntu-latest
     permissions:
