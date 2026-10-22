@@ -202,6 +202,10 @@ beforeAll(async () => {
     'fast': 'alpha/priced-mock',
     'broken': 'alpha/cut-mock',
     'guarded': { targets: ['keyless/locked-mock', 'beta/answer-mock'], fallbackOn: ['auth'] },
+    'guarded-strict': {
+      targets: ['keyless/locked-mock', 'beta/answer-mock'],
+      fallbackOn: ['rate_limit']
+    },
     'guarded-later': {
       targets: ['alpha/limited-mock', 'keyless/locked-mock', 'beta/answer-mock'],
       fallbackOn: ['rate_limit', 'auth']
@@ -414,6 +418,25 @@ describe('route totals', () => {
       expect(row(alias, 'beta/answer-mock')).toMatchObject({ requests: 1, failures: 0 })
     }
   )
+
+  // Catches a refusal that ends the chain (its alias does not name `auth`) counted as a fallback,
+  // or the next target counted though it was never tried (third #194 review).
+  test('count a credential refusal that ends an alias chain, with no fallback', async () => {
+    expect(await ask('guarded-strict')).toBe(401)
+
+    const credentialClass: FailureClass = 'auth'
+    expect(routeTotals()).toEqual([
+      {
+        ...EMPTY,
+        alias: 'guarded-strict',
+        provider: 'keyless',
+        model: 'keyless/locked-mock',
+        requests: 1,
+        failures: 1,
+        failuresByClass: { [credentialClass]: 1 }
+      }
+    ])
+  })
 
   // Catches a client that left counted as the route's failure: the call was abandoned, not
   // failed, though it was still an attempt.
