@@ -279,6 +279,15 @@ function errorText(error: unknown): string {
 }
 
 /**
+ * Names the stats file: `pi-switchboard-stats.sqlite` in pi's agent dir.
+ *
+ * @returns its path
+ */
+export function statsFilePath(): string {
+  return join(piAgentDir(), STATS_FILE)
+}
+
+/**
  * Starts recording to the stats file in pi's agent dir, for a server that has started listening.
  *
  * @remarks
@@ -290,7 +299,7 @@ function errorText(error: unknown): string {
  *   could not be opened
  */
 export function recordStatsToFile(): (() => void) | undefined {
-  const path = join(piAgentDir(), STATS_FILE)
+  const path = statsFilePath()
   let store: StatsStore
   try {
     store = openStatsStore(path)

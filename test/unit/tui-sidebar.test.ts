@@ -2,9 +2,9 @@ import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import type { Cooldown } from '@proxy/pi/cooldowns'
 import type { ActiveRequest, FinishedRequest } from '@proxy/server/active-requests'
 import type { RouteTotals } from '@proxy/server/route-totals'
+import { compactDuration } from '@proxy/tui/panel'
 import {
   besideSidebar,
-  compactDuration,
   type SidebarAccount,
   type SidebarInput,
   sidebarRows,

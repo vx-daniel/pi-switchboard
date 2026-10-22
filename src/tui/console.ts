@@ -53,10 +53,11 @@ import {
   onActiveRequestsChange
 } from '@proxy/server/active-requests'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
-import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
+import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
 import { accountRows } from '@proxy/tui/accounts-view'
+import { openStatsView, type StatsView, type StatsWindow } from '@proxy/tui/dashboard'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
@@ -71,7 +72,6 @@ import {
   type View
 } from '@proxy/tui/navigation'
 import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
-import { statsRows } from '@proxy/tui/stats-view'
 import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
 import { installConsoleTheme, paint, strong } from '@proxy/tui/theme'
@@ -114,6 +114,8 @@ interface ConsoleState extends RefreshState<Status> {
   connections: number | undefined
   /** Whether the operator hid the sidebar (`s`). */
   sidebarHidden: boolean
+  /** The window the Stats dashboard shows. */
+  statsWindow: StatsWindow
 }
 
 /** What the key handlers and the login flow need. */
@@ -124,6 +126,8 @@ interface ConsoleContext {
   readonly state: ConsoleState
   /** When the console started the proxy, in milliseconds since the epoch. */
   readonly startedAt: number
+  /** The Stats view: the dashboard, or the totals since the proxy started without stats. */
+  readonly statsView: StatsView
   /**
    * Reads the status and accounts again, then redraws.
    *
@@ -246,7 +250,7 @@ function viewRows(
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size)
   if (state.view === 'accounts') return accountsViewRows(state, size.height)
-  return statsRows(routeTotals(), routeTotalsSince(), size)
+  return context.statsView.rows(state.statsWindow, size)
 }
 
 /**
@@ -551,6 +555,9 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
     ['s', () => (state.sidebarHidden = !state.sidebarHidden)],
+    ['t', () => (state.statsWindow = 'today')],
+    ['w', () => (state.statsWindow = 'week')],
+    ['a', () => (state.statsWindow = 'all')],
     [Key.up, () => moveWithin(context, -1)],
     [Key.down, () => moveWithin(context, 1)],
     [Key.pageUp, () => moveWithin(context, -PAGE_LINES)],
@@ -657,6 +664,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
   )
   await initRegistry()
   const server = await listen(config)
+  const statsView = openStatsView(config.statsEnabled)
   const terminal = new ProcessTerminal()
   const tui = new TuiAltScreen(terminal)
   const stopped = settleable()
@@ -674,7 +682,8 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     credentialChanges: new Map(),
     selected: 0,
     connections: undefined,
-    sidebarHidden: false
+    sidebarHidden: false,
+    statsWindow: 'today'
   }
   const context: ConsoleContext = {
     config,
@@ -682,6 +691,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     tui,
     state,
     startedAt: Date.now(),
+    statsView,
     refresh: createRefresh(state, { status: readStatus, accounts: getCredentialStatuses }, () =>
       tui.requestRender()
     ),
@@ -706,6 +716,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     stopUpdates()
     stopListening()
     server.close()
+    statsView.close()
   }
   if (crash instanceof Error) throw crash
   if (crash !== undefined) {

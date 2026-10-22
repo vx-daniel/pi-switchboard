@@ -11,7 +11,6 @@
  */
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
-import { MS_PER_SECOND } from '@proxy/config/schema'
 import type { Cooldown } from '@proxy/pi/cooldowns'
 import type { ProviderQuota, QuotaWindow } from '@proxy/pi/quota'
 import {
@@ -22,6 +21,14 @@ import {
   type RequestOutcome
 } from '@proxy/server/active-requests'
 import type { RouteTotals } from '@proxy/server/route-totals'
+import {
+  compactCount,
+  compactDuration,
+  FRAME_COLUMNS,
+  latency,
+  panel,
+  spread
+} from '@proxy/tui/panel'
 import { fitLabel, sum } from '@proxy/tui/stats-view'
 import { type ConsoleColor, paint, strong } from '@proxy/tui/theme'
 
@@ -31,8 +38,6 @@ const MIN_TERMINAL_WIDTH = 100
 const SIDEBAR_SHARE = 0.3
 /** The narrowest and widest the sidebar gets. */
 const SIDEBAR_WIDTH = { least: 34, most: 48 } as const
-/** Columns a panel's frame takes: `│ ` before the content and ` │` after. */
-const FRAME_COLUMNS = 4
 /** Cells in a quota window's bar. */
 const BAR_CELLS = 8
 /** Columns a window's time to reset takes (` ↻` and up to `59m59s`), so the bars line up. */
@@ -54,20 +59,8 @@ const OUTCOME_MARKS: Readonly<Record<RequestOutcome, string>> = {
 }
 /** Percent in a whole. */
 const PERCENT = 100
-/** Seconds in a minute, minutes in an hour. */
-const SIXTY = 60
-/** Hours in a day. */
-const HOURS_PER_DAY = 24
-/** A thousand, for compact token counts. */
-const THOUSAND = 1000
-/** A million, for compact token counts. */
-const MILLION = 1_000_000
 /** Decimal places a cost is shown with: a request can cost a fraction of a cent. */
 const COST_DECIMALS = 4
-/** Columns a panel's two corners take, on its top and bottom borders. */
-const CORNER_COLUMNS = 2
-/** Digits the minutes or hours after the first unit are padded to: `4m05s`, `1h02m`. */
-const PAD_DIGITS = 2
 
 /** The proxy's own status, from the server config and the status the console reads. */
 export interface SidebarProxy {
@@ -126,71 +119,6 @@ export function sidebarWidth(terminalWidth: number): number | undefined {
   if (terminalWidth < MIN_TERMINAL_WIDTH) return undefined
   const share = Math.round(terminalWidth * SIDEBAR_SHARE)
   return Math.min(SIDEBAR_WIDTH.most, Math.max(SIDEBAR_WIDTH.least, share))
-}
-
-/**
- * Formats a length of time compactly: `42s`, `4m05s`, `1h02m`, `3d4h`.
- *
- * @param ms - the length, in milliseconds; a negative one counts as zero
- * @returns the text
- */
-export function compactDuration(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / MS_PER_SECOND))
-  if (seconds < SIXTY) return `${String(seconds)}s`
-  const minutes = Math.floor(seconds / SIXTY)
-  const padded = (value: number): string => String(value).padStart(PAD_DIGITS, '0')
-  if (minutes < SIXTY) return `${String(minutes)}m${padded(seconds % SIXTY)}s`
-  const hours = Math.floor(minutes / SIXTY)
-  if (hours < HOURS_PER_DAY) return `${String(hours)}h${padded(minutes % SIXTY)}m`
-  return `${String(Math.floor(hours / HOURS_PER_DAY))}d${String(hours % HOURS_PER_DAY)}h`
-}
-
-/**
- * Formats a token count compactly: `950`, `12.3K`, `1.2M`.
- *
- * @param value - the count
- * @returns the text
- */
-function compactCount(value: number): string {
-  if (value < THOUSAND) return String(value)
-  const [scaled, unit] = value < MILLION ? [value / THOUSAND, 'K'] : [value / MILLION, 'M']
-  return `${scaled.toFixed(1).replace(/\.0$/, '')}${unit}`
-}
-
-/**
- * Lays out a label on the left and a value on the right of one content line.
- *
- * @param label - the left part; cut with `…` when the line is too narrow
- * @param value - the right part, kept whole
- * @param width - the content's columns
- * @returns the line
- */
-function spread(label: string, value: string, width: number): string {
-  const room = Math.max(1, width - visibleWidth(value) - 1)
-  const left = truncateToWidth(label, room, '…')
-  const gap = Math.max(1, width - visibleWidth(left) - visibleWidth(value))
-  return `${left}${' '.repeat(gap)}${value}`
-}
-
-/**
- * Frames a panel: a titled top border, each line between side borders, a bottom border.
- *
- * @param title - the title, shown in the top border
- * @param lines - the content lines; each is cut or padded to the content's width
- * @param width - the panel's columns, borders included
- * @returns the panel's rows
- */
-function panel(title: string, lines: readonly string[], width: number): string[] {
-  const inner = Math.max(1, width - FRAME_COLUMNS)
-  const label = ` ${title} `
-  const rest = Math.max(0, width - CORNER_COLUMNS - 1 - visibleWidth(label))
-  const top = `${paint('border', '╭─')}${strong(paint('accent', label))}${paint('border', `${'─'.repeat(rest)}╮`)}`
-  const body = lines.map(
-    (line) =>
-      `${paint('border', '│ ')}${truncateToWidth(line, inner, '…', true)}${paint('border', ' │')}`
-  )
-  const bottom = paint('border', `╰${'─'.repeat(Math.max(0, width - CORNER_COLUMNS))}╯`)
-  return [top, ...body, bottom]
 }
 
 /**
@@ -381,18 +309,6 @@ function activeRequestLines(input: SidebarInput, width: number): string[] {
     .flatMap((request) => activeLines(request, input.now, width))
   const hidden = input.active.length - MAX_ACTIVE_LISTED
   return hidden > 0 ? [...listed, paint('dim', `+${String(hidden)} more`)] : listed
-}
-
-/**
- * Formats a request's time: `850ms`, `2.3s`, then as {@link compactDuration} from a minute.
- *
- * @param ms - the time, in milliseconds
- * @returns the text
- */
-function latency(ms: number): string {
-  if (ms < MS_PER_SECOND) return `${String(Math.max(0, Math.round(ms)))}ms`
-  if (ms < SIXTY * MS_PER_SECOND) return `${(ms / MS_PER_SECOND).toFixed(1)}s`
-  return compactDuration(ms)
 }
 
 /**
