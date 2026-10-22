@@ -136,7 +136,8 @@ describe('/healthz/creds', () => {
         type: 'api_key',
         source: 'models_json_key',
         availableModelCount: 1,
-        verified: true
+        verified: true,
+        quota: null
       }
     ])
   })

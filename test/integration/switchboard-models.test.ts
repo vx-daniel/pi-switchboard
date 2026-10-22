@@ -71,7 +71,8 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       context_window: 400000,
       max_output_tokens: 64000,
       cost: { input: 2.5, output: 15, cache_read: 0.25, cache_write: 3.125 },
-      cooldown: null
+      cooldown: null,
+      quota: null
     })
   })
 
@@ -96,7 +97,8 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       context_window: expect.any(Number),
       max_output_tokens: expect.any(Number),
       cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
-      cooldown: null
+      cooldown: null,
+      quota: null
     })
   })
 })
