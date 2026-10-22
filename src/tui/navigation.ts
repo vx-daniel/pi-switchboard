@@ -5,9 +5,8 @@
  * @packageDocumentation
  */
 
-import { styleText } from 'node:util'
-
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
+import { highlight, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */
 export const VIEWS = ['logs', 'accounts', 'stats'] as const
@@ -89,9 +88,7 @@ export function tabsLine(view: View): string {
     ['accounts', ' 2 Accounts '],
     ['stats', ' 3 Stats ']
   ]
-  const shown = tabs.map(([tab, label]) =>
-    tab === view ? styleText(['bold', 'inverse'], label) : label
-  )
+  const shown = tabs.map(([tab, label]) => (tab === view ? highlight(label) : label))
   return ` ${shown.join(' ')}`
 }
 
@@ -131,5 +128,5 @@ export function footerLine(view: View, sidebarFits: boolean): string {
   const shown = sidebarFits
     ? [...hints.slice(0, HINTS_BEFORE_SIDEBAR), 's sidebar', ...hints.slice(HINTS_BEFORE_SIDEBAR)]
     : hints
-  return styleText('dim', ` ${shown.join(' · ')}`)
+  return paint('dim', ` ${shown.join(' · ')}`)
 }

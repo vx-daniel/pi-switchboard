@@ -5,14 +5,13 @@
  * @packageDocumentation
  */
 
-import { styleText } from 'node:util'
-
 import { truncateToWidth } from '@earendil-works/pi-tui'
 import type { Reserve } from '@proxy/config/schema'
 import { providerQuota } from '@proxy/pi/quota'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { clampSelection, LOGIN_ROW } from '@proxy/tui/navigation'
+import { highlight, paint } from '@proxy/tui/theme'
 
 /** Widths of the view's columns: provider, auth type, source, model count. */
 const COLUMNS = { provider: 22, login: 8, source: 16, models: 4 } as const
@@ -37,8 +36,8 @@ export interface AccountsView {
  */
 function verification(account: ProviderCredentialStatus): string {
   if (account.verified === undefined) return ''
-  if (account.verified) return styleText('green', ' ✓ verified')
-  return styleText('red', ` ✗ ${account.error ?? 'failed'}`)
+  if (account.verified) return paint('success', ' ✓ verified')
+  return paint('error', ` ✗ ${account.error ?? 'failed'}`)
 }
 
 /**
@@ -55,7 +54,7 @@ function quotaCell(provider: string, reserve: Reserve): string {
     .map((window) => `${window.name} ${String(Math.round(window.used * PERCENT))}%`)
     .join(' ')
   if (providerBelowReserve(provider, reserve) === undefined) return used
-  return styleText('red', `${used} below reserve`)
+  return paint('error', `${used} below reserve`)
 }
 
 /**
@@ -81,14 +80,14 @@ function accountRow(account: ProviderCredentialStatus, reserve: Reserve): string
 }
 
 /**
- * Marks the selected row of a list: a pointer and reversed colours.
+ * Marks the selected row of a list: a pointer, in the theme's selection colors.
  *
  * @param text - the row's text
  * @param selected - whether it is the selected row
  * @returns the row, indented
  */
 function selectable(text: string, selected: boolean): string {
-  return selected ? styleText('inverse', `› ${text}`) : `  ${text}`
+  return selected ? highlight(`› ${text}`) : `  ${text}`
 }
 
 /**
@@ -112,5 +111,5 @@ export function accountRows(view: AccountsView, height: number): string[] {
     selectable(accountRow(account, reserve), index === current)
   )
   const login = selectable(LOGIN_ROW, current === accounts.length)
-  return [styleText('dim', `  ${titles.join(' ')}`), ...rows, login].slice(0, height)
+  return [paint('dim', `  ${titles.join(' ')}`), ...rows, login].slice(0, height)
 }

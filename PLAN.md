@@ -1773,8 +1773,18 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   credential pi stored (`ModelRuntime.logout`). pi's dialog shows a typed API key as it is typed,
   as pi's own `/login` does. The console binds pi's `app.message.copy` key (Ctrl+X, as in pi), so
   the dialog's sign-in URL can be copied.
-- **Theme.** `initTheme()` with no name: pi's system theme, which reads no theme file. Named
-  themes are JSON files in pi's package directory, which a compiled binary does not have.
+- **Theme** (`theme.ts`, `tokyonight-storm.ts`). Tokyo Night Storm, in true color where the
+  terminal has it and else the nearest of 256 colors. The palette is data in
+  `tokyonight-storm.ts` (pi's theme tokens, from the pi theme `tokyonight-storm.json`), with no
+  import of pi's code, so the logging module colors the console's log view from it too.
+  `installConsoleTheme()` builds pi's `Theme` from it with pi's public constructor, which checks
+  every token pi requires. pi loads a named theme only from `~/.pi/agent/themes`, which the console
+  doesn't write to, so the console installs that `Theme` under the key pi keeps its global theme
+  on (`Symbol.for('@earendil-works/pi-coding-agent:theme')`), and pi's dialogs (login, selectors)
+  draw with it. That key is pi's, not public API: the console calls `initTheme()` first, so a pi
+  that moves it keeps its system theme in the dialogs. The console's own text is colored by role
+  (`paint`, `strong`, `highlight`). A non-empty `NO_COLOR` turns all of it off: plain text, pi's
+  system theme, and an uncolored log view.
 
 ### Stats store (`src/stats/`, #216)
 

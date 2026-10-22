@@ -5,10 +5,9 @@
  * @packageDocumentation
  */
 
-import { styleText } from 'node:util'
-
 import { visibleWidth } from '@earendil-works/pi-tui'
 import type { RouteTotals } from '@proxy/server/route-totals'
+import { paint, strong } from '@proxy/tui/theme'
 
 /** Widths of the Stats view's number columns. */
 const WIDTHS = { count: 8, tokens: 11, cost: 10 } as const
@@ -102,7 +101,7 @@ function failureClasses(totals: RouteTotals): string {
   const classes = Object.entries(totals.failuresByClass)
     .toSorted(([first], [second]) => first.localeCompare(second))
     .map(([failure, failures]) => `${failure} ${String(failures)}`)
-  return classes.length === 0 ? '' : styleText('dim', `  ${classes.join(', ')}`)
+  return classes.length === 0 ? '' : paint('dim', `  ${classes.join(', ')}`)
 }
 
 /**
@@ -182,7 +181,7 @@ function fitRows(rows: readonly string[], room: number): readonly string[] {
   if (rows.length <= room) return rows
   if (room <= 0) return []
   const hidden = rows.length - room + 1
-  return [...rows.slice(0, room - 1), styleText('dim', `${INDENT}… ${String(hidden)} more`)]
+  return [...rows.slice(0, room - 1), paint('dim', `${INDENT}… ${String(hidden)} more`)]
 }
 
 /**
@@ -202,22 +201,16 @@ export function statsRows(
   size: { readonly height: number; readonly width: number }
 ): string[] {
   const started = new Date(since).toLocaleString('en-US', { hour12: false })
-  const sinceLine = styleText(
-    'dim',
-    `${INDENT}Since ${started}; counted in memory, reset on restart.`
-  )
+  const sinceLine = paint('dim', `${INDENT}Since ${started}; counted in memory, reset on restart.`)
   if (totals.length === 0) return [sinceLine, `${INDENT}No requests yet.`].slice(0, size.height)
   const labelWidth = routeWidth(size.width)
   const titles = COLUMNS.map((column) => column.title.padStart(column.width)).join(' ')
-  const heading = styleText('dim', `${INDENT}${fitLabel('route', labelWidth)} ${titles}`)
+  const heading = paint('dim', `${INDENT}${fitLabel('route', labelWidth)} ${titles}`)
   const rows = totals.map(
     (route) =>
       `${INDENT}${fitLabel(routeLabel(route), labelWidth)} ${countCells(route)}${failureClasses(route)}`
   )
-  const total = styleText(
-    'bold',
-    `${INDENT}${fitLabel('total', labelWidth)} ${countCells(sum(totals))}`
-  )
+  const total = strong(`${INDENT}${fitLabel('total', labelWidth)} ${countCells(sum(totals))}`)
   const room = size.height - FRAME_ROWS
   return [sinceLine, heading, ...fitRows(rows, room), total].slice(0, size.height)
 }
