@@ -415,7 +415,7 @@ serving model and login reported under `x_pi` and in the log.
 - [x] Aliases (#66): `aliases` in `proxy-config.json`, listed while the target is exposed, `x_pi.alias`, a shadowing alias reported in `/healthz/models`
 - [x] Fallback chains (#67): `{ targets, fallbackOn }` aliases, fallback only on the named failure classes before the response starts, `x_pi.attempts`, every hop logged
 - [x] Cooldowns after rate limits (#68): a 429 cools the provider, a 503 the model, for the time the response gives (else 60 s, 180 s, doubling); chains that name the class skip it; shown on `/healthz/models`, `/v1/switchboard/models` and `x_pi.attempts`
-- [ ] Quota awareness (#69)
+- [ ] Quota awareness (#69): research and tracking done (the headers each subscription sends; the latest report on `/healthz/creds` and `/v1/switchboard/models`); routing on a reserve still to decide
 - [ ] Usage and cost by route (#70): done are the `alias` and `attempt` on the upstream log lines and the running totals per alias × provider × model in memory (`src/server/route-totals.ts`), for the console (#61); open is whether to serve them at `GET /healthz/usage`
 
 ## Phase 6 — More of OpenAI's API
