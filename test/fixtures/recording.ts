@@ -301,7 +301,7 @@ async function forward(
     method: 'POST',
     headers: forwarded,
     // As sent: pi's Codex adapter zstd-compresses its bodies (`content-encoding` is forwarded).
-    body: new Uint8Array(body)
+    body
   })
   const contentType = upstream.headers.get('content-type') ?? 'application/octet-stream'
   response.writeHead(upstream.status, { 'content-type': contentType })

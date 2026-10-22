@@ -311,8 +311,9 @@ function chosenTargets(names: readonly string[]): { target: Target; scenarios: S
  * {@link fail} when the dir has no login for a chosen provider.
  */
 async function main(): Promise<void> {
-  const agentDir = recordingAgentDir()
+  // Names first: a mistyped one is refused before anything else is checked or started.
   const chosen = chosenTargets(process.argv.slice(FIRST_ARGUMENT))
+  const agentDir = recordingAgentDir()
   const upstreamOverride = process.env.PI_SWITCHBOARD_RECORD_UPSTREAM
   const recorders = await Promise.all(
     chosen.map(async ({ target }) => startRecorder(upstreamOverride ?? target.upstream))

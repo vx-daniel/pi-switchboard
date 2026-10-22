@@ -330,9 +330,9 @@ describe('choosing what to record', () => {
     })
   })
 
-  // Catches a mistyped name recording nothing without saying so, or recording everything.
-  test('refuses a name that matches no scenario, before any request', async () => {
-    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir(true))
+  // Catches a mistyped name recording nothing without saying so, or recording everything; and it
+  // is refused first, so a typo is named even before the login dir is set.
+  test('refuses a name that matches no scenario, before any other check or request', async () => {
     vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     const requestsBefore = upstream.requests.length
 
