@@ -1,7 +1,8 @@
 /**
- * The compiled standalone binary (`dist-bin/pi-switchboard`, built by `scripts/build-binary.ts`),
- * run as a real process. Bun is not the runtime the other suites run on, so these are the only
- * checks that the shipped bytes work. Run with `pnpm run test:binary`, which builds first.
+ * The compiled standalone binary (`dist-bin/pi-switchboard`, built by `scripts/build-binary.ts`,
+ * or the release file `PI_SWITCHBOARD_BINARY` names), run as a real process. Bun is not the
+ * runtime the other suites run on, so these are the only checks that the shipped bytes work. Run
+ * with `pnpm run test:binary`, which builds first.
  *
  * Offline like the rest: the binary gets a fixture agent dir, the local mock provider, and an
  * environment with no credentials. The one request that would leave the machine, an OAuth token
@@ -14,7 +15,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve } from 'node:path'
+import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vite-plus/test'
@@ -27,12 +28,10 @@ import {
   startMockProvider,
   textChunks
 } from '../fixtures/mock-provider'
-import { platformEnv } from '../fixtures/platform-env'
+import { binaryUnderTest, platformEnv } from '../fixtures/platform-env'
 
-/** The host binary `pnpm run build:binary` writes, with Windows' `.exe`. */
-const BINARY = resolve(
-  process.platform === 'win32' ? 'dist-bin/pi-switchboard.exe' : 'dist-bin/pi-switchboard'
-)
+/** The binary under test: the host build, or the release file `PI_SWITCHBOARD_BINARY` names. */
+const BINARY = binaryUnderTest()
 const READY_TIMEOUT_MS = 5000
 const READY_POLL_MS = 50
 

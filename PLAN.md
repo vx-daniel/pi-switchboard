@@ -1511,7 +1511,9 @@ release workflow, never in `check:all` or the pre-commit hook.
   `-windows-arm64.exe`, with `dist-bin/SHA256SUMS-windows`. The macOS and Windows binaries are
   unsigned.
 - **Windows, by hand only.** `binary.yml` with `platforms: windows` builds the Windows set, runs
-  the binary test suite on `windows-latest` and `--version` on `windows-latest` and
+  the binary test suite on `windows-latest` against the cross-compiled
+  `pi-switchboard-windows-x64.exe` the release gets (`PI_SWITCHBOARD_BINARY` names it, so the
+  suite tests the shipped file, not a rebuild), runs `--version` on `windows-latest` and
   `windows-11-arm`, and with a tag uploads the two `.exe` files and `SHA256SUMS-windows` to that
   release, attested like the others. The release workflow never runs it, to save Actions minutes:
   a release gets Windows binaries when someone runs it with the release's tag. The test suite
