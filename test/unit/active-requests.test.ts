@@ -3,6 +3,8 @@ import {
   beginActiveRequest,
   FINISHED_KEPT,
   finishedRequests,
+  recordRejectedRequest,
+  REJECTED_KEPT,
   requestOutcome
 } from '@proxy/server/active-requests'
 import { describe, expect, test } from 'vite-plus/test'
@@ -61,6 +63,31 @@ describe('the finished requests kept for the console', () => {
     expect(finishedRequests()[0]).toEqual(
       expect.objectContaining({ requestId: 'never-relayed', outcome: 'failed' })
     )
+  })
+
+  // Catches a flood of rejected requests (anyone who can reach the port can send them, no token
+  // needed) pushing out the requests that reached a model, or growing without bound.
+  test('keeps rejected requests apart, up to their own limit, newest first among all', () => {
+    const served = beginActiveRequest({
+      requestId: 'served',
+      alias: null,
+      model: 'alpha/model',
+      stream: false
+    })
+    served.end('ok')
+    for (let requestIndex = 0; requestIndex <= REJECTED_KEPT * 2; requestIndex += 1) {
+      recordRejectedRequest({
+        requestId: `junk-${String(requestIndex)}`,
+        model: undefined,
+        status: 401,
+        startedAt: 0
+      })
+    }
+
+    const kept = finishedRequests()
+    expect(kept.filter((request) => request.outcome === 'rejected')).toHaveLength(REJECTED_KEPT)
+    expect(kept[0]?.requestId).toBe(`junk-${String(REJECTED_KEPT * 2)}`)
+    expect(kept.some((request) => request.requestId === 'served')).toBe(true)
   })
 
   // Catches a client that left counted as a failure, which would make a healthy upstream look

@@ -84,6 +84,7 @@ function done(
     startedAt: endedAt - timing.tookMs,
     endedAt,
     outcome: 'ok',
+    status: undefined,
     ...fields
   }
 }
@@ -314,6 +315,31 @@ describe('the console sidebar', () => {
       '✗ alpha/broken 850ms',
       '↩ alpha/gone 4.0s',
       '✗ alpha/old 1m30s'
+    ])
+  })
+
+  // Catches a request the proxy turned away counted as a failure (it never reached a provider),
+  // pulling the averages down with its instant answer, or listed without the status that says why.
+  test('counts and lists rejected requests apart from failures', () => {
+    const finished = [
+      done(
+        { model: 'no/such-model', attempt: 0, outcome: 'rejected', status: 404 },
+        { endedAgoMs: 500, tookMs: 2 }
+      ),
+      done(
+        { model: '', attempt: 0, outcome: 'rejected', status: 401 },
+        { endedAgoMs: 600, tookMs: 1 }
+      ),
+      done({ model: 'alpha/model' }, { endedAgoMs: 1000, tookMs: 2000 })
+    ]
+    const lines = panelLines(rendered(snapshot({ finished })), 'RECENT')
+
+    expect(lines.map((line) => line.replaceAll(/ {2,}/g, ' '))).toEqual([
+      'last minute 3 req · 2 rejected',
+      ' avg time 2.0s',
+      '⊘ no/such-model 404',
+      '⊘ - 401',
+      '✓ alpha/model 2.0s'
     ])
   })
 

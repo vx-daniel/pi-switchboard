@@ -8,6 +8,7 @@
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import type { ServerConfig } from '@proxy/config/env'
 import { clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { activeRequests, finishedRequests } from '@proxy/server/active-requests'
 import { createApp } from '@proxy/server/app'
@@ -64,6 +65,14 @@ beforeAll(async () => {
             'cut-mock',
             'silent-mock'
           ].map((modelId) => ({ id: modelId }))
+        },
+        // A key command that prints nothing (the command does not exist): pi resolves no
+        // credential, so the proxy refuses the model before calling it.
+        keyless: {
+          baseUrl: `${mock.origin}/v1`,
+          api: 'openai-completions',
+          apiKey: '!notarealsecret-missing-command',
+          models: [{ id: 'locked-mock' }]
         }
       }
     }
@@ -213,5 +222,124 @@ describe('requests in flight', () => {
     expect(finishedRequests()[0]).toEqual(
       expect.objectContaining({ model: served, attempt, stream, outcome })
     )
+  })
+})
+
+/** The proxy token the auth case sends, or leaves out. */
+const TOKEN = 'notarealsecret-proxy-token'
+
+/**
+ * Posts a raw body to the chat route.
+ *
+ * @param body - the body, as sent
+ * @param config - the server config's changes from {@link testConfig}
+ * @returns the response status, once the answer was read
+ */
+async function post(body: string, config: Partial<ServerConfig> = {}): Promise<number> {
+  const response = await createApp({ ...testConfig(), ...config }, fileConfigReader).request(
+    '/v1/chat/completions',
+    {
+      method: 'POST',
+      // The body size limit reads the declared length, as a real client sends it.
+      headers: { 'Content-Type': 'application/json', 'Content-Length': String(body.length) },
+      body
+    }
+  )
+  await response.text()
+  return response.status
+}
+
+/**
+ * A chat request body for this model.
+ *
+ * @param model - the request's `model`
+ * @param extra - more fields
+ * @returns the body, as JSON
+ */
+function chatBody(model: string, extra: Record<string, unknown> = {}): string {
+  return JSON.stringify({ model, messages: [{ role: 'user', content: 'Say ok' }], ...extra })
+}
+
+describe('requests the proxy turns away (#214)', () => {
+  // Catches a request answered before any model was called going unseen in the console (the case
+  // of a client with a stale token or a wrong model name), recorded as a failure, or recorded
+  // with a model the proxy never read.
+  test.each([
+    {
+      reason: 'no proxy token',
+      body: chatBody('alpha/answer-mock'),
+      config: { proxyAuth: { kind: 'token', token: TOKEN } } as const,
+      status: 401,
+      model: ''
+    },
+    {
+      reason: 'a body over the limit',
+      body: chatBody('alpha/answer-mock'),
+      config: { maxBodySize: 10 },
+      status: 413,
+      model: ''
+    },
+    { reason: 'a body that is not JSON', body: '{"model":', config: {}, status: 400, model: '' },
+    {
+      reason: 'an unsupported field',
+      body: chatBody('alpha/answer-mock', { not_a_field: true }),
+      config: {},
+      status: 422,
+      model: ''
+    },
+    {
+      reason: 'a model not exposed',
+      body: chatBody('alpha/no-such-model'),
+      config: {},
+      status: 404,
+      model: 'alpha/no-such-model'
+    },
+    {
+      reason: 'no credential for the provider',
+      body: chatBody('keyless/locked-mock'),
+      config: {},
+      status: 502,
+      model: 'keyless/locked-mock'
+    },
+    {
+      reason: 'a remote image with remote images off',
+      body: JSON.stringify({
+        model: 'alpha/answer-mock',
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'image_url', image_url: { url: 'https://example.com/a.png' } }]
+          }
+        ]
+      }),
+      config: {},
+      status: 400,
+      model: 'alpha/answer-mock'
+    }
+  ])('records $reason as rejected, with its status', async ({ body, config, status, model }) => {
+    expect(await post(body, config)).toBe(status)
+
+    expect(activeRequests()).toEqual([])
+    expect(finishedRequests()[0]).toEqual(
+      expect.objectContaining({ outcome: 'rejected', status, model, attempt: 0 })
+    )
+  })
+
+  // Catches a request that reached the model also recorded as rejected once the route returns.
+  test('records a dispatched request once, never as rejected', async () => {
+    expect(await post(chatBody('alpha/answer-mock'))).toBe(200)
+
+    const [latest, before] = finishedRequests()
+    expect(latest).toEqual(expect.objectContaining({ outcome: 'ok', status: undefined }))
+    expect(before?.requestId).not.toBe(latest?.requestId)
+  })
+
+  // Catches requests to other routes counted as chat requests.
+  test('leaves other routes out', async () => {
+    const latest = finishedRequests()[0]
+    const response = await createApp(testConfig(), fileConfigReader).request('/v1/models')
+    await response.text()
+
+    expect(finishedRequests()[0]).toBe(latest)
   })
 })

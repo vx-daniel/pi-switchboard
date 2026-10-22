@@ -15,6 +15,7 @@ import {
   bodySizeLimitMiddleware,
   disconnectMiddleware,
   proxyAuthMiddleware,
+  rejectedChatMiddleware,
   renamedHeaderMiddleware,
   requestIdMiddleware
 } from '@proxy/server/middleware'
@@ -68,6 +69,8 @@ export function createApp(
   // Global middleware
   app.use('*', requestIdMiddleware())
   app.use('*', disconnectMiddleware())
+  // Ahead of the body size limit and proxy auth, so a chat request they turn away is recorded too.
+  app.use('/v1/chat/completions', rejectedChatMiddleware())
   app.use('*', bodySizeLimitMiddleware(config))
 
   // The OpenAPI document and the docs page, open like `/healthz`: registered before proxy auth.
