@@ -11,12 +11,9 @@
  * @packageDocumentation
  */
 
-import { styleText } from 'node:util'
-
 import type { AuthType } from '@earendil-works/pi-ai'
 import {
   ExtensionSelectorComponent,
-  initTheme,
   LoginDialogComponent,
   OAuthSelectorComponent
 } from '@earendil-works/pi-coding-agent'
@@ -77,6 +74,7 @@ import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@pr
 import { statsRows } from '@proxy/tui/stats-view'
 import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
+import { installConsoleTheme, paint, strong } from '@proxy/tui/theme'
 
 import packageJson from '../../package.json' with { type: 'json' }
 
@@ -187,9 +185,9 @@ function statusParts(status: Status): string[] {
   const exposed =
     typeof status.exposed === 'number'
       ? `${String(status.exposed)}/${String(status.available)} exposed`
-      : styleText('red', `exposure config: ${status.exposed}`)
+      : paint('error', `exposure config: ${status.exposed}`)
   const parts = [exposed, `${String(status.cooldowns)} cooldowns`]
-  if (status.modelsJsonError !== undefined) parts.push(styleText('red', 'models.json error'))
+  if (status.modelsJsonError !== undefined) parts.push(paint('error', 'models.json error'))
   return parts
 }
 
@@ -207,7 +205,7 @@ function headerLine(
   status: Status | undefined,
   withSidebar: boolean
 ): string {
-  const title = styleText('bold', ` pi-switchboard ${packageJson.version}`)
+  const title = strong(paint('accent', ` pi-switchboard ${packageJson.version}`))
   const address = `${config.host}:${String(config.port)}`
   if (withSidebar) return [title, address].join(' · ')
   const parts = [title, address, `auth ${config.proxyAuth.kind}`]
@@ -644,7 +642,7 @@ function listenForStops(stop: () => void, crashed: (error: unknown) => void): ()
  * @throws whatever stopped the console other than a quit or a signal
  */
 export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise<void> {
-  initTheme()
+  installConsoleTheme()
   // pi's login dialog copies its sign-in URL on pi's own `app.message.copy` key, Ctrl+X in pi;
   // without a binding its hint names no key. The console has no other pi app keys. The screen's
   // own viewport scrolling takes PgUp and PgDn before any component; the console's view always

@@ -12,6 +12,8 @@ declare namespace NodeJS {
     HOME?: string | undefined
     XDG_CONFIG_HOME?: string | undefined
     CUSTOM_DATA_DIR?: string | undefined
+    /** https://no-color.org: any non-empty value turns the console's colors off. */
+    NO_COLOR?: string | undefined
     PI_CODING_AGENT_DIR?: string | undefined
     PI_SWITCHBOARD_HOST?: string | undefined
     PI_SWITCHBOARD_PORT?: string | undefined

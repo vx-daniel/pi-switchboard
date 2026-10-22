@@ -55,6 +55,7 @@ import {
 } from '@logtape/logtape'
 import { getPrettyFormatter } from '@logtape/pretty'
 import { redactByField } from '@logtape/redaction'
+import { STORM } from '@proxy/tui/tokyonight-storm'
 import * as z from 'zod'
 
 /** The category every logger in this package sits under. */
@@ -156,7 +157,20 @@ const consolePretty = getPrettyFormatter({
   categoryWidth: 16,
   categoryTruncate: 'middle',
   value: 'bare',
-  wordWrap: false
+  wordWrap: false,
+  // The console's Tokyo Night Storm palette (`src/tui/tokyonight-storm.ts`), or none with NO_COLOR.
+  colors: process.env.NO_COLOR === undefined || process.env.NO_COLOR === '',
+  timestampColor: STORM.comment,
+  categoryColor: STORM.dim,
+  messageColor: null,
+  levelColors: {
+    trace: STORM.comment,
+    debug: STORM.purple,
+    info: STORM.blue,
+    warning: STORM.yellow,
+    error: STORM.red,
+    fatal: STORM.redStrong
+  }
 })
 
 /**

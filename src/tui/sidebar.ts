@@ -10,8 +10,6 @@
  * @packageDocumentation
  */
 
-import { styleText } from 'node:util'
-
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import { MS_PER_SECOND } from '@proxy/config/schema'
 import type { Cooldown } from '@proxy/pi/cooldowns'
@@ -25,6 +23,7 @@ import {
 } from '@proxy/server/active-requests'
 import type { RouteTotals } from '@proxy/server/route-totals'
 import { fitLabel, sum } from '@proxy/tui/stats-view'
+import { type ConsoleColor, paint, strong } from '@proxy/tui/theme'
 
 /** The narrowest terminal that shows the sidebar; narrower, the view takes the whole width. */
 const MIN_TERMINAL_WIDTH = 100
@@ -48,10 +47,10 @@ const MAX_RECENT_LISTED = 5
 const RATE_WINDOW_MS = 60_000
 /** Each outcome's mark and colour in the RECENT panel. */
 const OUTCOME_MARKS: Readonly<Record<RequestOutcome, string>> = {
-  ok: styleText('green', '✓'),
-  failed: styleText('red', '✗'),
-  left: styleText('dim', '↩'),
-  rejected: styleText('yellow', '⊘')
+  ok: paint('success', '✓'),
+  failed: paint('error', '✗'),
+  left: paint('dim', '↩'),
+  rejected: paint('warning', '⊘')
 }
 /** Percent in a whole. */
 const PERCENT = 100
@@ -185,12 +184,12 @@ function panel(title: string, lines: readonly string[], width: number): string[]
   const inner = Math.max(1, width - FRAME_COLUMNS)
   const label = ` ${title} `
   const rest = Math.max(0, width - CORNER_COLUMNS - 1 - visibleWidth(label))
-  const top = `${styleText('dim', '╭─')}${styleText('bold', label)}${styleText('dim', `${'─'.repeat(rest)}╮`)}`
+  const top = `${paint('border', '╭─')}${strong(paint('accent', label))}${paint('border', `${'─'.repeat(rest)}╮`)}`
   const body = lines.map(
     (line) =>
-      `${styleText('dim', '│ ')}${truncateToWidth(line, inner, '…', true)}${styleText('dim', ' │')}`
+      `${paint('border', '│ ')}${truncateToWidth(line, inner, '…', true)}${paint('border', ' │')}`
   )
-  const bottom = styleText('dim', `╰${'─'.repeat(Math.max(0, width - CORNER_COLUMNS))}╯`)
+  const bottom = paint('border', `╰${'─'.repeat(Math.max(0, width - CORNER_COLUMNS))}╯`)
   return [top, ...body, bottom]
 }
 
@@ -209,27 +208,27 @@ function proxyLines(input: SidebarInput, width: number): string[] {
     spread(proxy.address, `auth ${proxy.proxyAuth}`, width),
     `up ${compactDuration(now - proxy.startedAt)}${connections}`
   ]
-  if (typeof proxy.exposed === 'string') lines.push(styleText('red', 'exposure config error'))
+  if (typeof proxy.exposed === 'string') lines.push(paint('error', 'exposure config error'))
   else if (proxy.exposed !== undefined && proxy.available !== undefined) {
     lines.push(`models ${String(proxy.exposed)}/${String(proxy.available)} exposed`)
   }
   if (input.cooldowns.length > 0) {
-    lines.push(styleText('yellow', `${String(input.cooldowns.length)} cooling down`))
+    lines.push(paint('warning', `${String(input.cooldowns.length)} cooling down`))
   }
-  if (proxy.modelsJsonError) lines.push(styleText('red', 'models.json error'))
+  if (proxy.modelsJsonError) lines.push(paint('error', 'models.json error'))
   return lines
 }
 
 /**
- * Picks a window's colour by how much of it is used.
+ * Picks a window's color by how much of it is used.
  *
  * @param used - the share used, from 0 to 1
  * @param belowReserve - whether the provider is below its reserve, which is shown as spent
- * @returns the colour
+ * @returns the role to color it with
  */
-function usedColour(used: number, belowReserve: boolean): 'red' | 'yellow' | 'green' {
-  if (belowReserve || used >= USED_LEVELS.high) return 'red'
-  return used >= USED_LEVELS.warn ? 'yellow' : 'green'
+function usedColor(used: number, belowReserve: boolean): ConsoleColor {
+  if (belowReserve || used >= USED_LEVELS.high) return 'error'
+  return used >= USED_LEVELS.warn ? 'warning' : 'success'
 }
 
 /**
@@ -249,15 +248,13 @@ function windowLine(
 ): string {
   const used = Math.min(1, Math.max(0, window.used))
   const filled = Math.round(used * BAR_CELLS)
-  const colour = usedColour(used, account.belowReserve)
-  const bar = `${styleText(colour, '█'.repeat(filled))}${styleText('dim', '░'.repeat(BAR_CELLS - filled))}`
-  const percent = styleText(
-    colour,
-    `${String(Math.round(used * PERCENT))}%`.padStart('100%'.length)
-  )
+  const color = usedColor(used, account.belowReserve)
+  // The unused part in the border's color, so an empty window reads as a track, not a block.
+  const bar = `${paint(color, '█'.repeat(filled))}${paint('border', '░'.repeat(BAR_CELLS - filled))}`
+  const percent = paint(color, `${String(Math.round(used * PERCENT))}%`.padStart('100%'.length))
   const untilReset =
     window.resetsAt === undefined ? '' : ` ↻${compactDuration(window.resetsAt - input.now)}`
-  const reset = styleText('dim', untilReset.padEnd(RESET_COLUMNS))
+  const reset = paint('dim', untilReset.padEnd(RESET_COLUMNS))
   return spread(`  ${window.name}`, `${bar} ${percent}${reset}`, width)
 }
 
@@ -275,7 +272,7 @@ function cooldownLine(cooldown: Cooldown, now: number, width: number): string {
       ? 'cooling'
       : (cooldown.model?.slice(cooldown.provider.length + 1) ?? 'model')
   const left = compactDuration(cooldown.until - now)
-  return styleText('yellow', spread(`  ⏸ ${subject}`, left, width))
+  return paint('warning', spread(`  ⏸ ${subject}`, left, width))
 }
 
 /**
@@ -288,8 +285,8 @@ function cooldownLine(cooldown: Cooldown, now: number, width: number): string {
 function accountHeader(account: SidebarAccount, width: number): string {
   const login = account.type === 'oauth' ? 'account' : 'API key'
   return spread(
-    styleText('bold', account.provider),
-    styleText('dim', `${login} · ${String(account.models)}`),
+    strong(account.provider),
+    paint('dim', `${login} · ${String(account.models)}`),
     width
   )
 }
@@ -308,7 +305,7 @@ function accountLines(account: SidebarAccount, input: SidebarInput, width: numbe
   for (const window of account.quota?.windows ?? []) {
     lines.push(windowLine(window, account, input, width))
   }
-  if (account.belowReserve) lines.push(styleText('red', '  below reserve'))
+  if (account.belowReserve) lines.push(paint('error', '  below reserve'))
   for (const cooldown of input.cooldowns) {
     if (cooldown.provider === account.provider) lines.push(cooldownLine(cooldown, input.now, width))
   }
@@ -341,7 +338,7 @@ function quiet(account: SidebarAccount, input: SidebarInput): boolean {
  * @returns the lines
  */
 function accountsLines(input: SidebarInput, width: number, collapseQuiet: boolean): string[] {
-  if (input.accounts.length === 0) return [styleText('dim', 'No logins · n to log in')]
+  if (input.accounts.length === 0) return [paint('dim', 'No logins · n to log in')]
   return input.accounts.flatMap((account) =>
     collapseQuiet && quiet(account, input)
       ? [accountHeader(account, width)]
@@ -364,10 +361,10 @@ function activeLines(request: ActiveRequest, now: number, width: number): string
   const model = fitLabel(request.model, modelWidth)
   // A stream waits for the model's first event, then streams; a plain request only waits.
   let state = request.stream ? 'waiting · stream' : 'waiting'
-  if (request.firstEventAt !== undefined) state = styleText('green', 'streaming')
+  if (request.firstEventAt !== undefined) state = paint('success', 'streaming')
   const details = [request.alias ?? 'direct', state]
-  if (request.attempt > 1) details.push(styleText('yellow', `try ${String(request.attempt)}`))
-  return [`${model} ${elapsed}`, `  ${details.join(styleText('dim', ' · '))}`]
+  if (request.attempt > 1) details.push(paint('warning', `try ${String(request.attempt)}`))
+  return [`${model} ${elapsed}`, `  ${details.join(paint('dim', ' · '))}`]
 }
 
 /**
@@ -378,12 +375,12 @@ function activeLines(request: ActiveRequest, now: number, width: number): string
  * @returns the lines
  */
 function activeRequestLines(input: SidebarInput, width: number): string[] {
-  if (input.active.length === 0) return [styleText('dim', 'idle')]
+  if (input.active.length === 0) return [paint('dim', 'idle')]
   const listed = input.active
     .slice(0, MAX_ACTIVE_LISTED)
     .flatMap((request) => activeLines(request, input.now, width))
   const hidden = input.active.length - MAX_ACTIVE_LISTED
-  return hidden > 0 ? [...listed, styleText('dim', `+${String(hidden)} more`)] : listed
+  return hidden > 0 ? [...listed, paint('dim', `+${String(hidden)} more`)] : listed
 }
 
 /**
@@ -425,9 +422,9 @@ function lastMinuteLine(lastMinute: readonly FinishedRequest[], width: number): 
   const full = lastMinute.length - rejected >= FINISHED_KEPT || rejectedFull
   const parts = [`${String(lastMinute.length)}${full ? '+' : ''} req`]
   const failed = lastMinute.filter((request) => request.outcome === 'failed').length
-  if (failed > 0) parts.push(styleText('red', `${String(failed)} failed`))
+  if (failed > 0) parts.push(paint('error', `${String(failed)} failed`))
   if (rejected > 0) {
-    parts.push(styleText('yellow', `${String(rejected)}${rejectedFull ? '+' : ''} rejected`))
+    parts.push(paint('warning', `${String(rejected)}${rejectedFull ? '+' : ''} rejected`))
   }
   return spread('last minute', parts.join(' · '), width)
 }
@@ -448,7 +445,7 @@ function finishedLine(request: FinishedRequest, width: number): string {
   // The row is the mark, the model and the time, a space between each.
   const modelWidth = width - visibleWidth(end) - visibleWidth('✓  ')
   const model = fitLabel(request.model === '' ? '-' : request.model, Math.max(1, modelWidth))
-  return `${OUTCOME_MARKS[request.outcome]} ${model} ${styleText('dim', end)}`
+  return `${OUTCOME_MARKS[request.outcome]} ${model} ${paint('dim', end)}`
 }
 
 /**
@@ -466,7 +463,7 @@ function recentLines(
   lastMinute: readonly FinishedRequest[],
   width: number
 ): { summary: string[]; list: string[] } {
-  if (input.finished.length === 0) return { summary: [styleText('dim', 'none yet')], list: [] }
+  if (input.finished.length === 0) return { summary: [paint('dim', 'none yet')], list: [] }
   const summary = [lastMinuteLine(lastMinute, width)]
   // A rejected request is answered at once: its time would only pull the average down.
   const dispatched = lastMinute.filter((request) => request.outcome !== 'rejected')
@@ -497,7 +494,7 @@ function trafficLines(input: SidebarInput, width: number): string[] {
   const failed = String(counts.failures)
   return [
     spread('requests', String(counts.requests), width),
-    spread('failed', counts.failures > 0 ? styleText('red', failed) : failed, width),
+    spread('failed', counts.failures > 0 ? paint('error', failed) : failed, width),
     spread('fallbacks', String(counts.fallbacks), width),
     spread(
       'tokens in/out',
