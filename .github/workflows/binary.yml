@@ -227,14 +227,17 @@ jobs:
         shell: bash
         run: |
           chmod +x "$FILE"
-          output="$(./"$FILE" --version)"
+          # tr: a Windows console program may end its line with \r\n, and $(...) strips only \n.
+          output="$(./"$FILE" --version | tr -d '\r')"
           if [ "$output" != "$VERSION" ]; then
             echo "::error::$FILE --version printed '$output', not '$VERSION'"
             exit 1
           fi
           echo "$FILE --version: $output"
 
-  # A build-only run (no tag) stops after the tests.
+  # A build-only run (no tag) stops after the tests. `test-windows` runs only for the windows set,
+  # and a skipped job it needs would skip this one too: `!cancelled() && !failure()` lets a skipped
+  # `test-windows` through while a failed or cancelled build, smoke or test job still stops it.
   release:
     if: inputs.tag != '' && !cancelled() && !failure()
     needs: [build, smoke, test-windows]
