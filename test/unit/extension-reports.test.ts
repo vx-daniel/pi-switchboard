@@ -29,7 +29,7 @@ vi.mock('@vx-daniel/pi-switchboard/logging', () => import('@proxy/logging'))
 
 /** The server line of `/proxy show` for the default config. */
 const DEFAULT_SERVER_LINE =
-  'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: disabled | remote images: false | docs ui: false | max body: 50 MB | timeout: 120s'
+  'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: disabled | remote images: false | docs ui: false | stats: true | max body: 50 MB | timeout: 120s'
 
 /** The first five public IDs, and the count of the rest, for the two-provider fixture. */
 const ALL_EXPOSED_PREVIEW = 'alpha/a1, alpha/a2, alpha/a3, alpha/a4, alpha/a5 (+3 more)'
@@ -101,7 +101,7 @@ describe('with models on two providers', () => {
       ])
       const report = await buildConfigReport(state)
       expect(report).toEqual(
-        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: notar...; /proxy token shows it) | remote images: false | docs ui: false | max body: 50 MB | timeout: 120s\n' +
+        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: notar...; /proxy token shows it) | remote images: false | docs ui: false | stats: true | max body: 50 MB | timeout: 120s\n' +
           'id mode: collision-prefixed | exposure: scoped | enabled: 2 pi pattern(s) | exposed: a1 | unresolved: nothing-like-this (no-match)'
       )
     })
@@ -111,7 +111,7 @@ describe('with models on two providers', () => {
     test('an authToken that is not a string shows as invalid', async () => {
       const report = await buildConfigReport(stateWith(agentDir, { authToken: 12345 }))
       expect(report).toEqual(
-        'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: invalid (authToken in proxy-config.json is not a string: the proxy refuses to start) | remote images: false | docs ui: false | max body: 50 MB | timeout: 120s\n' +
+        'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: invalid (authToken in proxy-config.json is not a string: the proxy refuses to start) | remote images: false | docs ui: false | stats: true | max body: 50 MB | timeout: 120s\n' +
           `id mode: collision-prefixed | exposure: scoped | exposed: ${ALL_EXPOSED_PREVIEW}`
       )
     })

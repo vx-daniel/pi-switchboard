@@ -134,6 +134,8 @@ export interface ServerConfig {
   readonly remoteImagesEnabled: boolean
   /** Whether the Swagger UI docs page is served. */
   readonly docsUiEnabled: boolean
+  /** Whether per-minute traffic stats are kept in the stats file (#216). */
+  readonly statsEnabled: boolean
   /** Maximum request body size in bytes. */
   readonly maxBodySize: number
   /**
@@ -170,6 +172,7 @@ const RUNTIME_ENV_SUFFIXES = [
   'AUTH_TOKEN',
   'REMOTE_IMAGES',
   'DOCS_UI',
+  'STATS',
   'MAX_BODY_SIZE',
   'UPSTREAM_TIMEOUT_MS',
   'AGENTIC',
@@ -269,6 +272,7 @@ export interface CliOverrides {
   authToken?: string | undefined
   remoteImages?: boolean | undefined
   docsUi?: boolean | undefined
+  stats?: boolean | undefined
   maxBodySizeMb?: number | undefined
   upstreamTimeoutSec?: number | undefined
   logLevel?: LogLevel | undefined
@@ -320,6 +324,9 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     cli.docsUi ??
     parseBoolean('PI_SWITCHBOARD_DOCS_UI', process.env.PI_SWITCHBOARD_DOCS_UI, file.docsUi)
 
+  const statsEnabled =
+    cli.stats ?? parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats)
+
   const maxBodySize =
     cli.maxBodySizeMb === undefined
       ? parsePositiveInt(
@@ -347,6 +354,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     agenticEnabled,
     remoteImagesEnabled,
     docsUiEnabled,
+    statsEnabled,
     maxBodySize,
     upstreamTimeoutMs,
     publicModelIdMode: file.publicModelIdMode,

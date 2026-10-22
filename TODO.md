@@ -423,7 +423,8 @@ serving model and login reported under `x_pi` and in the log.
 - [x] Fallback chains (#67): `{ targets, fallbackOn }` aliases, fallback only on the named failure classes before the response starts, `x_pi.attempts`, every hop logged
 - [x] Cooldowns after rate limits (#68): a 429 cools the provider, a 503 the model, for the time the response gives (else 60 s, 180 s, doubling); chains that name the class skip it; shown on `/healthz/models`, `/v1/switchboard/models` and `x_pi.attempts`
 - [ ] Quota awareness (#69): research, tracking (`/healthz/creds`, `/v1/switchboard/models`, the console's Accounts view) and the per-provider reserve a fallback chain keeps (`routing.reserve`) done; the recorder keeps the quota headers and records a `quota` call for Anthropic and Codex; the recordings themselves, from a login made for recording, still to do
-- [ ] Usage and cost by route (#70): done are the `alias` and `attempt` on the upstream log lines and the running totals per alias × provider × model in memory (`src/server/route-totals.ts`), for the console (#61); open is whether to serve them at `GET /healthz/usage`
+- [ ] Usage and cost by route (#70): done are the `alias` and `attempt` on the upstream log lines, the running totals per alias × provider × model in memory (`src/server/route-totals.ts`) for the console (#61), and per-minute stats kept across restarts in SQLite (`src/stats/`, #216); open is whether to serve them at `GET /healthz/usage`
+- [ ] Stats dashboard (#216): the stats store and recorder done; the console's Stats view rebuilt on its queries still to do
 
 ## Phase 6 — More of OpenAI's API
 

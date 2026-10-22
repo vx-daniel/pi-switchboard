@@ -19,6 +19,7 @@ declare namespace NodeJS {
     PI_SWITCHBOARD_AGENTIC?: string | undefined
     PI_SWITCHBOARD_REMOTE_IMAGES?: string | undefined
     PI_SWITCHBOARD_DOCS_UI?: string | undefined
+    PI_SWITCHBOARD_STATS?: string | undefined
     PI_SWITCHBOARD_MAX_BODY_SIZE?: string | undefined
     PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS?: string | undefined
     PI_SWITCHBOARD_LOG_LEVEL?: string | undefined

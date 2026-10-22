@@ -131,19 +131,21 @@ const finished: Kept[] = []
 const rejectedKept: Kept[] = []
 /** The next finished request's place in the order. */
 let nextSequence = 0
-/** Who is told after each change. */
-const listeners = new Set<() => void>()
+/** Who is told after each change; with the request, when the change is one finishing. */
+const listeners = new Set<(finishedRequest: FinishedRequest | undefined) => void>()
 /** The next request's key. */
 let nextKey = 0
 
 /**
  * Tells every listener the requests changed. A listener that throws is logged and skipped: the
  * request that caused the change must not fail for it.
+ *
+ * @param finishedRequest - the request that just finished, when that is the change
  */
-function notify(): void {
+function notify(finishedRequest?: FinishedRequest): void {
   for (const listener of listeners) {
     try {
-      listener()
+      listener(finishedRequest)
     } catch (error) {
       activeLogger.warn('An active requests listener threw: {errorName}', {
         errorName: error instanceof Error ? error.name : typeof error
@@ -176,7 +178,7 @@ function keep(request: FinishedRequest): void {
   kept.push({ sequence: nextSequence, request })
   nextSequence += 1
   if (kept.length > bound) kept.shift()
-  notify()
+  notify(request)
 }
 
 /**
@@ -275,11 +277,13 @@ export function finishedRequests(): readonly FinishedRequest[] {
 /**
  * Subscribes to changes.
  *
- * @param listener - called after every change, with no arguments; read {@link activeRequests}
- *   and {@link finishedRequests}
+ * @param listener - called after every change, with the request when one finished (the stats
+ *   recorder keeps those); read {@link activeRequests} and {@link finishedRequests}
  * @returns a function that unsubscribes the listener
  */
-export function onActiveRequestsChange(listener: () => void): () => void {
+export function onActiveRequestsChange(
+  listener: (finishedRequest: FinishedRequest | undefined) => void
+): () => void {
   listeners.add(listener)
   return () => {
     listeners.delete(listener)

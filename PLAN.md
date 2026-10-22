@@ -1776,6 +1776,33 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
 - **Theme.** `initTheme()` with no name: pi's system theme, which reads no theme file. Named
   themes are JSON files in pi's package directory, which a compiled binary does not have.
 
+### Stats store (`src/stats/`, #216)
+
+Per-minute counts of the chat traffic, kept across restarts for the console's Stats view. On by
+default (`stats`, `--no-stats`, `PI_SWITCHBOARD_STATS=false`).
+
+- **Storage.** `node:sqlite` (`DatabaseSync`), built into Node 24 and into Bun, which compiles the
+  standalone binary: no dependency. The file is `pi-switchboard-stats.sqlite` in pi's agent dir,
+  in WAL mode with a 5 s busy timeout, so a console can read while proxies in other processes
+  write. `PRAGMA user_version` holds the schema version; a file from a newer proxy is refused.
+- **Tables** (`store.ts`), each keyed by the minute: `request_minutes` (finished requests by
+  alias, model, outcome and, for a rejected one, status, with total and longest duration and the
+  total time to a stream's first event), `attempt_minutes` (#70's attempts, failures, fallbacks,
+  tokens and cost by alias and served model) and `failure_minutes` (failed attempts by model and
+  class). Routes, counts and timings only: never message content, the request's `user`, or a
+  credential. Queries: a timeline in buckets with empty ones filled in, per-model numbers, and
+  failures by class with rejected requests by status.
+- **Recording** (`recorder.ts`). Route totals emit typed events (`RouteEvent`) and the requests
+  tracker passes each finished request to its listeners; the recorder adds them up per minute and
+  route in memory and writes them every 5 s in one transaction, and when the server closes or the
+  process exits (the store writes synchronously, so an `exit` handler can). A write that fails is
+  logged and its rows dropped: stats never hold up or fail a request. Rows older than 30 days are
+  pruned on start and about every hour.
+- **Started by `listen()`** (`server/startup.ts`), for the headless proxy and the console alike, so
+  the console's history covers every proxy that writes to the same agent dir. `createApp` alone
+  (the tests) records nothing. A file that can't be opened is a warning and no stats, never a
+  failed start.
+
 ### Dead code
 
 `src/pi/resolve-model.ts`, superseded by `src/openai/model-exposure.ts` in Phase 3A, has been
