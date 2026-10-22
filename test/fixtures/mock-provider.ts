@@ -50,6 +50,11 @@ export interface MockProvider {
   provider(
     api?: 'openai-completions' | 'anthropic-messages' | 'google-generative-ai'
   ): Record<string, unknown>
+  /**
+   * How many WebSocket upgrades were asked for. The mock refuses each by closing the socket, as a
+   * server without WebSocket support does: pi's Codex adapter then falls back to SSE.
+   */
+  readonly upgrades: number
   /** Drops open connections and stops the server. */
   close(): Promise<void>
 }
@@ -159,11 +164,19 @@ export async function startMockProvider(
       void reply(response, request)
     })
   })
+  let upgrades = 0
+  server.on('upgrade', (_incoming, socket) => {
+    upgrades += 1
+    socket.destroy()
+  })
   const origin = await listenOnLoopback(server)
 
   return {
     origin,
     requests,
+    get upgrades() {
+      return upgrades
+    },
     provider: (api = 'openai-completions') => ({
       baseUrl: api === 'openai-completions' ? `${origin}/v1` : origin,
       api,
@@ -269,15 +282,19 @@ export function finishChunk(
  * Builds a complete SSE answer: status 200, each chunk as a `data:` event, then `[DONE]`.
  *
  * @param chunks - the chunks to send, in order
- * @param options - `intervalMs` to wait between chunks; omitted, they are sent back to back
+ * @param options - `intervalMs` to wait between chunks (omitted, they are sent back to back), and
+ *   `headers` to send with the answer, such as a provider's quota headers
  * @returns the reply
  */
 export function sse(
   chunks: readonly Record<string, unknown>[],
-  options: { readonly intervalMs?: number } = {}
+  options: {
+    readonly intervalMs?: number
+    readonly headers?: Readonly<Record<string, string>>
+  } = {}
 ): MockReply {
   return async (response) => {
-    response.writeHead(HTTP_OK, { 'content-type': 'text/event-stream' })
+    response.writeHead(HTTP_OK, { ...options.headers, 'content-type': 'text/event-stream' })
     for (const [chunkIndex, event] of chunks.entries()) {
       if (chunkIndex > 0 && options.intervalMs !== undefined) await sleep(options.intervalMs)
       response.write(`data: ${JSON.stringify(event)}\n\n`)

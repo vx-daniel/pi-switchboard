@@ -30,6 +30,7 @@ import {
   passthroughStrategy,
   patchGooglePayload
 } from '@proxy/pi/payload-fields'
+import { observingFetch } from '@proxy/pi/quota'
 import { getRuntime } from '@proxy/pi/registry'
 import { capturingFetch, type FailedResponse } from '@proxy/pi/reset-time'
 import { upstreamTemperature } from '@proxy/pi/temperature'
@@ -58,6 +59,8 @@ export interface CompletionOptions {
    * time (#68). pi's `onResponse` only sees successes, so this goes through pi's `fetch` option.
    */
   readonly onFailedResponse?: ((response: FailedResponse) => void) | undefined
+  /** Receives every response's headers, for the quota they report (#69). */
+  readonly onResponseHeaders?: ((headers: Headers) => void) | undefined
 }
 
 /**
@@ -165,10 +168,11 @@ function passthroughHook(
 }
 
 /**
- * Returns the `fetch` option that copies a failed response to `options.onFailedResponse` (#68).
+ * Returns the `fetch` option that copies a failed response to `options.onFailedResponse` (#68)
+ * and every response's headers to `options.onResponseHeaders` (#69).
  *
  * @param model - the pi model; pi's Google adapters refuse a custom fetch, so their 429s cool
- *   down for the default time instead
+ *   down for the default time instead, and they report no quota
  * @param options - the per-request options
  * @returns `{ fetch }`, or nothing to add
  */
@@ -176,9 +180,31 @@ function captureOptions(
   model: Model<Api>,
   options: CompletionOptions
 ): Pick<SimpleStreamOptions, 'fetch'> {
-  return options.onFailedResponse === undefined || isGoogleApi(model.api)
-    ? {}
-    : { fetch: capturingFetch(options.onFailedResponse) }
+  const { onFailedResponse, onResponseHeaders } = options
+  if (isGoogleApi(model.api)) return {}
+  let fetch: typeof globalThis.fetch | undefined
+  if (onFailedResponse !== undefined) fetch = capturingFetch(onFailedResponse)
+  if (onResponseHeaders !== undefined) {
+    fetch = observingFetch(onResponseHeaders, fetch ?? globalThis.fetch)
+  }
+  return fetch === undefined ? {} : { fetch }
+}
+
+/**
+ * Returns the transport option: SSE for Codex (#185).
+ *
+ * @remarks
+ * pi's Codex adapter tries a WebSocket first, and `fetch` sees nothing of it: a usage limit's
+ * reset time and Codex's quota headers never reach the proxy. Over SSE they do. Measured live on
+ * 2026-10-21 (`gpt-6-luna`): SSE was faster to the first event on short calls (median 954 ms vs
+ * 1,522 ms) and even at a 31k-token history (1,071 ms vs 1,049 ms), where the WebSocket sends
+ * only the new turns. PLAN "Cooldowns (#68)" has the numbers.
+ *
+ * @param model - the pi model
+ * @returns `{ transport: 'sse' }` for Codex, or nothing to add
+ */
+function transportOptions(model: Model<Api>): Pick<SimpleStreamOptions, 'transport'> {
+  return model.api === 'openai-codex-responses' ? { transport: 'sse' } : {}
 }
 
 /**
@@ -248,7 +274,8 @@ async function buildStreamOptions(
   const onPayload = passthroughHook(model, request)
   if (onPayload !== undefined) opts.onPayload = onPayload
 
-  return { ...opts, ...captureOptions(model, options) }
+  // Last, so nothing set above can put Codex back on the WebSocket (#185).
+  return { ...opts, ...captureOptions(model, options), ...transportOptions(model) }
 }
 
 /**

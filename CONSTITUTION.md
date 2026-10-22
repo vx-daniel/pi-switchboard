@@ -1,21 +1,30 @@
 <!--
 Sync Impact Report
-Version change: 3.3.0 → 3.4.0 (MINOR)
-Rationale: some models on `api.openai.com`, the ChatGPT-subscription ones (`gpt-6-luna`,
-`gpt-5.6-terra`, `gpt-6.1-sol`, `gpt-6-astra`), answer `prompt_cache_breakpoint` with a 400 naming
-the field (#163), so every request from a client that sends it, docker-agent among them, failed on
-them. The first refusal per model is retried once without the field, and the model is remembered
-for the life of the process, so it costs at most one failed request per model per start. That is a
-second drop of the field, on an API that otherwise gets it, so principle I lists it.
-MINOR: one exception in principle I widened; no principle changes.
+Version change: 3.4.0 → 3.5.0 (MINOR)
+Rationale: #61 ships an opt-in console (`pi-switchboard tui`) and a standalone binary. A spike
+(2026-10-21) ran the server, a pi-tui screen and the proxy's ModelRuntime in one process: pi's own
+login screens (`OAuthSelectorComponent`, `LoginDialogComponent`) drove `ModelRuntime.login`, pi
+saved the credential to its `auth.json`, and the new provider's models were served at once. pi
+still runs every login flow and stores every credential; the proxy only hosts pi's screens in a
+local terminal. The Scope said the proxy "does not run logins", which read as forbidding that, so
+it now says what the proxy may do and where. The binary is compiled with Bun, which the stack line
+did not allow; Bun is a build tool for the binary only, and the binary's tests need Bun, so they
+run in their own CI job and in the release workflow, outside the gate.
+MINOR: guidance expanded in the Scope, principle III and the development workflow; no principle
+removed.
 Modified sections:
-- I. OpenAI Compatibility: the `prompt_cache_breakpoint` exception covers models that refuse it
+- Scope: pi runs and stores logins; the proxy may present pi's own login flow in a local terminal
+- III. Local-First Safety: no login over HTTP or any other network surface
+- Development Workflow: Bun builds the standalone binary only; its tests are the one check outside
+  the gate
 Templates requiring updates:
-- ✅ PLAN.md: "Prompt cache breakpoints"
-- ✅ README.md: the `prompt_cache_breakpoint` row
-- ✅ AGENTS.md: the permitted drops
+- ✅ AGENTS.md: runtime/tooling line, core constraints
+- ⏳ PLAN.md, README.md: the binary and the console, in the PRs that build them (#61)
 Follow-up TODOs:
 - None.
+
+3.4.0 (2026-10-21): principle I's `prompt_cache_breakpoint` exception covers models on
+`api.openai.com` that refuse it; the first refusal per model is retried once without it (#163).
 
 3.3.0 (2026-10-20): fields inside messages are strict; `name` on messages and `image_url.detail`
 are listed drops, a null `refusal` or `audio` is accepted (#146).
@@ -61,7 +70,7 @@ rule, logging limits, the lint-directive ban, verbatim exposure, and commit type
 
 ## Scope
 
-pi-switchboard is a local HTTP API over pi's models, logins and providers that speaks OpenAI's API to its clients. It grows in two directions: more of OpenAI's API where pi can back it (chat completions today, the Responses API next), and routing requests across pi's logins (aliases, fallback, cooldowns, quota awareness). It does not run logins or store credentials of its own (pi does), does not keep conversation state, and does not speak other vendors' client protocols. It started as a fork of `pi-openai-proxy` and is maintained independently.
+pi-switchboard is a local HTTP API over pi's models, logins and providers that speaks OpenAI's API to its clients. It grows in two directions: more of OpenAI's API where pi can back it (chat completions today, the Responses API next), and routing requests across pi's logins (aliases, fallback, cooldowns, quota awareness). It does not implement logins or store credentials of its own: pi runs every login flow and stores every credential. The proxy may present pi's own login flow, pi's screens driving pi's login, in a local terminal (the opt-in console, #61), never over HTTP or any other network surface. It does not keep conversation state, and does not speak other vendors' client protocols. It started as a fork of `pi-openai-proxy` and is maintained independently.
 
 ## Core Principles
 
@@ -106,7 +115,7 @@ Type safety is part of the contract: no `any`, no `@ts-ignore`, no unsafe `as` c
 Rationale: the proxy translates between multiple schemas and provider APIs, so boundary validation is the primary defense against accidental incompatibility and latent runtime bugs. Operator configuration is trusted but typo-prone; repairing it loudly keeps the service up without hiding the mistake.
 
 ### III. Local-First Safety
-The default runtime posture MUST remain local and conservative. The server MUST bind to localhost by default, and upstream work MUST be canceled when the client disconnects. Any feature that increases exposure or expands attack surface, including remote image fetching or experimental agentic behavior, MUST remain off by default and require explicit opt-in.
+The default runtime posture MUST remain local and conservative. The server MUST bind to localhost by default, and upstream work MUST be canceled when the client disconnects. Any feature that increases exposure or expands attack surface, including remote image fetching or experimental agentic behavior, MUST remain off by default and require explicit opt-in. A login, or any action that adds, replaces or removes a credential, MUST NOT be reachable over HTTP or any other network surface; it is offered only in a local terminal the operator runs.
 
 Secrets MUST never be echoed in errors or logs. Logs MUST NOT contain message content, tool arguments, image data, or credentials; credential-named properties are redacted as a backstop, not as the primary control. Warnings about configuration name fields, never values.
 
@@ -147,9 +156,9 @@ Rationale: routing changes which model and account a client is billed on. Doing 
 
 ## Development Workflow and Quality Gates
 
-- Stack: Node (≥ 24) runtime; the Vite+ toolchain (`vp`: Oxfmt, Oxlint with tsgolint, Vitest, tsdown); fallow for dead code, duplication and complexity; pnpm for packages and scripts; TypeScript, Hono, Zod v4, and TypeBox. TypeBox is used only where pi's API requires it, imported through `@earendil-works/pi-ai`'s re-export so the proxy never ships a second copy.
+- Stack: Node (≥ 24) runtime; the Vite+ toolchain (`vp`: Oxfmt, Oxlint with tsgolint, Vitest, tsdown); fallow for dead code, duplication and complexity; pnpm for packages and scripts; TypeScript, Hono, Zod v4, and TypeBox. TypeBox is used only where pi's API requires it, imported through `@earendil-works/pi-ai`'s re-export so the proxy never ships a second copy. Bun builds the standalone binary only (`bun build --compile`); the npm package and the Docker image run on Node.
 - Imports: the `@proxy/*` alias for `src/*` (no relative imports across the source tree), `node:` protocol for Node built-ins, `import * as z from "zod"`, and `vite-plus/test` in tests.
-- `pnpm run check:all` (`scripts/gate.ts`: format, lint with the type check, offline tests with coverage, fallow, build) is the single definition of green. The pre-commit hook, CI, and the release workflow all run it; a new check is added there, not in a hook or a workflow.
+- `pnpm run check:all` (`scripts/gate.ts`: format, lint with the type check, offline tests with coverage, fallow, build) is the single definition of green. The pre-commit hook, CI, and the release workflow all run it; a new check is added there, not in a hook or a workflow. The one exception is the standalone binary's tests, which need Bun: they run in their own CI job and in the release workflow, so the gate and the pre-commit hook never require Bun.
 - Hooks in `.vite-hooks/` MUST be preserved: `commit-msg` (commitlint), `pre-commit` (the gate), `pre-push` (lockfile sync). Lint passes only with zero warnings. Do not weaken lint, type, or test gates unless the maintainer explicitly asks.
 - Before completion, run the smallest verification that exercises the change, then the gate. Live provider tests (`pnpm run test:live`) spend quota and run on demand only.
 - Update durable docs and notes in the same change when a change affects user-visible behavior, architecture, or operator workflow.
@@ -177,4 +186,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.4.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-21
+**Version**: 3.5.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-21
