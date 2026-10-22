@@ -53,6 +53,15 @@ import { listen } from '@proxy/server/startup'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
+import {
+  type AccountAction,
+  accountActions,
+  clampSelection,
+  LOGIN_ROW,
+  moveSelection,
+  stepView,
+  type View
+} from '@proxy/tui/navigation'
 import { statsRows } from '@proxy/tui/stats-view'
 import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
@@ -73,9 +82,6 @@ const CHROME_ROWS = 3
 /** Widths of the accounts view's columns: provider, auth type, source, model count. */
 const COLUMNS = { provider: 28, login: 8, source: 16, models: 4 } as const
 
-/** The console's views. */
-type View = 'logs' | 'accounts' | 'stats'
-
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
   readonly available: number
@@ -90,6 +96,8 @@ interface ConsoleState extends RefreshState<Status> {
   view: View
   /** Where the log view is: following new lines, or pinned to the lines on screen. */
   logView: LogViewport
+  /** The selected row of the accounts view; the row after the accounts opens the login. */
+  selected: number
 }
 
 /** What the key handlers and the login flow need. */
@@ -198,9 +206,11 @@ function tabsLine(view: View): string {
 
 /** The footer's key hints for each view. */
 const FOOTER: Readonly<Record<View, string>> = {
-  logs: ' ↑↓ PgUp PgDn scroll · End follow · n login · x logout · q quit (stops the proxy)',
-  accounts: ' v verify · n login · x logout · q quit (stops the proxy)',
-  stats: ' per alias and served model, since the proxy started · q quit (stops the proxy)'
+  logs: ' ↑↓ PgUp PgDn scroll · End follow · ←→ Tab views · n login · q quit (stops the proxy)',
+  accounts:
+    ' ↑↓ select · Enter actions · ←→ Tab views · v verify all · n login · x logout · q quit (stops the proxy)',
+  stats:
+    ' per alias and served model, since the proxy started · ←→ Tab views · q quit (stops the proxy)'
 }
 
 /**
@@ -219,7 +229,7 @@ function verification(account: ProviderCredentialStatus): string {
  * Renders one provider's credential status: provider, auth type, source, models, verification.
  *
  * @param account - the provider's status; never the credential itself
- * @returns the row
+ * @returns the row's text, without its selection mark
  */
 function accountRow(account: ProviderCredentialStatus): string {
   const login = account.type === 'oauth' ? 'account' : 'API key'
@@ -229,28 +239,44 @@ function accountRow(account: ProviderCredentialStatus): string {
     (account.source ?? '').padEnd(COLUMNS.source),
     String(account.availableModelCount).padStart(COLUMNS.models)
   ]
-  return `  ${cells.join(' ')} models${verification(account)}`
+  return `${cells.join(' ')} models${verification(account)}`
 }
 
 /**
- * Renders the accounts view: pi's configured providers, as the proxy sees them.
+ * Marks the selected row of a list: a pointer and reversed colours.
+ *
+ * @param text - the row's text
+ * @param selected - whether it is the selected row
+ * @returns the row, indented
+ */
+function selectable(text: string, selected: boolean): string {
+  return selected ? styleText('inverse', `› ${text}`) : `  ${text}`
+}
+
+/**
+ * Renders the accounts view: pi's configured providers, as the proxy sees them, then the row that
+ * opens pi's login selector.
  *
  * @param accounts - the providers pi has a credential for
+ * @param selected - the selected row; the row after the accounts is the login row
  * @param height - rows available
  * @returns the rows
  */
-function accountRows(accounts: readonly ProviderCredentialStatus[], height: number): string[] {
+function accountRows(
+  accounts: readonly ProviderCredentialStatus[],
+  selected: number,
+  height: number
+): string[] {
   const titles = [
     'provider'.padEnd(COLUMNS.provider),
     'login'.padEnd(COLUMNS.login),
     'source'.padEnd(COLUMNS.source),
     'models'
   ]
-  const body =
-    accounts.length === 0
-      ? ['  No logins yet: press n to log in with pi.']
-      : accounts.map((account) => accountRow(account))
-  return [styleText('dim', `  ${titles.join(' ')}`), ...body].slice(0, height)
+  const current = clampSelection(selected, accounts.length)
+  const rows = accounts.map((account, index) => selectable(accountRow(account), index === current))
+  const login = selectable(LOGIN_ROW, current === accounts.length)
+  return [styleText('dim', `  ${titles.join(' ')}`), ...rows, login].slice(0, height)
 }
 
 /**
@@ -268,12 +294,13 @@ function viewRows(
 ): string[] {
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size.height)
-  if (state.view === 'accounts') return accountRows(state.accounts, size.height)
+  if (state.view === 'accounts') return accountRows(state.accounts, state.selected, size.height)
   return statsRows(routeTotals(), routeTotalsSince(), size)
 }
 
 /**
- * Creates the console's root component: header, tab bar, the current view, footer.
+ * Creates the console's root component: header, tab bar, the current view, and the footer on the
+ * screen's last row.
  *
  * @param context - the console
  * @param terminal - the terminal, for its height
@@ -289,11 +316,13 @@ function createRootView(
     render(width) {
       const height = Math.max(1, terminal.rows - CHROME_ROWS)
       const { state, config } = context
+      const body = viewRows(context, { height, width })
       const rows = [
         headerLine(config, state.status),
         tabsLine(state.view),
-        ...viewRows(context, { height, width }),
-        FOOTER[state.view]
+        ...body,
+        ...Array.from({ length: Math.max(0, height - body.length) }, () => ''),
+        styleText('dim', FOOTER[state.view])
       ]
       return rows.map((row) => truncateToWidth(row, width))
     },
@@ -436,6 +465,64 @@ async function openLogout(context: ConsoleContext): Promise<void> {
 }
 
 /**
+ * Opens the action menu for the selected account, or pi's login selector on the login row.
+ *
+ * @param context - the console
+ */
+function openSelected(context: ConsoleContext): void {
+  const { state } = context
+  const account = state.accounts[clampSelection(state.selected, state.accounts.length)]
+  if (account === undefined) {
+    openLogin(context)
+    return
+  }
+  const choices = accountActions(account)
+  const selector = new ExtensionSelectorComponent(
+    account.provider,
+    choices.map((choice) => choice.label),
+    (label) => {
+      handle.hide()
+      const chosen = choices.find((choice) => choice.label === label)
+      if (chosen !== undefined) runAccountAction(context, account, chosen.action)
+    },
+    () => handle.hide()
+  )
+  const handle = showDialog(context.tui, selector)
+}
+
+/**
+ * Runs an action chosen from an account's menu.
+ *
+ * @param context - the console
+ * @param account - the account it acts on
+ * @param action - what to do
+ */
+function runAccountAction(
+  context: ConsoleContext,
+  account: ProviderCredentialStatus,
+  action: AccountAction
+): void {
+  if (action === 'verify') inBackground(context.refresh(true), 'Verifying the logins')
+  else if (action === 'login') {
+    inBackground(loginTo(context, account.provider, account.type), 'Login')
+  } else inBackground(logoutOf(context, account.provider), 'Logout')
+}
+
+/**
+ * Moves within the current view: scrolls the logs, or moves the selection in the accounts.
+ *
+ * @param context - the console
+ * @param step - lines or rows to move: positive moves down
+ */
+function moveWithin(context: ConsoleContext, step: number): void {
+  const { state } = context
+  if (state.view === 'logs') state.logView = scrollLogView(state.logView, context.logs, -step)
+  else if (state.view === 'accounts') {
+    state.selected = moveSelection(state.selected, state.accounts.length, step)
+  }
+}
+
+/**
  * Lists the console's keys and what each does. Keys go to pi's dialogs instead while one is open.
  *
  * @param context - the console the actions act on
@@ -449,13 +536,18 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['1', () => (state.view = 'logs')],
     ['2', () => (state.view = 'accounts')],
     ['3', () => (state.view = 'stats')],
+    [Key.tab, () => (state.view = stepView(state.view, 1))],
+    [Key.right, () => (state.view = stepView(state.view, 1))],
+    [Key.shift('tab'), () => (state.view = stepView(state.view, -1))],
+    [Key.left, () => (state.view = stepView(state.view, -1))],
+    [Key.enter, () => state.view === 'accounts' && openSelected(context)],
     ['n', () => openLogin(context)],
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
-    [Key.up, () => (state.logView = scrollLogView(state.logView, context.logs, 1))],
-    [Key.down, () => (state.logView = scrollLogView(state.logView, context.logs, -1))],
-    [Key.pageUp, () => (state.logView = scrollLogView(state.logView, context.logs, PAGE_LINES))],
-    [Key.pageDown, () => (state.logView = scrollLogView(state.logView, context.logs, -PAGE_LINES))],
+    [Key.up, () => moveWithin(context, -1)],
+    [Key.down, () => moveWithin(context, 1)],
+    [Key.pageUp, () => moveWithin(context, -PAGE_LINES)],
+    [Key.pageDown, () => moveWithin(context, PAGE_LINES)],
     [Key.end, () => (state.logView = undefined)]
   ]
 }
@@ -560,7 +652,8 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     status: undefined,
     accounts: [],
     verification: new Map(),
-    credentialChanges: new Map()
+    credentialChanges: new Map(),
+    selected: 0
   }
   const context: ConsoleContext = {
     config,

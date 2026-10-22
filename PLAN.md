@@ -1646,10 +1646,16 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   models (exposure computed as `/healthz/models` does), active cooldowns and a models.json error,
   read every 5 s and after each login or logout.
 - **Accounts.** The providers pi has a credential for (`getCredentialStatuses`, as
-  `/healthz/creds`): login type, source and model count; never the credential. `v` verifies them,
+  `/healthz/creds`): login type, source and model count; never the credential. `↑` `↓` select a
+  row (`navigation.ts`; the selection stays on the list when a logout shortens it), and `Enter`
+  opens that provider's actions in pi's `ExtensionSelectorComponent`: verify, log in again (or a
+  new API key), log out. A last row opens pi's login selector, as `n` does. `v` verifies them all,
   which may refresh an OAuth token, and the result stays until that provider's next login or
   logout. A verification still running when a provider's login changes drops its result for
   that provider, which was about the old credential (`status-refresh.ts`).
+- **Navigation.** `←` `→`, `Tab` and `Shift+Tab` move between the views, wrapping around; `1`
+  `2` `3` jump to one. `↑` `↓` act on the view shown: scrolling in Logs, selection in Accounts.
+  The footer sits on the screen's last row and lists the current view's keys.
 - **Stats.** #70's in-memory route totals (`routeTotals()`), one row per alias × served model
   plus a total: requests, failed attempts with their classes, fallbacks taken, input, output and
   cache tokens, and cost. The view redraws on every change (`onRouteTotalsChange`). Cost comes
