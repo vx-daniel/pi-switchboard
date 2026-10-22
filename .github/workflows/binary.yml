@@ -9,7 +9,8 @@ name: Binary
 # (0.3.0 and earlier, with no scripts/build-binary.ts) fails at once: its tree cannot build one.
 #
 # Run by hand with no tag, it builds and smoke-tests the branch it runs on, every target on its
-# own platform, and uploads nothing: the way to check this workflow before a release.
+# own platform, and uploads nothing: the way to check this workflow before a release. The branch
+# needs scripts/build-binary.ts too, as a tag does.
 #
 # Retryable, never overwriting: the upload adds only the expected assets the release is missing.
 # An asset already there is kept, and must be byte-identical to this build (the compile is
@@ -77,7 +78,7 @@ jobs:
           if [ -n "$TAG" ]; then
             version="${TAG#pi-switchboard-v}"
           else
-            version="$(node -e "process.stdout.write(JSON.parse(require('node:fs').readFileSync('package.json', 'utf8')).version)")"
+            version="$(jq -r .version package.json)"
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
