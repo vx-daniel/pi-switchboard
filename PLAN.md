@@ -1516,7 +1516,10 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   logout.
 - **Stats.** #70's in-memory route totals (`routeTotals()`), one row per alias × served model
   plus a total: requests, failed attempts with their classes, fallbacks taken, input, output and
-  cache tokens, and cost. The view redraws on every change (`onRouteTotalsChange`).
+  cache tokens, and cost. The view redraws on every change (`onRouteTotalsChange`). Cost comes
+  right after requests and failures, and the route column narrows (16 to 44 columns, a long route
+  shortened with `…`), so an 80-column terminal cuts token counts, not the cost; failure classes
+  are listed in name order.
 - **Logins** (constitution 3.5.0: Scope and principle III). pi runs every flow and stores every
   credential; the console only shows pi's own screens, in a local terminal, never over HTTP.
   `n` opens pi's provider selector (`OAuthSelectorComponent`, every account and API-key login pi

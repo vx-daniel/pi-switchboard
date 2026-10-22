@@ -275,14 +275,19 @@ function accountRows(accounts: readonly ProviderCredentialStatus[], height: numb
  * Renders the current view's body.
  *
  * @param context - the console
- * @param height - rows available
+ * @param size - the space available
+ * @param size.height - rows
+ * @param size.width - columns
  * @returns the body's rows
  */
-function viewRows(context: ConsoleContext, height: number): string[] {
+function viewRows(
+  context: ConsoleContext,
+  size: { readonly height: number; readonly width: number }
+): string[] {
   const { state, logs } = context
-  if (state.view === 'logs') return logViewRows(state.logView, logs, height)
-  if (state.view === 'accounts') return accountRows(state.accounts, height)
-  return statsRows(routeTotals(), routeTotalsSince(), height)
+  if (state.view === 'logs') return logViewRows(state.logView, logs, size.height)
+  if (state.view === 'accounts') return accountRows(state.accounts, size.height)
+  return statsRows(routeTotals(), routeTotalsSince(), size)
 }
 
 /**
@@ -305,7 +310,7 @@ function createRootView(
       const rows = [
         headerLine(config, state.status),
         tabsLine(state.view),
-        ...viewRows(context, height),
+        ...viewRows(context, { height, width }),
         FOOTER[state.view]
       ]
       return rows.map((row) => truncateToWidth(row, width))

@@ -9,10 +9,14 @@ import { styleText } from 'node:util'
 
 import type { RouteTotals } from '@proxy/server/route-totals'
 
-/** Widths of the Stats view's columns. */
-const WIDTHS = { route: 44, count: 8, tokens: 11, cost: 10 } as const
+/** Widths of the Stats view's number columns. */
+const WIDTHS = { count: 8, tokens: 11, cost: 10 } as const
+/** The route column's width: as wide as fits, between these. */
+const ROUTE_WIDTH = { least: 16, most: 44 } as const
 /** Decimal places a cost is shown with: a request can cost a fraction of a cent. */
 const COST_DECIMALS = 4
+/** The indent before every row. */
+const INDENT = '  '
 
 /** The numbers the table shows for one row, or for the total. */
 type Counts = Pick<
@@ -28,32 +32,49 @@ type Counts = Pick<
 >
 
 /**
- * Formats a count with thousands separators, right-aligned.
+ * The number columns, in order: the most telling first (requests, failures, cost), so a narrow
+ * terminal cuts the token counts, not the cost.
+ */
+const COLUMNS: readonly {
+  readonly title: string
+  readonly width: number
+  readonly cell: (counts: Counts) => string
+}[] = [
+  { title: 'requests', width: WIDTHS.count, cell: (counts) => count(counts.requests) },
+  { title: 'failed', width: WIDTHS.count, cell: (counts) => count(counts.failures) },
+  {
+    title: 'cost',
+    width: WIDTHS.cost,
+    cell: (counts) => `$${counts.costUsd.toFixed(COST_DECIMALS)}`
+  },
+  { title: 'fellback', width: WIDTHS.count, cell: (counts) => count(counts.fallbacks) },
+  { title: 'input', width: WIDTHS.tokens, cell: (counts) => count(counts.inputTokens) },
+  { title: 'output', width: WIDTHS.tokens, cell: (counts) => count(counts.outputTokens) },
+  {
+    title: 'cache',
+    width: WIDTHS.tokens,
+    cell: (counts) => count(counts.cacheReadTokens + counts.cacheWriteTokens)
+  }
+]
+
+/**
+ * Formats a count with thousands separators.
  *
  * @param value - the count
- * @param width - the column's width
- * @returns the cell
+ * @returns the count, as text
  */
-function countCell(value: number, width: number): string {
-  return value.toLocaleString('en-US').padStart(width)
+function count(value: number): string {
+  return value.toLocaleString('en-US')
 }
 
 /**
- * Renders a row's numbers: requests, failures, fallbacks, input, output and cache tokens, cost.
+ * Renders a row's number cells, each right-aligned in its column.
  *
  * @param counts - the numbers
  * @returns the cells, joined
  */
 function countCells(counts: Counts): string {
-  return [
-    countCell(counts.requests, WIDTHS.count),
-    countCell(counts.failures, WIDTHS.count),
-    countCell(counts.fallbacks, WIDTHS.count),
-    countCell(counts.inputTokens, WIDTHS.tokens),
-    countCell(counts.outputTokens, WIDTHS.tokens),
-    countCell(counts.cacheReadTokens + counts.cacheWriteTokens, WIDTHS.tokens),
-    `$${counts.costUsd.toFixed(COST_DECIMALS)}`.padStart(WIDTHS.cost)
-  ].join(' ')
+  return COLUMNS.map((column) => column.cell(counts).padStart(column.width)).join(' ')
 }
 
 /**
@@ -67,15 +88,15 @@ function routeLabel(totals: RouteTotals): string {
 }
 
 /**
- * Lists a route's failures by class, for the end of its row.
+ * Lists a route's failures by class, in name order so the list does not reorder between redraws.
  *
  * @param totals - the route's totals
  * @returns `''` with no classed failure, else the classes and counts
  */
 function failureClasses(totals: RouteTotals): string {
-  const classes = Object.entries(totals.failuresByClass).map(
-    ([failure, count]) => `${failure} ${String(count)}`
-  )
+  const classes = Object.entries(totals.failuresByClass)
+    .toSorted(([first], [second]) => first.localeCompare(second))
+    .map(([failure, failures]) => `${failure} ${String(failures)}`)
   return classes.length === 0 ? '' : styleText('dim', `  ${classes.join(', ')}`)
 }
 
@@ -112,34 +133,46 @@ function sum(totals: readonly RouteTotals[]): Counts {
 }
 
 /**
- * Renders the Stats view: a heading, one row per route, and the total.
+ * Picks the route column's width: what the terminal leaves after the number columns, within
+ * {@link ROUTE_WIDTH}.
+ *
+ * @param width - the terminal's width
+ * @returns the route column's width
+ */
+function routeWidth(width: number): number {
+  const numbers = COLUMNS.reduce((total, column) => total + column.width + 1, INDENT.length)
+  return Math.min(ROUTE_WIDTH.most, Math.max(ROUTE_WIDTH.least, width - numbers))
+}
+
+/**
+ * Renders the Stats view: when counting began, a heading, one row per route, and the total.
  *
  * @param totals - #70's totals, in their stable order
  * @param since - when counting began, in epoch milliseconds
- * @param height - rows available
+ * @param size - the space available
+ * @param size.height - rows
+ * @param size.width - columns; the route column narrows to fit, and rows are cut at the edge
  * @returns the rows
  */
-export function statsRows(totals: readonly RouteTotals[], since: number, height: number): string[] {
-  const titles = ['requests', 'failed', 'fellback', 'input', 'output', 'cache', 'cost']
-  const widths = [
-    WIDTHS.count,
-    WIDTHS.count,
-    WIDTHS.count,
-    WIDTHS.tokens,
-    WIDTHS.tokens,
-    WIDTHS.tokens,
-    WIDTHS.cost
-  ]
-  const heading = `  ${'route'.padEnd(WIDTHS.route)} ${titles.map((title, column) => title.padStart(widths[column] ?? 0)).join(' ')}`
+export function statsRows(
+  totals: readonly RouteTotals[],
+  since: number,
+  size: { readonly height: number; readonly width: number }
+): string[] {
+  const started = new Date(since).toLocaleString('en-US', { hour12: false })
   const sinceLine = styleText(
     'dim',
-    `  Since ${new Date(since).toLocaleString()}; counted in memory, reset on restart.`
+    `${INDENT}Since ${started}; counted in memory, reset on restart.`
   )
-  if (totals.length === 0) return [sinceLine, '  No requests yet.'].slice(0, height)
+  if (totals.length === 0) return [sinceLine, `${INDENT}No requests yet.`].slice(0, size.height)
+  const labelWidth = routeWidth(size.width)
+  const label = (text: string): string =>
+    (text.length > labelWidth ? `${text.slice(0, labelWidth - 1)}…` : text).padEnd(labelWidth)
+  const titles = COLUMNS.map((column) => column.title.padStart(column.width)).join(' ')
+  const heading = styleText('dim', `${INDENT}${label('route')} ${titles}`)
   const rows = totals.map(
-    (route) =>
-      `  ${routeLabel(route).padEnd(WIDTHS.route)} ${countCells(route)}${failureClasses(route)}`
+    (route) => `${INDENT}${label(routeLabel(route))} ${countCells(route)}${failureClasses(route)}`
   )
-  const total = styleText('bold', `  ${'total'.padEnd(WIDTHS.route)} ${countCells(sum(totals))}`)
-  return [sinceLine, styleText('dim', heading), ...rows, total].slice(0, height)
+  const total = styleText('bold', `${INDENT}${label('total')} ${countCells(sum(totals))}`)
+  return [sinceLine, heading, ...rows, total].slice(0, size.height)
 }
