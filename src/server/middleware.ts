@@ -185,7 +185,8 @@ export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<Pro
     const token = BEARER.exec(authHeader)?.[1]
 
     if (token === undefined || !matchesToken(token, expected)) {
-      // Never the header or token value: only whether the scheme was right.
+      // Never the header or token value: only whether it was a Bearer header with a token
+      // (`bearerScheme` is false for `Bearer` with nothing after it, or no space before the token).
       authLogger.warn('Rejected {method} {path}: invalid proxy auth token', {
         method: context.req.method,
         path: context.req.path,

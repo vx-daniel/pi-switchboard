@@ -54,4 +54,20 @@ describe('proxy auth', () => {
   ])('refuses %s with 401', async (_form, authorization) => {
     expect(await statusWith(authorization)).toBe(401)
   })
+
+  // Catches the refusal bodies changing with the new matching: a missing header and a wrong token
+  // still get the same OpenAI-shaped 401, and neither quotes what the client sent.
+  test('answers the same 401 bodies as before', async () => {
+    const app = testApp({ ...testConfig(), proxyAuth: { kind: 'token', token: TOKEN } })
+    const refusal = async (headers: Record<string, string>): Promise<unknown> =>
+      (await app.request('/v1/responses', { headers })).json()
+    const body = (message: string): unknown => ({
+      error: { message, type: 'authentication_error', param: null, code: null }
+    })
+
+    expect(await refusal({})).toEqual(body('Missing Authorization header'))
+    expect(await refusal({ Authorization: `Bearer ${TOKEN}x` })).toEqual(
+      body('Invalid proxy authentication token')
+    )
+  })
 })
