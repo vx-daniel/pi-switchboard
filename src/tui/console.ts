@@ -62,7 +62,7 @@ import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
 import { pickLabel, showDialog } from '@proxy/tui/dialogs'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
-import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
+import { loginOptions, logoutOptions, providerName, runLogin, runLogout } from '@proxy/tui/login'
 import {
   type AccountAction,
   accountActions,
@@ -432,8 +432,7 @@ function openLogin(context: ConsoleContext): void {
  */
 async function logoutOf(context: ConsoleContext, providerId: string): Promise<void> {
   try {
-    await getRuntime().logout(providerId, { signal: AbortSignal.timeout(LOGOUT_TIMEOUT_MS) })
-    consoleLogger.info('Logged out of {provider}', { provider: providerId })
+    await runLogout(getRuntime(), providerId, AbortSignal.timeout(LOGOUT_TIMEOUT_MS))
   } catch (error) {
     consoleLogger.warn('Logout of {provider} failed: {reason}', {
       provider: providerId,
@@ -661,7 +660,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
       'app.message.copy': { defaultKeys: 'ctrl+x', description: 'Copy the sign-in URL' }
     })
   )
-  await initRegistry(config.accounts)
+  await initRegistry()
   const proxyAuth = createProxyAuthSwitch(config.proxyAuth)
   const server = await listen(config, proxyAuth)
   const terminal = new ProcessTerminal()

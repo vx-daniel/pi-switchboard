@@ -97,7 +97,7 @@ const main = defineCommand({
     logEffectiveConfig(config)
 
     // Initialize pi integration; initRegistry logs a models.json load failure itself.
-    await initRegistry(config.accounts)
+    await initRegistry()
     const server = await listen(config).catch((error: unknown): undefined => {
       lifecycleLogger.fatal('Cannot listen on {host}:{port}: {error}', {
         host: config.host,

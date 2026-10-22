@@ -147,7 +147,6 @@ export function testConfig(): ServerConfig {
     customModels: [],
     providerPrefixes: {},
     aliases: {},
-    accounts: {},
     logLevel: 'info'
   }
 }

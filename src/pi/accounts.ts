@@ -4,11 +4,15 @@
  *
  * @remarks
  * pi stores one credential per provider ID. A second login to the same service therefore needs a
- * second provider: `accounts: { "anthropic": 2 }` in the config registers `anthropic-account-2`,
- * which pi logs into (the console's login screen lists it) and whose credential pi stores under
- * that ID. Cooldowns, quota, the reserve, `x_pi` and the log are all keyed by provider, so each
- * login gets them separately; a fallback chain (#67) from `anthropic/X` to `anthropic-account-2/X`
- * moves to the second login on a rate limit.
+ * second provider: `anthropic-account-2`, which pi logs into and whose credential pi stores under
+ * that ID. Nothing is configured: at startup, every `{provider}-account-N` credential in pi's
+ * store gets its provider back ({@link registerStoredAccounts}); the console's login list offers
+ * the next free slot of each provider that is logged in, and logging in to it registers it first
+ * ({@link registerAccountProvider}); logging out of a slot drops it again
+ * ({@link unregisterAccountProvider}), so the slot is reused. Cooldowns, quota, the reserve,
+ * `x_pi` and the log are all keyed by provider, so each login gets them separately; a fallback
+ * chain (#67) from `anthropic/X` to `anthropic-account-2/X` moves to the second login on a rate
+ * limit.
  *
  * A copy is made from a fresh built-in provider (`builtinProviders()`), not from the composed one
  * the runtime holds: the composed provider carries the base's `models.json` overrides, including
@@ -30,7 +34,6 @@
 import type { Provider } from '@earendil-works/pi-ai'
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent'
-import type { Accounts } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 
 /** Logger for account registration. */
@@ -38,6 +41,30 @@ const accountsLogger = proxyLogger('pi', 'registry')
 
 /** The first extra login's number; number 1 is the base provider itself. */
 const FIRST_EXTRA_ACCOUNT = 2
+
+/** An account provider ID: the base, then `-account-N`. The base may itself contain `-`. */
+const ACCOUNT_ID = /^(?<base>.+)-account-(?<number>[1-9]\d*)$/
+
+/** What account registration needs of pi's runtime. */
+export type AccountRuntime = Pick<
+  ModelRuntime,
+  'getProvider' | 'listCredentials' | 'registerNativeProvider' | 'unregisterProvider'
+>
+
+/**
+ * Splits an account provider ID into its base and number.
+ *
+ * @param providerId - any provider ID
+ * @returns the base and the number (from 2), or `undefined` for an ID that is not an account slot
+ */
+export function parseAccountProviderId(
+  providerId: string
+): { readonly base: string; readonly number: number } | undefined {
+  const groups = ACCOUNT_ID.exec(providerId)?.groups
+  if (groups?.['base'] === undefined || groups['number'] === undefined) return undefined
+  const number = Number(groups['number'])
+  return number < FIRST_EXTRA_ACCOUNT ? undefined : { base: groups['base'], number }
+}
 
 /**
  * Returns the provider ID of a provider's Nth login.
@@ -124,41 +151,101 @@ export function accountProvider(base: Provider, number: number): Provider {
 }
 
 /**
- * Registers the configured extra logins as providers of the runtime.
+ * Registers an account slot as a provider, if it is one and is not registered yet.
  *
  * @remarks
- * A base that is not one of pi's built-in providers is skipped with a warning: a `models.json`
- * provider is composed, not built in, and its key would be copied with it.
+ * A base that is not one of pi's built-in providers is refused: a `models.json` provider is
+ * composed, not built in, and its key would be copied with it.
  *
  * @param runtime - pi's model runtime
- * @param accounts - provider -> how many logins it has, the base one included
+ * @param providerId - the slot, `{base}-account-N`
+ * @returns whether this call registered it; `false` when it already was, or it is no slot of a
+ *   built-in provider
+ */
+export function registerAccountProvider(runtime: AccountRuntime, providerId: string): boolean {
+  const slot = parseAccountProviderId(providerId)
+  if (slot === undefined || runtime.getProvider(providerId) !== undefined) return false
+  const fresh = builtinProviders().find((provider) => provider.id === slot.base)
+  if (fresh === undefined) {
+    accountsLogger.warn('{provider} is no login slot of a built-in pi provider; not registered', {
+      provider: providerId
+    })
+    return false
+  }
+  runtime.registerNativeProvider(accountProvider(fresh, slot.number))
+  accountsLogger.info('Registered {provider} as a login of {base}', {
+    provider: providerId,
+    base: slot.base
+  })
+  return true
+}
+
+/**
+ * Drops an account slot's provider, if it is one and is registered.
+ *
+ * @param runtime - pi's model runtime
+ * @param providerId - the slot, `{base}-account-N`
+ */
+export function unregisterAccountProvider(runtime: AccountRuntime, providerId: string): void {
+  if (parseAccountProviderId(providerId) === undefined) return
+  if (runtime.getProvider(providerId) === undefined) return
+  runtime.unregisterProvider(providerId)
+  accountsLogger.info('Dropped {provider}: logged out', { provider: providerId })
+}
+
+/** A provider's next free login slot. */
+export interface AccountSlot {
+  /** `{base}-account-N`. */
+  readonly providerId: string
+  /** N, from 2. */
+  readonly number: number
+}
+
+/**
+ * Returns a provider's lowest account slot that is not registered.
+ *
+ * @param runtime - pi's model runtime
+ * @param base - the base provider
+ * @returns the slot, for the lowest free N from 2
+ */
+export function nextAccountSlot(runtime: AccountRuntime, base: string): AccountSlot {
+  let number = FIRST_EXTRA_ACCOUNT
+  while (runtime.getProvider(accountProviderId(base, number)) !== undefined) number += 1
+  return { providerId: accountProviderId(base, number), number }
+}
+
+/** The IDs of pi's built-in providers, read once. */
+let builtinIds: ReadonlySet<string> | undefined
+
+/**
+ * Says whether a provider is one of pi's built-in providers, which is what a login slot copies.
+ *
+ * @param providerId - the provider
+ * @returns whether pi builds it in
+ */
+export function isBuiltinProvider(providerId: string): boolean {
+  builtinIds ??= new Set(builtinProviders().map((provider) => provider.id))
+  return builtinIds.has(providerId)
+}
+
+/**
+ * Registers a provider for every account slot pi has a credential for.
+ *
+ * @remarks
+ * Runs at startup, so a login made in an earlier run, or through pi-rotator or pi-multi-account,
+ * is served again. A credential whose base is no built-in provider is left as it is, with a
+ * warning.
+ *
+ * @param runtime - pi's model runtime
+ * @param signal - bounds the credential listing
  * @returns the registered provider IDs
  */
-export function registerAccounts(
-  runtime: Pick<ModelRuntime, 'registerNativeProvider'>,
-  accounts: Accounts
-): string[] {
-  const registered: string[] = []
-  for (const [base, logins] of Object.entries(accounts)) {
-    for (let number = FIRST_EXTRA_ACCOUNT; number <= logins; number += 1) {
-      const fresh = builtinProviders().find((provider) => provider.id === base)
-      if (fresh === undefined) {
-        accountsLogger.warn(
-          'accounts.{base} names no built-in pi provider; its extra logins are not registered',
-          { base }
-        )
-        break
-      }
-      const copy = accountProvider(fresh, number)
-      runtime.registerNativeProvider(copy)
-      registered.push(copy.id)
-    }
-  }
-  if (registered.length > 0) {
-    accountsLogger.info('Registered {count} extra login(s): {providers}', {
-      count: registered.length,
-      providers: registered
-    })
-  }
-  return registered
+export async function registerStoredAccounts(
+  runtime: AccountRuntime,
+  signal: AbortSignal
+): Promise<string[]> {
+  const stored = await runtime.listCredentials({ signal })
+  return stored
+    .map(({ providerId }) => providerId)
+    .filter((providerId) => registerAccountProvider(runtime, providerId))
 }

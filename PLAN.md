@@ -537,23 +537,28 @@ fallback chain skips a provider that is close to its limit, before it refuses:
 
 ### Accounts: several logins per provider (#227)
 
-pi stores one credential per provider ID, so a second subscription to the same service needs a
-second provider. `accounts` in `proxy-config.json` (`{ "anthropic": 2 }`, the total count from 2
-to 10) registers `{provider}-account-N` for N from 2, each a copy of one of pi's built-in
-providers under its own ID (`src/pi/accounts.ts`, in `initRegistry`). The convention is
-pi-rotator's and pi-multi-account's, so a login made through either appears here unchanged;
-neither extension is loaded, and neither can act on the proxy's requests (they switch an
-interactive session's model). pi-multiprovider keeps credentials outside pi's store, which the
-Scope rules out. Each extra login is a provider to everything already keyed by provider: it is an
-exposed model of its own (`anthropic-account-2/claude-opus-5-5`), a fallback chain (#67) moves
-to it, cooldowns (#68), quota and the reserve (#69), `x_pi`, the log and the route totals (#70)
-tell the logins apart, and the console's login list (#61) offers it (`Anthropic (account 2)`).
+pi stores one credential per provider ID, so a second subscription to the same service is a
+second provider: `{provider}-account-N` for N from 2, each a copy of one of pi's built-in
+providers under its own ID (`src/pi/accounts.ts`). Nothing is configured; the store is the
+record. At startup `initRegistry` registers a provider for every `{provider}-account-N`
+credential pi lists (`registerStoredAccounts`); in the console, the login list offers each
+logged-in built-in provider's next free slot (`Anthropic (account 2)`), `runLogin` registers the
+slot before pi's login and drops it again if the login fails or is cancelled, and `runLogout`
+drops it with the credential, so its number is reused. The convention is pi-rotator's and
+pi-multi-account's, so a login made through either appears here unchanged; neither extension is
+loaded, and neither can act on the proxy's requests (they switch an interactive session's
+model). pi-multiprovider keeps credentials outside pi's store, which the Scope rules out. Each
+extra login is a provider to everything already keyed by provider: it is an exposed model of its
+own (`anthropic-account-2/claude-opus-5-5`), a fallback chain (#67) moves to it, cooldowns (#68),
+quota and the reserve (#69), `x_pi`, the log and the route totals (#70) tell the logins apart,
+and the console's Accounts view (#61) shows it.
 
 - **A fresh built-in, not the composed provider.** The copy is made from a fresh
   `builtinProviders()` instance, not from the runtime's provider: the composed one carries the
   base's `models.json` overrides, `apiKey` included, which must not reach another login, and a
   dynamic catalog lives in the instance's closure, which copies would otherwise share. A base
-  that is not built in (a `models.json` provider) is skipped with a warning. A `models.json`
+  that is not built in (a `models.json` provider) offers no slot, and a stored `acme-account-2`
+  credential is left alone with a warning. A `models.json`
   entry under the copy's own ID composes above it, as for any native provider (checked on pi
   1.3.0: `baseUrl` and `apiKey` under `groq-account-2` apply to it, and `groq`'s key does not).
 - **Listed under its ID, sent as the base.** `getModels`/`getAllModels` re-key the catalog to the
@@ -574,11 +579,13 @@ tell the logins apart, and the console's login list (#61) offers it (`Anthropic 
   extra login's models too. Listing each model once with the other logins hidden but routable
   (pi-rotator's `carrierSlot`) would need an amendment to principles IV and VI, and "a request
   that names a model never falls back"; it can be built on top of this later (#227's B).
-- **Proven offline, not live.** `test/integration/accounts.test.ts` runs `groq` and
+- **Proven offline, not live.** `test/integration/accounts.test.ts` runs `groq` and a stored
   `groq-account-2` against the mock provider, which tells the logins apart by the key each
   request carries: both exposed, both on `/healthz/creds`, the chain moving to the second on the
-  first's 429, the cooldown on the first only. A real OAuth refresh and response through a copy
-  need a login made for recording (as #69's recordings do), never a copy of a live login.
+  first's 429, the cooldown on the first only; then the login list offering `groq-account-3`, a
+  scripted API-key login to it served at once, a cancelled login leaving no provider, and a
+  logout dropping the slot. A real OAuth refresh and response through a copy need a login made
+  for recording (as #69's recordings do), never a copy of a live login.
 
 ### Usage by route (#70)
 

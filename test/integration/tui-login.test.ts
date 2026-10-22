@@ -8,11 +8,12 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { getRuntime } from '@proxy/pi/registry'
-import { loginOptions, type LoginScreens, logoutOptions, runLogin } from '@proxy/tui/login'
+import { loginOptions, logoutOptions, runLogin, runLogout } from '@proxy/tui/login'
 import { isRecord } from '@proxy/utils/guards'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { scriptedScreens } from '../fixtures/login-screens'
 import { testApp } from '../helpers'
 
 /** The account provider the tests register: its login asks pi's three kinds of question. */
@@ -69,49 +70,6 @@ function registerAccountProvider(): void {
       getApiKey: (credentials) => credentials.access
     }
   })
-}
-
-/**
- * Builds scripted login screens: each choice picks the option with the given ID, each prompt gets
- * the given answer (or never answers), and every view shown is recorded.
- *
- * @param script - the answers, and the signal the dialog cancels with
- * @param script.choose - the option ID every choice picks
- * @param script.answer - what every prompt gets; `undefined` leaves prompts waiting
- * @param script.signal - the dialog's cancel signal
- * @returns the screens, and the views they were asked to show
- */
-function scriptedScreens(script: {
-  readonly choose: string
-  readonly answer: string | undefined
-  readonly signal: AbortSignal
-}): { screens: LoginScreens; shown: string[] } {
-  const shown: string[] = []
-  const reply = async (): Promise<string> =>
-    script.answer ?? (await new Promise<string>(() => undefined))
-  const screens: LoginScreens = {
-    dialog: {
-      signal: script.signal,
-      showAuth: (url) => shown.push(`auth ${url}`),
-      showDeviceCode: (info) => shown.push(`device ${info.userCode}`),
-      showWaiting: (message) => shown.push(`waiting ${message}`),
-      showInfo: (message) => shown.push(`info ${message}`),
-      showProgress: (message) => shown.push(`progress ${message}`),
-      showPrompt: async (message) => {
-        shown.push(`prompt ${message}`)
-        return reply()
-      },
-      showManualInput: async (message) => {
-        shown.push(`manual ${message}`)
-        return reply()
-      }
-    },
-    select: async (prompt) => {
-      shown.push(`select ${prompt.message}`)
-      return script.choose
-    }
-  }
-  return { screens, shown }
 }
 
 /**
@@ -283,7 +241,7 @@ describe('a logout in the console', () => {
     )
 
     expect((await logoutOptions(getRuntime())).map((option) => option.id)).toEqual([PROVIDER])
-    await getRuntime().logout(PROVIDER)
+    await runLogout(getRuntime(), PROVIDER, new AbortController().signal)
 
     expect(await servedModels()).not.toContain(MODEL)
     expect(storedCredentials()).not.toHaveProperty(PROVIDER)

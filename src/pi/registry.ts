@@ -12,9 +12,8 @@
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent'
-import type { Accounts } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
-import { registerAccounts } from '@proxy/pi/accounts'
+import { registerStoredAccounts } from '@proxy/pi/accounts'
 import * as z from 'zod'
 
 /** Logger for runtime setup and credential lookups. */
@@ -86,14 +85,19 @@ export function describeModelsJsonError(error: string): string {
     : `models.json is not valid JSON at position ${String(offset[1])}`
 }
 
+/** How long listing pi's stored credentials at startup may take. */
+const CREDENTIAL_LIST_TIMEOUT_MS = 15_000
+
 /**
  * Initializes the runtime and settings. Call once at startup.
  *
- * @param accounts - provider -> how many logins it has (#227); each extra one is registered as a
- *   provider of its own before the availability snapshot is taken
+ * @remarks
+ * Every `{provider}-account-N` credential in pi's store gets its provider registered (#227) before
+ * the availability snapshot is taken.
+ *
  * @returns the models.json error ({@link describeModelsJsonError}), or `undefined` on success
  */
-export async function initRegistry(accounts: Accounts = {}): Promise<string | undefined> {
+export async function initRegistry(): Promise<string | undefined> {
   const cwd = process.cwd()
   runtime = await ModelRuntime.create()
   settingsManager = SettingsManager.create(cwd)
@@ -105,7 +109,11 @@ export async function initRegistry(accounts: Accounts = {}): Promise<string | un
       path: splitModelsJsonError(rawError).path
     })
   }
-  if (registerAccounts(runtime, accounts).length > 0) {
+  const accounts = await registerStoredAccounts(
+    runtime,
+    AbortSignal.timeout(CREDENTIAL_LIST_TIMEOUT_MS)
+  )
+  if (accounts.length > 0) {
     // A registered provider is only provisionally available until the next availability pass;
     // this one settles it, from the stored credentials alone, before the snapshot is read.
     await runtime.refresh({ allowNetwork: false })

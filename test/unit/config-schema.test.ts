@@ -204,25 +204,6 @@ describe('normalizeConfig', () => {
     expect(normalizeConfig({}).routing).toEqual({ reserve: {} })
   })
 
-  // Catches one bad account count costing the others, or a count kept that registers nothing
-  // (1: the base login alone) or a runaway number of providers (#227).
-  test('keeps the valid account counts and drops the invalid ones', () => {
-    const result = normalizeConfig({
-      accounts: {
-        'anthropic': 2,
-        'openai-codex': 10,
-        'google': 1,
-        'xai': 11,
-        'mistral': 2.5,
-        'groq': '2',
-        '': 2
-      }
-    })
-
-    expect(result.accounts).toEqual({ 'anthropic': 2, 'openai-codex': 10 })
-    expect(normalizeConfig({}).accounts).toEqual({})
-  })
-
   // Catches a valid field being dropped or replaced by its default during normalization.
   test('preserves all fields from a complete valid config', () => {
     const full = {
@@ -240,7 +221,6 @@ describe('normalizeConfig', () => {
       customModels: ['openai/gpt-4o'],
       providerPrefixes: { openai: 'oai' },
       aliases: { coding: 'openai/gpt-4o' },
-      accounts: { anthropic: 2 },
       logLevel: 'debug',
       routing: { reserve: { anthropic: 0.2 } },
       zed: { providerName: 'My Proxy', autoSync: true }

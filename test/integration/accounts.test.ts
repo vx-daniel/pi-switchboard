@@ -1,8 +1,9 @@
 /**
- * Several logins per provider (#227), end to end: `accounts` in the config registers
- * `groq-account-2`, a copy of pi's built-in `groq` provider with its own credential in pi's store.
- * The proxy runs as deployed (its config file read per request) against the mock provider, which
- * tells the two logins apart by the key each request carries.
+ * Several logins per provider (#227), end to end: a stored `groq-account-2` credential gets its
+ * provider at startup, a copy of pi's built-in `groq` provider with its own credential in pi's
+ * store, and the console adds and drops further slots. The proxy runs as deployed (its config
+ * file read per request) against the mock provider, which tells the two logins apart by the key
+ * each request carries.
  */
 
 import { writeFileSync } from 'node:fs'
@@ -12,11 +13,12 @@ import { activeCooldown, clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { getRuntime } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
-import { loginOptions } from '@proxy/tui/login'
+import { loginOptions, runLogin, runLogout } from '@proxy/tui/login'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { scriptedScreens } from '../fixtures/login-screens'
 import {
   finishChunk,
   httpError,
@@ -62,8 +64,7 @@ beforeAll(async () => {
     modelsJson: {
       providers: { 'groq': { ...atMock, apiKey: FIRST_KEY }, 'groq-account-2': atMock }
     },
-    authJson: { 'groq-account-2': { type: 'api_key', key: SECOND_KEY } },
-    accounts: { groq: 2 }
+    authJson: { 'groq-account-2': { type: 'api_key', key: SECOND_KEY } }
   })
   writeFileSync(
     join(agentDir.path, 'proxy-config.json'),
@@ -164,5 +165,81 @@ describe('an extra login', () => {
 
     expect(answer.status).toBe(200)
     expect(answer.upstreamKeys).toEqual([SECOND_KEY])
+  })
+
+  // Catches the console offering no way to add a login: a logged-in provider's next free slot
+  // must be in the list, named after the base, while a slot and an unconfigured provider offer
+  // none (a slot of a slot, or a login nobody has).
+  test('the login list offers the next free slot of a logged-in provider only', () => {
+    const options = loginOptions(getRuntime()).map((option) => `${option.id}: ${option.name}`)
+
+    expect(options).toContain('groq-account-2: Groq (account 2)')
+    expect(options).toContain('groq-account-3: Groq (account 3)')
+    expect(options.filter((option) => option.startsWith('groq-account-'))).toHaveLength(2)
+    expect(options.some((option) => option.includes('-account-2-account-'))).toBe(false)
+    expect(options.some((option) => option.startsWith('anthropic-account-'))).toBe(false)
+  })
+
+  // Catches a login to a new slot that pi stores but the proxy never serves (the slot was not
+  // registered first), or that reaches another login's models. The slot's catalog is the built-in
+  // one, as its models.json has no entry of its own.
+  test('logging in to the next slot registers it and serves its models at once', async () => {
+    const { screens } = scriptedScreens({
+      choose: 'unused',
+      answer: 'notarealsecret-third-login-key',
+      signal: new AbortController().signal
+    })
+
+    await runLogin(
+      getRuntime(),
+      { providerId: 'groq-account-3', type: 'api_key', deviceId: () => 'device' },
+      screens
+    )
+
+    const models = await jsonBody(
+      await createApp(testConfig(), fileConfigReader).request('/v1/models')
+    )
+    const ids = isRecord(models) && Array.isArray(models['data']) ? models['data'] : []
+    expect(
+      ids.some(
+        (model: unknown) =>
+          isRecord(model) &&
+          typeof model['id'] === 'string' &&
+          model['id'].startsWith('groq-account-3/')
+      )
+    ).toBe(true)
+    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-account-4')
+  })
+
+  // Catches a cancelled login leaving an empty slot behind, which would then be listed as a
+  // provider and push the next login to a higher number.
+  test('a cancelled login to a new slot leaves no provider', async () => {
+    const cancel = new AbortController()
+    const { screens } = scriptedScreens({
+      choose: 'unused',
+      answer: undefined,
+      signal: cancel.signal
+    })
+    const login = runLogin(
+      getRuntime(),
+      { providerId: 'groq-account-4', type: 'api_key', deviceId: () => 'device' },
+      screens
+    )
+    cancel.abort()
+
+    await expect(login).rejects.toThrow()
+    expect(getRuntime().getProvider('groq-account-4')).toBeUndefined()
+    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-account-4')
+  })
+
+  // Catches a logout that removes the credential but keeps the slot as a provider: it would stay
+  // in the login list unconfigured, and the next login would skip its number.
+  test('logging out of a slot drops it, and its number is offered again', async () => {
+    await runLogout(getRuntime(), 'groq-account-3', new AbortController().signal)
+
+    expect(getRuntime().getProvider('groq-account-3')).toBeUndefined()
+    const options = loginOptions(getRuntime()).map((option) => option.id)
+    expect(options).toContain('groq-account-3')
+    expect(options).not.toContain('groq-account-4')
   })
 })

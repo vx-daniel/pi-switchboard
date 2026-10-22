@@ -7,8 +7,17 @@
 import type { Api, AssistantMessageEventStream, Model, Provider } from '@earendil-works/pi-ai'
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript'
-import { accountProvider, accountProviderId, registerAccounts } from '@proxy/pi/accounts'
-import { describe, expect, test, vi } from 'vite-plus/test'
+import {
+  type AccountRuntime,
+  accountProvider,
+  accountProviderId,
+  nextAccountSlot,
+  parseAccountProviderId,
+  registerAccountProvider,
+  registerStoredAccounts,
+  unregisterAccountProvider
+} from '@proxy/pi/accounts'
+import { describe, expect, test } from 'vite-plus/test'
 
 /**
  * Builds a chat model of a provider.
@@ -146,19 +155,109 @@ describe('accountProvider', () => {
   })
 })
 
-describe('registerAccounts', () => {
-  // Catches the count read as the number of extra logins rather than the total, a login skipped,
-  // or a base that is not built in registered anyway: a models.json provider is composed with its
-  // key, which the copy would carry to the other login.
-  test('registers every extra login of a built-in provider and skips an unknown base', () => {
-    const registerNativeProvider = vi.fn<(provider: Provider) => void>()
+/**
+ * Builds a fake runtime that keeps registered providers in a map and lists given credentials.
+ *
+ * @param credentials - the provider IDs pi has credentials for
+ * @param registered - the provider IDs registered already (bases, for instance)
+ * @returns the runtime, and the IDs it holds now
+ */
+function fakeRuntime(
+  credentials: readonly string[],
+  registered: readonly string[] = []
+): { runtime: AccountRuntime; ids: () => string[] } {
+  const providers = new Map<string, Provider>()
+  for (const providerId of registered) {
+    providers.set(providerId, { ...makeBase().provider, id: providerId })
+  }
+  return {
+    runtime: {
+      getProvider: (id) => providers.get(id),
+      registerNativeProvider: (provider) => providers.set(provider.id, provider),
+      unregisterProvider: (id) => providers.delete(id),
+      listCredentials: () =>
+        Promise.resolve(credentials.map((providerId) => ({ providerId, type: 'api_key' as const })))
+    },
+    ids: () => [...providers.keys()]
+  }
+}
 
-    const registered = registerAccounts(
-      { registerNativeProvider },
-      { 'anthropic': 3, 'no-such-provider': 2 }
+describe('parseAccountProviderId', () => {
+  // Catches a base with a dash split at the wrong dash, `-account-1` taken as a slot (slot 1 is
+  // the base itself), or a provider merely named like a slot taken for one.
+  test('splits a slot ID into base and number; nothing else is a slot', () => {
+    expect(parseAccountProviderId('openai-codex-account-12')).toEqual({
+      base: 'openai-codex',
+      number: 12
+    })
+    expect(parseAccountProviderId('anthropic-account-1')).toBeUndefined()
+    expect(parseAccountProviderId('anthropic-account-02')).toBeUndefined()
+    expect(parseAccountProviderId('anthropic')).toBeUndefined()
+    expect(parseAccountProviderId('-account-2')).toBeUndefined()
+  })
+})
+
+describe('registerAccountProvider', () => {
+  // Catches a slot of a models.json provider registered (its key would be copied), a slot
+  // registered twice, or a plain provider ID treated as a slot.
+  test('registers a slot of a built-in provider once, and refuses anything else', () => {
+    const { runtime, ids } = fakeRuntime([], ['anthropic'])
+
+    expect(registerAccountProvider(runtime, 'anthropic-account-2')).toBe(true)
+    expect(registerAccountProvider(runtime, 'anthropic-account-2')).toBe(false)
+    expect(registerAccountProvider(runtime, 'no-such-provider-account-2')).toBe(false)
+    expect(registerAccountProvider(runtime, 'anthropic')).toBe(false)
+
+    expect(ids()).toEqual(['anthropic', 'anthropic-account-2'])
+    expect(runtime.getProvider('anthropic-account-2')?.name).toBe('Anthropic (account 2)')
+  })
+
+  // Catches a logout leaving the slot registered (it would stay in the model and login lists, and
+  // the next login would take slot 3), or a base dropped as if it were a slot.
+  test('unregistering drops a registered slot and nothing else', () => {
+    const { runtime, ids } = fakeRuntime([], ['anthropic'])
+    registerAccountProvider(runtime, 'anthropic-account-2')
+
+    unregisterAccountProvider(runtime, 'anthropic')
+    unregisterAccountProvider(runtime, 'anthropic-account-3')
+    expect(ids()).toEqual(['anthropic', 'anthropic-account-2'])
+
+    unregisterAccountProvider(runtime, 'anthropic-account-2')
+    expect(ids()).toEqual(['anthropic'])
+  })
+})
+
+describe('nextAccountSlot', () => {
+  // Catches the next slot skipping a freed number, or colliding with a registered one.
+  test('is the lowest number from 2 that is not registered', () => {
+    const { runtime } = fakeRuntime([], ['anthropic', 'anthropic-account-3'])
+    expect(nextAccountSlot(runtime, 'anthropic')).toEqual({
+      providerId: 'anthropic-account-2',
+      number: 2
+    })
+
+    registerAccountProvider(runtime, 'anthropic-account-2')
+    expect(nextAccountSlot(runtime, 'anthropic').providerId).toBe('anthropic-account-4')
+  })
+})
+
+describe('registerStoredAccounts', () => {
+  // Catches a login from an earlier run (or from pi-rotator) not served after a restart, a base
+  // credential taken for a slot, or a slot of an unknown base registered.
+  test('registers a provider for each stored slot credential of a built-in provider', async () => {
+    const { runtime, ids } = fakeRuntime(
+      ['anthropic', 'anthropic-account-3', 'openai-codex-account-2', 'acme-account-2'],
+      ['anthropic', 'openai-codex']
     )
 
-    expect(registered).toEqual(['anthropic-account-2', 'anthropic-account-3'])
-    expect(registerNativeProvider.mock.calls.map(([provider]) => provider.id)).toEqual(registered)
+    const registered = await registerStoredAccounts(runtime, new AbortController().signal)
+
+    expect(registered).toEqual(['anthropic-account-3', 'openai-codex-account-2'])
+    expect(ids()).toEqual([
+      'anthropic',
+      'openai-codex',
+      'anthropic-account-3',
+      'openai-codex-account-2'
+    ])
   })
 })
