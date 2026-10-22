@@ -535,6 +535,10 @@ function moveWithin(context: ConsoleContext, step: number): void {
  */
 function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => void])[] {
   const { state } = context
+  // The window keys act on the Stats view only, where the footer lists them.
+  const pickWindow = (window: StatsWindow) => (): void => {
+    if (state.view === 'stats') state.statsWindow = window
+  }
   return [
     ['q', () => context.quit()],
     [Key.ctrl('c'), () => context.quit()],
@@ -555,9 +559,9 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
     ['s', () => (state.sidebarHidden = !state.sidebarHidden)],
-    ['t', () => (state.statsWindow = 'today')],
-    ['w', () => (state.statsWindow = 'week')],
-    ['a', () => (state.statsWindow = 'all')],
+    ['t', pickWindow('today')],
+    ['w', pickWindow('week')],
+    ['a', pickWindow('all')],
     [Key.up, () => moveWithin(context, -1)],
     [Key.down, () => moveWithin(context, 1)],
     [Key.pageUp, () => moveWithin(context, -PAGE_LINES)],

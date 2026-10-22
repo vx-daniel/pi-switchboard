@@ -299,6 +299,17 @@ describe('openStatsView', () => {
     expect(stripTerminalSequences(note ?? '')).toContain('Stats are off (--no-stats)')
   })
 
+  // Catches a stats file that can't be opened (a newer proxy's schema, a read-only directory)
+  // failing the console's start or leaving the view empty.
+  test('a file that can not be opened shows the totals and says why', () => {
+    const view = openStatsView(true, () => {
+      throw new Error('The stats file is schema version 2, newer than this proxy’s')
+    })
+    const [note] = view.rows('today', { height: 10, width: 120 })
+    view.close()
+    expect(stripTerminalSequences(note ?? '')).toContain('The stats file could not be opened')
+  })
+
   // Catches a read that fails after the file opened (a locked or damaged file) escaping the
   // console's render, or being tried again on every redraw.
   test('a failed read shows the totals and says why, without reading again', () => {

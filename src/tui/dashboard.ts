@@ -493,7 +493,7 @@ export function openStatsView(
   }
   const read = createDashboardSource(store)
   const unreadable =
-    'The stats file could not be read (see the log): totals since the proxy started.'
+    'The stats file could not be read (see the log; restart the console to retry): totals since the proxy started.'
   let readFailed = false
   return {
     rows: (window, size) => {
