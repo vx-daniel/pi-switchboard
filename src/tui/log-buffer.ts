@@ -23,6 +23,13 @@ export interface LogBuffer {
    */
   lines(): readonly string[]
   /**
+   * Returns how many lines were dropped at capacity since the buffer was created: the absolute
+   * position of the first kept line, which a scrolled-back view stays pinned to.
+   *
+   * @returns the number of dropped lines
+   */
+  dropped(): number
+  /**
    * Registers a listener called after every append.
    *
    * @param listener - called with no arguments
@@ -40,13 +47,19 @@ export interface LogBuffer {
 export function createLogBuffer(capacity: number): LogBuffer {
   const kept: string[] = []
   const listeners = new Set<() => void>()
+  let dropped = 0
   return {
     append(text) {
       kept.push(...text.replace(/\r?\n$/, '').split(/\r?\n/))
-      if (kept.length > capacity) kept.splice(0, kept.length - capacity)
+      const excess = kept.length - capacity
+      if (excess > 0) {
+        kept.splice(0, excess)
+        dropped += excess
+      }
       for (const listener of listeners) listener()
     },
     lines: () => kept,
+    dropped: () => dropped,
     onChange(listener) {
       listeners.add(listener)
       return () => listeners.delete(listener)

@@ -51,6 +51,7 @@ import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/serve
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
+import { type LogViewport, logViewRows, scrollLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
 import { statsRows } from '@proxy/tui/stats-view'
 
@@ -85,8 +86,8 @@ interface Status {
 /** The console's state, which every render reads. */
 interface ConsoleState {
   view: View
-  /** Lines scrolled up from the newest log line; 0 follows new lines. */
-  scrolledBack: number
+  /** Where the log view is: following new lines, or pinned to the lines on screen. */
+  logView: LogViewport
   status: Status | undefined
   accounts: readonly ProviderCredentialStatus[]
   /** The last verification of each provider (`v`), kept until its next login or logout. */
@@ -221,20 +222,6 @@ const FOOTER: Readonly<Record<View, string>> = {
 }
 
 /**
- * Renders the newest log lines that fit, or older ones when scrolled back.
- *
- * @param lines - every buffered log line, oldest first
- * @param scrolledBack - lines scrolled up from the newest
- * @param height - rows available
- * @returns the rows, padded at the top when there are fewer lines
- */
-function logRows(lines: readonly string[], scrolledBack: number, height: number): string[] {
-  const end = lines.length - scrolledBack
-  const rows = lines.slice(Math.max(0, end - height), end)
-  return [...Array.from({ length: height - rows.length }, () => ''), ...rows]
-}
-
-/**
  * Renders whether a provider's credential was verified, when it was.
  *
  * @param account - the provider's status
@@ -293,7 +280,7 @@ function accountRows(accounts: readonly ProviderCredentialStatus[], height: numb
  */
 function viewRows(context: ConsoleContext, height: number): string[] {
   const { state, logs } = context
-  if (state.view === 'logs') return logRows(logs.lines(), state.scrolledBack, height)
+  if (state.view === 'logs') return logViewRows(state.logView, logs, height)
   if (state.view === 'accounts') return accountRows(state.accounts, height)
   return statsRows(routeTotals(), routeTotalsSince(), height)
 }
@@ -462,17 +449,6 @@ async function openLogout(context: ConsoleContext): Promise<void> {
 }
 
 /**
- * Scrolls the log view, staying within the buffered lines.
- *
- * @param context - the console
- * @param lines - lines to scroll up (positive) or down (negative)
- */
-function scrollLogs(context: ConsoleContext, lines: number): void {
-  const most = Math.max(0, context.logs.lines().length - 1)
-  context.state.scrolledBack = Math.min(most, Math.max(0, context.state.scrolledBack + lines))
-}
-
-/**
  * Lists the console's keys and what each does. Keys go to pi's dialogs instead while one is open.
  *
  * @param context - the console the actions act on
@@ -489,11 +465,11 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['n', () => openLogin(context)],
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
-    [Key.up, () => scrollLogs(context, 1)],
-    [Key.down, () => scrollLogs(context, -1)],
-    [Key.pageUp, () => scrollLogs(context, PAGE_LINES)],
-    [Key.pageDown, () => scrollLogs(context, -PAGE_LINES)],
-    [Key.end, () => (state.scrolledBack = 0)]
+    [Key.up, () => (state.logView = scrollLogView(state.logView, context.logs, 1))],
+    [Key.down, () => (state.logView = scrollLogView(state.logView, context.logs, -1))],
+    [Key.pageUp, () => (state.logView = scrollLogView(state.logView, context.logs, PAGE_LINES))],
+    [Key.pageDown, () => (state.logView = scrollLogView(state.logView, context.logs, -PAGE_LINES))],
+    [Key.end, () => (state.logView = undefined)]
   ]
 }
 
@@ -506,13 +482,22 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
 function captureStderr(logs: LogBuffer): () => void {
   const original = process.stderr.write.bind(process.stderr)
   /**
-   * Appends a stray write to the log view, marked as such.
+   * Appends a stray write to the log view, marked as such, and calls its callback as a stream
+   * would, so a writer that waits for it does not stall.
    *
    * @param chunk - what was written
+   * @param encodingOrCallback - the encoding, or the callback when no encoding is given
+   * @param callback - the callback, after an encoding
    * @returns `true`: nothing is queued
    */
-  process.stderr.write = (chunk: string | Uint8Array): boolean => {
+  process.stderr.write = (
+    chunk: string | Uint8Array,
+    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
+    callback?: (error?: Error | null) => void
+  ): boolean => {
     logs.append(`[stderr] ${typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString()}`)
+    const done = typeof encodingOrCallback === 'function' ? encodingOrCallback : callback
+    if (done !== undefined) process.nextTick(done)
     return true
   }
   return () => {
@@ -535,31 +520,113 @@ function settleable(): { promise: Promise<void>; settle: () => void } {
 }
 
 /**
+ * Creates the console's status and accounts reader.
+ *
+ * @remarks
+ * Reads can overlap (the 5 s timer, `v`, a login or logout): only the newest read replaces the
+ * status and accounts, so a slower, older one never overwrites it. A verification is kept
+ * whenever it finishes, and merged into the accounts shown.
+ *
+ * @param state - the console's state, which the reads update
+ * @param tui - the screen, redrawn after each read
+ * @returns the reader
+ */
+function createRefresh(
+  state: ConsoleState,
+  tui: TuiAltScreen
+): (verify?: boolean) => Promise<void> {
+  let latest = 0
+  /**
+   * Reads the status and the accounts, then redraws.
+   *
+   * @param verify - whether to resolve each credential now, which may refresh an OAuth token
+   */
+  async function refresh(verify = false): Promise<void> {
+    latest += 1
+    const ticket = latest
+    const [status, accounts] = await Promise.all([readStatus(), getCredentialStatuses(verify)])
+    if (verify) {
+      state.verification = new Map(
+        accounts.map((account) => [account.provider, verificationOf(account)])
+      )
+    }
+    if (ticket === latest) {
+      state.status = status
+      state.accounts = accounts
+    }
+    state.accounts = state.accounts.map((account) => ({
+      ...account,
+      ...state.verification.get(account.provider)
+    }))
+    tui.requestRender()
+  }
+  return refresh
+}
+
+/**
+ * Starts what keeps the screen current: a redraw on every log line and every change to the route
+ * totals, the status read every few seconds, and stray stderr writes sent to the log view.
+ *
+ * @param context - the console
+ * @returns a function that stops them all
+ */
+function startUpdates(context: ConsoleContext): () => void {
+  const unsubscribeLogs = context.logs.onChange(() => context.tui.requestRender())
+  const unsubscribeTotals = onRouteTotalsChange(() => context.tui.requestRender())
+  const timer = setInterval(
+    () => inBackground(context.refresh(), 'Reading the status'),
+    STATUS_REFRESH_MS
+  )
+  const restoreStderr = captureStderr(context.logs)
+  return () => {
+    clearInterval(timer)
+    unsubscribeLogs()
+    unsubscribeTotals()
+    restoreStderr()
+  }
+}
+
+/**
  * Runs the console until the operator quits or the process is told to stop: starts the server,
  * draws the screen, and stops both on the way out.
  *
+ * @remarks
+ * The server listens before the console takes over the terminal, so a port in use fails with the
+ * terminal untouched. Once the screen is up, any way out (quit, a signal, an error, or an
+ * uncaught exception) stops the screen, restores stderr and closes the server before the error,
+ * if any, is rethrown for the command to report.
+ *
  * @param config - the resolved server config
  * @param logs - the buffer LogTape already writes to
+ * @throws whatever stopped the console other than a quit or a signal
  */
 export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise<void> {
   initTheme()
   // pi's login dialog copies its sign-in URL on pi's own `app.message.copy` key, Ctrl+X in pi;
-  // without a binding its hint names no key. The console has no other pi app keys.
+  // without a binding its hint names no key. The console has no other pi app keys. The screen's
+  // own viewport scrolling takes PgUp and PgDn before any component; the console's view always
+  // fits the screen, so they go to the log view instead.
   setKeybindings(
     new KeybindingsManager({
       ...TUI_KEYBINDINGS,
+      'tui.altScreen.pageUp': { defaultKeys: [] },
+      'tui.altScreen.pageDown': { defaultKeys: [] },
       'app.message.copy': { defaultKeys: 'ctrl+x', description: 'Copy the sign-in URL' }
     })
   )
   await initRegistry()
-  const server = listen(config)
+  const server = await listen(config)
   const terminal = new ProcessTerminal()
   const tui = new TuiAltScreen(terminal)
-  const restoreStderr = captureStderr(logs)
   const stopped = settleable()
+  let crash: unknown
+  const crashed = (error: unknown): void => {
+    crash ??= error
+    stopped.settle()
+  }
   const state: ConsoleState = {
     view: 'logs',
-    scrolledBack: 0,
+    logView: undefined,
     status: undefined,
     accounts: [],
     verification: new Map()
@@ -569,20 +636,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     logs,
     tui,
     state,
-    async refresh(verify = false) {
-      const [status, accounts] = await Promise.all([readStatus(), getCredentialStatuses(verify)])
-      state.status = status
-      if (verify) {
-        state.verification = new Map(
-          accounts.map((account) => [account.provider, verificationOf(account)])
-        )
-      }
-      state.accounts = accounts.map((account) => ({
-        ...account,
-        ...state.verification.get(account.provider)
-      }))
-      tui.requestRender()
-    },
+    refresh: createRefresh(state, tui),
     quit: stopped.settle
   }
   const actions = keyActions(context)
@@ -590,25 +644,25 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     actions.find(([key]) => matchesKey(data, key))?.[1]()
     tui.requestRender()
   })
-  const unsubscribeLogs = logs.onChange(() => tui.requestRender())
-  const unsubscribeTotals = onRouteTotalsChange(() => tui.requestRender())
-  const timer = setInterval(
-    () => inBackground(context.refresh(), 'Reading the status'),
-    STATUS_REFRESH_MS
-  )
+  const stopUpdates = startUpdates(context)
+  process.on('uncaughtException', crashed)
   process.once('SIGTERM', stopped.settle)
   process.once('SIGHUP', stopped.settle)
 
-  tui.addChild(root)
-  tui.setFocus(root)
-  tui.start()
-  await context.refresh()
-  await stopped.promise
-
-  clearInterval(timer)
-  unsubscribeLogs()
-  unsubscribeTotals()
-  tui.stop()
-  restoreStderr()
-  server.close()
+  try {
+    tui.addChild(root)
+    tui.setFocus(root)
+    tui.start()
+    await context.refresh()
+    await stopped.promise
+  } finally {
+    tui.stop()
+    stopUpdates()
+    process.off('uncaughtException', crashed)
+    server.close()
+  }
+  if (crash instanceof Error) throw crash
+  if (crash !== undefined) {
+    throw new Error('The console stopped on a thrown value', { cause: crash })
+  }
 }

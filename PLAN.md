@@ -1470,6 +1470,7 @@ src/
 │   ├── command.ts        -- `pi-switchboard tui` (citty)
 │   ├── console.ts        -- the console: pi-tui screen, server in the same process
 │   ├── log-buffer.ts     -- the log view's bounded line buffer
+│   ├── log-view.ts       -- the log view's position: following, or pinned when scrolled back
 │   └── login.ts          -- pi's login flow routed to pi's own screens
 └── utils/
     └── guards.ts         -- isRecord() and other type guards
@@ -1481,16 +1482,25 @@ An opt-in console for running the proxy at a terminal. One process holds the HTT
 full-screen pi-tui view (`TuiAltScreen`) and the proxy's `ModelRuntime`, so the console reads
 everything in memory and needs no HTTP surface of its own. Quitting it stops the proxy.
 
-- **Entry.** `src/cli.ts` dispatches `tui` before citty: citty's `subCommands` would run the
-  headless `main` after the subcommand. The console module is imported dynamically, so the
-  headless proxy never loads pi's interactive UI. Both share `src/server/startup.ts`: the server
-  flags, the config with its logging, and the listener. Without a terminal on stdin and stdout,
-  `tui` refuses to start (exit 1) and names the headless command.
+- **Entry.** `src/cli.ts` finds `tui` as the first argument that is neither a flag nor a flag's
+  value (`pi-switchboard --port 4000 tui` works), and dispatches it before citty: citty's
+  `subCommands` would run the headless `main` after the subcommand. The console module is
+  imported dynamically, so the headless proxy never loads pi's interactive UI. Both share
+  `src/server/startup.ts`: the server flags, the config with its logging, and the listener,
+  which waits until the server listens. Without a terminal on stdin and stdout, `tui` refuses to
+  start (exit 1) and names the headless command.
+- **Failures.** The server listens before the console takes over the terminal, so a port in use
+  fails with the terminal untouched. Once the screen is up, any way out (quit, a signal, an
+  error, an uncaught exception) stops the screen, restores stderr and closes the server; on a
+  failure the command prints the reason after the last 20 log lines and exits 1. The headless
+  CLI reports a port in use as a fatal log line and exit 1.
 - **Logs.** LogTape writes the pretty format into a bounded buffer (`log-buffer.ts`, 5000 lines)
   instead of stderr, with the same redaction. While the console runs, a stray stderr write (one
   that bypasses LogTape) goes into the buffer, marked `[stderr]`, instead of corrupting the screen.
-  Lines are truncated to the terminal width; the view follows new lines, and scrolls back with
-  the arrow and page keys.
+  Lines are truncated to the terminal width. The view follows new lines; scrolled back with the
+  arrow and page keys (`log-view.ts`), it stays on the same lines while new ones arrive, and
+  follows again at the newest line or on `End`. The screen's own viewport scrolling would take
+  PgUp and PgDn first, so the console unbinds them there.
 - **Status.** The header shows the address, proxy auth (`token` or `off`), exposed and available
   models (exposure computed as `/healthz/models` does), active cooldowns and a models.json error,
   read every 5 s and after each login or logout.

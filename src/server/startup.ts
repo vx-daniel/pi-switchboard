@@ -279,18 +279,38 @@ export function logEffectiveConfig(config: ServerConfig): void {
 }
 
 /**
- * Starts the HTTP server. The model runtime must be initialized (`initRegistry`).
+ * Starts the HTTP server and waits until it listens. The model runtime must be initialized
+ * (`initRegistry`).
+ *
+ * @remarks
+ * A port in use or an address that cannot be bound rejects here, before the caller goes on (the
+ * console takes over the terminal only after this), instead of surfacing later as an uncaught
+ * `error` event.
  *
  * @param config - the resolved server config
  * @returns the listening server
+ * @throws Error when the server cannot listen, such as `EADDRINUSE`
  */
-export function listen(config: ServerConfig): ServerType {
+export async function listen(config: ServerConfig): Promise<ServerType> {
   const app = createApp(config)
+  const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host })
+  await new Promise<void>((resolve, reject) => {
+    const failed = (error: Error): void => {
+      server.off('listening', listening)
+      reject(error)
+    }
+    const listening = (): void => {
+      server.off('error', failed)
+      resolve()
+    }
+    server.once('error', failed)
+    server.once('listening', listening)
+  })
   lifecycleLogger.info('Listening on http://{host}:{port} with {modelCount} models', {
     host: config.host,
     port: config.port,
     modelCount: getAvailableModels().length,
     logLevel: config.logLevel
   })
-  return serve({ fetch: app.fetch, port: config.port, hostname: config.host })
+  return server
 }
