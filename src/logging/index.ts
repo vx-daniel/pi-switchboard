@@ -49,6 +49,7 @@ import {
   type LoggerConfig,
   type LogLevel,
   type Sink,
+  type LogRecord,
   type TextFormatter
 } from '@logtape/logtape'
 import { getPrettyFormatter } from '@logtape/pretty'
@@ -139,16 +140,50 @@ export function resolveLogFormat(
 }
 
 /**
+ * What a sink can format records in: a {@link LogFormat} the CLI's flags name, or `console`, the
+ * console's narrow pretty layout, which no flag selects (its log view only).
+ */
+export type SinkFormat = LogFormat | 'console'
+
+/**
+ * The pretty format for the console's log view (#61): the time only, a narrower category without
+ * the package's own root, so a line's message starts at column 42 and fits a narrow terminal.
+ */
+const consolePretty = getPrettyFormatter({
+  timestamp: 'time',
+  timeZone: null,
+  categoryWidth: 16,
+  categoryTruncate: 'middle',
+  value: 'bare',
+  wordWrap: false
+})
+
+/**
+ * Formats a record for the console's log view: {@link consolePretty}, with the category under the
+ * package's root (`server`, not `pi-switchboard·server`). A record on the root itself, or outside
+ * the package, keeps its category.
+ *
+ * @param record - The record.
+ * @returns The formatted line.
+ */
+function consoleFormatter(record: LogRecord): string {
+  const under = record.category[0] === ROOT_CATEGORY && record.category.length > 1
+  return consolePretty(under ? { ...record, category: record.category.slice(1) } : record)
+}
+
+/**
  * Returns the LogTape formatter for a format.
  *
  * @param format - The format to render records in.
- * @returns LogTape's JSON Lines formatter, or a pretty formatter in local time.
+ * @returns LogTape's JSON Lines formatter, the console's narrow layout, or a pretty formatter in
+ *   local time.
  */
-function formatterFor(format: LogFormat): TextFormatter {
+function formatterFor(format: SinkFormat): TextFormatter {
   // JSON keeps LogTape's UTC `@timestamp`: unambiguous for anything that parses or ships logs. It
   // also keeps LogTape's quoted string values in `message`, on purpose: some come from clients, and
   // the quotes keep a crafted one from passing for message text (PLAN "Observability", #159).
   if (format === 'json') return jsonLinesFormatter
+  if (format === 'console') return consoleFormatter
   // A person reads local time: `timeZone: null` is the system zone (the `TZ` variable in a
   // container), with the offset shown so a line is never ambiguous. `bare` prints strings without
   // quotes: a reader wants `GET /v1/models`, not `'GET'`.
@@ -189,7 +224,7 @@ function loggerConfigs(level: LogLevel, sink: string): LoggerConfig<string, stri
 /** Options for {@link configureLogging}. */
 export interface LoggingOptions {
   readonly level: LogLevel
-  readonly format: LogFormat
+  readonly format: SinkFormat
   /**
    * Where formatted lines go. Default: `process.stderr.write`, which Node performs synchronously
    * for a terminal or a file and asynchronously for a pipe (POSIX): a piped reader that stops

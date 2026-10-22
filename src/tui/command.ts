@@ -1,6 +1,6 @@
 /**
  * `pi-switchboard tui`: the proxy with its console (#61). It takes the server flags the headless
- * CLI takes; logs go to the console's log view, always in the pretty format.
+ * CLI takes; logs go to the console's log view, in the pretty format's narrow console layout.
  *
  * @packageDocumentation
  */
@@ -54,7 +54,7 @@ export const tuiCommand = defineCommand({
 
     const logs = createLogBuffer(LOG_LINES_KEPT)
     const config = loadConfigWithLogging(args, {
-      format: 'pretty',
+      format: 'console',
       write: (line) => logs.append(line)
     })
     // Proxy auth set but unusable: the reason was logged to the buffer, which nothing shows yet.

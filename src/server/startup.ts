@@ -23,9 +23,9 @@ import { getConfigPath } from '@proxy/config/schema'
 import {
   configureLogging,
   isLogFormat,
-  type LogFormat,
   LOG_FORMATS,
-  proxyLogger
+  proxyLogger,
+  type SinkFormat
 } from '@proxy/logging'
 import { getAvailableModels } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
@@ -193,7 +193,8 @@ function logUnusableProxyAuth(invalid: InvalidAuthCause): void {
 
 /** Where log lines go, and in which format; the CLI picks them from its flags, the console its own. */
 export interface LogOutput {
-  readonly format: LogFormat
+  /** The format: the CLI's `pretty` or `json`, or the console's narrow `console` layout. */
+  readonly format: SinkFormat
   /** Where formatted lines go; `undefined` writes to stderr. */
   readonly write?: ((line: string) => void) | undefined
 }

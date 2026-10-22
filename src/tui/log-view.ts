@@ -9,6 +9,7 @@
  * @packageDocumentation
  */
 
+import { wrapTextWithAnsi } from '@earendil-works/pi-tui'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 
 /** `undefined` follows new lines; `{ end }` shows the lines before absolute line `end`. */
@@ -30,20 +31,49 @@ export function scrollLogView(view: LogViewport, buffer: LogBuffer, lines: numbe
   return { end: Math.max(end, Math.min(buffer.dropped() + 1, total)) }
 }
 
+/** What a wrapped line's later rows start with, so they do not read as new lines. */
+const CONTINUATION = '    '
+
 /**
- * Renders the lines the view shows, padded at the top when there are fewer than fit.
+ * Wraps one log line to the width: the first row as it is, the later ones indented by
+ * {@link CONTINUATION}.
+ *
+ * @param line - the log line
+ * @param width - the columns available
+ * @returns its rows
+ */
+function wrapLine(line: string, width: number): string[] {
+  const rows = wrapTextWithAnsi(line, Math.max(1, width - CONTINUATION.length))
+  return rows.map((row, rowIndex) => (rowIndex === 0 ? row : `${CONTINUATION}${row}`))
+}
+
+/**
+ * Renders the rows the view shows: its lines, each wrapped to the width, newest at the bottom once
+ * they fill the height, from the top while they do not.
+ *
+ * @remarks
+ * Scrolling moves by log lines, not rows: a wrapped line moves as one.
  *
  * @param view - where the view is
  * @param buffer - the log buffer
- * @param height - rows available
- * @returns exactly `height` rows
+ * @param size - the space available
+ * @param size.height - rows
+ * @param size.width - columns each line is wrapped to
+ * @returns at most `height` rows
  */
-export function logViewRows(view: LogViewport, buffer: LogBuffer, height: number): string[] {
+export function logViewRows(
+  view: LogViewport,
+  buffer: LogBuffer,
+  size: { readonly height: number; readonly width: number }
+): string[] {
   const lines = buffer.lines()
   const end =
     view === undefined
       ? lines.length
-      : Math.max(view.end - buffer.dropped(), Math.min(height, lines.length))
-  const shown = lines.slice(Math.max(0, end - height), end)
-  return [...Array.from({ length: height - shown.length }, () => ''), ...shown]
+      : Math.max(view.end - buffer.dropped(), Math.min(size.height, lines.length))
+  const rows: string[] = []
+  for (let lineIndex = end - 1; lineIndex >= 0 && rows.length < size.height; lineIndex--) {
+    rows.unshift(...wrapLine(lines[lineIndex] ?? '', size.width))
+  }
+  return rows.slice(-size.height)
 }

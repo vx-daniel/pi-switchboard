@@ -164,7 +164,7 @@ async function readStatus(): Promise<Status> {
 function statusParts(status: Status): string[] {
   const exposed =
     typeof status.exposed === 'number'
-      ? `${String(status.exposed)}/${String(status.available)} models exposed`
+      ? `${String(status.exposed)}/${String(status.available)} exposed`
       : styleText('red', `exposure config: ${status.exposed}`)
   const parts = [exposed, `${String(status.cooldowns)} cooldowns`]
   if (status.modelsJsonError !== undefined) parts.push(styleText('red', 'models.json error'))
@@ -180,7 +180,7 @@ function statusParts(status: Status): string[] {
  */
 function headerLine(config: ServerConfig, status: Status | undefined): string {
   const title = styleText('bold', ` pi-switchboard ${packageJson.version}`)
-  const address = `http://${config.host}:${String(config.port)}`
+  const address = `${config.host}:${String(config.port)}`
   const parts = [title, address, `auth ${config.proxyAuth.kind}`]
   if (status !== undefined) parts.push(...statusParts(status))
   return parts.join(' · ')
@@ -204,13 +204,15 @@ function tabsLine(view: View): string {
   return ` ${shown.join(' ')}`
 }
 
-/** The footer's key hints for each view. */
+/**
+ * The footer's key hints for each view, quitting first: a narrow terminal cuts the end of the line.
+ */
 const FOOTER: Readonly<Record<View, string>> = {
-  logs: ' ↑↓ PgUp PgDn scroll · End follow · ←→ Tab views · n login · q quit (stops the proxy)',
+  logs: ' q quit (stops the proxy) · ←→ views · ↑↓ PgUp PgDn scroll · End follow · n login',
   accounts:
-    ' ↑↓ select · Enter actions · ←→ Tab views · v verify all · n login · x logout · q quit (stops the proxy)',
+    ' q quit (stops the proxy) · ←→ views · ↑↓ select · Enter actions · v verify all · n login · x logout',
   stats:
-    ' per alias and served model, since the proxy started · ←→ Tab views · q quit (stops the proxy)'
+    ' q quit (stops the proxy) · ←→ views · per alias and served model, since the proxy started'
 }
 
 /**
@@ -293,7 +295,7 @@ function viewRows(
   size: { readonly height: number; readonly width: number }
 ): string[] {
   const { state, logs } = context
-  if (state.view === 'logs') return logViewRows(state.logView, logs, size.height)
+  if (state.view === 'logs') return logViewRows(state.logView, logs, size)
   if (state.view === 'accounts') return accountRows(state.accounts, state.selected, size.height)
   return statsRows(routeTotals(), routeTotalsSince(), size)
 }
@@ -540,7 +542,12 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     [Key.right, () => (state.view = stepView(state.view, 1))],
     [Key.shift('tab'), () => (state.view = stepView(state.view, -1))],
     [Key.left, () => (state.view = stepView(state.view, -1))],
-    [Key.enter, () => state.view === 'accounts' && openSelected(context)],
+    [
+      Key.enter,
+      () => {
+        if (state.view === 'accounts') openSelected(context)
+      }
+    ],
     ['n', () => openLogin(context)],
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],

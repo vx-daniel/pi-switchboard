@@ -1634,14 +1634,16 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   error, an uncaught exception) stops the screen, restores stderr and closes the server; on a
   failure the command prints the reason after the last 20 log lines and exits 1. The headless
   CLI reports a port in use as a fatal log line and exit 1.
-- **Logs.** LogTape writes the pretty format into a bounded buffer (`log-buffer.ts`, 5000 lines)
-  instead of stderr, with the same redaction. While the console runs, a stray stderr write (one
-  that bypasses LogTape) goes into the buffer a whole line at a time, marked `[stderr]`, instead
-  of corrupting the screen (`stderr-capture.ts`).
-  Lines are truncated to the terminal width. The view follows new lines; scrolled back with the
-  arrow and page keys (`log-view.ts`), it stays on the same lines while new ones arrive, and
-  follows again at the newest line or on `End`. The screen's own viewport scrolling would take
-  PgUp and PgDn first, so the console unbinds them there.
+- **Logs.** LogTape writes into a bounded buffer (`log-buffer.ts`, 5000 lines) instead of stderr,
+  with the same redaction, in the `console` layout of the pretty format: the time only, and the
+  category without the `pi-switchboard` root, 16 columns wide, so the message starts at column 42.
+  While the console runs, a stray stderr write (one that bypasses LogTape) goes into the buffer a
+  whole line at a time, marked `[stderr]`, instead of corrupting the screen (`stderr-capture.ts`).
+  A line wider than the terminal wraps (pi-tui's `wrapTextWithAnsi`); scrolling still moves by
+  log line. A log shorter than the screen starts at the top. The view follows new lines; scrolled
+  back with the arrow and page keys (`log-view.ts`), it stays on the same lines while new ones
+  arrive, and follows again at the newest line or on `End`. The screen's own viewport scrolling
+  would take PgUp and PgDn first, so the console unbinds them there.
 - **Status.** The header shows the address, proxy auth (`token` or `off`), exposed and available
   models (exposure computed as `/healthz/models` does), active cooldowns and a models.json error,
   read every 5 s and after each login or logout.
