@@ -47,10 +47,12 @@ import {
   type ProviderCredentialStatus,
   summarizeAuthError
 } from '@proxy/pi/registry'
+import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
+import { statsRows } from '@proxy/tui/stats-view'
 
 import packageJson from '../../package.json' with { type: 'json' }
 
@@ -69,7 +71,7 @@ const CHROME_ROWS = 3
 const COLUMNS = { provider: 28, login: 8, source: 16, models: 4 } as const
 
 /** The console's views. */
-type View = 'logs' | 'accounts'
+type View = 'logs' | 'accounts' | 'stats'
 
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
@@ -202,7 +204,8 @@ function headerLine(config: ServerConfig, status: Status | undefined): string {
 function tabsLine(view: View): string {
   const tabs: readonly (readonly [View, string])[] = [
     ['logs', ' 1 Logs '],
-    ['accounts', ' 2 Accounts ']
+    ['accounts', ' 2 Accounts '],
+    ['stats', ' 3 Stats ']
   ]
   const shown = tabs.map(([tab, label]) =>
     tab === view ? styleText(['bold', 'inverse'], label) : label
@@ -213,7 +216,8 @@ function tabsLine(view: View): string {
 /** The footer's key hints for each view. */
 const FOOTER: Readonly<Record<View, string>> = {
   logs: ' ↑↓ PgUp PgDn scroll · End follow · n login · x logout · q quit (stops the proxy)',
-  accounts: ' v verify · n login · x logout · q quit (stops the proxy)'
+  accounts: ' v verify · n login · x logout · q quit (stops the proxy)',
+  stats: ' per alias and served model, since the proxy started · q quit (stops the proxy)'
 }
 
 /**
@@ -281,6 +285,20 @@ function accountRows(accounts: readonly ProviderCredentialStatus[], height: numb
 }
 
 /**
+ * Renders the current view's body.
+ *
+ * @param context - the console
+ * @param height - rows available
+ * @returns the body's rows
+ */
+function viewRows(context: ConsoleContext, height: number): string[] {
+  const { state, logs } = context
+  if (state.view === 'logs') return logRows(logs.lines(), state.scrolledBack, height)
+  if (state.view === 'accounts') return accountRows(state.accounts, height)
+  return statsRows(routeTotals(), routeTotalsSince(), height)
+}
+
+/**
  * Creates the console's root component: header, tab bar, the current view, footer.
  *
  * @param context - the console
@@ -296,15 +314,11 @@ function createRootView(
   return {
     render(width) {
       const height = Math.max(1, terminal.rows - CHROME_ROWS)
-      const { state, config, logs } = context
-      const body =
-        state.view === 'logs'
-          ? logRows(logs.lines(), state.scrolledBack, height)
-          : accountRows(state.accounts, height)
+      const { state, config } = context
       const rows = [
         headerLine(config, state.status),
         tabsLine(state.view),
-        ...body,
+        ...viewRows(context, height),
         FOOTER[state.view]
       ]
       return rows.map((row) => truncateToWidth(row, width))
@@ -471,6 +485,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     [Key.ctrl('c'), () => context.quit()],
     ['1', () => (state.view = 'logs')],
     ['2', () => (state.view = 'accounts')],
+    ['3', () => (state.view = 'stats')],
     ['n', () => openLogin(context)],
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
@@ -575,7 +590,8 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     actions.find(([key]) => matchesKey(data, key))?.[1]()
     tui.requestRender()
   })
-  const unsubscribe = logs.onChange(() => tui.requestRender())
+  const unsubscribeLogs = logs.onChange(() => tui.requestRender())
+  const unsubscribeTotals = onRouteTotalsChange(() => tui.requestRender())
   const timer = setInterval(
     () => inBackground(context.refresh(), 'Reading the status'),
     STATUS_REFRESH_MS
@@ -590,7 +606,8 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
   await stopped.promise
 
   clearInterval(timer)
-  unsubscribe()
+  unsubscribeLogs()
+  unsubscribeTotals()
   tui.stop()
   restoreStderr()
   server.close()
