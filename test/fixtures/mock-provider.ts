@@ -14,11 +14,10 @@
 import { once } from 'node:events'
 import { createServer, type IncomingHttpHeaders, type Server, type ServerResponse } from 'node:http'
 import { setTimeout as sleep } from 'node:timers/promises'
-import { zstdDecompressSync } from 'node:zlib'
 
 import { isRecord } from '@proxy/utils/guards'
 
-import { listenOnLoopback } from './local-server'
+import { decodeBody, listenOnLoopback, onRequestBody } from './local-server'
 
 /** One request the mock received. */
 export interface MockRequest {
@@ -81,27 +80,6 @@ function parseBody(text: string): unknown {
   }
 }
 
-/**
- * Returns the request body as text.
- *
- * @remarks
- * pi's Codex adapter zstd-compresses its bodies, as the Codex backend accepts. A body that does not
- * decompress stays as sent: it is then not JSON, and the mock answers 400 instead of throwing
- * inside the request handler.
- *
- * @param raw - the body bytes as received
- * @param contentEncoding - the request's `content-encoding` header; only `zstd` is decoded
- * @returns the decompressed text, or the raw bytes as text when not zstd or not decompressible
- */
-function decodeBody(raw: Buffer, contentEncoding: string | undefined): string {
-  if (contentEncoding !== 'zstd') return raw.toString()
-  try {
-    return zstdDecompressSync(raw).toString()
-  } catch {
-    return raw.toString()
-  }
-}
-
 /** Google's request path: `/models/<id>:<method>`, the model ID before the colon. */
 const GOOGLE_MODEL_PATH = /\/models\/([^/:?]+):/u
 
@@ -137,12 +115,8 @@ export async function startMockProvider(
 ): Promise<MockProvider> {
   const requests: MockRequest[] = []
   const server: Server = createServer((incoming, response) => {
-    const parts: Buffer[] = []
-    incoming.on('data', (part: Buffer) => {
-      parts.push(part)
-    })
-    incoming.on('end', () => {
-      const body = parseBody(decodeBody(Buffer.concat(parts), incoming.headers['content-encoding']))
+    onRequestBody(incoming, (raw) => {
+      const body = parseBody(decodeBody(raw, incoming.headers['content-encoding']))
       const request: MockRequest = { path: incoming.url ?? '', headers: incoming.headers, body }
       requests.push(request)
       // Recorded either way, so a test can see what pi sent; but a provider would refuse it.

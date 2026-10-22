@@ -506,8 +506,10 @@ Copilot wasn't logged in, so it is unknown.
   accounts would overwrite each other (#189 review); the reserve below is per provider for that
   reason.
 - **No recordings yet.** Tests use the probe's header names and formats, with fake identifying
-  values (`test/fixtures/quota-headers.ts`). Recording them needs a login made for recording
-  (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
+  values (`test/fixtures/quota-headers.ts`). The recorder keeps a response's quota headers, by
+  exact name and nothing else (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), and
+  records a `quota` call for Anthropic and for Codex (over SSE, as the proxy calls it); making
+  them needs a login made for recording (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
 
 **The reserve** (`src/server/route-reserve.ts`, principle VI: configured, and reported). A
 fallback chain skips a provider that is close to its limit, before it refuses:
