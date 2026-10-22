@@ -279,8 +279,24 @@ function cooldownLine(cooldown: Cooldown, now: number, width: number): string {
 }
 
 /**
- * Renders one login: provider, login type and model count, then each quota window, whether it is
- * below its reserve, and its cooldowns.
+ * Renders a login's first row: provider, login type and model count.
+ *
+ * @param account - the login
+ * @param width - the content's columns
+ * @returns the row
+ */
+function accountHeader(account: SidebarAccount, width: number): string {
+  const login = account.type === 'oauth' ? 'account' : 'API key'
+  return spread(
+    styleText('bold', account.provider),
+    styleText('dim', `${login} · ${String(account.models)}`),
+    width
+  )
+}
+
+/**
+ * Renders one login: its first row, then each quota window, whether it is below its reserve, and
+ * its cooldowns.
  *
  * @param account - the login
  * @param input - the snapshot
@@ -288,14 +304,7 @@ function cooldownLine(cooldown: Cooldown, now: number, width: number): string {
  * @returns the lines
  */
 function accountLines(account: SidebarAccount, input: SidebarInput, width: number): string[] {
-  const login = account.type === 'oauth' ? 'account' : 'API key'
-  const lines = [
-    spread(
-      styleText('bold', account.provider),
-      styleText('dim', `${login} · ${String(account.models)}`),
-      width
-    )
-  ]
+  const lines = [accountHeader(account, width)]
   for (const window of account.quota?.windows ?? []) {
     lines.push(windowLine(window, account, input, width))
   }
@@ -307,15 +316,37 @@ function accountLines(account: SidebarAccount, input: SidebarInput, width: numbe
 }
 
 /**
- * Renders the ACCOUNTS panel's lines: every login, or how to add one.
+ * Says whether a login has nothing to warn about: no cooldown, not below its reserve, and every
+ * quota window under the share shown as nearly spent.
+ *
+ * @param account - the login
+ * @param input - the snapshot, for the cooldowns
+ * @returns whether it is quiet
+ */
+function quiet(account: SidebarAccount, input: SidebarInput): boolean {
+  return (
+    !account.belowReserve &&
+    !input.cooldowns.some((cooldown) => cooldown.provider === account.provider) &&
+    (account.quota?.windows ?? []).every((window) => window.used < USED_LEVELS.warn)
+  )
+}
+
+/**
+ * Renders the ACCOUNTS panel's lines: every login, or how to add one. Under stress a quiet login
+ * takes its first row only, so the logins in trouble stand out and the panel stays short.
  *
  * @param input - the snapshot
  * @param width - the content's columns
+ * @param collapseQuiet - whether to collapse quiet logins
  * @returns the lines
  */
-function accountsLines(input: SidebarInput, width: number): string[] {
+function accountsLines(input: SidebarInput, width: number, collapseQuiet: boolean): string[] {
   if (input.accounts.length === 0) return [styleText('dim', 'No logins · n to log in')]
-  return input.accounts.flatMap((account) => accountLines(account, input, width))
+  return input.accounts.flatMap((account) =>
+    collapseQuiet && quiet(account, input)
+      ? [accountHeader(account, width)]
+      : accountLines(account, input, width)
+  )
 }
 
 /**
@@ -421,34 +452,36 @@ function finishedLine(request: FinishedRequest, width: number): string {
 }
 
 /**
- * Renders the RECENT panel's lines: the last minute's requests, failures and rejections, the
- * average time and average time to a stream's first event of those the proxy dispatched, then the
- * latest finished requests.
+ * Renders the RECENT panel's lines: a summary (the last minute's requests, failures and
+ * rejections, the average time and average time to a stream's first event of those the proxy
+ * dispatched), then the latest finished requests.
  *
  * @param input - the snapshot
+ * @param lastMinute - the requests that finished in the last minute
  * @param width - the content's columns
- * @returns the lines
+ * @returns the summary and the list apart: a short screen cuts the list first
  */
-function recentLines(input: SidebarInput, width: number): string[] {
-  if (input.finished.length === 0) return [styleText('dim', 'none yet')]
-  const lastMinute = input.finished.filter(
-    (request) => input.now - request.endedAt < RATE_WINDOW_MS
-  )
-  const lines = [lastMinuteLine(lastMinute, width)]
+function recentLines(
+  input: SidebarInput,
+  lastMinute: readonly FinishedRequest[],
+  width: number
+): { summary: string[]; list: string[] } {
+  if (input.finished.length === 0) return { summary: [styleText('dim', 'none yet')], list: [] }
+  const summary = [lastMinuteLine(lastMinute, width)]
   // A rejected request is answered at once: its time would only pull the average down.
   const dispatched = lastMinute.filter((request) => request.outcome !== 'rejected')
   const took = average(dispatched.map((request) => request.endedAt - request.startedAt))
-  if (took !== undefined) lines.push(spread('  avg time', latency(took), width))
+  if (took !== undefined) summary.push(spread('  avg time', latency(took), width))
   const first = average(
     dispatched.map((request) =>
       request.firstEventAt === undefined ? undefined : request.firstEventAt - request.startedAt
     )
   )
-  if (first !== undefined) lines.push(spread('  first event', latency(first), width))
-  for (const request of input.finished.slice(0, MAX_RECENT_LISTED)) {
-    lines.push(finishedLine(request, width))
-  }
-  return lines
+  if (first !== undefined) summary.push(spread('  first event', latency(first), width))
+  const list = input.finished
+    .slice(0, MAX_RECENT_LISTED)
+    .map((request) => finishedLine(request, width))
+  return { summary, list }
 }
 
 /**
@@ -476,13 +509,109 @@ function trafficLines(input: SidebarInput, width: number): string[] {
   ]
 }
 
+/** One panel before it is framed: its title, its lines, and how many of them a short screen keeps. */
+interface PanelSpec {
+  readonly id: 'proxy' | 'accounts' | 'active' | 'recent' | 'traffic'
+  readonly title: string
+  readonly lines: readonly string[]
+  /** The lines kept when the screen is short: all of them, but RECENT's summary only. */
+  readonly keep: number
+}
+
 /**
- * Renders the sidebar: PROXY, ACCOUNTS, ACTIVE, RECENT and TRAFFIC panels, a blank row between
- * them when they fit with it.
+ * Describes a panel a short screen keeps whole or not at all.
+ *
+ * @param id - which panel
+ * @param title - its title
+ * @param lines - its lines
+ * @returns the panel
+ */
+function whole(id: PanelSpec['id'], title: string, lines: readonly string[]): PanelSpec {
+  return { id, title, lines, keep: lines.length }
+}
+
+/**
+ * Says whether the proxy is under stress: something cooling down, a login below its reserve, or a
+ * request that failed or was rejected in the last minute.
+ *
+ * @param input - the snapshot
+ * @param lastMinute - the requests that finished in the last minute
+ * @returns whether it is
+ */
+function underStress(input: SidebarInput, lastMinute: readonly FinishedRequest[]): boolean {
+  return (
+    input.cooldowns.length > 0 ||
+    input.accounts.some((account) => account.belowReserve) ||
+    lastMinute.some((request) => request.outcome === 'failed' || request.outcome === 'rejected')
+  )
+}
+
+/**
+ * Titles the RECENT panel with what went wrong in the last minute: the failures, or, with none,
+ * the rejected requests, so whatever put the proxy under stress is named where a cut list can't
+ * hide it.
+ *
+ * @param lastMinute - the requests that finished in the last minute
+ * @returns the title
+ */
+function recentTitle(lastMinute: readonly FinishedRequest[]): string {
+  const failed = lastMinute.filter((request) => request.outcome === 'failed').length
+  if (failed > 0) return `RECENT · ${String(failed)} failed`
+  const rejected = lastMinute.filter((request) => request.outcome === 'rejected').length
+  return rejected > 0 ? `RECENT · ${String(rejected)} rejected` : 'RECENT'
+}
+
+/**
+ * Frames the panels and stacks them.
+ *
+ * @param specs - the panels, in order
+ * @param width - the sidebar's columns
+ * @param gaps - whether to leave a blank row between panels
+ * @returns the rows
+ */
+function stack(specs: readonly PanelSpec[], width: number, gaps: boolean): string[] {
+  return specs.flatMap((spec, index) => {
+    const rows = panel(spec.title, spec.lines, width)
+    return gaps && index > 0 ? ['', ...rows] : rows
+  })
+}
+
+/**
+ * Fits the panels to the height: with blank rows between them if they fit so, else without; then
+ * without TRAFFIC; then with RECENT's list cut down to its summary; then cut at the bottom.
+ *
+ * @param specs - the panels, in order
+ * @param size - the space available
+ * @param size.height - rows
+ * @param size.width - columns
+ * @returns the rows, at most `size.height`
+ */
+function fitPanels(
+  specs: readonly PanelSpec[],
+  size: { readonly height: number; readonly width: number }
+): string[] {
+  const spaced = stack(specs, size.width, true)
+  if (spaced.length <= size.height) return spaced
+  const tight = stack(specs, size.width, false)
+  if (tight.length <= size.height) return tight
+  const kept = specs.filter((spec) => spec.id !== 'traffic')
+  const over = stack(kept, size.width, false).length - size.height
+  const trimmed = kept.map((spec) =>
+    spec.id === 'recent'
+      ? { ...spec, lines: spec.lines.slice(0, Math.max(spec.keep, spec.lines.length - over)) }
+      : spec
+  )
+  return stack(trimmed, size.width, false).slice(0, Math.max(0, size.height))
+}
+
+/**
+ * Renders the sidebar: PROXY, ACCOUNTS, ACTIVE, RECENT and TRAFFIC panels. Under stress
+ * ({@link underStress}) ACTIVE and RECENT come before ACCOUNTS, whose quiet logins collapse to one
+ * row, and RECENT's title carries the last minute's failures.
  *
  * @param input - the snapshot
  * @param size - the space available
- * @param size.height - rows; panels that do not fit are cut at the bottom
+ * @param size.height - rows; panels that do not fit give way as {@link fitPanels} says
  * @param size.width - columns, borders included
  * @returns the rows, each exactly `size.width` columns wide
  */
@@ -491,17 +620,33 @@ export function sidebarRows(
   size: { readonly height: number; readonly width: number }
 ): string[] {
   const inner = Math.max(1, size.width - FRAME_COLUMNS)
-  const panels = [
-    panel('PROXY', proxyLines(input, inner), size.width),
-    panel(`ACCOUNTS · ${String(input.accounts.length)}`, accountsLines(input, inner), size.width),
-    panel(`ACTIVE · ${String(input.active.length)}`, activeRequestLines(input, inner), size.width),
-    panel('RECENT', recentLines(input, inner), size.width),
-    panel('TRAFFIC', trafficLines(input, inner), size.width)
-  ]
-  const tight = panels.flat()
-  const spaced = panels.flatMap((rows, index) => (index === 0 ? rows : ['', ...rows]))
-  const rows = spaced.length <= size.height ? spaced : tight.slice(0, size.height)
-  return rows.map((row) => truncateToWidth(row, size.width, '', true))
+  const lastMinute = input.finished.filter(
+    (request) => input.now - request.endedAt < RATE_WINDOW_MS
+  )
+  const stressed = underStress(input, lastMinute)
+  const recent = recentLines(input, lastMinute, inner)
+  const proxy = whole('proxy', 'PROXY', proxyLines(input, inner))
+  const accounts = whole(
+    'accounts',
+    `ACCOUNTS · ${String(input.accounts.length)}`,
+    accountsLines(input, inner, stressed)
+  )
+  const active = whole(
+    'active',
+    `ACTIVE · ${String(input.active.length)}`,
+    activeRequestLines(input, inner)
+  )
+  const recentPanel: PanelSpec = {
+    id: 'recent',
+    title: recentTitle(lastMinute),
+    lines: [...recent.summary, ...recent.list],
+    keep: recent.summary.length
+  }
+  const traffic = whole('traffic', 'TRAFFIC', trafficLines(input, inner))
+  const order = stressed
+    ? [proxy, active, recentPanel, accounts, traffic]
+    : [proxy, accounts, active, recentPanel, traffic]
+  return fitPanels(order, size).map((row) => truncateToWidth(row, size.width, '', true))
 }
 
 /**
