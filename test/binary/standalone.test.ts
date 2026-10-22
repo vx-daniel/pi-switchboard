@@ -212,12 +212,38 @@ describe('standalone binary', () => {
 
   // Catches the compile flags dropped: a compiled Bun binary otherwise reads `.env` from the
   // directory it starts in, and a stray one could turn proxy auth on, off, or to a known token.
+  // Auth staying off shows it: no token and a wrong token are both let through.
   test('ignores a .env in its working directory', async () => {
     const home = mkdtempSync(join(tmpdir(), 'pi-proxy-binary-home-'))
     try {
       writeFileSync(join(home, '.env'), 'PI_SWITCHBOARD_AUTH_TOKEN=from-dotenv\n')
       const binary = await startBinary(baseEnv(home), home)
       expect((await fetch(`${binary.url}/v1/models`)).status).toBe(200)
+      const wrongToken = await fetch(`${binary.url}/v1/models`, {
+        headers: { Authorization: 'Bearer not-the-token' }
+      })
+      expect(wrongToken.status).toBe(200)
+    } finally {
+      rmSync(home, { recursive: true, force: true })
+    }
+  })
+
+  // Catches `--no-compile-autoload-bunfig` dropped: a compiled Bun binary otherwise reads
+  // `bunfig.toml` from the directory it starts in, and its `preload` runs code in the proxy's
+  // process. This preload leaves a marker file and turns proxy auth on; neither may happen.
+  test('ignores a bunfig.toml in its working directory', async () => {
+    const home = mkdtempSync(join(tmpdir(), 'pi-proxy-binary-home-'))
+    try {
+      const marker = join(home, 'preload-ran')
+      writeFileSync(
+        join(home, 'preload.js'),
+        `require('node:fs').writeFileSync(${JSON.stringify(marker)}, 'ran')\n` +
+          "process.env.PI_SWITCHBOARD_AUTH_TOKEN = 'from-bunfig'\n"
+      )
+      writeFileSync(join(home, 'bunfig.toml'), 'preload = ["./preload.js"]\n')
+      const binary = await startBinary(baseEnv(home), home)
+      expect((await fetch(`${binary.url}/v1/models`)).status).toBe(200)
+      expect(existsSync(marker)).toBe(false)
     } finally {
       rmSync(home, { recursive: true, force: true })
     }

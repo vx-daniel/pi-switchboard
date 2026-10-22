@@ -529,9 +529,12 @@ version=<version>   # e.g. 0.2.0
 base="https://github.com/vx-daniel/pi-switchboard/releases/download/pi-switchboard-v$version"
 curl -LO "$base/pi-switchboard-linux-x64" -LO "$base/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+gh attestation verify pi-switchboard-linux-x64 --repo vx-daniel/pi-switchboard   # optional: built by this repo's release workflow
 chmod +x pi-switchboard-linux-x64
 ./pi-switchboard-linux-x64 --port 4141
 ```
+
+Every binary is run (`--version`) on its own platform, Linux and macOS on x64 and arm64, before the release workflow uploads it, and each asset has a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) that `gh attestation verify` checks.
 
 - **macOS.** The binaries are not signed, so Gatekeeper blocks the first run. After checking the checksum, remove the quarantine flag: `xattr -d com.apple.quarantine pi-switchboard-darwin-arm64`.
 - **Logins come from pi's `auth.json`.** The binary reads the same `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) as the npm package, so log in with pi first. Logging in from the binary itself comes with its terminal console ([#61](https://github.com/vx-daniel/pi-switchboard/issues/61)).

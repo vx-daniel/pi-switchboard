@@ -1406,16 +1406,30 @@ release workflow, never in `check:all` or the pre-commit hook.
   the macOS binaries are unsigned.
 - **Tests.** `test/binary/` runs the compiled host binary against the fixtures: a chat completion
   through the mock provider, an expired OAuth login refreshed through a local recording HTTPS
-  proxy (no `Cannot find module`), and a `.env` in its working directory ignored. Compiled from
-  `src/index.ts`, the refresh test fails; compiled without the autoload flags, the `.env` test
-  fails. The `binary` Vitest project exists only when `PI_SWITCHBOARD_BINARY_TESTS=1`, which
-  `pnpm run test:binary` sets after building, so `vp test` and the gate never need Bun. CI runs it
-  in the `binary` job (Bun 1.4.3, `oven-sh/setup-bun`), on the same triggers as `gate`.
+  proxy (no `Cannot find module`), and a `.env` and a `bunfig.toml` in its working directory
+  ignored. The `.env` sets a token and the `bunfig.toml` preloads a script that sets one and
+  writes a marker file; auth staying off (no token and a wrong token both pass) and no marker
+  show them ignored. Compiled from `src/index.ts`, the refresh test fails; compiled without
+  `--no-compile-autoload-dotenv`, the `.env` test fails; without `--no-compile-autoload-bunfig`,
+  the `bunfig.toml` test fails. The `binary` Vitest project exists only when
+  `PI_SWITCHBOARD_BINARY_TESTS=1`, which `pnpm run test:binary` sets after building, so `vp test`
+  and the gate never need Bun. CI runs it in the `binary` job (Bun 1.4.3, `oven-sh/setup-bun`), on
+  the same triggers as `gate`.
 - **Release assets.** The release workflow's `binary` job calls `binary.yml` with each new release
-  tag. It checks the tag out, runs `test:binary`, cross-compiles every target and uploads the four
-  binaries and `SHA256SUMS` to that tag's GitHub release. It refuses a release that already has
-  binaries, so an asset is never replaced; run `binary.yml` by hand with the tag to add binaries to
-  a release that has none.
+  tag. Its `build` job checks the tag out, runs `test:binary` and cross-compiles every target.
+  Its `smoke` matrix then runs each binary's `--version` on a native runner (ubuntu x64,
+  `ubuntu-24.04-arm`, `macos-14` for arm64, `macos-15-intel` for x64, since `macos-13` is
+  retired), so the darwin and arm64 binaries are run before release, not only built. Its `release`
+  job checks them against `SHA256SUMS`, attests their build provenance
+  (`actions/attest-build-provenance`; the only job with `id-token: write` and
+  `attestations: write`) and uploads them to the tag's GitHub release.
+- **Retryable upload, never overwriting.** The upload adds only the five expected assets the
+  release is missing, `SHA256SUMS` last. An asset already there is downloaded and must be
+  byte-identical to the new build, or the run fails before uploading anything; the compile is
+  deterministic for one tree and Bun version (two `--all` builds gave the same `SHA256SUMS`). With
+  all five already there it succeeds without uploading. So a run that failed partway is fixed by
+  running `binary.yml` again by hand with the tag. Third-party actions in `binary.yml` and the CI
+  `binary` job are pinned by commit SHA.
 - **Logins.** Until the TUI (#61) can log in through pi's own screens, the binary uses the logins
   in pi's `auth.json` (`~/.pi/agent`, or `PI_CODING_AGENT_DIR`), made by pi or the image's pi.
 

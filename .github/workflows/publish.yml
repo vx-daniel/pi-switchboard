@@ -90,12 +90,15 @@ jobs:
     with:
       tag: ${{ needs.release.outputs.tag }}
 
-  # The standalone binaries for the release (#61), uploaded to its GitHub release, built from its tag.
+  # The standalone binaries for the release (#61), uploaded to its GitHub release, built from its
+  # tag, with a build provenance attestation (hence `id-token` and `attestations`).
   binary:
     needs: release
     if: needs.release.outputs.tag != ''
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/binary.yml
     with:
       tag: ${{ needs.release.outputs.tag }}
