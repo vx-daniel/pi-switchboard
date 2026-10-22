@@ -65,9 +65,9 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 - **Gate** (`scripts/gate.ts`, `pnpm run check:all`): format → lint + type check → tests with coverage → fallow → build; the single definition of green, run by the pre-commit hook, CI, and the release workflow
 - **fallow** (`.fallowrc.jsonc`, `fallow-plugin-oxlint-js.jsonc`): dead code, duplication and complexity, CRAP scored against the test coverage; adopted at zero findings (#83), so any new one fails the gate. Exceptions are config entries with reasons, never inline comments. No complexity ceiling is raised: the ones set at adoption were refactored away (#85), the last being `resolveModelScope`
 - **Git hooks** (`.vite-hooks/`): pre-commit (`check:all`), commit-msg (commitlint), pre-push (lockfile sync)
-- **CI** (`.github/workflows/`): `ci.yml` (`gate` on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks, new commits only, every branch), `claude-pr-review.yml` (manual), `publish.yml` (release on `main`, then `image.yml` and `package.yml` for the new tag)
+- **CI** (`.github/workflows/`): `ci.yml` (`gate` on pull requests into `dev`/`main` and pushes to `dev`, and beside it `binary`, which builds and tests the standalone binary with Bun), `secret-scan.yml` (gitleaks, new commits only, every branch), `claude-pr-review.yml` (manual), `publish.yml` (release on `main`, then `image.yml`, `package.yml` and `binary.yml` for the new tag)
 - **commitlint**: conventional commits via `@commitlint/config-conventional`
-- **semantic-release**: version, changelog, GitHub release and the release commit; the image and the package are published from its tag by `image.yml` and `package.yml`
+- **semantic-release**: version, changelog, GitHub release and the release commit; the image, the package and the binaries are published from its tag by `image.yml`, `package.yml` and `binary.yml`
 
 ## API compatibility policy
 
@@ -1377,6 +1377,61 @@ share it widely. npmjs comes later, by choice.
 
   Measured with pi 1.3.0 and a marker in the installed copies: before, pi's own process loaded
   both at startup; after, only the proxy process does, and pi prints no extension warning.
+
+### Standalone binary
+
+The proxy compiled into one executable with `bun build --compile` (#61, ported from #86), so it
+runs with no Node and no pi installed. Bun is build-only (constitution 3.5.0): the npm package
+and the image run on Node, and Bun appears only in `scripts/build-binary.ts`, its CI job and its
+release workflow, never in `check:all` or the pre-commit hook.
+
+- **Its own entry, `src/standalone/main.ts`.** It repeats the setup pi's own Bun binary does
+  (pi-coding-agent `dist/bun/`) before loading `src/index.ts`. It restores an environment a sandbox
+  emptied (`src/standalone/sandbox-env.ts`, from `/proc/self/environ`), since losing
+  `PI_SWITCHBOARD_AUTH_TOKEN` silently would turn proxy auth off. Then it registers pi-ai's OAuth
+  flows (`@earendil-works/pi-ai/bun-oauth`) and Bedrock provider (`/bedrock-provider`, `/compat`)
+  statically: pi-ai loads them through variable import specifiers, which no bundler follows, so a
+  plain compile serves until an OAuth token needs refreshing and then fails every request with
+  `Cannot find module './anthropic.js'`. Those imports are dynamic, after the restore, because a
+  static import would read the environment before it is recovered; their literal specifiers are
+  still embedded. `src/index.ts` loads the CLI dynamically to explain a missing pi package (#165);
+  in the binary pi is always embedded, and the literal specifier is followed the same way.
+- **Compile flags.** `--no-compile-autoload-dotenv --no-compile-autoload-bunfig`, as pi's binary
+  uses. Without them the binary reads `.env` and `bunfig.toml` from the directory it is started
+  in, so a stray `.env` could set `PI_SWITCHBOARD_HOST` or `PI_SWITCHBOARD_AUTH_TOKEN`: settings
+  come only from flags, the environment and the config file (principle III).
+- **Targets.** `node scripts/build-binary.ts` builds the host's `dist-bin/pi-switchboard`;
+  `--all` cross-compiles `pi-switchboard-<os>-<arch>` for linux-x64, linux-arm64, darwin-x64 and
+  darwin-arm64 on one Linux machine, with `dist-bin/SHA256SUMS`. Windows is not a target yet, and
+  the macOS binaries are unsigned.
+- **Tests.** `test/binary/` runs the compiled host binary against the fixtures: a chat completion
+  through the mock provider, an expired OAuth login refreshed through a local recording HTTPS
+  proxy (no `Cannot find module`), and a `.env` and a `bunfig.toml` in its working directory
+  ignored. The `.env` sets a token and the `bunfig.toml` preloads a script that sets one and
+  writes a marker file; auth staying off (no token and a wrong token both pass) and no marker
+  show them ignored. Compiled from `src/index.ts`, the refresh test fails; compiled without
+  `--no-compile-autoload-dotenv`, the `.env` test fails; without `--no-compile-autoload-bunfig`,
+  the `bunfig.toml` test fails. The `binary` Vitest project exists only when
+  `PI_SWITCHBOARD_BINARY_TESTS=1`, which `pnpm run test:binary` sets after building, so `vp test`
+  and the gate never need Bun. CI runs it in the `binary` job (Bun 1.4.3, `oven-sh/setup-bun`), on
+  the same triggers as `gate`.
+- **Release assets.** The release workflow's `binary` job calls `binary.yml` with each new release
+  tag. Its `build` job checks the tag out, runs `test:binary` and cross-compiles every target.
+  Its `smoke` matrix then runs each binary's `--version` on a native runner (ubuntu x64,
+  `ubuntu-24.04-arm`, `macos-14` for arm64, `macos-15-intel` for x64, since `macos-13` is
+  retired), so the darwin and arm64 binaries are run before release, not only built. Its `release`
+  job checks them against `SHA256SUMS`, attests their build provenance
+  (`actions/attest-build-provenance`; the only job with `id-token: write` and
+  `attestations: write`) and uploads them to the tag's GitHub release.
+- **Retryable upload, never overwriting.** The upload adds only the five expected assets the
+  release is missing, `SHA256SUMS` last. An asset already there is downloaded and must be
+  byte-identical to the new build, or the run fails before uploading anything; the compile is
+  deterministic for one tree and Bun version (two `--all` builds gave the same `SHA256SUMS`). With
+  all five already there it succeeds without uploading. So a run that failed partway is fixed by
+  running `binary.yml` again by hand with the tag. Third-party actions in `binary.yml` and the CI
+  `binary` job are pinned by commit SHA.
+- **Logins.** Until the TUI (#61) can log in through pi's own screens, the binary uses the logins
+  in pi's `auth.json` (`~/.pi/agent`, or `PI_CODING_AGENT_DIR`), made by pi or the image's pi.
 
 ### Agentic mode
 

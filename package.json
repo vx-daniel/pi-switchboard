@@ -66,6 +66,8 @@
     "test:live:record": "node scripts/record-fixtures.ts",
     "openai-spec:update": "node scripts/update-openai-spec.ts",
     "build": "vp pack",
+    "build:binary": "node scripts/build-binary.ts",
+    "test:binary": "node scripts/build-binary.ts && PI_SWITCHBOARD_BINARY_TESTS=1 vp test --project binary",
     "smoke": "node dist/index.mjs --version",
     "prepare": "vp config --no-agent && vp pack",
     "prepack": "vp pack",
