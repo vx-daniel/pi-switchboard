@@ -319,16 +319,15 @@ function upstreamStatusIn(message: string): number | undefined {
 
 /**
  * Wording that identifies a failure when the message carries no status: Bedrock, network
- * failures, the proxy's own upstream idle timeout, Codex's usage limit and capacity messages.
+ * failures, the proxy's own upstream idle timeout, pi's Codex adapter, which throws a usage limit
+ * as "You have hit your ChatGPT usage limit" with no status (#185), and capacity messages.
  * Checked in this order.
  *
  * @remarks
- * pi's Codex adapter reports Codex's 429 for a ChatGPT login over its usage limit with no status:
- * "You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min." (#190). The usage-limit
- * pattern has no leading word boundary, so it also matches `usage_limit_reached` and
+ * The usage-limit pattern has no leading word boundary, so it also matches `usage_limit_reached` and
  * `subscription_sharing_usage_limit_exceeded`; it ends where a letter would follow, so "usage
- * limitations" is not one. The capacity wordings are ones pi's own retry
- * classifier treats as transient (`pi-ai/utils/retry`).
+ * limitations" is not one. The capacity wordings are the ones pi's own retry classifier treats as
+ * transient (`pi-ai/utils/retry`).
  */
 const BY_WORDING: readonly (readonly [RegExp, MappedUpstreamError])[] = [
   [
