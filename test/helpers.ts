@@ -138,6 +138,7 @@ export function testConfig(): ServerConfig {
     agenticEnabled: false,
     remoteImagesEnabled: false,
     docsUiEnabled: false,
+    statsEnabled: false,
     maxBodySize: 52428800,
     upstreamTimeoutMs: 120000,
     publicModelIdMode: 'collision-prefixed',

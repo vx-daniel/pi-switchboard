@@ -81,8 +81,28 @@ type MutableTotals = { -readonly [Field in keyof RouteTotals]: RouteTotals[Field
 
 /** The rows, keyed by `[alias, provider, model]` as JSON, so no separator can make two collide. */
 const rows = new Map<string, MutableTotals>()
+/**
+ * One update to the totals, as listeners get it: an attempt, a failure, a fallback, one upstream
+ * call's usage, or the totals cleared. The stats recorder (`src/stats/recorder.ts`) keeps them.
+ */
+export type RouteEvent =
+  | { readonly kind: 'attempt'; readonly key: RouteKey }
+  | { readonly kind: 'fallback'; readonly key: RouteKey }
+  | { readonly kind: 'failure'; readonly key: RouteKey; readonly failure: FailureClass | undefined }
+  | { readonly kind: 'usage'; readonly key: RouteKey; readonly usage: RouteUsage }
+  | { readonly kind: 'cleared' }
+
+/** One upstream call's tokens and cost, as a {@link RouteEvent} carries them. */
+export interface RouteUsage {
+  readonly inputTokens: number
+  readonly outputTokens: number
+  readonly cacheReadTokens: number
+  readonly cacheWriteTokens: number
+  readonly costUsd: number
+}
+
 /** Who is told after each update. */
-const listeners = new Set<() => void>()
+const listeners = new Set<(event: RouteEvent) => void>()
 /** When counting began, in epoch milliseconds. */
 let since = Date.now()
 
@@ -115,13 +135,15 @@ function rowFor(key: RouteKey): MutableTotals {
 }
 
 /**
- * Tells every listener the totals changed. A listener that throws is logged and skipped: the
- * request that caused the update must not fail for it.
+ * Tells every listener what changed. A listener that throws is logged and skipped: the request
+ * that caused the update must not fail for it.
+ *
+ * @param event - the update
  */
-function notify(): void {
+function notify(event: RouteEvent): void {
   for (const listener of listeners) {
     try {
-      listener()
+      listener(event)
     } catch (error) {
       totalsLogger.warn('A route totals listener threw: {errorName}', {
         errorName: error instanceof Error ? error.name : typeof error
@@ -137,7 +159,7 @@ function notify(): void {
  */
 export function recordRouteAttempt(key: RouteKey): void {
   rowFor(key).requests += 1
-  notify()
+  notify({ kind: 'attempt', key })
 }
 
 /**
@@ -152,7 +174,7 @@ export function recordRouteFailure(key: RouteKey, failure: FailureClass | undefi
   if (failure !== undefined) {
     row.failuresByClass[failure] = (row.failuresByClass[failure] ?? 0) + 1
   }
-  notify()
+  notify({ kind: 'failure', key, failure })
 }
 
 /**
@@ -162,7 +184,7 @@ export function recordRouteFailure(key: RouteKey, failure: FailureClass | undefi
  */
 export function recordRouteFallback(key: RouteKey): void {
   rowFor(key).fallbacks += 1
-  notify()
+  notify({ kind: 'fallback', key })
 }
 
 /**
@@ -173,12 +195,19 @@ export function recordRouteFallback(key: RouteKey): void {
  */
 export function recordRouteUsage(key: RouteKey, usage: Usage): void {
   const row = rowFor(key)
-  row.inputTokens += usage.input
-  row.outputTokens += usage.output
-  row.cacheReadTokens += usage.cacheRead
-  row.cacheWriteTokens += usage.cacheWrite
-  row.costUsd += usage.cost.total
-  notify()
+  const call: RouteUsage = {
+    inputTokens: usage.input,
+    outputTokens: usage.output,
+    cacheReadTokens: usage.cacheRead,
+    cacheWriteTokens: usage.cacheWrite,
+    costUsd: usage.cost.total
+  }
+  row.inputTokens += call.inputTokens
+  row.outputTokens += call.outputTokens
+  row.cacheReadTokens += call.cacheReadTokens
+  row.cacheWriteTokens += call.cacheWriteTokens
+  row.costUsd += call.costUsd
+  notify({ kind: 'usage', key, usage: call })
 }
 
 /**
@@ -252,11 +281,11 @@ export function routeTotalsSince(): number {
 /**
  * Subscribes to updates.
  *
- * @param listener - called after every update, with no arguments; read {@link routeTotals} for the
+ * @param listener - called after every update with what changed; read {@link routeTotals} for the
  *   new values
  * @returns a function that unsubscribes the listener
  */
-export function onRouteTotalsChange(listener: () => void): () => void {
+export function onRouteTotalsChange(listener: (event: RouteEvent) => void): () => void {
   listeners.add(listener)
   return () => {
     listeners.delete(listener)
@@ -270,5 +299,5 @@ export function onRouteTotalsChange(listener: () => void): () => void {
 export function clearRouteTotals(): void {
   rows.clear()
   since = Date.now()
-  notify()
+  notify({ kind: 'cleared' })
 }

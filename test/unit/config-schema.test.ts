@@ -213,6 +213,7 @@ describe('normalizeConfig', () => {
       authToken: 'tok',
       remoteImages: true,
       docsUi: true,
+      stats: false,
       maxBodySizeMb: 100,
       upstreamTimeoutSec: 300,
       publicModelIdMode: 'always-prefixed',

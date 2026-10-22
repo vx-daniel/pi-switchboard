@@ -29,6 +29,7 @@ import {
 } from '@proxy/logging'
 import { getAvailableModels } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
+import { recordStatsToFile } from '@proxy/stats/recorder'
 
 /** Logger for process lifecycle (`server` category). */
 const lifecycleLogger = proxyLogger('server')
@@ -57,6 +58,11 @@ export const SERVER_ARGS = {
     description:
       'Serve the Swagger UI docs page at /docs (off by default; its scripts load from a CDN)'
   },
+  'stats': {
+    type: 'boolean',
+    description:
+      'Keep per-minute traffic stats in pi-switchboard-stats.sqlite in pi’s agent dir, for the console (on by default; --no-stats turns it off)'
+  },
   'max-body-size': {
     type: 'string',
     description: 'Maximum request body size in MB (default: from config or 50)'
@@ -79,6 +85,7 @@ export interface CliArgs {
   'auth-token'?: string | undefined
   'remote-images'?: boolean | undefined
   'docs-ui'?: boolean | undefined
+  'stats'?: boolean | undefined
   'max-body-size'?: string | undefined
   'upstream-timeout'?: string | undefined
   'log-level'?: string | undefined
@@ -149,6 +156,9 @@ function buildCliOverrides(args: CliArgs): CliOverrides {
   }
   if (args['docs-ui'] !== undefined) {
     cli.docsUi = args['docs-ui']
+  }
+  if (args.stats !== undefined) {
+    cli.stats = args.stats
   }
   const mb = parsePositiveIntArg('max-body-size', args['max-body-size'])
   if (mb !== undefined) cli.maxBodySizeMb = mb
@@ -259,6 +269,7 @@ export function logEffectiveConfig(config: ServerConfig): void {
     agenticEnabled: config.agenticEnabled,
     remoteImagesEnabled: config.remoteImagesEnabled,
     docsUiEnabled: config.docsUiEnabled,
+    statsEnabled: config.statsEnabled,
     maxBodySize: config.maxBodySize,
     upstreamTimeoutMs: config.upstreamTimeoutMs,
     publicModelIdMode: config.publicModelIdMode,
@@ -313,5 +324,8 @@ export async function listen(config: ServerConfig): Promise<ServerType> {
     modelCount: getAvailableModels().length,
     logLevel: config.logLevel
   })
+  // Written until the server closes, or the process exits without closing it.
+  const stopStats = config.statsEnabled ? recordStatsToFile() : undefined
+  if (stopStats !== undefined) server.once('close', stopStats)
   return server
 }

@@ -20,6 +20,7 @@
  *   openai.schema      JSON Schema → TypeBox       openai.images      remote image fetches
  *   pi.registry        pi's model runtime          pi.complete        upstream calls
  *   sync.zed           Zed settings sync
+ *   stats              the stats store and recorder (src/stats/)
  *   extension          the pi extension's command handler (extensions/proxy/index.ts)
  *   extension.*        the pi extension's parts (process, settings, reports, zed-sync)
  *
