@@ -47,11 +47,13 @@ import {
   type ProviderCredentialStatus,
   summarizeAuthError
 } from '@proxy/pi/registry'
+import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
+import { statsRows } from '@proxy/tui/stats-view'
 import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
 
@@ -72,7 +74,7 @@ const CHROME_ROWS = 3
 const COLUMNS = { provider: 28, login: 8, source: 16, models: 4 } as const
 
 /** The console's views. */
-type View = 'logs' | 'accounts'
+type View = 'logs' | 'accounts' | 'stats'
 
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
@@ -185,7 +187,8 @@ function headerLine(config: ServerConfig, status: Status | undefined): string {
 function tabsLine(view: View): string {
   const tabs: readonly (readonly [View, string])[] = [
     ['logs', ' 1 Logs '],
-    ['accounts', ' 2 Accounts ']
+    ['accounts', ' 2 Accounts '],
+    ['stats', ' 3 Stats ']
   ]
   const shown = tabs.map(([tab, label]) =>
     tab === view ? styleText(['bold', 'inverse'], label) : label
@@ -196,7 +199,8 @@ function tabsLine(view: View): string {
 /** The footer's key hints for each view. */
 const FOOTER: Readonly<Record<View, string>> = {
   logs: ' ↑↓ PgUp PgDn scroll · End follow · n login · x logout · q quit (stops the proxy)',
-  accounts: ' v verify · n login · x logout · q quit (stops the proxy)'
+  accounts: ' v verify · n login · x logout · q quit (stops the proxy)',
+  stats: ' per alias and served model, since the proxy started · q quit (stops the proxy)'
 }
 
 /**
@@ -250,6 +254,25 @@ function accountRows(accounts: readonly ProviderCredentialStatus[], height: numb
 }
 
 /**
+ * Renders the current view's body.
+ *
+ * @param context - the console
+ * @param size - the space available
+ * @param size.height - rows
+ * @param size.width - columns
+ * @returns the body's rows
+ */
+function viewRows(
+  context: ConsoleContext,
+  size: { readonly height: number; readonly width: number }
+): string[] {
+  const { state, logs } = context
+  if (state.view === 'logs') return logViewRows(state.logView, logs, size.height)
+  if (state.view === 'accounts') return accountRows(state.accounts, size.height)
+  return statsRows(routeTotals(), routeTotalsSince(), size)
+}
+
+/**
  * Creates the console's root component: header, tab bar, the current view, footer.
  *
  * @param context - the console
@@ -265,15 +288,11 @@ function createRootView(
   return {
     render(width) {
       const height = Math.max(1, terminal.rows - CHROME_ROWS)
-      const { state, config, logs } = context
-      const body =
-        state.view === 'logs'
-          ? logViewRows(state.logView, logs, height)
-          : accountRows(state.accounts, height)
+      const { state, config } = context
       const rows = [
         headerLine(config, state.status),
         tabsLine(state.view),
-        ...body,
+        ...viewRows(context, { height, width }),
         FOOTER[state.view]
       ]
       return rows.map((row) => truncateToWidth(row, width))
@@ -429,6 +448,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     [Key.ctrl('c'), () => context.quit()],
     ['1', () => (state.view = 'logs')],
     ['2', () => (state.view = 'accounts')],
+    ['3', () => (state.view = 'stats')],
     ['n', () => openLogin(context)],
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
@@ -455,14 +475,15 @@ function settleable(): { promise: Promise<void>; settle: () => void } {
 }
 
 /**
- * Starts what keeps the screen current: a redraw on every log line, the status read every few
- * seconds, and stray stderr writes sent to the log view.
+ * Starts what keeps the screen current: a redraw on every log line and every change to the route
+ * totals, the status read every few seconds, and stray stderr writes sent to the log view.
  *
  * @param context - the console
- * @returns a function that stops all three
+ * @returns a function that stops them all
  */
 function startUpdates(context: ConsoleContext): () => void {
-  const unsubscribe = context.logs.onChange(() => context.tui.requestRender())
+  const unsubscribeLogs = context.logs.onChange(() => context.tui.requestRender())
+  const unsubscribeTotals = onRouteTotalsChange(() => context.tui.requestRender())
   const timer = setInterval(
     () => inBackground(context.refresh(), 'Reading the status'),
     STATUS_REFRESH_MS
@@ -470,7 +491,8 @@ function startUpdates(context: ConsoleContext): () => void {
   const restoreStderr = captureWrites(process.stderr, context.logs)
   return () => {
     clearInterval(timer)
-    unsubscribe()
+    unsubscribeLogs()
+    unsubscribeTotals()
     restoreStderr()
   }
 }

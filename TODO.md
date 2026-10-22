@@ -410,7 +410,7 @@ since the rename; each issue holds the detailed checklist.
         with `SHA256SUMS` (ported from #86)
   - [x] Opt-in `pi-switchboard tui` console: logs, status, accounts, and logins through pi's own
         screens, in one process with the server
-  - [ ] The console's per-route stats, once #70's totals land
+  - [x] The console's per-route stats from #70's totals
 
 ## Phase 5 — Routing across pi's logins
 
