@@ -193,7 +193,8 @@ function logUnusableProxyAuth(invalid: InvalidAuthCause): void {
 
 /** Where log lines go, and in which format; the CLI picks them from its flags, the console its own. */
 export interface LogOutput {
-  readonly format: LogFormat
+  /** The format: the CLI's `pretty` or `json`, or the console's narrow `console` layout. */
+  readonly format: LogFormat | 'console'
   /** Where formatted lines go; `undefined` writes to stderr. */
   readonly write?: ((line: string) => void) | undefined
 }

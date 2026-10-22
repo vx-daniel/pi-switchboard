@@ -49,6 +49,7 @@ import {
   type LoggerConfig,
   type LogLevel,
   type Sink,
+  type LogRecord,
   type TextFormatter
 } from '@logtape/logtape'
 import { getPrettyFormatter } from '@logtape/pretty'
@@ -139,16 +140,42 @@ export function resolveLogFormat(
 }
 
 /**
+ * The pretty format for the console's log view (#61): the time only, a narrower category without
+ * the package's own root, so a line's message starts by column 40 and fits a narrow terminal.
+ */
+const consolePretty = getPrettyFormatter({
+  timestamp: 'time',
+  timeZone: null,
+  categoryWidth: 16,
+  categoryTruncate: 'middle',
+  value: 'bare',
+  wordWrap: false
+})
+
+/**
+ * Formats a record for the console's log view: {@link consolePretty}, with the category under the
+ * package's root (`server`, not `pi-switchboard·server`).
+ *
+ * @param record - The record.
+ * @returns The formatted line.
+ */
+function consoleFormatter(record: LogRecord): string {
+  const own = record.category[0] === ROOT_CATEGORY
+  return consolePretty(own ? { ...record, category: record.category.slice(1) } : record)
+}
+
+/**
  * Returns the LogTape formatter for a format.
  *
- * @param format - The format to render records in.
+ * @param format - The format to render records in; `console` is the console's narrow pretty one.
  * @returns LogTape's JSON Lines formatter, or a pretty formatter in local time.
  */
-function formatterFor(format: LogFormat): TextFormatter {
+function formatterFor(format: LogFormat | 'console'): TextFormatter {
   // JSON keeps LogTape's UTC `@timestamp`: unambiguous for anything that parses or ships logs. It
   // also keeps LogTape's quoted string values in `message`, on purpose: some come from clients, and
   // the quotes keep a crafted one from passing for message text (PLAN "Observability", #159).
   if (format === 'json') return jsonLinesFormatter
+  if (format === 'console') return consoleFormatter
   // A person reads local time: `timeZone: null` is the system zone (the `TZ` variable in a
   // container), with the offset shown so a line is never ambiguous. `bare` prints strings without
   // quotes: a reader wants `GET /v1/models`, not `'GET'`.
@@ -189,7 +216,8 @@ function loggerConfigs(level: LogLevel, sink: string): LoggerConfig<string, stri
 /** Options for {@link configureLogging}. */
 export interface LoggingOptions {
   readonly level: LogLevel
-  readonly format: LogFormat
+  /** The format; `console` is the console's narrow pretty layout (its log view only). */
+  readonly format: LogFormat | 'console'
   /**
    * Where formatted lines go. Default: `process.stderr.write`, which Node performs synchronously
    * for a terminal or a file and asynchronously for a pipe (POSIX): a piped reader that stops
