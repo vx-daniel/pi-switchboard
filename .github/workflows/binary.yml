@@ -169,7 +169,7 @@ jobs:
             if printf '%s\n' "$present" | grep -Fxq "$asset"; then
               gh release download "$TAG" --pattern "$asset" --dir .published
               if ! cmp -s "$asset" ".published/$asset"; then
-                echo "::error::$asset on $TAG differs from this build; an asset is never overwritten (delete it to rebuild)"
+                echo "::error::$asset on $TAG differs from this build: the tree or the Bun version changed since it was uploaded, or Bun's output was not reproducible. An asset is never overwritten; delete $TAG's binary assets to rebuild them"
                 exit 1
               fi
               echo "$asset: already on $TAG, identical"
