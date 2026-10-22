@@ -132,6 +132,17 @@ export function internalError(): OpenAIError {
 }
 
 /**
+ * Builds the body for usage that can't be read: stats are off, or the stats file won't open or
+ * read.
+ *
+ * @param message - why, without a path or the underlying error's text
+ * @returns the `server_error` body with code `stats_unavailable`
+ */
+export function statsUnavailable(message: string): OpenAIError {
+  return makeError(message, 'server_error', null, 'stats_unavailable')
+}
+
+/**
  * Builds a `server_error` body for an upstream failure.
  *
  * @param message - the fixed message the client sees; never the upstream message

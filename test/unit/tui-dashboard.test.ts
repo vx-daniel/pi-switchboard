@@ -67,6 +67,7 @@ function snapshot(parts: Partial<DashboardData>): DashboardData {
     bucketMinutes: 1,
     timeline: [],
     models: [],
+    aliases: [],
     errors: NO_ERRORS,
     ...parts
   }
@@ -125,7 +126,7 @@ describe('createDashboardSource', () => {
    * @returns the store and its query count
    */
   function countingStore(): {
-    store: Pick<StatsStore, 'timeline' | 'models' | 'errors'>
+    store: Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors'>
     reads: () => number
   } {
     let count = 0
@@ -136,6 +137,7 @@ describe('createDashboardSource', () => {
           return []
         },
         models: () => [],
+        aliases: () => [],
         errors: () => NO_ERRORS
       },
       reads: () => count
@@ -282,6 +284,22 @@ describe('dashboardRows', () => {
     expect(rows.some((row) => row.includes('timeout 1'))).toBe(true)
   })
 
+  // Catches the ALIASES panel hidden when routes were used (the per-alias cost is the point), or
+  // shown for direct requests only, where it would repeat the totals.
+  test('the ALIASES panel shows when a request named an alias, with direct requests labelled', () => {
+    const coding = { ...modelStats({ model: '', requests: 3, fallbacks: 1 }), alias: 'coding' }
+    const direct = { ...modelStats({ model: '', requests: 2 }), alias: '' }
+    const size = { height: 40, width: 120 }
+
+    const withAlias = plainRows(snapshot({ aliases: [coding, direct] }), size)
+    const directOnly = plainRows(snapshot({ aliases: [direct] }), size)
+
+    expect(withAlias.some((row) => row.includes('ALIASES'))).toBe(true)
+    expect(withAlias.some((row) => /coding\s+3\s+0\s+1 /.test(row))).toBe(true)
+    expect(withAlias.some((row) => /direct\s+2 /.test(row))).toBe(true)
+    expect(directOnly.some((row) => row.includes('ALIASES'))).toBe(false)
+  })
+
   // Catches an empty window rendering a blank table the operator can't tell from a broken one.
   test('a window without requests says so', () => {
     const text = plainRows(snapshot({}), { height: 30, width: 80 }).join('\n')
@@ -320,6 +338,7 @@ describe('openStatsView', () => {
         throw new Error('database disk image is malformed')
       },
       models: () => [],
+      aliases: () => [],
       errors: () => NO_ERRORS,
       close: () => undefined
     }))

@@ -17,13 +17,16 @@ import { proxyLogger } from '@proxy/logging'
 import { routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { statsFilePath } from '@proxy/stats/recorder'
 import {
+  type AliasStats,
   type ErrorStats,
   type MinuteRange,
   type ModelStats,
   openStatsStore,
   type StatsStore,
-  type TimelineBucket
+  type TimelineBucket,
+  type UsageStats
 } from '@proxy/stats/store'
+import { MS_PER_MINUTE, STATS_WINDOWS, type StatsWindow, windowMinutes } from '@proxy/stats/windows'
 import {
   compactCount,
   compactDuration,
@@ -38,26 +41,16 @@ import { type ConsoleColor, highlight, paint } from '@proxy/tui/theme'
 /** Logger for the console's own actions. */
 const consoleLogger = proxyLogger('tui')
 
-/** The windows the dashboard shows, in the order the window line lists them. */
-const STATS_WINDOWS = ['today', 'week', 'all'] as const
-
-/** A window of the stats file's history. */
-export type StatsWindow = (typeof STATS_WINDOWS)[number]
-
-/** Milliseconds in a minute: the stats are kept per minute. */
-const MS_PER_MINUTE = 60_000
 /** Minutes in an hour. */
 const MINUTES_PER_HOUR = 60
-/** Minutes in a day. */
-const MINUTES_PER_DAY = 1440
-/** Days in each window that isn't today; `all` is the stats file's retention. */
-const WINDOW_DAYS = { week: 7, all: 30 } as const
 /** How long a snapshot is reused for one window and width, in milliseconds. */
 const SNAPSHOT_MS = 5000
 /** Rows the timeline's bars take at most and at least. */
 const CHART_ROWS = { most: 16, least: 3 } as const
 /** Model rows the layout makes room for before the timeline takes the rest. */
 const MODEL_ROWS_WANTED = 6
+/** Alias rows the layout makes room for, when any request named an alias. */
+const ALIAS_ROWS_WANTED = 4
 /** The bar heights, in eighths of a row. */
 const EIGHTHS = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'] as const
 /** Eighths in a full cell. */
@@ -66,7 +59,7 @@ const FULL_CELL = 8
 const PERCENT = 100
 /** Decimal places a cost is shown with. */
 const COST_DECIMALS = 2
-/** The dashboard's panels: OVERVIEW, TIMELINE, MODELS and ERRORS. */
+/** The dashboard's panels that always show; ALIASES shows when a request named an alias. */
 const PANELS = ['OVERVIEW', 'TIMELINE', 'MODELS', 'ERRORS'] as const
 /** Rows a panel's frame takes: its top and bottom borders. */
 const BORDER_ROWS = 2
@@ -77,28 +70,33 @@ const FRAME_ROWS = PANELS.length * BORDER_ROWS
  * lines, the timeline's peak and axis lines, the models' heading and the errors' lines.
  */
 const FIXED_LINES = { window: 1, overview: 2, timeline: 2, modelsHeading: 1, errors: 2 } as const
-/** The model column's narrowest width. */
-const MODEL_LABEL_LEAST = 12
-/** Which of the models table's number columns is the failures. */
+/** Rows the ALIASES panel takes besides its alias rows: its frame and its heading. */
+const ALIAS_PANEL_ROWS = BORDER_ROWS + 1
+/** The label column's narrowest width. */
+const LABEL_LEAST = 12
+/** Which of the usage table's number columns is the failures. */
 const FAILED_COLUMN = 1
+/** What the ALIASES panel calls requests that named a model directly. */
+const DIRECT_LABEL = 'direct'
 
-/** The models table's number columns. */
-const MODEL_COLUMNS: readonly {
+/** The usage table's number columns, for models and aliases alike. */
+const USAGE_COLUMNS: readonly {
   readonly title: string
   readonly width: number
-  readonly cell: (model: ModelStats) => string
+  readonly cell: (usage: UsageStats) => string
 }[] = [
-  { title: 'req', width: 7, cell: (model) => compactCount(model.requests) },
-  { title: 'fail', width: 5, cell: (model) => compactCount(model.failed) },
-  { title: 'avg', width: 7, cell: (model) => optionalLatency(model.averageMs) },
-  { title: 'slow', width: 7, cell: (model) => latency(model.slowestMs) },
-  { title: '1st', width: 7, cell: (model) => optionalLatency(model.averageFirstEventMs) },
+  { title: 'req', width: 7, cell: (usage) => compactCount(usage.requests) },
+  { title: 'fail', width: 5, cell: (usage) => compactCount(usage.failed) },
+  { title: 'fb', width: 4, cell: (usage) => compactCount(usage.fallbacks) },
+  { title: 'avg', width: 7, cell: (usage) => optionalLatency(usage.averageMs) },
+  { title: 'slow', width: 7, cell: (usage) => latency(usage.slowestMs) },
+  { title: '1st', width: 7, cell: (usage) => optionalLatency(usage.averageFirstEventMs) },
   {
     title: 'tok in/out',
     width: 13,
-    cell: (model) => `${compactCount(model.inputTokens)}/${compactCount(model.outputTokens)}`
+    cell: (usage) => `${compactCount(usage.inputTokens)}/${compactCount(usage.outputTokens)}`
   },
-  { title: 'cost', width: 8, cell: (model) => `$${model.costUsd.toFixed(COST_DECIMALS)}` }
+  { title: 'cost', width: 8, cell: (usage) => `$${usage.costUsd.toFixed(COST_DECIMALS)}` }
 ]
 
 /** What one render of the dashboard shows. */
@@ -110,6 +108,8 @@ export interface DashboardData {
   readonly bucketMinutes: number
   readonly timeline: readonly TimelineBucket[]
   readonly models: readonly ModelStats[]
+  /** Each alias's numbers, requests that named a model directly under ''. */
+  readonly aliases: readonly AliasStats[]
   readonly errors: ErrorStats
 }
 
@@ -126,16 +126,9 @@ export function windowRange(
   now: number,
   columns: number
 ): { range: MinuteRange; bucketMinutes: number } {
-  const toMinute = Math.floor(now / MS_PER_MINUTE) + 1
-  let fromMinute = toMinute - WINDOW_DAYS.all * MINUTES_PER_DAY
-  if (window === 'week') fromMinute = toMinute - WINDOW_DAYS.week * MINUTES_PER_DAY
-  else if (window === 'today') {
-    const midnight = new Date(now)
-    midnight.setHours(0, 0, 0, 0)
-    fromMinute = Math.floor(midnight.getTime() / MS_PER_MINUTE)
-  }
-  const bucketMinutes = Math.max(1, Math.ceil((toMinute - fromMinute) / Math.max(1, columns)))
-  return { range: { fromMinute, toMinute }, bucketMinutes }
+  const range = windowMinutes(window, now)
+  const span = range.toMinute - range.fromMinute
+  return { range, bucketMinutes: Math.max(1, Math.ceil(span / Math.max(1, columns))) }
 }
 
 /**
@@ -157,7 +150,7 @@ function chartColumns(width: number): number {
  * @returns a function from a window and the chart's width to the snapshot
  */
 export function createDashboardSource(
-  store: Pick<StatsStore, 'timeline' | 'models' | 'errors'>,
+  store: Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors'>,
   now: () => number = Date.now
 ): (window: StatsWindow, columns: number) => DashboardData {
   let cached: { key: string; at: number; data: DashboardData } | undefined
@@ -172,6 +165,7 @@ export function createDashboardSource(
       bucketMinutes,
       timeline: store.timeline(range, bucketMinutes),
       models: store.models(range),
+      aliases: store.aliases(range),
       errors: store.errors(range)
     }
     cached = { key, at, data }
@@ -344,28 +338,34 @@ function timelineLines(data: DashboardData, rows: number, width: number): string
 }
 
 /**
- * Renders the MODELS panel's lines: a heading, then one row per served model, busiest first, fitted
- * to the room left.
+ * Renders a usage table's lines (MODELS, ALIASES): a heading, then one row per entry, busiest
+ * first, fitted to the room left.
  *
- * @param models - the models
- * @param room - the rows the models may take
+ * @param heading - the label column's title
+ * @param entries - each row's label and numbers
+ * @param room - the rows the entries may take
  * @param width - the content's columns
  * @returns the lines
  */
-function modelLines(models: readonly ModelStats[], room: number, width: number): string[] {
-  const numbers = MODEL_COLUMNS.reduce((total, column) => total + column.width + 1, 0)
-  const labelWidth = Math.max(MODEL_LABEL_LEAST, width - numbers)
-  const titles = MODEL_COLUMNS.map((column) => column.title.padStart(column.width)).join(' ')
-  const heading = paint('dim', `${fitLabel('model', labelWidth)} ${titles}`)
-  if (models.length === 0) return [heading, paint('dim', 'No requests in this window.')]
-  const rows = models.map((model) => {
-    const cells = MODEL_COLUMNS.map((column) => column.cell(model).padStart(column.width))
-    if (model.failed > 0) cells[FAILED_COLUMN] = paint('error', cells[FAILED_COLUMN] ?? '')
-    return `${fitLabel(model.model, labelWidth)} ${cells.join(' ')}`
+function usageLines(
+  heading: string,
+  entries: readonly { readonly label: string; readonly usage: UsageStats }[],
+  room: number,
+  width: number
+): string[] {
+  const numbers = USAGE_COLUMNS.reduce((total, column) => total + column.width + 1, 0)
+  const labelWidth = Math.max(LABEL_LEAST, width - numbers)
+  const titles = USAGE_COLUMNS.map((column) => column.title.padStart(column.width)).join(' ')
+  const head = paint('dim', `${fitLabel(heading, labelWidth)} ${titles}`)
+  if (entries.length === 0) return [head, paint('dim', 'No requests in this window.')]
+  const rows = entries.map(({ label, usage }) => {
+    const cells = USAGE_COLUMNS.map((column) => column.cell(usage).padStart(column.width))
+    if (usage.failed > 0) cells[FAILED_COLUMN] = paint('error', cells[FAILED_COLUMN] ?? '')
+    return `${fitLabel(label, labelWidth)} ${cells.join(' ')}`
   })
-  if (rows.length <= room) return [heading, ...rows]
+  if (rows.length <= room) return [head, ...rows]
   const kept = Math.max(0, room - 1)
-  return [heading, ...rows.slice(0, kept), paint('dim', `+${String(rows.length - kept)} more`)]
+  return [head, ...rows.slice(0, kept), paint('dim', `+${String(rows.length - kept)} more`)]
 }
 
 /**
@@ -387,9 +387,10 @@ function errorLines(errors: ErrorStats, width: number): string[] {
 }
 
 /**
- * Renders the dashboard: the window line, then OVERVIEW, TIMELINE, MODELS and ERRORS. The timeline
- * takes the room the models don't need, between 3 and 16 rows of bars; on a short screen the models
- * give way first, then the bars, then the bottom is cut.
+ * Renders the dashboard: the window line, then OVERVIEW, TIMELINE, MODELS, ALIASES (when a request
+ * named an alias) and ERRORS. The timeline takes the room the tables don't need, between 3 and 16
+ * rows of bars; on a short screen the tables give way first, then the bars, then the bottom is
+ * cut.
  *
  * @param data - the snapshot
  * @param size - the space available
@@ -402,18 +403,33 @@ export function dashboardRows(
   size: { readonly height: number; readonly width: number }
 ): string[] {
   const inner = Math.max(1, size.width - FRAME_COLUMNS)
-  const fixed = FRAME_ROWS + Object.values(FIXED_LINES).reduce((total, rows) => total + rows, 0)
+  // Only direct requests: the table would repeat the totals, so it isn't shown.
+  const aliases = data.aliases.some((alias) => alias.alias !== '') ? data.aliases : []
+  const aliasPanel = aliases.length === 0 ? 0 : ALIAS_PANEL_ROWS
+  const fixed =
+    FRAME_ROWS + aliasPanel + Object.values(FIXED_LINES).reduce((total, rows) => total + rows, 0)
   const modelsWanted = Math.min(Math.max(1, data.models.length), MODEL_ROWS_WANTED)
+  const aliasesWanted = Math.min(aliases.length, ALIAS_ROWS_WANTED)
   const chart = Math.min(
     CHART_ROWS.most,
-    Math.max(CHART_ROWS.least, size.height - fixed - modelsWanted)
+    Math.max(CHART_ROWS.least, size.height - fixed - modelsWanted - aliasesWanted)
   )
-  const modelRoom = Math.max(1, size.height - fixed - chart)
+  const tableRoom = Math.max(1, size.height - fixed - chart)
+  const aliasRoom = aliases.length === 0 ? 0 : Math.max(1, Math.min(aliasesWanted, tableRoom - 1))
+  const modelRoom = Math.max(1, tableRoom - aliasRoom)
+  const modelEntries = data.models.map((model) => ({ label: model.model, usage: model }))
+  const aliasEntries = aliases.map((alias) => ({
+    label: alias.alias === '' ? DIRECT_LABEL : alias.alias,
+    usage: alias
+  }))
   const rows = [
     windowLine(data, size.width),
     ...panel('OVERVIEW', overviewLines(data), size.width),
     ...panel('TIMELINE', timelineLines(data, chart, inner), size.width),
-    ...panel('MODELS', modelLines(data.models, modelRoom, inner), size.width),
+    ...panel('MODELS', usageLines('model', modelEntries, modelRoom, inner), size.width),
+    ...(aliases.length === 0
+      ? []
+      : panel('ALIASES', usageLines('alias', aliasEntries, aliasRoom, inner), size.width)),
     ...panel('ERRORS', errorLines(data.errors, inner), size.width)
   ]
   return rows.slice(0, Math.max(0, size.height))
@@ -434,7 +450,7 @@ export interface StatsView {
 }
 
 /** The store's methods the Stats view uses. */
-type DashboardStore = Pick<StatsStore, 'timeline' | 'models' | 'errors' | 'close'>
+type DashboardStore = Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors' | 'close'>
 
 /**
  * Renders the totals since the proxy started (#70), under a line that says why the dashboard isn't

@@ -26,6 +26,7 @@ import { openAIChatCompletionSchema } from '@proxy/openai/responses'
 import { chatCompletionRequestSchema } from '@proxy/openai/schemas'
 import { sseChunkSchema } from '@proxy/openai/sse'
 import { openAIErrorSchema } from '@proxy/server/errors'
+import { usageSchema } from '@proxy/server/usage'
 import { type DescribeRouteOptions, type GenerateSpecOptions, resolver } from 'hono-openapi'
 import * as z from 'zod'
 
@@ -86,6 +87,22 @@ export const credentialsQuerySchema = z.object({
     .union([z.string().trim(), z.array(z.string().trim())])
     .optional()
     .meta({ description: '`true` asks pi to resolve each credential now.' })
+})
+
+/**
+ * The query of `GET /v1/switchboard/usage`. Any string is accepted here and the route judges it,
+ * so an unknown window is refused in OpenAI's error shape (`400`, `param: window`), as with
+ * `verify` above.
+ */
+export const usageQuerySchema = z.object({
+  window: z
+    .union([z.string().trim(), z.array(z.string().trim())])
+    .optional()
+    .meta({
+      description:
+        '`today` (from local midnight; the default), `week` (the last 7 days) or `all` (the ' +
+        'last 30 days, all the stats file keeps).'
+    })
 })
 
 /** The prefix of the proxy's own routes, outside OpenAI's API (constitution, principle I). */
@@ -247,6 +264,25 @@ export const listModelCapabilitiesDescription: DescribeRouteOptions = {
   responses: {
     200: jsonResponse('Each exposed model, with its capabilities.', piModelListSchema),
     401: UNAUTHORIZED
+  }
+}
+
+/** `GET /v1/switchboard/usage`. */
+export const usageDescription: DescribeRouteOptions = {
+  operationId: 'getUsage',
+  tags: [SWITCHBOARD_TAG],
+  summary: 'Usage over a window, from the stats file',
+  description:
+    "Not OpenAI's: requests, timings, attempts, tokens and cost per served model and per alias, " +
+    'failures by class, rejected requests by status, and a timeline, from the stats the proxy ' +
+    'keeps. Routes and counts only: never message content, `user` or a credential.',
+  responses: {
+    200: jsonResponse('The usage over the window.', usageSchema),
+    400: errorResponse('`window` is not `today`, `week` or `all`.'),
+    401: UNAUTHORIZED,
+    503: errorResponse(
+      'Stats are off (`--no-stats`), or the stats file could not be read (`stats_unavailable`).'
+    )
   }
 }
 

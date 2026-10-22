@@ -176,10 +176,9 @@ export interface TimelineBucket {
   readonly rejected: number
 }
 
-/** One served model's numbers over a range. */
-export interface ModelStats {
-  readonly model: string
-  /** Finished requests it served, not counting rejected ones. */
+/** Requests, timings, attempts, tokens and cost over a range, for one model or one alias. */
+export interface UsageStats {
+  /** Finished requests, not counting rejected ones. */
   readonly requests: number
   readonly failed: number
   readonly left: number
@@ -194,6 +193,17 @@ export interface ModelStats {
   readonly outputTokens: number
   readonly cacheTokens: number
   readonly costUsd: number
+}
+
+/** One served model's numbers over a range. */
+export interface ModelStats extends UsageStats {
+  readonly model: string
+}
+
+/** One alias's numbers over a range: every model that served it, fallbacks included. */
+export interface AliasStats extends UsageStats {
+  /** The alias the requests named; '' for requests that named a model directly. */
+  readonly alias: string
 }
 
 /** What went wrong over a range. */
@@ -233,6 +243,13 @@ export interface StatsStore {
    * @returns one entry per model, most requests first
    */
   models(range: MinuteRange): ModelStats[]
+  /**
+   * Adds up each alias's numbers, with requests that named a model directly under ''.
+   *
+   * @param range - the minutes
+   * @returns one entry per alias, most requests first
+   */
+  aliases(range: MinuteRange): AliasStats[]
   /**
    * Adds up what went wrong.
    *
@@ -378,60 +395,70 @@ function timelineOf(db: DatabaseSync, range: MinuteRange, bucketMinutes: number)
 }
 
 /**
- * Adds up each served model's requests and timings, then its attempts, tokens and cost.
+ * Adds up requests and timings, then attempts, tokens and cost, grouped by served model or by
+ * alias.
+ *
+ * @remarks
+ * `column` is one of two fixed names, never input, so it is written into the SQL; both tables
+ * have both columns. By alias, a request counts once under the alias it named, and its attempts
+ * count under that alias whichever model in a fallback chain made them.
  *
  * @param db - the database
  * @param range - the minutes
- * @returns one entry per model, most requests first
+ * @param column - what to group by
+ * @returns each model or alias with its numbers, most requests first
  */
-function modelsOf(db: DatabaseSync, range: MinuteRange): ModelStats[] {
+function usageBy(
+  db: DatabaseSync,
+  range: MinuteRange,
+  column: 'model' | 'alias'
+): [string, UsageStats][] {
   const requests = db
     .prepare(
-      `SELECT model, sum(requests) AS requests,
+      `SELECT ${column} AS name, sum(requests) AS requests,
         sum(CASE outcome WHEN 'failed' THEN requests ELSE 0 END) AS failed,
         sum(CASE outcome WHEN 'left' THEN requests ELSE 0 END) AS left_count,
         sum(duration_ms_total) AS duration_total, max(duration_ms_max) AS duration_max,
         sum(first_event_ms_total) AS first_total, sum(first_event_count) AS first_count
       FROM request_minutes WHERE minute >= ? AND minute < ? AND outcome != 'rejected'
-      GROUP BY model`
+      GROUP BY ${column}`
     )
     .all(range.fromMinute, range.toMinute)
   const attempts = db
     .prepare(
-      `SELECT model, sum(attempts) AS attempts, sum(fallbacks) AS fallbacks,
+      `SELECT ${column} AS name, sum(attempts) AS attempts, sum(fallbacks) AS fallbacks,
         sum(input_tokens) AS input, sum(output_tokens) AS output,
         sum(cache_read_tokens) + sum(cache_write_tokens) AS cache, sum(cost_usd) AS cost
-      FROM attempt_minutes WHERE minute >= ? AND minute < ? GROUP BY model`
+      FROM attempt_minutes WHERE minute >= ? AND minute < ? GROUP BY ${column}`
     )
     .all(range.fromMinute, range.toMinute)
-  const attemptsByModel = new Map(attempts.map((row) => [textOf(row, 'model'), row]))
-  const models = new Set([...requests, ...attempts].map((row) => textOf(row, 'model')))
-  const requestsByModel = new Map(requests.map((row) => [textOf(row, 'model'), row]))
-  return [...models]
-    .map((model) =>
-      modelStats(model, requestsByModel.get(model) ?? {}, attemptsByModel.get(model) ?? {})
-    )
+  const attemptsByName = new Map(attempts.map((row) => [textOf(row, 'name'), row]))
+  const requestsByName = new Map(requests.map((row) => [textOf(row, 'name'), row]))
+  const groups = new Set([...requestsByName.keys(), ...attemptsByName.keys()])
+  return [...groups]
+    .map((group): [string, UsageStats] => [
+      group,
+      usageStats(requestsByName.get(group) ?? {}, attemptsByName.get(group) ?? {})
+    ])
     .toSorted(
-      (left, right) => right.requests - left.requests || left.model.localeCompare(right.model)
+      ([leftName, left], [rightName, right]) =>
+        right.requests - left.requests || leftName.localeCompare(rightName)
     )
 }
 
 /**
- * Builds one model's numbers from its two query rows.
+ * Builds one model's or alias's numbers from its two query rows.
  *
- * @param model - the model
  * @param requests - its row of finished requests, or `{}` for none
  * @param attempts - its row of attempts, or `{}` for none
  * @returns the numbers
  */
-function modelStats(
-  model: string,
+function usageStats(
   requests: Readonly<Record<string, SQLOutputValue>>,
   attempts: Readonly<Record<string, SQLOutputValue>>
-): ModelStats {
+): UsageStats {
   const served = numberOf(requests, 'requests')
   return {
-    model,
     requests: served,
     failed: numberOf(requests, 'failed'),
     left: numberOf(requests, 'left_count'),
@@ -529,7 +556,8 @@ export function openStatsStore(path: string): StatsStore {
       })
     },
     timeline: (range, bucketMinutes) => timelineOf(db, range, bucketMinutes),
-    models: (range) => modelsOf(db, range),
+    models: (range) => usageBy(db, range, 'model').map(([model, usage]) => ({ model, ...usage })),
+    aliases: (range) => usageBy(db, range, 'alias').map(([alias, usage]) => ({ alias, ...usage })),
     errors: (range) => errorsOf(db, range),
     close: () => {
       if (!open) return
