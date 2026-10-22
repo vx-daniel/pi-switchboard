@@ -34,9 +34,11 @@ import {
   TUI_KEYBINDINGS
 } from '@earendil-works/pi-tui'
 import type { ServerConfig } from '@proxy/config/env'
+import type { Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
+import { providerQuota } from '@proxy/pi/quota'
 import {
   getAvailableModels,
   getCredentialStatuses,
@@ -47,6 +49,7 @@ import {
   type ProviderCredentialStatus,
   summarizeAuthError
 } from '@proxy/pi/registry'
+import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
@@ -80,7 +83,9 @@ const PAGE_LINES = 10
 /** Rows the header, the tab bar and the footer take. */
 const CHROME_ROWS = 3
 /** Widths of the accounts view's columns: provider, auth type, source, model count. */
-const COLUMNS = { provider: 28, login: 8, source: 16, models: 4 } as const
+const COLUMNS = { provider: 22, login: 8, source: 16, models: 4 } as const
+/** Percent in a whole: a window's share used is shown as a percentage. */
+const PERCENT = 100
 
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
@@ -89,6 +94,8 @@ interface Status {
   readonly exposed: number | string
   readonly cooldowns: number
   readonly modelsJsonError: string | undefined
+  /** The quota reserve per provider (`routing.reserve`), to mark a provider below it. */
+  readonly reserve: Reserve
 }
 
 /** The console's state, which every render reads. */
@@ -146,12 +153,14 @@ function inBackground(task: Promise<void>, what: string): void {
  */
 async function readStatus(): Promise<Status> {
   const available = getAvailableModels()
-  const exposure = computeModelExposure(available, await fileConfigReader())
+  const config = await fileConfigReader()
+  const exposure = computeModelExposure(available, config)
   return {
     available: available.length,
     exposed: exposure.ok ? exposure.models.length : exposure.message,
     cooldowns: activeCooldowns().length,
-    modelsJsonError: getModelsJsonError()
+    modelsJsonError: getModelsJsonError(),
+    reserve: config.reserve ?? {}
   }
 }
 
@@ -228,20 +237,40 @@ function verification(account: ProviderCredentialStatus): string {
 }
 
 /**
- * Renders one provider's credential status: provider, auth type, source, models, verification.
+ * Renders a provider's latest quota: the share used of each window it reports, in red with
+ * `below reserve` when it has less left than its `routing.reserve` (#69).
+ *
+ * @param provider - the provider
+ * @param reserve - the reserve per provider
+ * @returns the cell; `''` when the provider reports no quota
+ */
+function quotaCell(provider: string, reserve: Reserve): string {
+  const windows = providerQuota(provider)?.windows ?? []
+  const used = windows
+    .map((window) => `${window.name} ${String(Math.round(window.used * PERCENT))}%`)
+    .join(' ')
+  if (providerBelowReserve(provider, reserve) === undefined) return used
+  return styleText('red', `${used} below reserve`)
+}
+
+/**
+ * Renders one provider's credential status: provider, auth type, source, models, quota used,
+ * verification.
  *
  * @param account - the provider's status; never the credential itself
+ * @param reserve - the reserve per provider, to mark a provider below it
  * @returns the row's text, without its selection mark
  */
-function accountRow(account: ProviderCredentialStatus): string {
+function accountRow(account: ProviderCredentialStatus, reserve: Reserve): string {
   const login = account.type === 'oauth' ? 'account' : 'API key'
   const cells = [
     account.provider.padEnd(COLUMNS.provider),
     login.padEnd(COLUMNS.login),
     (account.source ?? '').padEnd(COLUMNS.source),
-    String(account.availableModelCount).padStart(COLUMNS.models)
+    `${String(account.availableModelCount).padStart(COLUMNS.models)} models`,
+    quotaCell(account.provider, reserve)
   ]
-  return `${cells.join(' ')} models${verification(account)}`
+  return `${cells.join(' ')}${verification(account)}`
 }
 
 /**
@@ -259,24 +288,25 @@ function selectable(text: string, selected: boolean): string {
  * Renders the accounts view: pi's configured providers, as the proxy sees them, then the row that
  * opens pi's login selector.
  *
- * @param accounts - the providers pi has a credential for
- * @param selected - the selected row; the row after the accounts is the login row
+ * @param state - the console's state: the accounts, the selected row (the row after the
+ *   accounts is the login row), and the status with the reserve per provider
  * @param height - rows available
  * @returns the rows
  */
-function accountRows(
-  accounts: readonly ProviderCredentialStatus[],
-  selected: number,
-  height: number
-): string[] {
+function accountRows(state: ConsoleState, height: number): string[] {
+  const { accounts } = state
+  const reserve = state.status?.reserve ?? {}
   const titles = [
     'provider'.padEnd(COLUMNS.provider),
     'login'.padEnd(COLUMNS.login),
     'source'.padEnd(COLUMNS.source),
-    'models'
+    'models'.padEnd(COLUMNS.models + ' models'.length),
+    'quota used'
   ]
-  const current = clampSelection(selected, accounts.length)
-  const rows = accounts.map((account, index) => selectable(accountRow(account), index === current))
+  const current = clampSelection(state.selected, accounts.length)
+  const rows = accounts.map((account, index) =>
+    selectable(accountRow(account, reserve), index === current)
+  )
   const login = selectable(LOGIN_ROW, current === accounts.length)
   return [styleText('dim', `  ${titles.join(' ')}`), ...rows, login].slice(0, height)
 }
@@ -296,7 +326,7 @@ function viewRows(
 ): string[] {
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size)
-  if (state.view === 'accounts') return accountRows(state.accounts, state.selected, size.height)
+  if (state.view === 'accounts') return accountRows(state, size.height)
   return statsRows(routeTotals(), routeTotalsSince(), size)
 }
 

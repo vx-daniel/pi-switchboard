@@ -1,0 +1,178 @@
+/**
+ * How an alias's fallback chain keeps a provider's subscription quota in reserve (#69): a chain
+ * skips a provider that has less than its reserve left. The quota itself is `src/pi/quota.ts`.
+ *
+ * @remarks
+ * - **Configured, per provider.** `routing.reserve` in the config file (`{ "anthropic": 0.2 }`);
+ *   a provider left out, or one that reports no quota (Google, API keys), is never skipped.
+ * - **The worse window decides.** A subscription reports several windows (a 5-hour and a 7-day
+ *   one); the provider is below its reserve when any of them has less than that share left.
+ * - **Chains only.** A request that names a model, or a chain with one candidate, is sent as
+ *   before: the reserve only chooses between candidates.
+ * - **Never skip them all.** When every remaining candidate is below its reserve, the one with the
+ *   most left is tried, so a reserve never fails a request by itself.
+ *
+ * @packageDocumentation
+ */
+
+import type { FailureClass, Reserve } from '@proxy/config/schema'
+import { proxyLogger } from '@proxy/logging'
+import type { ExposedModel } from '@proxy/openai/model-exposure'
+import type { Attempt } from '@proxy/openai/responses'
+import { providerQuota } from '@proxy/pi/quota'
+import { coolingForChain } from '@proxy/server/route-cooldowns'
+
+/** Logger for routing decisions, as for the chat route's other skips. */
+const chatLogger = proxyLogger('server', 'chat')
+
+/**
+ * Steps the share left is rounded to: `1 - 0.8` is `0.19999999999999996` in floating point, which
+ * would put a provider with exactly its reserve left below it.
+ */
+const SHARE_STEPS = 1_000_000
+
+/** Why a chain skips a candidate: its provider has less than its reserve left. */
+export interface ReserveSkip {
+  readonly provider: string
+  /** The window with the least left, by the provider's name for it (`5h`, `secondary`). */
+  readonly window: string
+  /** The share of that window left, from 0 to 1. */
+  readonly left: number
+  /** The provider's reserve. */
+  readonly reserve: number
+}
+
+/**
+ * Finds the window a provider has the least left of, from its latest quota report.
+ *
+ * @param provider - the provider
+ * @param now - the current time
+ * @returns the window's name and share left, or `undefined` when the provider reports none
+ */
+function tightestWindow(
+  provider: string,
+  now: number
+): { readonly window: string; readonly left: number } | undefined {
+  const windows = providerQuota(provider, now)?.windows ?? []
+  return windows.reduce<{ window: string; left: number } | undefined>((tightest, window) => {
+    const left = Math.round((1 - window.used) * SHARE_STEPS) / SHARE_STEPS
+    return tightest === undefined || left < tightest.left ? { window: window.name, left } : tightest
+  }, undefined)
+}
+
+/**
+ * Checks whether a provider is below its reserve, for a chain or for the console's Accounts view.
+ *
+ * @param provider - the provider
+ * @param reserve - the reserve per provider
+ * @param now - the current time; `Date.now()` by default
+ * @returns why it is below, or `undefined` when it is not (or has no reserve or no quota)
+ */
+export function providerBelowReserve(
+  provider: string,
+  reserve: Reserve,
+  now: number = Date.now()
+): ReserveSkip | undefined {
+  const kept = reserve[provider]
+  if (kept === undefined) return undefined
+  const tightest = tightestWindow(provider, now)
+  if (tightest === undefined || tightest.left >= kept) return undefined
+  return { provider, ...tightest, reserve: kept }
+}
+
+/**
+ * Checks whether a candidate's provider is below its reserve.
+ *
+ * @param candidate - the candidate, or `undefined` past the chain's end
+ * @param reserve - the reserve per provider
+ * @param now - the current time
+ * @returns why it is below, or `undefined` when it is not
+ */
+function belowReserve(
+  candidate: ExposedModel | undefined,
+  reserve: Reserve,
+  now: number
+): ReserveSkip | undefined {
+  return candidate === undefined
+    ? undefined
+    : providerBelowReserve(candidate.provider, reserve, now)
+}
+
+/**
+ * Decides whether the chain skips the candidate at `position` because its provider is below its
+ * reserve.
+ *
+ * @remarks
+ * A later candidate the chain will skip for its cooldown (#68) is not an alternative: with
+ * `[below its reserve, cooling down]`, the first one is called rather than skipped for one the
+ * chain would not call either.
+ *
+ * @param candidates - the chain's candidates, in order
+ * @param position - the candidate's position
+ * @param rules - the reserve per provider, and the classes the alias names (for its cooldowns)
+ * @param rules.reserve - the reserve per provider
+ * @param rules.fallbackOn - the failure classes the alias names
+ * @param now - the current time; `Date.now()` by default
+ * @returns why it is skipped, or `undefined` to call it
+ */
+export function reserveSkip(
+  candidates: readonly ExposedModel[],
+  position: number,
+  rules: { readonly reserve: Reserve; readonly fallbackOn: ReadonlySet<FailureClass> },
+  now: number = Date.now()
+): ReserveSkip | undefined {
+  const { reserve, fallbackOn } = rules
+  const own = belowReserve(candidates[position], reserve, now)
+  if (own === undefined) return undefined
+  const alternatives = candidates
+    .slice(position + 1)
+    .filter((later) => !coolingForChain(later, fallbackOn, now))
+  if (alternatives.some((later) => belowReserve(later, reserve, now) === undefined)) return own
+  // Every alternative is below its reserve too, or there is none: call the one with the most left.
+  const mostLeft = alternatives.every(
+    (later) => (belowReserve(later, reserve, now)?.left ?? 0) <= own.left
+  )
+  return mostLeft ? undefined : own
+}
+
+/**
+ * Skips a candidate whose provider is below its reserve: logs the skip at `info` and lists it in
+ * `attempts` (`reason: "quota"`, `skipped: true`), as a cooldown skip is.
+ *
+ * @param chain - the candidates, the classes the alias names, the reserve per provider, and the
+ *   alias
+ * @param chain.candidates - the chain's candidates
+ * @param chain.fallbackOn - the failure classes the alias names, for the cooldowns it skips by
+ * @param chain.reserve - the reserve per provider
+ * @param chain.alias - the alias whose chain it is
+ * @param position - the candidate's index in `chain.candidates`
+ * @param attempts - the attempts so far; a skip is added to them
+ * @returns whether the candidate is skipped
+ */
+export function skipBelowReserve(
+  chain: {
+    readonly candidates: readonly ExposedModel[]
+    readonly fallbackOn: ReadonlySet<FailureClass>
+    readonly reserve: Reserve
+    readonly alias: string | undefined
+  },
+  position: number,
+  attempts: Attempt[]
+): boolean {
+  const skip = reserveSkip(chain.candidates, position, chain)
+  const candidate = chain.candidates[position]
+  if (skip === undefined || candidate === undefined) return false
+  chatLogger.info(
+    'Alias {alias}: skipping {model}, {provider} has {left} of its {window} window left, below its reserve of {reserve}',
+    {
+      alias: chain.alias,
+      model: candidate.canonicalId,
+      provider: skip.provider,
+      window: skip.window,
+      left: skip.left,
+      reserve: skip.reserve
+    }
+  )
+  attempts.push({ model: candidate.canonicalId, reason: 'quota', skipped: true })
+  return true
+}

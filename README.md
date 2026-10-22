@@ -81,7 +81,7 @@ pi-switchboard tui            # takes the same flags as pi-switchboard
 `pi-switchboard tui` runs the proxy with a full-screen console. Quitting it (`q` or Ctrl+C) stops the proxy. It needs a terminal; from a script or a service, run `pi-switchboard` without `tui`. `←` `→` or `Tab` move between the views (`1` `2` `3` jump to one), and the footer lists the keys of the view you are on.
 
 - **Logs (`1`).** The live log, redacted as on stderr, in a narrower pretty layout than the CLI's: the time only and a shorter category, so the message has room. A line wider than the terminal wraps. It follows new lines; `↑` `↓` `PgUp` `PgDn` scroll back, `End` follows again. The console keeps the last 5000 lines.
-- **Accounts (`2`).** Each provider pi has a credential for: account or API key, where pi found it, and how many of its models are available. `↑` `↓` select a provider and `Enter` opens what you can do with it: verify the logins (which may refresh an account's token), log in again or enter a new API key, or log out. The last row, **+ Log in to a provider…**, opens pi's login list. `v` verifies every login from anywhere in the view.
+- **Accounts (`2`).** Each provider pi has a credential for: account or API key, where pi found it, how many of its models are available, and the share used of each quota window it reports (`5h 12% 7d 47%`; red with `below reserve` under its [reserve](#quota)). `↑` `↓` select a provider and `Enter` opens what you can do with it: verify the logins (which may refresh an account's token), log in again or enter a new API key, or log out. The last row, **+ Log in to a provider…**, opens pi's login list. `v` verifies every login from anywhere in the view.
 - **Stats (`3`).** Usage per alias and served model since the proxy started (#70): requests, failed attempts (with their failure classes), fallbacks taken, input, output and cache tokens, and cost, with a total row. Counted in memory, so a restart starts again at zero.
 - **Status line.** The address (`host:port`, without `http://`, to fit a narrow terminal), whether proxy auth is on, how many models are exposed and available (`26/26 exposed`), active cooldowns, and a `models.json` error if there is one.
 - **Log in (`n`) and log out (`x`) through pi.** `n` opens pi's own login list: every account and API key login pi offers. The login runs on pi's own screens and pi stores the credential in its `auth.json`, exactly as `pi /login` does, and the proxy serves the provider's models at once, without a restart. A browser sign-in waits for the browser, or takes the pasted redirect URL when the browser is on another machine; `Ctrl+X` copies the sign-in URL and `Esc` cancels. `x` removes a credential pi stored; one from an environment variable or `models.json` stays.
@@ -331,6 +331,7 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 | `customModels` | `[]` | Canonical model IDs for `custom` mode. An empty list exposes no model |
 | `providerPrefixes` | `{}` | Provider key -> custom prefix label overrides |
 | `aliases` | `{}` | Alias -> the canonical ID of an exposed model ([Aliases](#aliases)) |
+| `routing.reserve` | `{}` | Provider -> the share of each quota window, 0–1, that fallback chains keep free ([Quota](#quota)) |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.
 
@@ -404,7 +405,17 @@ Subscriptions report on every response how much of each usage window the account
 - **Who reports.** Anthropic subscriptions (`5h` and `7d` windows) and Codex's ChatGPT plans (`primary`, 5 hours, and `secondary`, 7 days). Google and API-key logins report nothing, and show `null`.
 - **`used`** is the share of the window used, from 0 to 1. A window that has reset since is left out, and a provider with nothing left to show is `null` until its next response.
 - **Only the shared login.** A request that sends its own key records nothing. Only the window fields, status and plan are kept, never an account or organization ID.
-- Routing on quota (skipping a provider that's nearly out) isn't built yet ([#69](https://github.com/vx-daniel/pi-switchboard/issues/69)).
+- **Keep some in reserve.** A fallback chain can skip a provider before it runs out. Set the share of each window to keep free, per provider, in `proxy-config.json`:
+
+  ```json
+  { "routing": { "reserve": { "anthropic": 0.2, "openai-codex": 0.1 } } }
+  ```
+
+  - **The worse window decides.** With 20% reserved, Anthropic is skipped once either its 5-hour or its 7-day window has less than 20% left.
+  - **Chains only.** A request that names a model is always sent; only a chain skips, to its next target.
+  - **Never skips them all.** When every remaining target is below its reserve, the one with the most left is called, so a reserve never fails a request by itself.
+  - **Needs a report.** A provider that has reported no quota yet, or never does (Google, API keys), is never skipped.
+  - **Visible.** A skip is listed in `x_pi.attempts` as `{ "model": "anthropic/claude-opus-5-5", "reason": "quota", "skipped": true }` and logged at info with the provider, the window and the share left. The console's Accounts view marks a provider `below reserve`.
 
 ### Discovering available models
 

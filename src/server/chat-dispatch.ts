@@ -24,7 +24,7 @@
  */
 
 import type { AssistantMessageEvent } from '@earendil-works/pi-ai'
-import type { FailureClass } from '@proxy/config/schema'
+import type { FailureClass, Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ConversionSuccess } from '@proxy/openai/messages'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
@@ -52,7 +52,8 @@ import {
   HTTP_TOO_MANY_REQUESTS,
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
-import { cooldownSkip, recordCooldown } from '@proxy/server/route-cooldowns'
+import { recordCooldown, skipCooling } from '@proxy/server/route-cooldowns'
+import { skipBelowReserve } from '@proxy/server/route-reserve'
 import {
   recordRouteAttempt,
   recordRouteFailure,
@@ -353,6 +354,8 @@ export interface DispatchJob {
   /** The candidates in order. The first one's credential was already checked. */
   readonly candidates: readonly ExposedModel[]
   readonly fallbackOn: ReadonlySet<FailureClass>
+  /** The quota reserve per provider (`routing.reserve`, #69). */
+  readonly reserve: Reserve
   /** Attempts already failed, before the first candidate (credential checks). */
   readonly attempts: readonly Attempt[]
   readonly context: PiContext
@@ -656,37 +659,6 @@ async function runAttempt(
 }
 
 /**
- * Skips a candidate while it cools down (#68), when the chain names its class: logs the skip and
- * lists it in `attempts`.
- *
- * @param chain - the candidates, the classes the alias names, and the alias
- * @param chain.candidates - the chain's candidates
- * @param chain.fallbackOn - the failure classes the alias names
- * @param chain.alias - the alias whose chain it is
- * @param position - the candidate's index in `chain.candidates`
- * @param attempts - the attempts so far; a skip is added to them
- * @returns whether the candidate is skipped
- */
-function skipCooling(
-  chain: Pick<ChatRoute, 'candidates' | 'fallbackOn'> & { alias: string | undefined },
-  position: number,
-  attempts: Attempt[]
-): boolean {
-  const cooldown = cooldownSkip(chain.candidates, position, chain.fallbackOn)
-  const candidate = chain.candidates[position]
-  if (cooldown === undefined || candidate === undefined) return false
-  chatLogger.info('Alias {alias}: skipping {model}, cooling down after {reason} until {until}', {
-    alias: chain.alias,
-    model: candidate.canonicalId,
-    reason: cooldown.reason,
-    until: new Date(cooldown.until).toISOString(),
-    scope: cooldown.scope
-  })
-  attempts.push({ model: candidate.canonicalId, reason: cooldown.reason, skipped: true })
-  return true
-}
-
-/**
  * Answers with the candidate that accepted the request, logging the chain that led to it.
  *
  * @param respond - the accepted attempt's responder
@@ -737,6 +709,18 @@ function fallbackFor(
 }
 
 /**
+ * Skips a candidate the chain does not call: cooling down (#68) or below its quota reserve (#69).
+ *
+ * @param job - the chain
+ * @param position - the candidate's index in `job.candidates`
+ * @param attempts - the attempts so far; a skip is added to them
+ * @returns whether the candidate is skipped
+ */
+function skipsCandidate(job: DispatchJob, position: number, attempts: Attempt[]): boolean {
+  return skipCooling(job, position, attempts) || skipBelowReserve(job, position, attempts)
+}
+
+/**
  * Runs the request on its candidates in turn and answers with the first that accepts it.
  *
  * @param honoContext - the request's Hono context
@@ -749,7 +733,7 @@ export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob):
   // say nothing about the login other clients share (#181 review).
   const sharedLogin = job.options.upstreamApiKey === undefined
   for (const [position, candidate] of job.candidates.entries()) {
-    if (skipCooling(job, position, attempts)) continue
+    if (skipsCandidate(job, position, attempts)) continue
     const sentAt = Date.now()
     const key = routeKey(job.alias, candidate)
     recordRouteAttempt(key)

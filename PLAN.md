@@ -469,8 +469,8 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
 Subscriptions report on every response how much of each usage window the account has used. The
 proxy keeps the latest report per provider, in memory (`src/pi/quota.ts`). It shows it on
 `/healthz/creds` (per provider, for the operator) and on `/v1/switchboard/models` (per model,
-for clients that pick models themselves, #69's P6 comment). Routing on it, a reserve below which
-a chain skips a provider, is not built yet; it waits on data from this.
+for clients that pick models themselves, #69's P6 comment). A fallback chain can keep a share of
+it in reserve, skipping a provider that is close to its limit (below).
 
 **What each subscription sends.** Read from a live probe of each login on 2026-10-21, one call each.
 Copilot wasn't logged in, so it is unknown.
@@ -503,10 +503,36 @@ Copilot wasn't logged in, so it is unknown.
   cooldowns: its headers report that key's account.
 - **Keyed by provider.** pi has one login per provider, so a provider's report is its login's.
   Routing one provider over several logins would need the reports keyed by login, or two
-  accounts would overwrite each other; that is a precondition for a reserve (#189 review).
+  accounts would overwrite each other (#189 review); the reserve below is per provider for that
+  reason.
 - **No recordings yet.** Tests use the probe's header names and formats, with fake identifying
   values (`test/fixtures/quota-headers.ts`). Recording them needs a login made for recording
   (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
+
+**The reserve** (`src/server/route-reserve.ts`, principle VI: configured, and reported). A
+fallback chain skips a provider that is close to its limit, before it refuses:
+
+- **Configured per provider.** `routing.reserve` in `proxy-config.json`, the share of each window
+  to keep free, from 0 to 1 (`{ "anthropic": 0.2 }`); read per request with the aliases. Invalid
+  entries (a share outside 0–1, a non-number) are dropped with the config warning. A provider
+  left out has no reserve.
+- **The worse window decides.** A provider is below its reserve when any window it reports has
+  less than that share left. The share left is rounded to six places, so `1 - 0.8` is `0.2` and
+  a provider with exactly its reserve left is not below it.
+- **Chains only.** A request that names a model is always sent; a chain's last candidate is too.
+  Only candidates of an alias's chain are skipped, after the cooldown check (#68).
+- **Never skip them all.** A provider below its reserve is skipped only when a later candidate is
+  a real alternative: one above its reserve and not cooling down for a class the alias names (a
+  candidate the chain will skip for its cooldown is none). When every alternative is below its
+  reserve, or there is none, the one with the most left is called, the earlier on a tie, as
+  cooldowns call the one that ends first: a reserve never fails a request by itself.
+- **Needs a report.** A provider with no quota known (not reported yet, every window reset, or
+  one that never reports, such as Google and API keys) is not below any reserve.
+- **Reported.** The skip is in `x_pi.attempts` as `reason: "quota"` with `skipped: true`, and an
+  info line names the alias, the model, the provider, the window, the share left and the
+  reserve. It is not a request in the route totals (#70), as a cooldown skip is not. The
+  console's Accounts view shows each provider's share used per window, red with `below reserve`
+  when it is.
 
 ### Usage by route (#70)
 

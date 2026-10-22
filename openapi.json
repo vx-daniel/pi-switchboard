@@ -2100,12 +2100,13 @@
                                   "timeout",
                                   "auth",
                                   "refused",
-                                  "upstream_error"
+                                  "upstream_error",
+                                  "quota"
                                 ],
-                                "description": "Why the chain moved on from it: its failure, or the one it is cooling down from."
+                                "description": "Why the chain moved on from it: its failure, the one it is cooling down from, or `quota` when its provider had less than the config's `routing.reserve` left."
                               },
                               "skipped": {
-                                "description": "Not called: it was cooling down after that failure (#68). Absent when tried.",
+                                "description": "Not called: it was cooling down after that failure (#68), or below its quota reserve (#69). Absent when tried.",
                                 "type": "boolean",
                                 "const": true
                               }
@@ -2283,12 +2284,13 @@
                                   "timeout",
                                   "auth",
                                   "refused",
-                                  "upstream_error"
+                                  "upstream_error",
+                                  "quota"
                                 ],
-                                "description": "Why the chain moved on from it: its failure, or the one it is cooling down from."
+                                "description": "Why the chain moved on from it: its failure, the one it is cooling down from, or `quota` when its provider had less than the config's `routing.reserve` left."
                               },
                               "skipped": {
-                                "description": "Not called: it was cooling down after that failure (#68). Absent when tried.",
+                                "description": "Not called: it was cooling down after that failure (#68), or below its quota reserve (#69). Absent when tried.",
                                 "type": "boolean",
                                 "const": true
                               }

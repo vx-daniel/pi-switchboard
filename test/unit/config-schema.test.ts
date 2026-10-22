@@ -184,6 +184,26 @@ describe('normalizeConfig', () => {
     expect(result.aliases).toEqual({ chain })
   })
 
+  // Catches one bad reserve costing the others, or a share outside 0–1 kept: a reserve above 1
+  // would skip a provider whenever it reports quota, and a negative one never would (#69).
+  test('keeps the valid quota reserves and drops the invalid ones', () => {
+    const result = normalizeConfig({
+      routing: {
+        reserve: {
+          'anthropic': 0.2,
+          'openai-codex': 0,
+          'google': 1.5,
+          'xai': -0.1,
+          'mistral': '0.3',
+          '': 0.5
+        }
+      }
+    })
+
+    expect(result.routing.reserve).toEqual({ 'anthropic': 0.2, 'openai-codex': 0 })
+    expect(normalizeConfig({}).routing).toEqual({ reserve: {} })
+  })
+
   // Catches a valid field being dropped or replaced by its default during normalization.
   test('preserves all fields from a complete valid config', () => {
     const full = {
@@ -201,6 +221,7 @@ describe('normalizeConfig', () => {
       providerPrefixes: { openai: 'oai' },
       aliases: { coding: 'openai/gpt-4o' },
       logLevel: 'debug',
+      routing: { reserve: { anthropic: 0.2 } },
       zed: { providerName: 'My Proxy', autoSync: true }
     }
     expect(normalizeConfig(full)).toEqual(full)
