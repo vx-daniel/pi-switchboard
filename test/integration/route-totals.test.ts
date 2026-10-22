@@ -10,7 +10,7 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { resetSync } from '@logtape/logtape'
-import type { AliasTarget } from '@proxy/config/schema'
+import type { AliasTarget, FailureClass } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
 import { clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { createApp } from '@proxy/server/app'
@@ -33,6 +33,7 @@ import {
   type MockProvider,
   type MockReply,
   sse,
+  silent,
   startMockProvider,
   textChunks
 } from '../fixtures/mock-provider'
@@ -41,6 +42,10 @@ import { testConfig } from '../helpers'
 const MOCK_KEY = 'notarealsecret-mock-provider-key'
 /** Prices per million tokens, the same for every model: input, output, cache read, cache write. */
 const PRICES = { input: 1000, output: 2000, cacheRead: 100, cacheWrite: 500 }
+/** OpenAI's own API, the one host the proxy sends `prompt_cache_breakpoint` to (#163). */
+const OPENAI_ORIGIN = 'https://api.openai.com'
+/** Long enough for a request to reach the provider before the client leaves, in milliseconds. */
+const LEAVE_AFTER_MS = 200
 
 /**
  * Builds a streamed answer whose closing chunk reports this usage, as OpenAI sends it.
@@ -76,6 +81,28 @@ function answerWithUsage(usage: {
 const PRICED_USAGE = { prompt: 100, completion: 20, cached: 30, written: 10 }
 /** What `answer-mock` reports: 7 uncached input, 5 output, 3 cache-read, none written. */
 const ANSWER_USAGE = { prompt: 10, completion: 5, cached: 3, written: 0 }
+
+/**
+ * Answers as a ChatGPT model that refuses `prompt_cache_breakpoint` (#163): a 400 naming the
+ * field when the request carries it, else an answer reporting {@link PRICED_USAGE}.
+ *
+ * @returns the reply
+ */
+function refusingBreakpoints(): MockReply {
+  const refusal = httpError(400, {
+    error: {
+      message: 'prompt_cache_breakpoint is not supported on this model',
+      type: 'invalid_request_error',
+      param: 'prompt_cache_breakpoint',
+      code: 'invalid_parameter'
+    }
+  })
+  const answer = answerWithUsage(PRICED_USAGE)
+  return (response, request) =>
+    JSON.stringify(request.body).includes('prompt_cache_breakpoint')
+      ? refusal(response, request)
+      : answer(response, request)
+}
 
 /**
  * The tokens and cost a usage adds to a route, at {@link PRICES}.
@@ -137,8 +164,11 @@ beforeAll(async () => {
       error: { message: 'Unsupported value', type: 'invalid_request_error' }
     }),
     'cut-mock': cutOff('par'),
+    'silent-mock': silent(),
     'priced-mock': answerWithUsage(PRICED_USAGE),
-    'answer-mock': answerWithUsage(ANSWER_USAGE)
+    'answer-mock': answerWithUsage(ANSWER_USAGE),
+    'refuses-plain': refusingBreakpoints(),
+    'refuses-stream': refusingBreakpoints()
   })
   const provider = (models: string[]): Record<string, unknown> => ({
     baseUrl: `${mock.origin}/v1`,
@@ -149,15 +179,33 @@ beforeAll(async () => {
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
       providers: {
-        alpha: provider(['limited-mock', 'invalid-mock', 'cut-mock', 'priced-mock']),
-        beta: provider(['answer-mock'])
+        alpha: provider(['limited-mock', 'invalid-mock', 'cut-mock', 'silent-mock', 'priced-mock']),
+        beta: provider(['answer-mock']),
+        // A key command that prints nothing (the command does not exist): pi resolves no
+        // credential, so the proxy refuses the model before calling it.
+        keyless: { ...provider(['locked-mock']), apiKey: '!notarealsecret-missing-command' },
+        // Breakpoints are sent to OpenAI's own API only; `fetch` sends it to the mock below.
+        openai: { ...provider(['refuses-plain', 'refuses-stream']), baseUrl: `${OPENAI_ORIGIN}/v1` }
       }
     }
   })
+  const realFetch = globalThis.fetch
+  vi.stubGlobal('fetch', (input: Request | URL | string, init?: RequestInit) => {
+    const url = input instanceof Request ? input.url : String(input)
+    return realFetch(
+      url.startsWith(OPENAI_ORIGIN) ? `${mock.origin}${url.slice(OPENAI_ORIGIN.length)}` : input,
+      init
+    )
+  })
   setAliases({
-    coding: { targets: ['alpha/limited-mock', 'beta/answer-mock'], fallbackOn: ['rate_limit'] },
-    fast: 'alpha/priced-mock',
-    broken: 'alpha/cut-mock'
+    'coding': { targets: ['alpha/limited-mock', 'beta/answer-mock'], fallbackOn: ['rate_limit'] },
+    'fast': 'alpha/priced-mock',
+    'broken': 'alpha/cut-mock',
+    'guarded': { targets: ['keyless/locked-mock', 'beta/answer-mock'], fallbackOn: ['auth'] },
+    'guarded-later': {
+      targets: ['alpha/limited-mock', 'keyless/locked-mock', 'beta/answer-mock'],
+      fallbackOn: ['rate_limit', 'auth']
+    }
   })
 })
 
@@ -180,6 +228,7 @@ beforeEach(() => {
 afterAll(async () => {
   resetSync()
   vi.unstubAllEnvs()
+  vi.unstubAllGlobals()
   await mock.close()
   agentDir.remove()
 })
@@ -197,7 +246,7 @@ function setAliases(aliases: Record<string, AliasTarget>): void {
  * Sends one chat request and reads the whole answer.
  *
  * @param model - the request's `model`
- * @param options - stream or not, extra headers, and extra body fields
+ * @param options - stream or not, extra headers, extra body fields, and a signal to leave early
  * @returns the response status
  */
 async function ask(
@@ -206,6 +255,7 @@ async function ask(
     stream?: boolean
     headers?: Record<string, string>
     body?: Record<string, unknown>
+    signal?: AbortSignal
   } = {}
 ): Promise<number> {
   const response = await createApp(testConfig(), fileConfigReader).request('/v1/chat/completions', {
@@ -216,7 +266,8 @@ async function ask(
       stream: options.stream === true,
       messages: [{ role: 'user', content: 'Say ok' }],
       ...options.body
-    })
+    }),
+    ...(options.signal === undefined ? {} : { signal: options.signal })
   })
   await response.text()
   return response.status
@@ -318,19 +369,110 @@ describe('route totals', () => {
     })
   })
 
-  // Catches a stream that broke off after it started counted as a success: the client got an
-  // error event, so the route failed although no other model was tried.
-  test('count a stream that fails after it started as a failure', async () => {
+  // Catches a stream that broke off after it started counted as a success, or counted twice: the
+  // client got one error event, so the attempt failed once (by the `error` event, and not again
+  // by the relay's `catch`), although no other model was tried.
+  test('count a stream that fails after it started as one failure', async () => {
     expect(await ask('broken', { stream: true })).toBe(200)
 
-    await vi.waitFor(() => {
-      expect(row('broken', 'alpha/cut-mock')).toMatchObject({
-        requests: 1,
-        failures: 1,
-        fallbacks: 0
-      })
+    // The whole stream has been read, so the attempt has ended and every count is in.
+    expect(row('broken', 'alpha/cut-mock')).toEqual({
+      ...EMPTY,
+      alias: 'broken',
+      provider: 'alpha',
+      model: 'alpha/cut-mock',
+      requests: 1,
+      failures: 1,
+      failuresByClass: { upstream_error: 1 }
     })
   })
+
+  // Catches a credential refusal left out of the totals: no call is made, but it is an attempt
+  // that failed `auth` (`x_pi.attempts` lists it), whether it ends the request with a 401 or the
+  // chain moves on, before the first call or between two.
+  test.each([
+    ['before the first call', 'guarded'],
+    ['between two calls', 'guarded-later']
+  ])(
+    'count a credential refusal as an auth failure, and the fallback past it: %s',
+    async (_when, alias) => {
+      expect(await ask('locked-mock')).toBe(401)
+      expect(await ask(alias)).toBe(200)
+
+      const locked = { ...EMPTY, provider: 'keyless', model: 'keyless/locked-mock', requests: 1 }
+      // The class's name is `auth` (FailureClassSchema); the naming rule reads a literal `auth`
+      // key as an abbreviation, so the key is computed from a typed value.
+      const credentialClass: FailureClass = 'auth'
+      const failedAuth = { failures: 1, failuresByClass: { [credentialClass]: 1 } }
+      expect(row(null, 'keyless/locked-mock')).toEqual({ ...locked, ...failedAuth, alias: null })
+      expect(row(alias, 'keyless/locked-mock')).toEqual({
+        ...locked,
+        ...failedAuth,
+        alias,
+        fallbacks: 1
+      })
+      expect(row(alias, 'beta/answer-mock')).toMatchObject({ requests: 1, failures: 0 })
+    }
+  )
+
+  // Catches a client that left counted as the route's failure: the call was abandoned, not
+  // failed, though it was still an attempt.
+  test.each([
+    ['non-streamed', false],
+    ['streamed', true]
+  ])('count a request the client left as a request, not a failure: %s', async (_mode, stream) => {
+    // The handler returns once the attempt has ended, so every count is in when this resolves.
+    await ask('silent-mock', { stream, signal: AbortSignal.timeout(LEAVE_AFTER_MS) })
+
+    expect(row(null, 'alpha/silent-mock')).toEqual({
+      ...EMPTY,
+      alias: null,
+      provider: 'alpha',
+      model: 'alpha/silent-mock',
+      requests: 1
+    })
+  })
+
+  // Catches the #163 retry miscounted: the model refuses `prompt_cache_breakpoint` and is called
+  // again without it, which is two upstream calls in one attempt. Both calls' usage must be added
+  // (the refusal is a 400 and reports none) under one request, with no failure.
+  test.each([
+    ['non-streamed', 'refuses-plain', false],
+    ['streamed', 'refuses-stream', true]
+  ])(
+    '%s: count a prompt_cache_breakpoint retry as one request with both calls’ usage',
+    async (_mode, modelId, stream) => {
+      const status = await ask(`openai/${modelId}`, {
+        stream,
+        body: {
+          messages: [
+            {
+              role: 'user',
+              content: [
+                { type: 'text', text: 'Say ok', prompt_cache_breakpoint: { mode: 'explicit' } }
+              ]
+            }
+          ]
+        }
+      })
+
+      expect(status).toBe(200)
+      await vi.waitFor(() => {
+        expect(resultRecords().map((record) => record['properties'])).toEqual([
+          expect.objectContaining({ modelId, alias: null, attempt: 1, stopReason: 'error' }),
+          expect.objectContaining({ modelId, alias: null, attempt: 1, stopReason: 'stop' })
+        ])
+      })
+      expect(row(null, `openai/${modelId}`)).toEqual({
+        ...EMPTY,
+        alias: null,
+        provider: 'openai',
+        model: `openai/${modelId}`,
+        requests: 1,
+        ...expectedUsage(PRICED_USAGE, 1)
+      })
+    }
+  )
 
   // Catches a failure with no class (a 400, the request's own fault) dropped from `failures`, or
   // given a class it doesn't have.
@@ -364,18 +506,24 @@ describe('route totals', () => {
     }
   })
 
-  // Catches a subscriber (the console, #61) never told of an update, or told after it left.
-  test('tell a listener of every update until it unsubscribes', async () => {
+  // Catches a subscriber (the console, #61) never told of an update, told after it left, or not
+  // told of a reset, which would leave it showing the totals from before.
+  test('tell a listener of every update and of a reset, until it unsubscribes', async () => {
     const before = routeTotalsSince()
     const listener = vi.fn()
     const unsubscribe = onRouteTotalsChange(listener)
     try {
       await ask('fast')
       expect(listener).toHaveBeenCalled()
+
       const seen = listener.mock.calls.length
+      clearRouteTotals()
+      expect(listener).toHaveBeenCalledTimes(seen + 1)
+      expect(routeTotals()).toEqual([])
+
       unsubscribe()
       await ask('fast')
-      expect(listener).toHaveBeenCalledTimes(seen)
+      expect(listener).toHaveBeenCalledTimes(seen + 1)
     } finally {
       unsubscribe()
     }

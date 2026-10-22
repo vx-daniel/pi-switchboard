@@ -311,7 +311,8 @@ function callProperties(call: UpstreamCall): Record<string, unknown> {
     modelId: call.model.id,
     api: call.model.api,
     stream: call.stream,
-    ...call.options.route,
+    alias: call.options.route?.alias,
+    attempt: call.options.route?.attempt,
     durationMs: Math.round(performance.now() - call.startedAt)
   }
 }
@@ -334,7 +335,8 @@ function logUpstreamStart(
     modelId: model.id,
     api: model.api,
     stream,
-    ...options.route,
+    alias: options.route?.alias,
+    attempt: options.route?.attempt,
     messageCount: context.messages.length,
     toolCount: context.tools?.length ?? 0,
     reasoningEffort: request.reasoning_effort,
