@@ -36,6 +36,7 @@ import { clearCooldowns } from '@proxy/pi/cooldowns'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
+import type { ActiveRequestHandle } from '@proxy/server/active-requests'
 import {
   authenticationError,
   type MappedUpstreamError,
@@ -361,6 +362,11 @@ export interface DispatchJob {
   readonly context: PiContext
   readonly request: ChatCompletionRequest
   readonly options: CompletionOptions
+  /**
+   * The request's entry among those in flight (the console's sidebar): told each attempt's model,
+   * and ended by a stream when it closes. The caller ends it otherwise, once this returns.
+   */
+  readonly active: ActiveRequestHandle
 }
 
 /** How one attempt ended. */
@@ -472,7 +478,7 @@ async function attemptStream(
   candidate: ExposedModel,
   job: DispatchJob
 ): Promise<AttemptOutcome> {
-  const { requestId, context, request, options } = job
+  const { requestId, context, request, options, active } = job
   const start = performance.now()
   // The client's own departure aborts the call, which then fails: not an upstream failure, and
   // nobody is waiting for the answer.
@@ -507,6 +513,7 @@ async function attemptStream(
       model: route.model,
       includeUsage
     })
+    active.streaming()
     return honoStream(honoContext, async (stream) => {
       let frameCount = 0
       const countFailure = streamFailureCounter(key, options.signal)
@@ -533,6 +540,8 @@ async function attemptStream(
         })
         await stream.write(`data: ${JSON.stringify(mapped.body)}\n\n`)
         await stream.write('data: [DONE]\n\n')
+      } finally {
+        active.end()
       }
     })
   }
@@ -736,6 +745,7 @@ export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob):
     if (skipsCandidate(job, position, attempts)) continue
     const sentAt = Date.now()
     const key = routeKey(job.alias, candidate)
+    job.active.attempt(candidate.canonicalId, attempts.length + 1)
     recordRouteAttempt(key)
     const { outcome, captured } = await runAttempt(honoContext, candidate, job, {
       checkFirst: position > 0,

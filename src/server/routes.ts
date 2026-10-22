@@ -35,6 +35,7 @@ import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { convertTools } from '@proxy/openai/tools'
 import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/validate'
 import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
+import { beginActiveRequest } from '@proxy/server/active-requests'
 import { dispatchChat, findCredentialedStart, planRoute } from '@proxy/server/chat-dispatch'
 import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
@@ -351,23 +352,35 @@ async function handleChatCompletion(
   const built = buildPiContext(context, prepared.value)
   if (!built.ok) return built.response
 
-  return dispatchChat(context, {
+  // Listed among the requests in flight until it ends: here, or when its stream closes.
+  const active = beginActiveRequest({
     requestId,
-    alias: resolved.alias,
-    candidates: start.candidates,
-    fallbackOn: route.fallbackOn,
-    reserve: requestConfig.reserve ?? {},
-    attempts: start.attempts,
-    context: built.value,
-    request,
-    options: {
-      upstreamApiKey,
-      // The client's disconnect only. The dispatch reads it to tell a client that left from an
-      // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
-      signal: context.get('abortController').signal,
-      upstreamTimeoutMs: config.upstreamTimeoutMs
-    }
+    alias: resolved.alias ?? null,
+    model: start.candidates[0]?.canonicalId ?? first.canonicalId,
+    stream: request.stream === true
   })
+  try {
+    return await dispatchChat(context, {
+      requestId,
+      alias: resolved.alias,
+      candidates: start.candidates,
+      fallbackOn: route.fallbackOn,
+      reserve: requestConfig.reserve ?? {},
+      attempts: start.attempts,
+      context: built.value,
+      request,
+      options: {
+        upstreamApiKey,
+        // The client's disconnect only. The dispatch reads it to tell a client that left from an
+        // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
+        signal: context.get('abortController').signal,
+        upstreamTimeoutMs: config.upstreamTimeoutMs
+      },
+      active
+    })
+  } finally {
+    active.settled()
+  }
 }
 
 /**
