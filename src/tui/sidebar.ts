@@ -49,7 +49,8 @@ const RATE_WINDOW_MS = 60_000
 const OUTCOME_MARKS: Readonly<Record<RequestOutcome, string>> = {
   ok: styleText('green', '✓'),
   failed: styleText('red', '✗'),
-  left: styleText('dim', '↩')
+  left: styleText('dim', '↩'),
+  rejected: styleText('yellow', '⊘')
 }
 /** Percent in a whole. */
 const PERCENT = 100
@@ -378,8 +379,45 @@ function average(times: readonly (number | undefined)[]): number | undefined {
 }
 
 /**
- * Renders the RECENT panel's lines: the last minute's requests, failures, average time and
- * average time to a stream's first event, then the latest finished requests.
+ * Renders RECENT's last-minute line: the requests, with the failed and the rejected ones apart.
+ *
+ * @param lastMinute - the requests that finished in the last minute
+ * @param width - the content's columns
+ * @returns the line
+ */
+function lastMinuteLine(lastMinute: readonly FinishedRequest[], width: number): string {
+  // Only the newest FINISHED_KEPT are kept: a full list may be missing some of the minute.
+  const parts = [`${String(lastMinute.length)}${lastMinute.length >= FINISHED_KEPT ? '+' : ''} req`]
+  const failed = lastMinute.filter((request) => request.outcome === 'failed').length
+  if (failed > 0) parts.push(styleText('red', `${String(failed)} failed`))
+  const rejected = lastMinute.filter((request) => request.outcome === 'rejected').length
+  if (rejected > 0) parts.push(styleText('yellow', `${String(rejected)} rejected`))
+  return spread('last minute', parts.join(' · '), width)
+}
+
+/**
+ * Renders one finished request: its mark, its model and how long it took. A rejected one shows the
+ * status it was answered with instead, and `-` for a model it did not get as far as naming.
+ *
+ * @param request - the request
+ * @param width - the content's columns
+ * @returns the line
+ */
+function finishedLine(request: FinishedRequest, width: number): string {
+  const end =
+    request.status === undefined
+      ? latency(request.endedAt - request.startedAt)
+      : String(request.status)
+  // The row is the mark, the model and the time, a space between each.
+  const modelWidth = width - visibleWidth(end) - visibleWidth('✓  ')
+  const model = fitLabel(request.model === '' ? '-' : request.model, Math.max(1, modelWidth))
+  return `${OUTCOME_MARKS[request.outcome]} ${model} ${styleText('dim', end)}`
+}
+
+/**
+ * Renders the RECENT panel's lines: the last minute's requests, failures and rejections, the
+ * average time and average time to a stream's first event of those the proxy dispatched, then the
+ * latest finished requests.
  *
  * @param input - the snapshot
  * @param width - the content's columns
@@ -390,25 +428,19 @@ function recentLines(input: SidebarInput, width: number): string[] {
   const lastMinute = input.finished.filter(
     (request) => input.now - request.endedAt < RATE_WINDOW_MS
   )
-  // Only the newest FINISHED_KEPT are kept: a full list may be missing some of the minute.
-  const count = `${String(lastMinute.length)}${lastMinute.length >= FINISHED_KEPT ? '+' : ''}`
-  const failed = lastMinute.filter((request) => request.outcome === 'failed').length
-  const failures = failed > 0 ? styleText('red', ` · ${String(failed)} failed`) : ''
-  const lines = [spread('last minute', `${count} req${failures}`, width)]
-  const took = average(lastMinute.map((request) => request.endedAt - request.startedAt))
+  const lines = [lastMinuteLine(lastMinute, width)]
+  // A rejected request is answered at once: its time would only pull the average down.
+  const dispatched = lastMinute.filter((request) => request.outcome !== 'rejected')
+  const took = average(dispatched.map((request) => request.endedAt - request.startedAt))
   if (took !== undefined) lines.push(spread('  avg time', latency(took), width))
   const first = average(
-    lastMinute.map((request) =>
+    dispatched.map((request) =>
       request.firstEventAt === undefined ? undefined : request.firstEventAt - request.startedAt
     )
   )
   if (first !== undefined) lines.push(spread('  first event', latency(first), width))
   for (const request of input.finished.slice(0, MAX_RECENT_LISTED)) {
-    const time = latency(request.endedAt - request.startedAt)
-    // The row is the mark, the model and the time, a space between each.
-    const modelWidth = width - visibleWidth(time) - visibleWidth('✓  ')
-    const model = fitLabel(request.model, Math.max(1, modelWidth))
-    lines.push(`${OUTCOME_MARKS[request.outcome]} ${model} ${styleText('dim', time)}`)
+    lines.push(finishedLine(request, width))
   }
   return lines
 }

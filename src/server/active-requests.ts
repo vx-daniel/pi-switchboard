@@ -6,8 +6,9 @@
  * The chat route adds a request before it dispatches; the dispatcher (`chat-dispatch.ts`) names
  * the model each attempt goes to and marks a stream's first event. The request ends, with how it
  * ended, when the dispatch returns or, for a stream, when the stream closes (finished, failed, or
- * the client left). The last {@link FINISHED_KEPT} finished requests are kept, oldest dropped
- * first. No HTTP route serves this.
+ * the client left). A chat request answered before the dispatch is recorded as rejected, by
+ * `rejectedChatMiddleware` (#214). The last {@link FINISHED_KEPT} finished requests are kept,
+ * oldest dropped first. No HTTP route serves this.
  *
  * An entry holds the request's ID, the route and timings, never message content, the request's
  * `user`, or a credential.
@@ -23,8 +24,12 @@ const activeLogger = proxyLogger('server', 'chat')
 /** How many finished requests are kept: enough for a minute's rate on a busy local proxy. */
 export const FINISHED_KEPT = 500
 
-/** How a request ended: answered, failed (an error answer or a failed stream), or the client left. */
-export type RequestOutcome = 'ok' | 'failed' | 'left'
+/**
+ * How a request ended: answered, failed (an error answer or a failed stream), the client left, or
+ * rejected (answered before the proxy called a model: auth, size, validation, an unknown model, a
+ * credential pi can't resolve, a remote image or a message it can't convert).
+ */
+export type RequestOutcome = 'ok' | 'failed' | 'left' | 'rejected'
 
 /** One chat request in flight. */
 export interface ActiveRequest {
@@ -44,11 +49,28 @@ export interface ActiveRequest {
   readonly firstEventAt: number | undefined
 }
 
-/** One request that finished. */
+/**
+ * One request that finished. A rejected one never reached a model: its `model` is the one the
+ * request named (`''` when the proxy did not read that far), its `attempt` is 0, and it never
+ * streamed.
+ */
 export interface FinishedRequest extends ActiveRequest {
   readonly outcome: RequestOutcome
   /** When it ended, in milliseconds since the epoch. */
   readonly endedAt: number
+  /** The HTTP status a rejected request was answered with; `undefined` for any other. */
+  readonly status: number | undefined
+}
+
+/** What a rejected request is recorded with. */
+export interface RejectedRequest {
+  readonly requestId: string
+  /** The model the request named, or `undefined` when the proxy did not read that far. */
+  readonly model: string | undefined
+  /** The HTTP status it was answered with. */
+  readonly status: number
+  /** When it arrived, in milliseconds since the epoch. */
+  readonly startedAt: number
 }
 
 /** What a request starts with. */
@@ -124,6 +146,18 @@ export function requestOutcome(failed: boolean, signal: AbortSignal | undefined)
 }
 
 /**
+ * Keeps a finished request, dropping the oldest past {@link FINISHED_KEPT}, and tells the
+ * listeners.
+ *
+ * @param request - the request
+ */
+function keep(request: FinishedRequest): void {
+  finished.push(request)
+  if (finished.length > FINISHED_KEPT) finished.shift()
+  notify()
+}
+
+/**
  * Moves a request from in flight to finished.
  *
  * @param key - its key
@@ -134,9 +168,28 @@ function finish(key: number, outcome: RequestOutcome, now: number): void {
   const request = requests.get(key)
   if (request === undefined) return
   requests.delete(key)
-  finished.push({ ...request, outcome, endedAt: now })
-  if (finished.length > FINISHED_KEPT) finished.shift()
-  notify()
+  keep({ ...request, outcome, endedAt: now, status: undefined })
+}
+
+/**
+ * Records a chat request the proxy answered without calling a model.
+ *
+ * @param rejected - its ID, the model it named, its status and when it arrived
+ * @param now - when it was answered; `Date.now()` by default
+ */
+export function recordRejectedRequest(rejected: RejectedRequest, now: number = Date.now()): void {
+  keep({
+    requestId: rejected.requestId,
+    alias: null,
+    model: rejected.model ?? '',
+    attempt: 0,
+    stream: false,
+    startedAt: rejected.startedAt,
+    firstEventAt: undefined,
+    outcome: 'rejected',
+    endedAt: now,
+    status: rejected.status
+  })
 }
 
 /**

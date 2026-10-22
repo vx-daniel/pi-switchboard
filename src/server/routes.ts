@@ -311,6 +311,7 @@ async function handleChatCompletion(
   const requestId = context.get('requestId')
   const upstreamApiKey = context.get('upstreamApiKey')
   logValidatedChatRequest(request)
+  context.set('chatModel', request.model)
 
   // Resolve model through the exposure engine. The config is read once: the reserve comes with it.
   const requestConfig = await configReader()
@@ -352,13 +353,15 @@ async function handleChatCompletion(
   const built = buildPiContext(context, prepared.value)
   if (!built.ok) return built.response
 
-  // Listed among the requests in flight until it ends: here, or when its stream closes.
+  // Listed among the requests in flight until it ends: here, or when its stream closes. Marked on
+  // the context, so `rejectedChatMiddleware` leaves it to the tracker from here.
   const active = beginActiveRequest({
     requestId,
     alias: resolved.alias ?? null,
     model: start.candidates[0]?.canonicalId ?? first.canonicalId,
     stream: request.stream === true
   })
+  context.set('chatDispatched', true)
   // The client's disconnect only. The dispatch reads it to tell a client that left from an
   // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
   const signal = context.get('abortController').signal

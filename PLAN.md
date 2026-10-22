@@ -1723,9 +1723,14 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   it dispatches (never message content or a credential), the dispatcher names each attempt's
   model and marks a stream's first event, and the request ends when the dispatch returns or, for
   a stream, when the stream closes. It ends `ok`, `failed` (an error answer, or a stream that
-  failed) or `left` (the client disconnected, whatever the answer). The last 500 finished
-  requests are kept, so the minute's count reads `500+` when it may be missing some. Like the
-  route totals, all of it is in memory and no HTTP route serves it.
+  failed) or `left` (the client disconnected, whatever the answer). A chat request answered before
+  the dispatch (proxy auth, the body size limit, validation, an unexposed model, a credential pi
+  can't resolve, a remote image or a message it can't convert) is `rejected`, with its status:
+  `rejectedChatMiddleware`, mounted on the chat path ahead of the body size limit and proxy auth,
+  records any answer the route did not mark as dispatched (`chatDispatched`), with the model the
+  request named once its body validated (`chatModel`) (#214). The last 500 finished requests are
+  kept, so the minute's count reads `500+` when it may be missing some. Like the route totals,
+  all of it is in memory and no HTTP route serves it.
 - **Accounts.** The providers pi has a credential for (`getCredentialStatuses`, as
   `/healthz/creds`): login type, source and model count; never the credential. `↑` `↓` select a
   row (`navigation.ts`; the selection stays on the list when a logout shortens it), and `Enter`

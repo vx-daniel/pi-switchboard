@@ -10,6 +10,7 @@ import { createHash, timingSafeEqual } from 'node:crypto'
 import { withContext } from '@logtape/logtape'
 import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
+import { recordRejectedRequest } from '@proxy/server/active-requests'
 import { authenticationError, invalidRequest } from '@proxy/server/errors'
 import {
   HTTP_BAD_REQUEST,
@@ -240,6 +241,34 @@ export function disconnectMiddleware(): MiddlewareHandler<ProxyEnv> {
     }
 
     await next()
+  }
+}
+
+/**
+ * Creates the middleware that records a chat request the proxy answers without calling a model
+ * as rejected, for the console (#214).
+ *
+ * @remarks
+ * Mounted on `POST /v1/chat/completions` ahead of the body size limit and proxy auth, so it sees
+ * their answers too. The chat route marks a request that reaches the dispatch (`chatDispatched`),
+ * which `active-requests.ts` follows from there; any other answer is recorded with its status and
+ * the model the request named, if the route read that far (`chatModel`). Nothing else from the
+ * request is kept.
+ *
+ * @returns the middleware
+ */
+export function rejectedChatMiddleware(): MiddlewareHandler<ProxyEnv> {
+  return async (context, next) => {
+    const startedAt = Date.now()
+    await next()
+    if (context.req.method !== 'POST' || context.get('chatDispatched') === true) return undefined
+    recordRejectedRequest({
+      requestId: context.get('requestId'),
+      model: context.get('chatModel'),
+      status: context.res.status,
+      startedAt
+    })
+    return undefined
   }
 }
 
