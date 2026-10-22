@@ -12,7 +12,9 @@
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent'
+import type { Accounts } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { registerAccounts } from '@proxy/pi/accounts'
 import * as z from 'zod'
 
 /** Logger for runtime setup and credential lookups. */
@@ -87,9 +89,11 @@ export function describeModelsJsonError(error: string): string {
 /**
  * Initializes the runtime and settings. Call once at startup.
  *
+ * @param accounts - provider -> how many logins it has (#227); each extra one is registered as a
+ *   provider of its own before the availability snapshot is taken
  * @returns the models.json error ({@link describeModelsJsonError}), or `undefined` on success
  */
-export async function initRegistry(): Promise<string | undefined> {
+export async function initRegistry(accounts: Accounts = {}): Promise<string | undefined> {
   const cwd = process.cwd()
   runtime = await ModelRuntime.create()
   settingsManager = SettingsManager.create(cwd)
@@ -100,6 +104,11 @@ export async function initRegistry(): Promise<string | undefined> {
       error: loadError,
       path: splitModelsJsonError(rawError).path
     })
+  }
+  if (registerAccounts(runtime, accounts).length > 0) {
+    // A registered provider is only provisionally available until the next availability pass;
+    // this one settles it, from the stored credentials alone, before the snapshot is read.
+    await runtime.refresh({ allowNetwork: false })
   }
   registryLogger.info('Model runtime ready with {availableModelCount} available models', {
     availableModelCount: runtime.getAvailableSnapshot().length,

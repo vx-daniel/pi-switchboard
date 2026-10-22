@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import type { Accounts } from '@proxy/config/schema'
 import { initRegistry } from '@proxy/pi/registry'
 import { vi } from 'vite-plus/test'
 
@@ -20,6 +21,8 @@ export interface FixtureAgentDirFiles {
   readonly modelsJsonText?: string
   /** Written as JSON, owner-only, as pi expects. */
   readonly authJson?: unknown
+  /** Provider -> how many logins it has, registered as `initRegistry` does from the config (#227). */
+  readonly accounts?: Accounts
 }
 
 /** A loaded fixture agent directory: where it is, and how to delete it. */
@@ -79,7 +82,7 @@ export async function loadFixtureAgentDir(
     writeFileSync(join(path, 'auth.json'), JSON.stringify(files.authJson), { mode: OWNER_ONLY })
   }
   vi.stubEnv('PI_CODING_AGENT_DIR', path)
-  await initRegistry()
+  await initRegistry(files.accounts)
   return {
     path,
     remove() {

@@ -661,7 +661,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
       'app.message.copy': { defaultKeys: 'ctrl+x', description: 'Copy the sign-in URL' }
     })
   )
-  await initRegistry()
+  await initRegistry(config.accounts)
   const proxyAuth = createProxyAuthSwitch(config.proxyAuth)
   const server = await listen(config, proxyAuth)
   const terminal = new ProcessTerminal()
