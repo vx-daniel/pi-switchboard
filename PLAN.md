@@ -1504,10 +1504,22 @@ release workflow, never in `check:all` or the pre-commit hook.
   uses. Without them the binary reads `.env` and `bunfig.toml` from the directory it is started
   in, so a stray `.env` could set `PI_SWITCHBOARD_HOST` or `PI_SWITCHBOARD_AUTH_TOKEN`: settings
   come only from flags, the environment and the config file (principle III).
-- **Targets.** `node scripts/build-binary.ts` builds the host's `dist-bin/pi-switchboard`;
-  `--all` cross-compiles `pi-switchboard-<os>-<arch>` for linux-x64, linux-arm64, darwin-x64 and
-  darwin-arm64 on one Linux machine, with `dist-bin/SHA256SUMS`. Windows is not a target yet, and
-  the macOS binaries are unsigned.
+- **Targets.** `node scripts/build-binary.ts` builds the host's `dist-bin/pi-switchboard`
+  (`pi-switchboard.exe` on Windows); `--all` cross-compiles `pi-switchboard-<os>-<arch>` for
+  linux-x64, linux-arm64, darwin-x64 and darwin-arm64 on one Linux machine, with
+  `dist-bin/SHA256SUMS`; `--windows` cross-compiles `pi-switchboard-windows-x64.exe` and
+  `-windows-arm64.exe`, with `dist-bin/SHA256SUMS-windows`. The macOS and Windows binaries are
+  unsigned.
+- **Windows, by hand only.** `binary.yml` with `platforms: windows` builds the Windows set, runs
+  the binary test suite on `windows-latest` against the cross-compiled
+  `pi-switchboard-windows-x64.exe` the release gets (`PI_SWITCHBOARD_BINARY` names it, so the
+  suite tests the shipped file, not a rebuild), runs `--version` on `windows-latest` and
+  `windows-11-arm`, and with a tag uploads the two `.exe` files and `SHA256SUMS-windows` to that
+  release, attested like the others. The release workflow never runs it, to save Actions minutes:
+  a release gets Windows binaries when someone runs it with the release's tag. The test suite
+  starts the binary with `USERPROFILE` and `SystemRoot` as well as `HOME`
+  (`test/fixtures/platform-env.ts`): Windows takes the home from `USERPROFILE`, and a process
+  without `SystemRoot` cannot open sockets.
 - **Tests.** `test/binary/` runs the compiled host binary against the fixtures: a chat completion
   through the mock provider, an expired OAuth login refreshed through a local recording HTTPS
   proxy (no `Cannot find module`), and a `.env` and a `bunfig.toml` in its working directory
@@ -1527,13 +1539,13 @@ release workflow, never in `check:all` or the pre-commit hook.
   job checks them against `SHA256SUMS`, attests their build provenance
   (`actions/attest-build-provenance`; the only job with `id-token: write` and
   `attestations: write`) and uploads them to the tag's GitHub release.
-- **Retryable upload, never overwriting.** The upload adds only the five expected assets the
-  release is missing, `SHA256SUMS` last. An asset already there is downloaded and must be
+- **Retryable upload, never overwriting.** The upload adds only the set's expected assets the
+  release is missing, the checksum file last. An asset already there is downloaded and must be
   byte-identical to the new build, or the run fails before uploading anything. This relies on Bun
   producing identical binaries for one tree and Bun version, which two local `--all` builds showed
   (the same `SHA256SUMS`), not a guarantee Bun makes; if a build ever differs, a retry stops at the
   first existing asset, and the release's existing assets must be deleted by hand first. With
-  all five already there it succeeds without uploading. So a run that failed partway is fixed by
+  all of them already there it succeeds without uploading. So a run that failed partway is fixed by
   running `binary.yml` again by hand with the tag. Third-party actions in `binary.yml` and the CI
   `binary` job are pinned by commit SHA.
 - **Releases before the binary.** A tag whose tree has no `scripts/build-binary.ts` (0.3.0 and

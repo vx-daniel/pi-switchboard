@@ -2,9 +2,13 @@
 /**
  * Compile the standalone binary (`src/standalone/main.ts`) with `bun build --compile`.
  *
- *   node scripts/build-binary.ts         the host platform, to dist-bin/pi-switchboard
- *   node scripts/build-binary.ts --all   every release target, to dist-bin/pi-switchboard-<target>,
- *                                        plus dist-bin/SHA256SUMS
+ *   node scripts/build-binary.ts            the host platform, to dist-bin/pi-switchboard
+ *                                           (pi-switchboard.exe on Windows)
+ *   node scripts/build-binary.ts --all      the Linux and macOS release targets, to
+ *                                           dist-bin/pi-switchboard-<target>, plus SHA256SUMS
+ *   node scripts/build-binary.ts --windows  the Windows targets, to
+ *                                           dist-bin/pi-switchboard-<target>.exe, plus
+ *                                           SHA256SUMS-windows
  *
  * Bun is the compiler only: the npm package still runs on Node. One Linux machine builds every
  * target. The two autoload flags are the ones pi's own binary uses: without them a compiled binary
@@ -21,13 +25,34 @@ import { join } from 'node:path'
 
 /** The binary's entry: the proxy after pi's Bun setup. */
 const ENTRY = 'src/standalone/main.ts'
-/** Where the binaries and `SHA256SUMS` are written; git-ignored. */
+/** Where the binaries and their checksum files are written; git-ignored. */
 const OUT_DIR = 'dist-bin'
 /** The host binary's file name, and the prefix of each release target's. */
 const NAME = 'pi-switchboard'
 
-/** Release targets, as Bun names them after `bun-`. Windows is not one yet (#61). */
-const RELEASE_TARGETS = ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'] as const
+/** A set of release targets, built together, with its checksum file. */
+interface TargetSet {
+  /** The targets, as Bun names them after `bun-`. */
+  readonly targets: readonly string[]
+  /** The binaries' file extension. */
+  readonly extension: string
+  /** The checksum file listing them. */
+  readonly sums: string
+}
+
+/** The Linux and macOS targets: what the release workflow builds for every release. */
+const UNIX: TargetSet = {
+  targets: ['linux-x64', 'linux-arm64', 'darwin-x64', 'darwin-arm64'],
+  extension: '',
+  sums: 'SHA256SUMS'
+}
+
+/** The Windows targets: built by hand (`binary.yml` with `platforms: windows`), not per release. */
+const WINDOWS: TargetSet = {
+  targets: ['windows-x64', 'windows-arm64'],
+  extension: '.exe',
+  sums: 'SHA256SUMS-windows'
+}
 
 /** `bun build` arguments for every target: compile, without `.env` or `bunfig.toml` autoloading. */
 const COMPILE_FLAGS = [
@@ -54,22 +79,28 @@ function compile(outfile: string, targetFlags: readonly string[] = []): void {
   process.exit(result.status ?? 1)
 }
 
-mkdirSync(OUT_DIR, { recursive: true })
-
-if (process.argv.includes('--all')) {
+/**
+ * Builds every target of a set into a clean output directory, then writes its checksum file.
+ *
+ * @param set - the targets to build
+ */
+function buildSet(set: TargetSet): void {
   rmSync(OUT_DIR, { recursive: true, force: true })
   mkdirSync(OUT_DIR, { recursive: true })
-  const sums: string[] = []
-  for (const target of RELEASE_TARGETS) {
-    const file = `${NAME}-${target}`
+  const sums = set.targets.map((target) => {
+    const file = `${NAME}-${target}${set.extension}`
     compile(join(OUT_DIR, file), ['--target', `bun-${target}`])
-    sums.push(
-      `${createHash('sha256')
-        .update(readFileSync(join(OUT_DIR, file)))
-        .digest('hex')}  ${file}`
-    )
-  }
-  writeFileSync(join(OUT_DIR, 'SHA256SUMS'), `${sums.join('\n')}\n`)
-} else {
-  compile(join(OUT_DIR, NAME))
+    const digest = createHash('sha256')
+      .update(readFileSync(join(OUT_DIR, file)))
+      .digest('hex')
+    return `${digest}  ${file}`
+  })
+  writeFileSync(join(OUT_DIR, set.sums), `${sums.join('\n')}\n`)
+}
+
+if (process.argv.includes('--all')) buildSet(UNIX)
+else if (process.argv.includes('--windows')) buildSet(WINDOWS)
+else {
+  mkdirSync(OUT_DIR, { recursive: true })
+  compile(join(OUT_DIR, process.platform === 'win32' ? `${NAME}.exe` : NAME))
 }
