@@ -19,6 +19,10 @@ export interface LogBuffer {
   /**
    * Returns the lines, oldest first.
    *
+   * @remarks
+   * The buffer's own list, not a copy (a render reads it at every redraw): read it at once, as a
+   * render does. The next append changes it, so a caller that keeps it shifts with the buffer.
+   *
    * @returns the lines
    */
   lines(): readonly string[]
