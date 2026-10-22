@@ -85,7 +85,8 @@ pi-switchboard tui            # takes the same flags as pi-switchboard
 - **Stats (`3`).** A dashboard over the [stats file](#configuration) (#216), for today, the last week or all 30 days kept (`t`, `w`, `a`):
   - **OVERVIEW:** requests, failed ones with their share, rejected ones; the average time and time to the first event, tokens in and out, and cost.
   - **TIMELINE:** requests over the window, one bar per column, each bar as long as the window over the width (`8 min per bar` today, about `1h40m` for a week). A bar's failed and rejected requests are stacked at its foot: red when any failed, yellow when they were only rejected.
-  - **MODELS:** each served model, busiest first: requests, failures, average and slowest time, average time to the first event, tokens in and out, and cost.
+  - **MODELS:** each served model, busiest first: requests, failures, fallbacks taken, average and slowest time, average time to the first event, tokens in and out, and cost.
+  - **ALIASES:** the same numbers per [alias](#aliases), with requests that named a model directly as `direct`. An alias counts every model its fallback chain tried. Shown when a request in the window named an alias.
   - **ERRORS:** failed attempts by failure class, and rejected requests by HTTP status.
 
   It covers every proxy that writes to the same agent dir, and reads the file again every 5 seconds; the proxy writes it every 5 seconds. With stats off (`--no-stats`), or a file that can't be opened or read, the view shows the totals per alias and served model since the proxy started instead (#70), counted in memory, and says why.
@@ -173,6 +174,7 @@ The stable routes are the first three rows. [`PLAN.md`](PLAN.md) "Stable surface
 | `GET /v1/models/{model}` | Model details by public ID or canonical ID (supports URL-encoded IDs with `/`) |
 | `POST /v1/chat/completions` | Chat completions (streaming and non-streaming) |
 | `GET /v1/switchboard/models` | Not OpenAI's: each exposed model's pi capabilities, such as its supported `reasoning_effort` values ([below](#discovering-available-models)) |
+| `GET /v1/switchboard/usage` | Not OpenAI's: usage over today, the last week or 30 days, per model and per alias, from the stats file ([below](#usage-over-http)) |
 | `GET /v1/switchboard/openapi.json` | Not OpenAI's: this API as an OpenAPI 3.1 document ([below](#api-documentation)) |
 | `GET /docs` | Off by default: Swagger UI for the document, to read the API and try requests ([below](#api-documentation)) |
 
@@ -183,6 +185,22 @@ The stable routes are the first three rows. [`PLAN.md`](PLAN.md) "Stable surface
 Turn on `docsUi` (`--docs-ui`, `PI_SWITCHBOARD_DOCS_UI=true`, or the settings panel) and open `http://localhost:4141/docs` in a browser to browse the API and send requests with "Try it out". With proxy auth on, click **Authorize** and enter the token first. The page loads Swagger UI 5.34.0 from the jsDelivr CDN, so it needs internet access; that is why it is off by default. While it is off, `/docs` answers 404.
 
 Neither route needs the proxy token, even with proxy auth on: a browser cannot send one to open a page. Both name routes and schemas only, never a model, provider or credential, and every route they describe still needs the token.
+
+### Usage over HTTP
+
+`GET /v1/switchboard/usage` (not part of OpenAI's API; proxy token, if set) answers what the console's Stats view shows, for a proxy run without the console, such as the Docker image. It reads the [stats file](#configuration), so it covers every proxy that writes to the same agent dir and survives restarts. Like the file, which the proxy writes every 5 seconds, an answer can be up to 5 seconds old: one window's answer is reused that long, so polling it costs one read.
+
+```bash
+curl -s "http://localhost:4141/v1/switchboard/usage?window=week" -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" | jq '.aliases'
+```
+
+- **`window`:** `today` (from midnight, the proxy's local time; the default), `week` (the last 7 days) or `all` (the 30 days the file keeps). Anything else is a `400`.
+- **`models` and `aliases`:** per served model and per alias, busiest first: `requests`, `failed`, `left` (the client went away), `average_ms`, `slowest_ms`, `average_first_event_ms`, `attempts`, `fallbacks`, `input_tokens`, `output_tokens`, `cache_tokens` and `cost_usd`. An alias counts every model its fallback chain tried; `alias: null` is the requests that named a model directly.
+- **`failures` and `rejected`:** failed attempts by failure class, and rejected requests by HTTP status.
+- **`timeline`:** requests per hour (`today`), per 6 hours (`week`) or per day (`all`), with failed and rejected ones; `bucket_minutes` says which.
+- **Stats off** (`--no-stats`), or a file that can't be read, answers `503` with code `stats_unavailable`, not empty numbers.
+
+Routes, counts, timings, tokens and cost only: never message content, a request's `user`, or a credential.
 
 ### Health checks
 

@@ -53,9 +53,12 @@ import {
   modelPathSchema,
   retrieveModelDescription,
   SWITCHBOARD_PREFIX,
-  UNSUPPORTED_ENDPOINTS
+  UNSUPPORTED_ENDPOINTS,
+  usageDescription,
+  usageQuerySchema
 } from '@proxy/server/openapi'
 import type { ProxyEnv } from '@proxy/server/types'
+import { createUsageAnswer } from '@proxy/server/usage'
 import { type Context, Hono } from 'hono'
 import { describeRoute, validator } from 'hono-openapi'
 
@@ -426,6 +429,19 @@ export function createRoutes(
         aliasCount: exposure.aliases.length
       })
       return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
+    }
+  )
+
+  // --- GET /v1/switchboard/usage ---
+  // Not OpenAI's: the stats file's usage over a window, for a proxy run without the console.
+  const answerUsage = createUsageAnswer(config.statsEnabled)
+  routes.get(
+    `${SWITCHBOARD_PREFIX}/usage`,
+    describeRoute(usageDescription),
+    validator('query', usageQuerySchema),
+    (context) => {
+      const answer = answerUsage(context.req.valid('query').window, Date.now())
+      return context.json(answer.body, answer.status)
     }
   )
 

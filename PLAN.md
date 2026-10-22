@@ -153,8 +153,8 @@ document is registered before the auth middleware in `createApp`; `/docs` is out
 What the document covers: every route the proxy serves, which a test checks against the app's
 route table.
 
-- the stable routes and `GET /v1/switchboard/models`, with their request and response schemas,
-  error statuses and the bearer scheme;
+- the stable routes, `GET /v1/switchboard/models` and `GET /v1/switchboard/usage`, with their
+  request and response schemas, error statuses and the bearer scheme;
 - the health endpoints, under "Operational", with their bodies (`/healthz` needs no token);
 - the document and the docs page, under "Documentation". `/docs` is registered whatever the
   config, so the document does not depend on `docsUi`;
@@ -570,8 +570,8 @@ client-supplied key (#177 settled this), and never the request's `user`.
 - **Never pruned.** A row stays until restart or a clear, so an alias renamed or removed in the
   config (read per request) keeps its rows. They are bounded by alias × model.
 - **Readers.** The terminal console (#61) reads `routeTotals()` in-process and subscribes with
-  `onRouteTotalsChange()`. There is no HTTP view: whether to add `GET /healthz/usage` for headless
-  use stays open on #70.
+  `onRouteTotalsChange()`. Over HTTP, usage comes from the stats file instead, which survives a
+  restart: `GET /v1/switchboard/usage` (#224, below).
 
 ### Route handling
 
@@ -1263,6 +1263,16 @@ Each entry is pi's catalogue entry for the model, as pi resolves it (`models.jso
 - new capability fields go here, never on `/v1/models`
 - non-standard routes live under `/v1/switchboard/`, as `/v1/switchboard/agent/completions` would. The prefix was `/v1/pi/` until constitution 2.0.0; `/v1/pi/models` moved here with no alias
 
+### `GET /v1/switchboard/usage`
+
+Not part of OpenAI's API (#224): the stats file's usage over a window, for a proxy run without the console (the Docker image, say). Behind proxy auth like every `/v1/*` route.
+
+- `?window=` `today` (from local midnight; the default), `week` (the last 7 days) or `all` (30 days, all the file keeps); the windows are `src/stats/windows.ts`, shared with the console. Anything else is `400` `invalid_request_error`, `param: "window"`. A repeated `window` counts by its first value, as `verify` does on `/healthz/creds`
+- the body (`usageSchema`, `src/server/usage.ts`): `object: "switchboard.usage"`, the window, `from` and `to` (ISO times; `to` is the minute after the last), `bucket_minutes` (60, 360 or 1440 by window), then `models` and `aliases` with the same numbers (`requests`, `failed`, `left`, `average_ms`, `slowest_ms`, `average_first_event_ms`, `attempts`, `fallbacks`, `input_tokens`, `output_tokens`, `cache_tokens`, `cost_usd`), `failures` by class, `rejected` by status, and `timeline` (`start`, `requests` with rejected ones, `failed`, `rejected`)
+- `aliases`: one entry per alias a request named, its attempts counted whichever model in a fallback chain made them, and `alias: null` for requests that named a model directly. Rejected requests are only in `rejected` and `timeline`
+- reads the store through its own connection, opened on the first request (WAL lets it read while the recorder writes). The reads are synchronous, on the thread that serves requests, so one window's answer is reused for 5 s, the recorder's own write interval: a burst of requests reads the file once. A file that won't open or read answers `503` `stats_unavailable` and is closed (a failed close is logged, not thrown) and opened again on the next request; stats off (`--no-stats`) is `503` `stats_unavailable` too, never empty numbers. The connection lives until the process exits: the route has no server lifecycle to close it on, and a WAL reader holds no lock
+- routes, counts, timings, tokens and cost only: never message content, the request's `user`, or a credential. A rejected request's model is the client's text, already capped by the recorder
+
 ## Error contract
 
 Use an OpenAI-style shape:
@@ -1638,7 +1648,8 @@ src/
 │   └── index.ts          -- LogTape setup, categories, level guide, redaction (exported via ./logging)
 ├── server/
 │   ├── app.ts            -- Hono app assembly (middleware + routes)
-│   ├── routes.ts         -- GET /v1/models, GET /v1/models/:model, GET /v1/switchboard/models, POST /v1/chat/completions
+│   ├── routes.ts         -- GET /v1/models, GET /v1/models/:model, GET /v1/switchboard/models and /usage, POST /v1/chat/completions
+│   ├── usage.ts          -- GET /v1/switchboard/usage: the stats file's usage over a window
 │   ├── health.ts         -- GET /healthz, /healthz/models, /healthz/creds
 │   ├── middleware.ts     -- request-id, proxy-auth, body size limit, disconnect detection
 │   ├── errors.ts         -- OpenAI-style error helpers, upstream error mapping
@@ -1765,8 +1776,10 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   size rounded up so the window fits, bars drawn in eighths of a row against the busiest bucket
   and ending under `now`; a bucket's failed and rejected requests are stacked at the foot of its
   bar, at least one cell, red when any failed and yellow when they were only rejected, since
-  coloring a whole bar would mark nearly every busy bar), MODELS and ERRORS. The timeline takes
-  the room the models don't need, 3 to 16 rows of bars; on a short screen the models give way
+  coloring a whole bar would mark nearly every busy bar), MODELS, ALIASES (only when a request
+  named an alias, since direct requests alone would repeat the totals; `direct` for those) and
+  ERRORS, the two tables with the same columns, fallbacks included. The timeline takes the room
+  the tables don't need, 3 to 16 rows of bars; on a short screen the tables give way
   first (`+N more`), then the bars, then the bottom is cut. With stats off or a file that won't
   open, the view falls back to #70's in-memory route totals (`stats-view.ts`), one row per alias ×
   served model plus a total, under a line that says why. A read that fails once the file is open
@@ -1822,8 +1835,9 @@ default (`stats`, `--no-stats`, `PI_SWITCHBOARD_STATS=false`).
   class). Routes, counts and timings only: never message content, the request's `user`, or a
   credential. A rejected request's model is the name the client sent, so it is cut to 128
   characters, and past 20 distinct names in a minute the rest are filed as `(other)`. Queries: a
-  timeline in buckets with empty ones filled in, per-model numbers, and failures by class with
-  rejected requests by status.
+  timeline in buckets with empty ones filled in, per-model and per-alias numbers (one query
+  grouped by either column, `usageBy`), and failures by class with rejected requests by status.
+  Readers: the console's Stats view and `GET /v1/switchboard/usage`.
 - **Recording** (`recorder.ts`). Route totals emit typed events (`RouteEvent`) and the requests
   tracker passes each finished request to its listeners; the recorder adds them up per minute and
   route in memory and writes them every 5 s in one transaction, and when the server closes or the
