@@ -27,6 +27,8 @@ declare namespace NodeJS {
     PI_SWITCHBOARD_EXTENSION_LOG_FILE?: string | undefined
     /** `1` turns on the `live` test project (test/conformance); set by `pnpm run test:live`. */
     PI_SWITCHBOARD_LIVE_TESTS?: string | undefined
+    /** `1` turns on the `binary` test project (test/binary); set by `pnpm run test:binary`. */
+    PI_SWITCHBOARD_BINARY_TESTS?: string | undefined
     /** scripts/record-fixtures.ts: the pi agent dir holding the login used for recording. */
     PI_SWITCHBOARD_RECORD_AGENT_DIR?: string | undefined
     /** scripts/record-fixtures.ts: where recordings are saved (default test/fixtures/recordings). */

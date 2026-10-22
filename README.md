@@ -553,6 +553,26 @@ curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141
 - **Health.** The image's healthcheck asks `GET /healthz`, which needs no token, so the container is healthy before you log in. `GET /v1/models` with the token lists what the login can use.
 - **A number-5 login volume** (`j5-pi-openai-proxy_pi-auth`) works unchanged: same UID, same mount path. To keep it, declare it in `compose.yaml` as an `external` volume under that name.
 
+## Standalone binary
+
+From the first release after this lands, each GitHub release carries the proxy as one executable for Linux and macOS (x64 and arm64): `pi-switchboard-linux-x64`, `pi-switchboard-linux-arm64`, `pi-switchboard-darwin-x64`, `pi-switchboard-darwin-arm64`, and a `SHA256SUMS` file. It needs no Node and no pi install: pi is compiled in. Windows is not built yet.
+
+```bash
+version=<version>   # e.g. 0.2.0
+base="https://github.com/vx-daniel/pi-switchboard/releases/download/pi-switchboard-v$version"
+curl -LO "$base/pi-switchboard-linux-x64" -LO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+gh attestation verify pi-switchboard-linux-x64 --repo vx-daniel/pi-switchboard   # optional: built by this repo's release workflow
+chmod +x pi-switchboard-linux-x64
+./pi-switchboard-linux-x64 --port 4141
+```
+
+Every binary is run (`--version`) on its own platform, Linux and macOS on x64 and arm64, before the release workflow uploads it, and each asset has a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) that `gh attestation verify` checks.
+
+- **macOS.** The binaries are not signed, so Gatekeeper blocks the first run. After checking the checksum, remove the quarantine flag: `xattr -d com.apple.quarantine pi-switchboard-darwin-arm64`.
+- **Logins come from pi's `auth.json`.** The binary reads the same `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) as the npm package, so log in with pi first. Logging in from the binary itself comes with its terminal console ([#61](https://github.com/vx-daniel/pi-switchboard/issues/61)).
+- **Same options.** Flags, `PI_SWITCHBOARD_*` variables and `proxy-config.json` work as in [Configuration](#configuration). The binary never reads a `.env` or `bunfig.toml` from the directory it starts in.
+
 ## Architecture
 
 ```text
@@ -619,6 +639,8 @@ pnpm run test:live    # Live conformance tests against real providers: uses your
 pnpm run test:live:record  # Re-record the Anthropic replay fixtures (needs a login made for recording)
 pnpm run openai-spec:update <commit>  # Re-pin OpenAI's OpenAPI spec subset to a full commit SHA
 vp pack               # Build for npm (ESM + .d.ts)
+pnpm run build:binary # Standalone binary for this machine (dist-bin/pi-switchboard); needs Bun
+pnpm run test:binary  # Build it, then run it against the fixtures (test/binary); needs Bun, not in the gate
 ```
 
 `check:all` (`scripts/gate.ts`) is the one definition of "green": the pre-commit hook, CI, and the release workflow all run it.
@@ -634,7 +656,8 @@ Offline tests run with pi pointed at an empty agent directory and credential env
 - **pnpm** — package manager, driven by `vp`
 - **Node.js** — runtime (`@hono/node-server`)
 - **commitlint** — conventional commits (`commit-msg` hook)
-- **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`)
+- **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`, plus the `binary` job, which builds and tests the standalone binary with Bun), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`, then the image, package and binaries)
+- **Bun** — build-only: compiles the standalone binary (`scripts/build-binary.ts`, `src/standalone/main.ts`); nothing else runs on it
 - **semantic-release** — automated versioning, GitHub releases and the changelog (npm publishing comes with [#59](https://github.com/vx-daniel/pi-switchboard/issues/59))
 
 ## Attribution
