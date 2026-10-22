@@ -666,6 +666,7 @@ Reason:
 
 - incoming `Authorization: Bearer <proxy-key>` protects the proxy itself; off by default for local use
 - the token comes from `--auth-token`, `PI_SWITCHBOARD_AUTH_TOKEN` or `authToken` in the config file, in that order; `"authToken": ""` turns it off
+- the header is matched as RFC 7235 §2.1 allows: the `Bearer` scheme in any case, one or more spaces, then the token, which must match exactly (#128 item 2). The token is compared in constant time: the SHA-256 digests of both, hashed once for the proxy's token, go through `crypto.timingSafeEqual`, so neither how much of a guess matched nor its length shows in the time a refusal takes (#128 item 1)
 - two states (`ServerConfig.proxyAuth`): `off` and `token`. Auth that is set but cannot be applied refuses to start (`UnusableProxyAuthError` from `loadConfig`, CONSTITUTION principle II's exception): a file `authToken` that is not a string (`null` included, #82), or a `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN` that is set but empty (#99). The file's token is not used in place of an empty override, since that would ignore what was set. The CLI logs why at `fatal` (no log level filters it out), naming the field or the flag/variable and never the value, and exits `1`. It never falls back to `off`, which would turn a requested token into an open proxy, and it does not start to refuse every request, which would hide the mistake behind a running process
 - the pi extension discards the proxy's output, so `/proxy start` checks the same two causes before spawning (`startRefusal` in `extensions/proxy/process.ts`: the token it passes wins over pi's own `PI_SWITCHBOARD_AUTH_TOKEN`, which the child inherits, and either wins over the file) and refuses with the reason instead of reporting a proxy that never answered
 - saving the config (the extension's settings panel, the model selector) writes such a value back unchanged; only an explicit choice on the auth row or `/proxy reset` replaces it
@@ -1663,6 +1664,7 @@ src/
 ├── sync/
 │   └── zed.ts            -- Zed settings.json model sync
 ├── tui/
+│   ├── accounts-view.ts  -- the Accounts view's rows: providers, quota used, the login row
 │   ├── command.ts        -- `pi-switchboard tui` (citty)
 │   ├── console.ts        -- the console: pi-tui screen, server in the same process
 │   ├── log-buffer.ts     -- the log view's bounded line buffer
