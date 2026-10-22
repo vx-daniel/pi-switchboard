@@ -1728,9 +1728,12 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   can't resolve, a remote image or a message it can't convert) is `rejected`, with its status:
   `rejectedChatMiddleware`, mounted on the chat path ahead of the body size limit and proxy auth,
   records any answer the route did not mark as dispatched (`chatDispatched`), with the model the
-  request named once its body validated (`chatModel`) (#214). The last 500 finished requests are
-  kept, so the minute's count reads `500+` when it may be missing some. Like the route totals,
-  all of it is in memory and no HTTP route serves it.
+  request named once its body validated (`chatModel`) (#214). The last 500 finished requests that
+  reached a model are kept, and apart from them the last 100 rejected ones: the middleware runs
+  before proxy auth, so anyone who can reach the port can send rejected requests, and a flood of
+  them must not push out the others. The minute's count reads `500+` (or `100+ rejected`) when a
+  list may be missing some of it. Like the route totals, all of it is in memory and no HTTP route
+  serves it.
 - **Accounts.** The providers pi has a credential for (`getCredentialStatuses`, as
   `/healthz/creds`): login type, source and model count; never the credential. `↑` `↓` select a
   row (`navigation.ts`; the selection stays on the list when a logout shortens it), and `Enter`

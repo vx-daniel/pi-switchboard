@@ -7,8 +7,9 @@
  * the model each attempt goes to and marks a stream's first event. The request ends, with how it
  * ended, when the dispatch returns or, for a stream, when the stream closes (finished, failed, or
  * the client left). A chat request answered before the dispatch is recorded as rejected, by
- * `rejectedChatMiddleware` (#214). The last {@link FINISHED_KEPT} finished requests are kept,
- * oldest dropped first. No HTTP route serves this.
+ * `rejectedChatMiddleware` (#214). The last {@link FINISHED_KEPT} finished requests that reached a
+ * model are kept, and apart from them the last {@link REJECTED_KEPT} rejected ones, oldest dropped
+ * first, so a flood of rejected requests can't push out the others. No HTTP route serves this.
  *
  * An entry holds the request's ID, the route and timings, never message content, the request's
  * `user`, or a credential.
@@ -21,8 +22,14 @@ import { proxyLogger } from '@proxy/logging'
 /** Logger for a listener that throws: the chat route's category, as the dispatcher records here. */
 const activeLogger = proxyLogger('server', 'chat')
 
-/** How many finished requests are kept: enough for a minute's rate on a busy local proxy. */
+/** How many finished requests that reached a model are kept: a minute's rate on a busy proxy. */
 export const FINISHED_KEPT = 500
+/**
+ * How many rejected requests are kept, apart from the others: a flood of them (anyone who can
+ * reach the port can send one without a token) must not push out the requests that reached a
+ * model.
+ */
+export const REJECTED_KEPT = 100
 
 /**
  * How a request ended: answered, failed (an error answer or a failed stream), the client left, or
@@ -110,8 +117,20 @@ export interface ActiveRequestHandle {
 
 /** The requests in flight, by a key of their own: two requests can share a client's request ID. */
 const requests = new Map<number, ActiveRequest>()
-/** The finished requests, oldest first, at most {@link FINISHED_KEPT}. */
-const finished: FinishedRequest[] = []
+/**
+ * A finished request as kept, with the order it finished in: many finish within one millisecond,
+ * so `endedAt` alone can't order the two lists below into one.
+ */
+interface Kept {
+  readonly sequence: number
+  readonly request: FinishedRequest
+}
+/** The finished requests that reached a model, oldest first, at most {@link FINISHED_KEPT}. */
+const finished: Kept[] = []
+/** The rejected requests, oldest first, at most {@link REJECTED_KEPT}. */
+const rejectedKept: Kept[] = []
+/** The next finished request's place in the order. */
+let nextSequence = 0
 /** Who is told after each change. */
 const listeners = new Set<() => void>()
 /** The next request's key. */
@@ -146,14 +165,17 @@ export function requestOutcome(failed: boolean, signal: AbortSignal | undefined)
 }
 
 /**
- * Keeps a finished request, dropping the oldest past {@link FINISHED_KEPT}, and tells the
- * listeners.
+ * Keeps a finished request, dropping the oldest of its kind past its bound
+ * ({@link FINISHED_KEPT}, or {@link REJECTED_KEPT} for a rejected one), and tells the listeners.
  *
  * @param request - the request
  */
 function keep(request: FinishedRequest): void {
-  finished.push(request)
-  if (finished.length > FINISHED_KEPT) finished.shift()
+  const [kept, bound] =
+    request.outcome === 'rejected' ? [rejectedKept, REJECTED_KEPT] : [finished, FINISHED_KEPT]
+  kept.push({ sequence: nextSequence, request })
+  nextSequence += 1
+  if (kept.length > bound) kept.shift()
   notify()
 }
 
@@ -240,12 +262,14 @@ export function activeRequests(): readonly ActiveRequest[] {
 }
 
 /**
- * Returns a snapshot of the finished requests kept.
+ * Returns a snapshot of the finished requests kept, rejected ones included.
  *
  * @returns them, newest first
  */
 export function finishedRequests(): readonly FinishedRequest[] {
-  return finished.toReversed()
+  return [...finished, ...rejectedKept]
+    .toSorted((left, right) => right.sequence - left.sequence)
+    .map((kept) => kept.request)
 }
 
 /**

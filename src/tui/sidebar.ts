@@ -20,6 +20,7 @@ import {
   type ActiveRequest,
   FINISHED_KEPT,
   type FinishedRequest,
+  REJECTED_KEPT,
   type RequestOutcome
 } from '@proxy/server/active-requests'
 import type { RouteTotals } from '@proxy/server/route-totals'
@@ -386,12 +387,17 @@ function average(times: readonly (number | undefined)[]): number | undefined {
  * @returns the line
  */
 function lastMinuteLine(lastMinute: readonly FinishedRequest[], width: number): string {
-  // Only the newest FINISHED_KEPT are kept: a full list may be missing some of the minute.
-  const parts = [`${String(lastMinute.length)}${lastMinute.length >= FINISHED_KEPT ? '+' : ''} req`]
+  const rejected = lastMinute.filter((request) => request.outcome === 'rejected').length
+  // Each kind keeps only its newest (FINISHED_KEPT, REJECTED_KEPT): a full one may be missing some
+  // of the minute.
+  const rejectedFull = rejected >= REJECTED_KEPT
+  const full = lastMinute.length - rejected >= FINISHED_KEPT || rejectedFull
+  const parts = [`${String(lastMinute.length)}${full ? '+' : ''} req`]
   const failed = lastMinute.filter((request) => request.outcome === 'failed').length
   if (failed > 0) parts.push(styleText('red', `${String(failed)} failed`))
-  const rejected = lastMinute.filter((request) => request.outcome === 'rejected').length
-  if (rejected > 0) parts.push(styleText('yellow', `${String(rejected)} rejected`))
+  if (rejected > 0) {
+    parts.push(styleText('yellow', `${String(rejected)}${rejectedFull ? '+' : ''} rejected`))
+  }
   return spread('last minute', parts.join(' · '), width)
 }
 

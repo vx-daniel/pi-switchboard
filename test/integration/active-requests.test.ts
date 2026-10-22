@@ -300,6 +300,21 @@ describe('requests the proxy turns away (#214)', () => {
       config: {},
       status: 502,
       model: 'keyless/locked-mock'
+    },
+    {
+      reason: 'a remote image with remote images off',
+      body: JSON.stringify({
+        model: 'alpha/answer-mock',
+        messages: [
+          {
+            role: 'user',
+            content: [{ type: 'image_url', image_url: { url: 'https://example.com/a.png' } }]
+          }
+        ]
+      }),
+      config: {},
+      status: 400,
+      model: 'alpha/answer-mock'
     }
   ])('records $reason as rejected, with its status', async ({ body, config, status, model }) => {
     expect(await post(body, config)).toBe(status)
