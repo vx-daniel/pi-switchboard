@@ -1,23 +1,33 @@
 /**
- * The console's Accounts view (#61): pi's configured providers as the proxy sees them, each with
- * its login, source, model count, quota used and last verification, then the row that opens pi's
- * login selector.
+ * The console's Accounts view (#61): each provider pi has a credential for, as the proxy sees it,
+ * with its quota (#69), then the row that opens pi's login selector.
  *
  * @packageDocumentation
  */
 
 import { styleText } from 'node:util'
 
+import { truncateToWidth } from '@earendil-works/pi-tui'
 import type { Reserve } from '@proxy/config/schema'
 import { providerQuota } from '@proxy/pi/quota'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { clampSelection, LOGIN_ROW } from '@proxy/tui/navigation'
 
-/** Widths of the accounts view's columns: provider, auth type, source, model count. */
+/** Widths of the view's columns: provider, auth type, source, model count. */
 const COLUMNS = { provider: 22, login: 8, source: 16, models: 4 } as const
 /** Percent in a whole: a window's share used is shown as a percentage. */
 const PERCENT = 100
+
+/** What the Accounts view shows. */
+export interface AccountsView {
+  /** The providers pi has a credential for. */
+  readonly accounts: readonly ProviderCredentialStatus[]
+  /** The selected row; the row after the accounts is the login row. */
+  readonly selected: number
+  /** The reserve per provider, to mark a provider below it. */
+  readonly reserve: Reserve
+}
 
 /**
  * Renders whether a provider's credential was verified, when it was.
@@ -59,9 +69,11 @@ function quotaCell(provider: string, reserve: Reserve): string {
 function accountRow(account: ProviderCredentialStatus, reserve: Reserve): string {
   const login = account.type === 'oauth' ? 'account' : 'API key'
   const cells = [
-    account.provider.padEnd(COLUMNS.provider),
+    // A name longer than its column (`qwen-token-plan-individual`, a models.json provider) is cut
+    // with `…`, so the columns after it stay aligned.
+    truncateToWidth(account.provider, COLUMNS.provider, '…', true),
     login.padEnd(COLUMNS.login),
-    (account.source ?? '').padEnd(COLUMNS.source),
+    truncateToWidth(account.source ?? '', COLUMNS.source, '…', true),
     `${String(account.availableModelCount).padStart(COLUMNS.models)} models`,
     quotaCell(account.provider, reserve)
   ]
@@ -80,22 +92,14 @@ function selectable(text: string, selected: boolean): string {
 }
 
 /**
- * Renders the accounts view: pi's configured providers, as the proxy sees them, then the row that
- * opens pi's login selector.
+ * Renders the Accounts view: a heading, one row per provider, then the login row.
  *
- * @param accounts - the providers pi has a credential for
- * @param selected - the selected row; the row after the accounts is the login row
- * @param reserve - the reserve per provider, to mark a provider below it; `undefined` before the
- *   status is first read
+ * @param view - the accounts, the selected row and the reserve
  * @param height - rows available
  * @returns the rows
  */
-export function accountRows(
-  accounts: readonly ProviderCredentialStatus[],
-  selected: number,
-  reserve: Reserve | undefined,
-  height: number
-): string[] {
+export function accountRows(view: AccountsView, height: number): string[] {
+  const { accounts, reserve } = view
   const titles = [
     'provider'.padEnd(COLUMNS.provider),
     'login'.padEnd(COLUMNS.login),
@@ -103,9 +107,9 @@ export function accountRows(
     'models'.padEnd(COLUMNS.models + ' models'.length),
     'quota used'
   ]
-  const current = clampSelection(selected, accounts.length)
+  const current = clampSelection(view.selected, accounts.length)
   const rows = accounts.map((account, index) =>
-    selectable(accountRow(account, reserve ?? {}), index === current)
+    selectable(accountRow(account, reserve), index === current)
   )
   const login = selectable(LOGIN_ROW, current === accounts.length)
   return [styleText('dim', `  ${titles.join(' ')}`), ...rows, login].slice(0, height)

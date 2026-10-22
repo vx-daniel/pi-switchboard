@@ -2379,7 +2379,7 @@
             }
           },
           "401": {
-            "description": "Proxy auth failed, or pi has no credential for the model and no `X-Switchboard-Upstream-Api-Key` was sent.",
+            "description": "Proxy auth failed, or the provider rejected the key sent in `X-Switchboard-Upstream-Api-Key` (`upstream_api_key_invalid`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2674,7 +2674,7 @@
             }
           },
           "502": {
-            "description": "The provider refused the credential, or failed.",
+            "description": "The provider refused pi's stored credential (`upstream_auth_error`), pi has no credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent (`upstream_credentials_missing`), or the provider failed.",
             "content": {
               "application/json": {
                 "schema": {

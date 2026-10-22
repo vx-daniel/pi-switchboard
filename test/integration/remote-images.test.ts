@@ -230,7 +230,7 @@ describe('remote image URLs', () => {
   })
 
   // Catches images fetched for a request that cannot reach the provider: a model whose credential
-  // does not resolve answers 401 before the proxy fetches anything on the client's behalf.
+  // does not resolve answers 502 before the proxy fetches anything on the client's behalf.
   test('are not fetched when the model has no usable credential', async () => {
     const imagesBefore = images.requests.length
 
@@ -241,7 +241,7 @@ describe('remote image URLs', () => {
     )
 
     expect({ status: response.status, fetched: images.requests.length - imagesBefore }).toEqual({
-      status: 401,
+      status: 502,
       fetched: 0
     })
   })

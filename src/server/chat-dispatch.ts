@@ -38,7 +38,8 @@ import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
 import { type ActiveRequestHandle, requestOutcome } from '@proxy/server/active-requests'
 import {
-  authenticationError,
+  CREDENTIALS_MISSING,
+  forClientKey,
   type MappedUpstreamError,
   mapFailedCall,
   mapUpstreamError,
@@ -64,6 +65,7 @@ import {
   streamFailureCounter
 } from '@proxy/server/route-totals'
 import type { ProxyEnv } from '@proxy/server/types'
+import { startingWith } from '@proxy/utils/async-iterables'
 import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
 
@@ -75,16 +77,19 @@ type ProxyContext = Context<ProxyEnv>
 /** A pi `Context`: system prompt, messages and tools. */
 type PiContext = ConversionSuccess['context']
 
-/** An answer the client gets when a call fails: a mapped upstream error, or the 401 for no credential. */
+/**
+ * An answer the client gets when a call fails: a mapped upstream error, the 401 for a client key
+ * the provider refused, or the 502 for no credential.
+ */
 export interface FailedAnswer {
-  readonly status: MappedUpstreamError['status'] | typeof HTTP_UNAUTHORIZED
+  readonly status: MappedUpstreamError['status']
   readonly body: OpenAIError
 }
 
 /**
  * Each failed answer's class, by status. A 400 is the request's own fault, so it has none: another
- * model is not the answer to it. A 502 is `upstream_error` unless its code says the credential
- * failed ({@link failureClass}).
+ * model is not the answer to it. A 401 is the client's own key refused. A 502 is `upstream_error`
+ * unless its code says the credential failed or is missing ({@link failureClass}).
  */
 const FAILURE_BY_STATUS: Readonly<Record<FailedAnswer['status'], FailureClass | undefined>> = {
   [HTTP_BAD_REQUEST]: undefined,
@@ -96,6 +101,12 @@ const FAILURE_BY_STATUS: Readonly<Record<FailedAnswer['status'], FailureClass | 
   [HTTP_GATEWAY_TIMEOUT]: 'timeout'
 }
 
+/** The 502 codes that are a credential problem, the `auth` class: refused, or missing (#128). */
+const CREDENTIAL_CODES: ReadonlySet<string | null> = new Set([
+  'upstream_auth_error',
+  CREDENTIALS_MISSING.body.error.code
+])
+
 /**
  * Classifies a failed answer for an alias's `fallbackOn` (#67).
  *
@@ -103,7 +114,7 @@ const FAILURE_BY_STATUS: Readonly<Record<FailedAnswer['status'], FailureClass | 
  * @returns the failure class, or `undefined` for one that never falls back (a 400)
  */
 export function failureClass(answer: FailedAnswer): FailureClass | undefined {
-  if (answer.status === HTTP_BAD_GATEWAY && answer.body.error.code === 'upstream_auth_error') {
+  if (answer.status === HTTP_BAD_GATEWAY && CREDENTIAL_CODES.has(answer.body.error.code)) {
     return 'auth'
   }
   return FAILURE_BY_STATUS[answer.status]
@@ -125,11 +136,12 @@ function logUpstreamDetail(detail: string | undefined): void {
  * @remarks
  * A line for the failure, plus a warning for rate limiting or overload (429, 503) so those can be
  * counted apart from real failures. A 400 is the client's doing (a field the provider refused, a
- * history too long for the model), so its line is a warning; any other failure is an error. The
- * level follows the mapped status on purpose: mapping decides whose fault a failure is (a
- * credential problem a provider answers with 400 maps to a 502, so it stays an error), and any
- * future mapping to 400 is a client error too. The raw upstream `detail` stays at debug
- * ({@link logUpstreamDetail}). The request's IDs come from the logging context.
+ * history too long for the model), and so is a 401 (the provider refused the client's own key),
+ * so their line is a warning; any other failure is an error. The level follows the mapped status
+ * on purpose: mapping decides whose fault a failure is (a credential problem a provider answers
+ * with 400 maps to a 502, so it stays an error), and any future mapping to 400 is a client error
+ * too. The raw upstream `detail` stays at debug ({@link logUpstreamDetail}). The request's IDs
+ * come from the logging context.
  *
  * @param mapped - the status and body the client gets
  * @param detail - the raw upstream error message, or `undefined` when there is none
@@ -144,7 +156,7 @@ function reportUpstreamFailure(
     message: mapped.body.error.message,
     code: mapped.body.error.code
   }
-  if (mapped.status === HTTP_BAD_REQUEST) {
+  if (mapped.status === HTTP_BAD_REQUEST || mapped.status === HTTP_UNAUTHORIZED) {
     chatLogger.warn('Upstream refused the request with {status}: {message}', properties)
   } else {
     chatLogger.error('Upstream call failed with {status}: {message}', properties)
@@ -177,12 +189,13 @@ function reportThrownFailure(err: unknown): MappedUpstreamError {
  *
  * @remarks
  * With no per-request key, the model's provider must have a credential pi can resolve; otherwise
- * the request is refused early instead of letting the provider fail later with a less actionable
- * error.
+ * the request is refused early, with 502 `upstream_credentials_missing` (#128): the fix is a pi
+ * login on the proxy's host, which the client cannot do. pi's reason is logged, never answered: it
+ * can quote a key command or an install path.
  *
  * @param model - the pi model
  * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined` when not sent
- * @returns the 401 answer when no upstream auth is available, else `undefined`
+ * @returns the 502 answer when no upstream auth is available, else `undefined`
  */
 async function checkCredential(
   model: ExposedModel['model'],
@@ -204,13 +217,7 @@ async function checkCredential(
     model: `${model.provider}/${model.id}`,
     reason: requestAuth.error
   })
-  return {
-    status: HTTP_UNAUTHORIZED,
-    body: authenticationError(
-      `Could not resolve request auth for provider '${model.provider}'. ${requestAuth.error}. ` +
-        "Configure credentials via 'pi /login' or pass X-Switchboard-Upstream-Api-Key header."
-    )
-  }
+  return CREDENTIALS_MISSING
 }
 
 /** The models a request may run on, in order, and the failures that move between them. */
@@ -301,7 +308,7 @@ function logFallback(alias: string | undefined, hop: FallbackHop): void {
   })
 }
 
-/** Where the chain starts: the first candidate whose credential resolves, or the 401 answer. */
+/** Where the chain starts: the first candidate whose credential resolves, or the 502 answer. */
 export type CredentialedStart =
   | {
       readonly kind: 'ready'
@@ -318,7 +325,7 @@ export type CredentialedStart =
  * @param route - the planned candidates and fallback classes
  * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined`
  * @param alias - the alias whose chain it is, for the log
- * @returns the candidates from that one on, with the attempts skipped, or the last 401 answer
+ * @returns the candidates from that one on, with the attempts skipped, or the last 502 answer
  */
 export async function findCredentialedStart(
   route: ChatRoute,
@@ -389,14 +396,21 @@ type AttemptOutcome =
  *
  * @param mapped - the mapped error
  * @param detail - the raw upstream message, or `undefined`
+ * @param options - the call's options: with the client's own upstream key, a refused credential
+ *   is answered as that key's ({@link forClientKey})
  * @returns the outcome, logging the failure only if the client gets it
  */
-function upstreamFailure(mapped: MappedUpstreamError, detail: string | undefined): AttemptOutcome {
+function upstreamFailure(
+  mapped: MappedUpstreamError,
+  detail: string | undefined,
+  options: CompletionOptions
+): AttemptOutcome {
+  const answer = options.upstreamApiKey === undefined ? mapped : forClientKey(mapped)
   return {
     kind: 'failed',
-    answer: mapped,
+    answer,
     detail,
-    report: () => reportUpstreamFailure(mapped, detail)
+    report: () => reportUpstreamFailure(answer, detail)
   }
 }
 
@@ -412,32 +426,6 @@ function wantsUsage(request: ChatCompletionRequest): boolean {
     request.stream_options !== undefined &&
     request.stream_options.include_usage === true
   )
-}
-
-/**
- * Joins the first result of an event iterator and the rest of it into one async iterable.
- *
- * @remarks
- * Ending it early (the client left mid-stream) ends the rest too.
- *
- * @typeParam T - the event type
- * @param first - the result already read from `rest`
- * @param rest - the iterator `first` came from
- * @returns a generator that yields `first`'s value (unless it is done), then the rest
- */
-async function* startingWith<T>(
-  first: IteratorResult<T>,
-  rest: AsyncIterator<T>
-): AsyncGenerator<T> {
-  try {
-    if (first.done === true) return
-    yield first.value
-    for (let next = await rest.next(); next.done !== true; next = await rest.next()) {
-      yield next.value
-    }
-  } finally {
-    await rest.return?.()
-  }
 }
 
 /**
@@ -494,13 +482,17 @@ async function attemptStream(
     started = await piStream(candidate.model, context, request, options)
   } catch (err: unknown) {
     if (options.signal?.aborted === true) return clientLeft()
-    return upstreamFailure(mapUpstreamError(err), err instanceof Error ? err.message : undefined)
+    return upstreamFailure(
+      mapUpstreamError(err),
+      err instanceof Error ? err.message : undefined,
+      options
+    )
   }
   const { first, events } = started
   if (first.done !== true && first.value.type === 'error') {
     if (options.signal?.aborted === true) return clientLeft()
     const failed = first.value.error
-    return upstreamFailure(mapFailedCall(failed), failed.errorMessage)
+    return upstreamFailure(mapFailedCall(failed), failed.errorMessage, options)
   }
 
   const key = routeKey(job.alias, candidate)
@@ -586,7 +578,7 @@ async function attemptComplete(
       durationMs: Math.round(performance.now() - start)
     })
     if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-      return final(upstreamFailure(mapFailedCall(message), message.errorMessage))
+      return final(upstreamFailure(mapFailedCall(message), message.errorMessage, options))
     }
     return {
       kind: 'answered',
@@ -594,7 +586,11 @@ async function attemptComplete(
     }
   } catch (err: unknown) {
     return final(
-      upstreamFailure(mapUpstreamError(err), err instanceof Error ? err.message : undefined)
+      upstreamFailure(
+        mapUpstreamError(err),
+        err instanceof Error ? err.message : undefined,
+        options
+      )
     )
   }
 }

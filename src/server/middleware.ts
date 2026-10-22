@@ -5,6 +5,8 @@
  * @packageDocumentation
  */
 
+import { createHash, timingSafeEqual } from 'node:crypto'
+
 import { withContext } from '@logtape/logtape'
 import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
@@ -24,8 +26,12 @@ const httpLogger = proxyLogger('server', 'http')
 /** Logger for proxy auth decisions. */
 const authLogger = proxyLogger('server', 'auth')
 
-/** The scheme prefix of an `Authorization` header that carries a bearer token. */
-const BEARER_PREFIX = 'Bearer '
+/**
+ * An `Authorization` header with a bearer token: the scheme in any case, then one or more spaces
+ * (RFC 7235 §2.1: `credentials = auth-scheme [ 1*SP ... ]`, and the scheme is case-insensitive),
+ * then the token, captured as sent.
+ */
+const BEARER = /^bearer +(\S.*)$/i
 /** The liveness path; it and the paths below it are logged as polling. */
 const HEALTH_PATH = '/healthz'
 /** The per-request upstream key header. */
@@ -119,20 +125,50 @@ export function renamedHeaderMiddleware(): MiddlewareHandler<ProxyEnv> {
 }
 
 /**
+ * Hashes a token for {@link matchesToken}.
+ *
+ * @param token - the token
+ * @returns its SHA-256 digest
+ */
+function tokenDigest(token: string): Buffer {
+  return createHash('sha256').update(token).digest()
+}
+
+/**
+ * Compares a token from a request with the proxy's in constant time (#128 item 1).
+ *
+ * @remarks
+ * `!==` returns at the first character that differs, so its time tells how much of the token
+ * matched. Comparing SHA-256 digests with `timingSafeEqual` takes the same time for any token,
+ * and the digests' equal length hides the token's length too.
+ *
+ * @param token - the token the request sent
+ * @param expected - the digest of the proxy's token
+ * @returns whether they are the same token
+ */
+function matchesToken(token: string, expected: Buffer): boolean {
+  return timingSafeEqual(tokenDigest(token), expected)
+}
+
+/**
  * Creates the proxy auth middleware for `config.proxyAuth`.
  *
  * @remarks
  * `off` lets everything through; `token` needs `Authorization: Bearer <token>` and answers 401 for
- * a missing header or a wrong token. Auth that cannot be applied never gets here: the proxy
- * refuses to start (`UnusableProxyAuthError`).
+ * a missing header or a wrong token. The scheme is matched in any case, with one or more spaces
+ * before the token, as RFC 7235 §2.1 allows; the token itself is matched exactly (#128 item 2).
+ * Auth that cannot be applied never gets here: the proxy refuses to start
+ * (`UnusableProxyAuthError`).
  *
  * @param config - the server config; only `proxyAuth` is read, once, when the middleware is made
  * @returns the middleware
  */
 export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<ProxyEnv> {
   const proxyAuth = config.proxyAuth
+  // Hashed once: every request compares against the same digest.
+  const expected = proxyAuth.kind === 'token' ? tokenDigest(proxyAuth.token) : undefined
   return async (context, next) => {
-    if (proxyAuth.kind === 'off') {
+    if (expected === undefined) {
       await next()
       return undefined
     }
@@ -146,15 +182,15 @@ export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<Pro
       return context.json(authenticationError('Missing Authorization header'), HTTP_UNAUTHORIZED)
     }
 
-    const isBearer = authHeader.startsWith(BEARER_PREFIX)
-    const token = isBearer ? authHeader.slice(BEARER_PREFIX.length) : undefined
+    const token = BEARER.exec(authHeader)?.[1]
 
-    if (token !== proxyAuth.token) {
-      // Never the header or token value: only whether the scheme was right.
+    if (token === undefined || !matchesToken(token, expected)) {
+      // Never the header or token value: only whether it was a Bearer header with a token
+      // (`bearerScheme` is false for `Bearer` with nothing after it, or no space before the token).
       authLogger.warn('Rejected {method} {path}: invalid proxy auth token', {
         method: context.req.method,
         path: context.req.path,
-        bearerScheme: isBearer
+        bearerScheme: token !== undefined
       })
       return context.json(
         authenticationError('Invalid proxy authentication token'),

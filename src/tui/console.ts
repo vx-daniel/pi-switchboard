@@ -243,6 +243,23 @@ const FOOTER: Readonly<Record<View, string>> = {
 }
 
 /**
+ * Renders the Accounts view from the console's state.
+ *
+ * @param state - the console's state: the accounts, the selected row, and the status with the
+ *   reserve per provider
+ * @param height - rows available
+ * @returns the rows
+ */
+function accountsViewRows(state: ConsoleState, height: number): string[] {
+  const view = {
+    accounts: state.accounts,
+    selected: state.selected,
+    reserve: state.status?.reserve ?? {}
+  }
+  return accountRows(view, height)
+}
+
+/**
  * Renders the current view's body.
  *
  * @param context - the console
@@ -257,9 +274,7 @@ function viewRows(
 ): string[] {
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size)
-  if (state.view === 'accounts') {
-    return accountRows(state.accounts, state.selected, state.status?.reserve, size.height)
-  }
+  if (state.view === 'accounts') return accountsViewRows(state, size.height)
   return statsRows(routeTotals(), routeTotalsSince(), size)
 }
 
