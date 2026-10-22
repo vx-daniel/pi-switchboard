@@ -257,4 +257,24 @@ describe('the stats store', () => {
     newer.close()
     expect(() => openStatsStore(path)).toThrow(/newer/)
   })
+
+  // Catches a write that waits seconds for another connection's lock: node:sqlite waits on the
+  // thread that serves requests, so a long wait would stall every request in flight.
+  test('gives up a write quickly when another connection holds the lock', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
+    directories.push(directory)
+    const path = join(directory, 'stats.sqlite')
+    const store = openStatsStore(path)
+    opened.push(store)
+    const other = new DatabaseSync(path)
+    other.exec('BEGIN IMMEDIATE')
+    const started = performance.now()
+
+    expect(() => {
+      store.add({ requests: [requestRow({ minute: 1, model: 'a/m' })], attempts: [], failures: [] })
+    }).toThrow(/locked|busy/i)
+    expect(performance.now() - started).toBeLessThan(2000)
+    other.exec('ROLLBACK')
+    other.close()
+  })
 })

@@ -19,12 +19,25 @@
  * @packageDocumentation
  */
 
-import { DatabaseSync, type SQLOutputValue } from 'node:sqlite'
+import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite'
 
 /** The schema version, in SQLite's `user_version`. */
 const SCHEMA_VERSION = 1
-/** How long a write waits for another process's lock, in milliseconds. */
-const BUSY_TIMEOUT_MS = 5000
+/**
+ * How long a statement waits for another connection's lock, in milliseconds. `node:sqlite` waits
+ * synchronously, on the thread that serves requests, so the wait is short: a write that can't get
+ * the lock in time is dropped by the recorder rather than stalling every request in flight.
+ */
+const BUSY_TIMEOUT_MS = 250
+
+/** The statements a store reuses, prepared once when it opens. */
+interface Statements {
+  readonly upsertRequest: StatementSync
+  readonly upsertAttempt: StatementSync
+  readonly upsertFailure: StatementSync
+  /** One `DELETE … WHERE minute < ?` per table. */
+  readonly prunes: readonly StatementSync[]
+}
 
 /** The schema, version {@link SCHEMA_VERSION}. */
 const SCHEMA = `
@@ -270,6 +283,10 @@ function averageOf(total: number, count: number): number | undefined {
 /**
  * Runs writes in one transaction, rolled back if one throws.
  *
+ * @remarks
+ * Some errors (a full disk, an I/O error) roll the transaction back themselves; a second `ROLLBACK`
+ * would then throw "no transaction is active" in place of the error that says what went wrong.
+ *
  * @param db - the database
  * @param writes - the writes
  */
@@ -279,7 +296,7 @@ function inTransaction(db: DatabaseSync, writes: () => void): void {
     writes()
     db.exec('COMMIT')
   } catch (error) {
-    db.exec('ROLLBACK')
+    if (db.isTransaction) db.exec('ROLLBACK')
     throw error
   }
 }
@@ -287,13 +304,12 @@ function inTransaction(db: DatabaseSync, writes: () => void): void {
 /**
  * Writes a batch's rows.
  *
- * @param db - the database
+ * @param statements - the store's prepared upserts
  * @param batch - the rows
  */
-function writeBatch(db: DatabaseSync, batch: StatsBatch): void {
-  const request = db.prepare(UPSERT_REQUEST)
+function writeBatch(statements: Statements, batch: StatsBatch): void {
   for (const row of batch.requests) {
-    request.run(
+    statements.upsertRequest.run(
       row.minute,
       row.alias,
       row.model,
@@ -306,9 +322,8 @@ function writeBatch(db: DatabaseSync, batch: StatsBatch): void {
       row.firstEventCount
     )
   }
-  const attempt = db.prepare(UPSERT_ATTEMPT)
   for (const row of batch.attempts) {
-    attempt.run(
+    statements.upsertAttempt.run(
       row.minute,
       row.alias,
       row.provider,
@@ -323,9 +338,8 @@ function writeBatch(db: DatabaseSync, batch: StatsBatch): void {
       row.costUsd
     )
   }
-  const failure = db.prepare(UPSERT_FAILURE)
   for (const row of batch.failures) {
-    failure.run(row.minute, row.model, row.failureClass, row.failures)
+    statements.upsertFailure.run(row.minute, row.model, row.failureClass, row.failures)
   }
 }
 
@@ -494,18 +508,24 @@ export function openStatsStore(path: string): StatsStore {
     db.close()
     throw error
   }
+  const statements: Statements = {
+    upsertRequest: db.prepare(UPSERT_REQUEST),
+    upsertAttempt: db.prepare(UPSERT_ATTEMPT),
+    upsertFailure: db.prepare(UPSERT_FAILURE),
+    prunes: ['request_minutes', 'attempt_minutes', 'failure_minutes'].map((table) =>
+      db.prepare(`DELETE FROM ${table} WHERE minute < ?`)
+    )
+  }
   let open = true
   return {
     add: (batch) => {
       inTransaction(db, () => {
-        writeBatch(db, batch)
+        writeBatch(statements, batch)
       })
     },
     prune: (beforeMinute) => {
       inTransaction(db, () => {
-        for (const table of ['request_minutes', 'attempt_minutes', 'failure_minutes']) {
-          db.prepare(`DELETE FROM ${table} WHERE minute < ?`).run(beforeMinute)
-        }
+        for (const prune of statements.prunes) prune.run(beforeMinute)
       })
     },
     timeline: (range, bucketMinutes) => timelineOf(db, range, bucketMinutes),

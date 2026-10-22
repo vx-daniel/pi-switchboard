@@ -42,6 +42,12 @@ const DEFAULT_FLUSH_MS = 5000
 const DEFAULT_RETENTION_DAYS = 30
 /** How many flushes between prunes: about an hour at the default flush interval. */
 const FLUSHES_PER_PRUNE = 720
+/** The longest rejected model name kept; a canonical `provider/model-id` is far shorter. */
+const MAX_REJECTED_MODEL_LENGTH = 128
+/** Distinct rejected model names kept per minute, before the rest are {@link OTHER_REJECTED_MODEL}. */
+const MAX_REJECTED_MODELS_PER_MINUTE = 20
+/** What rejected requests past {@link MAX_REJECTED_MODELS_PER_MINUTE} names are filed under. */
+const OTHER_REJECTED_MODEL = '(other)'
 
 /** How the recorder runs; the defaults are the production ones. */
 export interface RecorderOptions {
@@ -74,16 +80,18 @@ function emptyPending(): Pending {
  *
  * @param pending - the counts
  * @param request - the request
+ * @param model - the model to file it under: the served one, or for a rejected request the name it
+ *   gave, as {@link rejectedModelNames} bounds it
  */
-function addFinished(pending: Pending, request: FinishedRequest): void {
+function addFinished(pending: Pending, request: FinishedRequest, model: string): void {
   const minute = Math.floor(request.endedAt / MS_PER_MINUTE)
   const alias = request.alias ?? ''
   const status = request.status ?? 0
-  const id = JSON.stringify([minute, alias, request.model, request.outcome, status])
+  const id = JSON.stringify([minute, alias, model, request.outcome, status])
   const row = pending.requests.get(id) ?? {
     minute,
     alias,
-    model: request.model,
+    model,
     outcome: request.outcome,
     status,
     requests: 0,
@@ -101,6 +109,26 @@ function addFinished(pending: Pending, request: FinishedRequest): void {
     row.firstEventCount += 1
   }
   pending.requests.set(id, row)
+}
+
+/**
+ * Bounds what a rejected request's model name puts on disk: the name comes from the client, which
+ * can send any string of any length. A name is cut to {@link MAX_REJECTED_MODEL_LENGTH}, and past
+ * {@link MAX_REJECTED_MODELS_PER_MINUTE} distinct names in a minute the rest are filed as
+ * {@link OTHER_REJECTED_MODEL}, so a client can't add rows without limit.
+ *
+ * @returns a function from a rejected request's minute and model name to the name to store
+ */
+function rejectedModelNames(): (minute: number, model: string) => string {
+  let current = { minute: Number.NaN, names: new Set<string>() }
+  return (minute, model) => {
+    if (minute !== current.minute) current = { minute, names: new Set() }
+    const name = model.slice(0, MAX_REJECTED_MODEL_LENGTH)
+    if (current.names.has(name)) return name
+    if (current.names.size >= MAX_REJECTED_MODELS_PER_MINUTE) return OTHER_REJECTED_MODEL
+    current.names.add(name)
+    return name
+  }
 }
 
 /**
@@ -216,8 +244,14 @@ export function startStatsRecorder(store: StatsStore, options: RecorderOptions =
   const stopTotals = onRouteTotalsChange((event) => {
     addRouteEvent(pending, event, now())
   })
+  const nameRejected = rejectedModelNames()
   const stopRequests = onActiveRequestsChange((finishedRequest) => {
-    if (finishedRequest !== undefined) addFinished(pending, finishedRequest)
+    if (finishedRequest === undefined) return
+    const model =
+      finishedRequest.outcome === 'rejected'
+        ? nameRejected(Math.floor(finishedRequest.endedAt / MS_PER_MINUTE), finishedRequest.model)
+        : finishedRequest.model
+    addFinished(pending, finishedRequest, model)
   })
   const timer = setInterval(flush, options.flushMs ?? DEFAULT_FLUSH_MS)
   // The timer alone must not keep a process alive that is otherwise done.

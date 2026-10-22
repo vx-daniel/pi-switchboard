@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { DatabaseSync } from 'node:sqlite'
 
 import type { Usage } from '@earendil-works/pi-ai'
 import { beginActiveRequest, recordRejectedRequest } from '@proxy/server/active-requests'
@@ -94,20 +95,60 @@ describe('the stats recorder', () => {
     store.close()
   })
 
-  // Catches a store that fails a write failing the request that caused it, or the stop.
-  test('logs and drops a batch the store refuses, and still stops', () => {
-    const store: StatsStore = {
-      ...openStatsStore(':memory:'),
+  // Catches a store that fails a write failing the request that caused it, stopping the recorder
+  // for good, or the batch being kept and written twice later.
+  test('drops a batch the store refuses, and keeps recording on the next flush', () => {
+    vi.useFakeTimers()
+    const store = openStatsStore(':memory:')
+    let refuse = true
+    const flaky: StatsStore = {
+      ...store,
       add: (batch: StatsBatch) => {
-        throw new Error(`disk full (${String(batch.attempts.length)} rows)`)
-      }
+        if (refuse) throw new Error('disk full')
+        store.add(batch)
+      },
+      close: () => undefined
     }
-    const stop = startStatsRecorder(store, { now: () => NOW })
-    recordRouteAttempt({ alias: null, provider: 'alpha', model: 'alpha/one' })
+    const stop = startStatsRecorder(flaky, { now: () => NOW, flushMs: 1000 })
+    recordRouteAttempt({ alias: null, provider: 'alpha', model: 'alpha/dropped' })
+    vi.advanceTimersByTime(1000)
+    refuse = false
+    recordRouteAttempt({ alias: null, provider: 'alpha', model: 'alpha/kept' })
+    vi.advanceTimersByTime(1000)
 
-    expect(() => {
-      stop()
-    }).not.toThrow()
+    // Written by the timer, before the stop.
+    expect(store.models(ALL).map((model) => model.model)).toEqual(['alpha/kept'])
+    stop()
+    vi.useRealTimers()
+    store.close()
+  })
+
+  // Catches a client flooding the file through rejected requests: any string it sends as the model
+  // used to be kept whole, one row per distinct name per minute.
+  test('cuts long rejected model names and files names past the limit as (other)', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
+    directories.push(directory)
+    const path = join(directory, 'stats.sqlite')
+    const stop = startStatsRecorder(openStatsStore(path), { now: () => NOW })
+    const rejected = (requestId: string, model: string): void => {
+      recordRejectedRequest({ requestId, model, status: 404, startedAt: NOW }, NOW)
+    }
+    rejected('long', 'x'.repeat(5000))
+    for (let nameIndex = 0; nameIndex < 30; nameIndex += 1) {
+      rejected(`r${String(nameIndex)}`, `junk/${String(nameIndex)}`)
+    }
+    stop()
+
+    const db = new DatabaseSync(path)
+    const rows = db
+      .prepare("SELECT model, requests FROM request_minutes WHERE outcome = 'rejected'")
+      .all()
+    db.close()
+    const models = rows.map((row) => String(row['model']))
+    // 20 names kept (the long one cut to 128), and the other 11 requests under one row.
+    expect(models).toHaveLength(21)
+    expect(models.every((model) => model.length <= 128)).toBe(true)
+    expect(rows.find((row) => row['model'] === '(other)')?.['requests']).toBe(11)
   })
 
   // Catches the retention never running, so the file grows for ever, or running on the wrong
