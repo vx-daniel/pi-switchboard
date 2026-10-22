@@ -1495,7 +1495,9 @@ src/
 │   ├── console.ts        -- the console: pi-tui screen, server in the same process
 │   ├── log-buffer.ts     -- the log view's bounded line buffer
 │   ├── log-view.ts       -- the log view's position: following, or pinned when scrolled back
-│   └── login.ts          -- pi's login flow routed to pi's own screens
+│   ├── login.ts          -- pi's login flow routed to pi's own screens
+│   ├── status-refresh.ts -- the status and accounts reads: newest wins, no stale verification
+│   └── stderr-capture.ts -- stray stderr writes to the log view, a whole line at a time
 └── utils/
     └── guards.ts         -- isRecord() and other type guards
 ```
@@ -1520,7 +1522,8 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   CLI reports a port in use as a fatal log line and exit 1.
 - **Logs.** LogTape writes the pretty format into a bounded buffer (`log-buffer.ts`, 5000 lines)
   instead of stderr, with the same redaction. While the console runs, a stray stderr write (one
-  that bypasses LogTape) goes into the buffer, marked `[stderr]`, instead of corrupting the screen.
+  that bypasses LogTape) goes into the buffer a whole line at a time, marked `[stderr]`, instead
+  of corrupting the screen (`stderr-capture.ts`).
   Lines are truncated to the terminal width. The view follows new lines; scrolled back with the
   arrow and page keys (`log-view.ts`), it stays on the same lines while new ones arrive, and
   follows again at the newest line or on `End`. The screen's own viewport scrolling would take
@@ -1531,7 +1534,8 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
 - **Accounts.** The providers pi has a credential for (`getCredentialStatuses`, as
   `/healthz/creds`): login type, source and model count; never the credential. `v` verifies them,
   which may refresh an OAuth token, and the result stays until that provider's next login or
-  logout.
+  logout. A verification still running when a provider's login changes drops its result for
+  that provider, which was about the old credential (`status-refresh.ts`).
 - **Logins** (constitution 3.5.0: Scope and principle III). pi runs every flow and stores every
   credential; the console only shows pi's own screens, in a local terminal, never over HTTP.
   `n` opens pi's provider selector (`OAuthSelectorComponent`, every account and API-key login pi

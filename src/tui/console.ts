@@ -52,6 +52,8 @@ import { listen } from '@proxy/server/startup'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
+import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
+import { captureWrites } from '@proxy/tui/stderr-capture'
 
 import packageJson from '../../package.json' with { type: 'json' }
 
@@ -82,30 +84,10 @@ interface Status {
 }
 
 /** The console's state, which every render reads. */
-interface ConsoleState {
+interface ConsoleState extends RefreshState<Status> {
   view: View
   /** Where the log view is: following new lines, or pinned to the lines on screen. */
   logView: LogViewport
-  status: Status | undefined
-  accounts: readonly ProviderCredentialStatus[]
-  /** The last verification of each provider (`v`), kept until its next login or logout. */
-  verification: Map<string, Verification>
-}
-
-/** A provider's last verification result. */
-type Verification = Pick<ProviderCredentialStatus, 'verified' | 'error'>
-
-/**
- * Keeps a status's verification result, with only the fields it has.
- *
- * @param account - a status read with `verify`
- * @returns its verification
- */
-function verificationOf({ verified, error }: ProviderCredentialStatus): Verification {
-  return {
-    ...(verified === undefined ? {} : { verified }),
-    ...(error === undefined ? {} : { error })
-  }
 }
 
 /** What the key handlers and the login flow need. */
@@ -372,7 +354,7 @@ async function loginTo(context: ConsoleContext, providerId: string, type: AuthTy
     })
   } finally {
     handle.hide()
-    context.state.verification.delete(providerId)
+    credentialChanged(context.state, providerId)
     await context.refresh()
   }
 }
@@ -411,7 +393,7 @@ async function logoutOf(context: ConsoleContext, providerId: string): Promise<vo
       reason: failureReason(error)
     })
   }
-  context.state.verification.delete(providerId)
+  credentialChanged(context.state, providerId)
   await context.refresh()
 }
 
@@ -459,38 +441,6 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
 }
 
 /**
- * Sends stray stderr writes to the log view while the console owns the terminal.
- *
- * @param logs - the log buffer
- * @returns a function that restores stderr
- */
-function captureStderr(logs: LogBuffer): () => void {
-  const original = process.stderr.write.bind(process.stderr)
-  /**
-   * Appends a stray write to the log view, marked as such, and calls its callback as a stream
-   * would, so a writer that waits for it does not stall.
-   *
-   * @param chunk - what was written
-   * @param encodingOrCallback - the encoding, or the callback when no encoding is given
-   * @param callback - the callback, after an encoding
-   * @returns `true`: nothing is queued
-   */
-  process.stderr.write = (
-    chunk: string | Uint8Array,
-    encodingOrCallback?: BufferEncoding | ((error?: Error | null) => void),
-    callback?: (error?: Error | null) => void
-  ): boolean => {
-    logs.append(`[stderr] ${typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString()}`)
-    const done = typeof encodingOrCallback === 'function' ? encodingOrCallback : callback
-    if (done !== undefined) process.nextTick(done)
-    return true
-  }
-  return () => {
-    process.stderr.write = original
-  }
-}
-
-/**
  * Creates a promise and the function that resolves it, in the executor form the project's ES2023
  * lib allows (`Promise.withResolvers` is ES2024).
  *
@@ -502,50 +452,6 @@ function settleable(): { promise: Promise<void>; settle: () => void } {
     settle = resolve
   })
   return { promise, settle }
-}
-
-/**
- * Creates the console's status and accounts reader.
- *
- * @remarks
- * Reads can overlap (the 5 s timer, `v`, a login or logout): only the newest read replaces the
- * status and accounts, so a slower, older one never overwrites it. A verification is kept
- * whenever it finishes, and merged into the accounts shown.
- *
- * @param state - the console's state, which the reads update
- * @param tui - the screen, redrawn after each read
- * @returns the reader
- */
-function createRefresh(
-  state: ConsoleState,
-  tui: TuiAltScreen
-): (verify?: boolean) => Promise<void> {
-  let latest = 0
-  /**
-   * Reads the status and the accounts, then redraws.
-   *
-   * @param verify - whether to resolve each credential now, which may refresh an OAuth token
-   */
-  async function refresh(verify = false): Promise<void> {
-    latest += 1
-    const ticket = latest
-    const [status, accounts] = await Promise.all([readStatus(), getCredentialStatuses(verify)])
-    if (verify) {
-      state.verification = new Map(
-        accounts.map((account) => [account.provider, verificationOf(account)])
-      )
-    }
-    if (ticket === latest) {
-      state.status = status
-      state.accounts = accounts
-    }
-    state.accounts = state.accounts.map((account) => ({
-      ...account,
-      ...state.verification.get(account.provider)
-    }))
-    tui.requestRender()
-  }
-  return refresh
 }
 
 /**
@@ -561,11 +467,30 @@ function startUpdates(context: ConsoleContext): () => void {
     () => inBackground(context.refresh(), 'Reading the status'),
     STATUS_REFRESH_MS
   )
-  const restoreStderr = captureStderr(context.logs)
+  const restoreStderr = captureWrites(process.stderr, context.logs)
   return () => {
     clearInterval(timer)
     unsubscribe()
     restoreStderr()
+  }
+}
+
+/**
+ * Ends the console on `SIGTERM`, `SIGHUP` or an uncaught exception, until the returned function is
+ * called.
+ *
+ * @param stop - ends the console on a signal
+ * @param crashed - ends the console on an uncaught exception, which it reports
+ * @returns a function that removes the handlers
+ */
+function listenForStops(stop: () => void, crashed: (error: unknown) => void): () => void {
+  process.on('uncaughtException', crashed)
+  process.once('SIGTERM', stop)
+  process.once('SIGHUP', stop)
+  return () => {
+    process.off('uncaughtException', crashed)
+    process.off('SIGTERM', stop)
+    process.off('SIGHUP', stop)
   }
 }
 
@@ -612,14 +537,17 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     logView: undefined,
     status: undefined,
     accounts: [],
-    verification: new Map()
+    verification: new Map(),
+    credentialChanges: new Map()
   }
   const context: ConsoleContext = {
     config,
     logs,
     tui,
     state,
-    refresh: createRefresh(state, tui),
+    refresh: createRefresh(state, { status: readStatus, accounts: getCredentialStatuses }, () =>
+      tui.requestRender()
+    ),
     quit: stopped.settle
   }
   const actions = keyActions(context)
@@ -628,9 +556,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     tui.requestRender()
   })
   const stopUpdates = startUpdates(context)
-  process.on('uncaughtException', crashed)
-  process.once('SIGTERM', stopped.settle)
-  process.once('SIGHUP', stopped.settle)
+  const stopListening = listenForStops(stopped.settle, crashed)
 
   try {
     tui.addChild(root)
@@ -641,7 +567,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
   } finally {
     tui.stop()
     stopUpdates()
-    process.off('uncaughtException', crashed)
+    stopListening()
     server.close()
   }
   if (crash instanceof Error) throw crash
