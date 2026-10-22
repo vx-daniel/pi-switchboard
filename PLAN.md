@@ -1718,8 +1718,12 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   failures, average time and time to a stream's first event, then the latest finished
   requests) and TRAFFIC (the route totals summed). Rendering is a function of a snapshot the
   console gathers per frame; a 1 s tick moves the clocks on and counts the server's open
-  connections (`getConnections`). On a short screen the blank rows between panels go first, then
-  the bottom is cut. The requests come from `active-requests.ts`: the chat route adds one before
+  connections (`getConnections`). Under stress (a cooldown, a login below its reserve, or a
+  request that failed or was rejected in the last minute; #215) ACTIVE and RECENT come before
+  ACCOUNTS, RECENT's title carries the minute's failures, and a quiet login (no cooldown, not below
+  its reserve, every window under 70%) collapses to one row. On a short screen the blank rows
+  between panels go first, then TRAFFIC, then RECENT's list down to its summary, then the bottom
+  is cut. The requests come from `active-requests.ts`: the chat route adds one before
   it dispatches (never message content or a credential), the dispatcher names each attempt's
   model and marks a stream's first event, and the request ends when the dispatch returns or, for
   a stream, when the stream closes. It ends `ok`, `failed` (an error answer, or a stream that

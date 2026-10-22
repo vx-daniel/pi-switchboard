@@ -5,6 +5,7 @@ import type { RouteTotals } from '@proxy/server/route-totals'
 import {
   besideSidebar,
   compactDuration,
+  type SidebarAccount,
   type SidebarInput,
   sidebarRows,
   sidebarWidth
@@ -115,6 +116,35 @@ function panelLines(rows: readonly string[], title: string): string[] {
   return rows.slice(start + 1, end).map((row) => row.slice(2, -1).trimEnd())
 }
 
+/**
+ * Builds a login with a quota window per share used.
+ *
+ * @param provider - the provider
+ * @param shares - each window's share used, from 0 to 1
+ * @returns the login
+ */
+function login(provider: string, shares: readonly number[]): SidebarAccount {
+  return {
+    provider,
+    type: 'oauth',
+    models: 3,
+    quota: {
+      provider,
+      observedAt: NOW,
+      status: undefined,
+      plan: undefined,
+      windows: shares.map((used, index) => ({
+        name: `w${String(index)}`,
+        used,
+        resetsAt: undefined,
+        windowMinutes: undefined,
+        status: undefined
+      }))
+    },
+    belowReserve: false
+  }
+}
+
 describe('the console sidebar', () => {
   // Catches a sidebar squeezing the log view on a narrow terminal, or growing without bound on a
   // wide one.
@@ -173,6 +203,85 @@ describe('the console sidebar', () => {
       full.filter((row) => row !== '')
     )
     expect(rendered(snapshot(), { height: 5, width: WIDTH })).toHaveLength(5)
+  })
+
+  // Catches a short screen losing RECENT's last-minute line (what is happening now) to keep
+  // TRAFFIC (totals since start) or RECENT's own list of single requests.
+  test('on a short screen drops TRAFFIC, then RECENT’s list, before RECENT’s summary', () => {
+    const finished = Array.from({ length: 5 }, (_, index) =>
+      done({ requestId: `req-${String(index)}`, model: `alpha/model-${String(index)}` })
+    )
+    const input = snapshot({ finished })
+    const tight = rendered(input).filter((row) => row !== '')
+    const traffic = tight.findIndex((row) => row.startsWith('╭─ TRAFFIC'))
+    // Two list rows too few for everything but TRAFFIC.
+    const rows = rendered(input, { height: traffic - 2, width: WIDTH })
+
+    expect(rows.some((row) => row.startsWith('╭─ TRAFFIC'))).toBe(false)
+    expect(panelLines(rows, 'RECENT').map((line) => line.replaceAll(/ {2,}/g, ' '))).toEqual([
+      'last minute 5 req',
+      ' avg time 2.3s',
+      '✓ alpha/model-0 2.3s',
+      '✓ alpha/model-1 2.3s',
+      '✓ alpha/model-2 2.3s'
+    ])
+    expect(rows.at(-1)?.startsWith('╰')).toBe(true)
+  })
+
+  // Catches a healthy proxy losing its usual layout: ACCOUNTS before ACTIVE, every quota window
+  // shown, and a plain RECENT title.
+  test('keeps the usual order and every quota window while the proxy is healthy', () => {
+    const rows = rendered(
+      snapshot({ accounts: [login('anthropic', [0.2, 0.4])], finished: [done({})] })
+    )
+    const titles = rows.filter((row) => row.startsWith('╭─')).map((row) => row.split(' ')[1])
+
+    expect(titles).toEqual(['PROXY', 'ACCOUNTS', 'ACTIVE', 'RECENT', 'TRAFFIC'])
+    expect(panelLines(rows, 'ACCOUNTS')).toHaveLength(3)
+    expect(rows.some((row) => row.startsWith('╭─ RECENT ─'))).toBe(true)
+  })
+
+  // Catches the stressed case burying what is happening now: on a short screen with many logins,
+  // a cooldown and failures, ACTIVE and RECENT's summary must come before ACCOUNTS and stay
+  // visible, the failure count must show in RECENT's title, and quiet logins take one row.
+  test('under stress puts ACTIVE and RECENT first and collapses quiet logins', () => {
+    const cooldown: Cooldown = {
+      scope: 'provider',
+      provider: 'cooling',
+      model: undefined,
+      reason: 'rate_limit',
+      since: NOW,
+      until: NOW + 90_000,
+      source: 'response',
+      streak: 1
+    }
+    const accounts = [
+      ...['one', 'two', 'three', 'four'].map((provider) => login(provider, [0.1, 0.2])),
+      login('cooling', [0.3, 0.95])
+    ]
+    const input = snapshot({
+      accounts,
+      cooldowns: [cooldown],
+      active: [request({ requestId: 'a' }), request({ requestId: 'b' })],
+      finished: [
+        done({ outcome: 'failed' }),
+        done({ outcome: 'failed' }),
+        ...Array.from({ length: 4 }, () => done({}))
+      ]
+    })
+    const rows = rendered(input, { height: 30, width: WIDTH })
+    const titles = rows.filter((row) => row.startsWith('╭─')).map((row) => row.split(' ')[1])
+
+    expect(titles.slice(0, 3)).toEqual(['PROXY', 'ACTIVE', 'RECENT'])
+    expect(panelLines(rows, 'ACTIVE')).toHaveLength(4)
+    expect(rows.some((row) => row.startsWith('╭─ RECENT · 2 failed'))).toBe(true)
+    expect(panelLines(rows, 'RECENT')[0]?.replaceAll(/ {2,}/g, ' ')).toBe(
+      'last minute 6 req · 2 failed'
+    )
+    // Rendered in full, the quiet logins take a row each; the cooling one keeps its detail.
+    const full = panelLines(rendered(input), 'ACCOUNTS')
+    expect(full.filter((line) => /^(one|two|three|four) /.test(line))).toHaveLength(4)
+    expect(full).toHaveLength(4 + 1 + 2 + 1)
   })
 
   // Catches the proxy panel losing what the header no longer shows when the sidebar is on: the
