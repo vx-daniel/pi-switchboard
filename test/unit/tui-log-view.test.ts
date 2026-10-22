@@ -34,6 +34,15 @@ describe('the console log view', () => {
     expect(logViewRows(undefined, bufferWith(2), THREE_ROWS)).toEqual(['line 1', 'line 2'])
   })
 
+  // Catches a blank line in a multi-line record vanishing when wrapped, which would join the
+  // paragraphs around it (second #204 review).
+  test('keeps a blank line as an empty row', () => {
+    const buffer = createLogBuffer(10)
+    buffer.append('before\n\nafter\n')
+
+    expect(logViewRows(undefined, buffer, THREE_ROWS)).toEqual(['before', '', 'after'])
+  })
+
   // Catches a line's message cut off at the screen's edge on a narrow terminal: it wraps onto the
   // next rows, indented so they don't read as new lines, and the newest line's last row stays at
   // the bottom.

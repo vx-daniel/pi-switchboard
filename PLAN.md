@@ -1636,7 +1636,7 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   CLI reports a port in use as a fatal log line and exit 1.
 - **Logs.** LogTape writes into a bounded buffer (`log-buffer.ts`, 5000 lines) instead of stderr,
   with the same redaction, in the `console` layout of the pretty format: the time only, and the
-  category without the `pi-switchboard` root, 16 columns wide, so the message starts by column 40.
+  category without the `pi-switchboard` root, 16 columns wide, so the message starts at column 42.
   While the console runs, a stray stderr write (one that bypasses LogTape) goes into the buffer a
   whole line at a time, marked `[stderr]`, instead of corrupting the screen (`stderr-capture.ts`).
   A line wider than the terminal wraps (pi-tui's `wrapTextWithAnsi`); scrolling still moves by
