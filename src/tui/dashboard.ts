@@ -273,9 +273,10 @@ function eighthsOf(count: number, peak: number, rows: number): number {
 }
 
 /**
- * Renders one column of a timeline row: blue for the bucket's requests, with its failed or
- * rejected share stacked at the foot of the bar in red or yellow, at least one cell when there is
- * any. A cell has one color, so the cell where the share ends takes the share's color.
+ * Renders one column of a timeline row: blue for the bucket's requests, with its failed and
+ * rejected requests stacked at the foot of the bar, at least one cell when there are any. The
+ * share is red when any request failed, yellow when they were only rejected; a cell has one color,
+ * so the cell where the share ends takes the share's color.
  *
  * @param bucket - the bucket
  * @param peak - the busiest bucket's requests
@@ -387,7 +388,7 @@ function errorLines(errors: ErrorStats, width: number): string[] {
 
 /**
  * Renders the dashboard: the window line, then OVERVIEW, TIMELINE, MODELS and ERRORS. The timeline
- * takes the room the models don't need, between 3 and 8 rows of bars; on a short screen the models
+ * takes the room the models don't need, between 3 and 16 rows of bars; on a short screen the models
  * give way first, then the bars, then the bottom is cut.
  *
  * @param data - the snapshot
@@ -432,43 +433,82 @@ export interface StatsView {
   close(): void
 }
 
+/** The store's methods the Stats view uses. */
+type DashboardStore = Pick<StatsStore, 'timeline' | 'models' | 'errors' | 'close'>
+
+/**
+ * Renders the totals since the proxy started (#70), under a line that says why the dashboard isn't
+ * shown.
+ *
+ * @param note - why
+ * @param size - the space available
+ * @param size.height - rows
+ * @param size.width - columns
+ * @returns the rows
+ */
+function totalsRows(
+  note: string,
+  size: { readonly height: number; readonly width: number }
+): string[] {
+  return [
+    paint('dim', note),
+    ...statsRows(routeTotals(), routeTotalsSince(), { ...size, height: size.height - 1 })
+  ]
+}
+
 /**
  * Opens the Stats view: the dashboard over the stats file, read beside the recorder's own
  * connection (the file is in WAL mode, so reading doesn't wait for the recorder's writes), or the
  * totals since the proxy started when stats are off or the file can't be opened.
  *
+ * @remarks
+ * A read that fails once the file is open (a locked or damaged file) is logged once, and the view
+ * shows the totals for the rest of the session: trying again on every redraw could wait out the
+ * store's busy timeout each time, on the thread that serves requests.
+ *
  * @param statsEnabled - whether the proxy keeps stats (`--no-stats` turns them off)
+ * @param open - opens the stats file at a path; the store's own `openStatsStore` but in tests
  * @returns the view
  */
-export function openStatsView(statsEnabled: boolean): StatsView {
-  let store: StatsStore | undefined
-  if (statsEnabled) {
-    const path = statsFilePath()
-    try {
-      store = openStatsStore(path)
-    } catch (error) {
-      consoleLogger.warn('The Stats view shows totals only: could not open {path}: {reason}', {
-        path,
-        reason: error instanceof Error ? error.message : String(error)
-      })
-    }
+export function openStatsView(
+  statsEnabled: boolean,
+  open: (path: string) => DashboardStore = openStatsStore
+): StatsView {
+  if (!statsEnabled) {
+    const off = 'Stats are off (--no-stats): totals since the proxy started.'
+    return { rows: (_window, size) => totalsRows(off, size), close: () => undefined }
   }
-  if (store !== undefined) {
-    const open = store
-    const read = createDashboardSource(open)
-    return {
-      rows: (window, size) => dashboardRows(read(window, chartColumns(size.width)), size),
-      close: () => open.close()
-    }
+  const path = statsFilePath()
+  let store: DashboardStore
+  try {
+    store = open(path)
+  } catch (error) {
+    consoleLogger.warn('The Stats view shows totals only: could not open {path}: {reason}', {
+      path,
+      reason: error instanceof Error ? error.message : String(error)
+    })
+    const unopened =
+      'The stats file could not be opened (see the log): totals since the proxy started.'
+    return { rows: (_window, size) => totalsRows(unopened, size), close: () => undefined }
   }
-  const note = statsEnabled
-    ? 'The stats file could not be opened (see the log): totals since the proxy started.'
-    : 'Stats are off (--no-stats): totals since the proxy started.'
+  const read = createDashboardSource(store)
+  const unreadable =
+    'The stats file could not be read (see the log): totals since the proxy started.'
+  let readFailed = false
   return {
-    rows: (_window, size) => [
-      paint('dim', note),
-      ...statsRows(routeTotals(), routeTotalsSince(), { ...size, height: size.height - 1 })
-    ],
-    close: () => undefined
+    rows: (window, size) => {
+      if (readFailed) return totalsRows(unreadable, size)
+      try {
+        return dashboardRows(read(window, chartColumns(size.width)), size)
+      } catch (error) {
+        readFailed = true
+        consoleLogger.warn('The Stats view shows totals only: could not read {path}: {reason}', {
+          path,
+          reason: error instanceof Error ? error.message : String(error)
+        })
+        return totalsRows(unreadable, size)
+      }
+    },
+    close: () => store.close()
   }
 }

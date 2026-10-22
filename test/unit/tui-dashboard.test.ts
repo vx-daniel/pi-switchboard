@@ -298,4 +298,26 @@ describe('openStatsView', () => {
     view.close()
     expect(stripTerminalSequences(note ?? '')).toContain('Stats are off (--no-stats)')
   })
+
+  // Catches a read that fails after the file opened (a locked or damaged file) escaping the
+  // console's render, or being tried again on every redraw.
+  test('a failed read shows the totals and says why, without reading again', () => {
+    let reads = 0
+    const view = openStatsView(true, () => ({
+      timeline: () => {
+        reads += 1
+        throw new Error('database disk image is malformed')
+      },
+      models: () => [],
+      errors: () => NO_ERRORS,
+      close: () => undefined
+    }))
+    const size = { height: 10, width: 100 }
+    for (const window of ['today', 'week'] as const) {
+      const [note] = view.rows(window, size)
+      expect(stripTerminalSequences(note ?? '')).toContain('The stats file could not be read')
+    }
+    view.close()
+    expect(reads).toBe(1)
+  })
 })

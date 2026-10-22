@@ -1752,14 +1752,23 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
 - **Navigation.** `←` `→`, `Tab` and `Shift+Tab` move between the views, wrapping around; `1`
   `2` `3` jump to one. `↑` `↓` act on the view shown: scrolling in Logs, selection in Accounts.
   The footer sits on the screen's last row and lists the current view's keys.
-- **Stats.** #70's in-memory route totals (`routeTotals()`), one row per alias × served model
-  plus a total: requests, failed attempts with their classes, fallbacks taken, input, output and
-  cache tokens, and cost. The view redraws on every change (`onRouteTotalsChange`). Cost comes
-  right after requests and failures, and the route column narrows (16 to 44 columns; a long route
-  keeps its end, the served model, behind a `…`), so an 80-column terminal cuts token counts, not
-  the cost; widths are measured in terminal columns, so a wide character does not misalign them.
-  On a short screen the route rows give way, not the total, and the last one says how many more
-  there are. Failure classes are listed in name order.
+- **Stats** (`dashboard.ts`, #216). A dashboard over the stats store, for one of three windows:
+  today (from local midnight), the last 7 days, or all 30 days kept; `t` `w` `a` pick one. The
+  console opens the stats file itself, beside the recorder's connection (WAL lets it read while
+  the recorder writes), and reads a snapshot at most every 5 s for one window and chart width, so
+  the redraws that every request causes don't query the file. Panels: OVERVIEW (sums of the
+  per-model numbers, the average weighted by requests), TIMELINE (one bar per column, the bucket
+  size rounded up so the window fits, bars drawn in eighths of a row against the busiest bucket
+  and ending under `now`; a bucket's failed and rejected requests are stacked at the foot of its
+  bar, at least one cell, red when any failed and yellow when they were only rejected, since
+  coloring a whole bar would mark nearly every busy bar), MODELS and ERRORS. The timeline takes
+  the room the models don't need, 3 to 16 rows of bars; on a short screen the models give way
+  first (`+N more`), then the bars, then the bottom is cut. With stats off or a file that won't
+  open, the view falls back to #70's in-memory route totals (`stats-view.ts`), one row per alias ×
+  served model plus a total, under a line that says why. A read that fails once the file is open
+  is logged once and falls back the same way for the rest of the session, rather than trying
+  again (and maybe waiting out the busy timeout) on every redraw. Panels, label-value lines and
+  compact numbers are shared with the sidebar (`panel.ts`).
 - **Logins** (constitution 3.5.0: Scope and principle III). pi runs every flow and stores every
   credential; the console only shows pi's own screens, in a local terminal, never over HTTP.
   `n` opens pi's provider selector (`OAuthSelectorComponent`, every account and API-key login pi
