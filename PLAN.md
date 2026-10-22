@@ -1492,8 +1492,10 @@ release workflow, never in `check:all` or the pre-commit hook.
   `attestations: write`) and uploads them to the tag's GitHub release.
 - **Retryable upload, never overwriting.** The upload adds only the five expected assets the
   release is missing, `SHA256SUMS` last. An asset already there is downloaded and must be
-  byte-identical to the new build, or the run fails before uploading anything; the compile is
-  deterministic for one tree and Bun version (two `--all` builds gave the same `SHA256SUMS`). With
+  byte-identical to the new build, or the run fails before uploading anything. This relies on Bun
+  producing identical binaries for one tree and Bun version, which two local `--all` builds showed
+  (the same `SHA256SUMS`), not a guarantee Bun makes; if a build ever differs, a retry stops at the
+  first existing asset, and the release's existing assets must be deleted by hand first. With
   all five already there it succeeds without uploading. So a run that failed partway is fixed by
   running `binary.yml` again by hand with the tag. Third-party actions in `binary.yml` and the CI
   `binary` job are pinned by commit SHA.
