@@ -16,9 +16,14 @@
  */
 
 import type { FailureClass } from '@proxy/config/schema'
+import { proxyLogger } from '@proxy/logging'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
+import type { Attempt } from '@proxy/openai/responses'
 import { activeCooldown, type Cooldown, startCooldown } from '@proxy/pi/cooldowns'
 import { type FailedResponse, resetAfterMs } from '@proxy/pi/reset-time'
+
+/** Logger for routing decisions, as for the chat route's other skips. */
+const chatLogger = proxyLogger('server', 'chat')
 
 /**
  * The cooldown a chain skips a candidate for: an active one whose class the alias names.
@@ -62,6 +67,41 @@ export function cooldownSkip(
     (later) => (skippableCooldown(later, fallbackOn, now)?.until ?? Infinity) >= own.until
   )
   return endsFirst ? undefined : own
+}
+
+/**
+ * Skips a candidate while it cools down (#68), when the chain names its class: logs the skip and
+ * lists it in `attempts`.
+ *
+ * @param chain - the candidates, the classes the alias names, and the alias
+ * @param chain.candidates - the chain's candidates
+ * @param chain.fallbackOn - the failure classes the alias names
+ * @param chain.alias - the alias whose chain it is
+ * @param position - the candidate's index in `chain.candidates`
+ * @param attempts - the attempts so far; a skip is added to them
+ * @returns whether the candidate is skipped
+ */
+export function skipCooling(
+  chain: {
+    readonly candidates: readonly ExposedModel[]
+    readonly fallbackOn: ReadonlySet<FailureClass>
+    readonly alias: string | undefined
+  },
+  position: number,
+  attempts: Attempt[]
+): boolean {
+  const cooldown = cooldownSkip(chain.candidates, position, chain.fallbackOn)
+  const candidate = chain.candidates[position]
+  if (cooldown === undefined || candidate === undefined) return false
+  chatLogger.info('Alias {alias}: skipping {model}, cooling down after {reason} until {until}', {
+    alias: chain.alias,
+    model: candidate.canonicalId,
+    reason: cooldown.reason,
+    until: new Date(cooldown.until).toISOString(),
+    scope: cooldown.scope
+  })
+  attempts.push({ model: candidate.canonicalId, reason: cooldown.reason, skipped: true })
+  return true
 }
 
 /**

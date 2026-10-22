@@ -152,6 +152,20 @@ const AliasTargetSchema = z.union([
 /** What an alias names: see {@link AliasTargetSchema}. */
 export type AliasTarget = z.infer<typeof AliasTargetSchema>
 
+/**
+ * A provider's reserve (#69): the share of a subscription's usage window, from 0 to 1, to keep
+ * free. A fallback chain skips a provider with less than this left in any window it reports.
+ */
+const ReserveShareSchema = z.number().min(0).max(1)
+
+/** How fallback chains route beyond their aliases (#69): the quota reserve per provider. */
+const RoutingConfigSchema = z.object({
+  /** Provider -> the share to keep free (`{ "anthropic": 0.2 }`). Providers left out have none. */
+  reserve: z.record(z.string().min(1), ReserveShareSchema).readonly()
+})
+/** The `routing` section: see {@link RoutingConfigSchema}. */
+export type RoutingConfig = z.infer<typeof RoutingConfigSchema>
+
 /** The JSON config file's fields and the values each accepts. */
 const ProxyConfigSchema = z.object({
   /** Bind address. Surrounding whitespace is a typo; empty means unset. */
@@ -182,6 +196,7 @@ const ProxyConfigSchema = z.object({
   aliases: z.record(z.string().min(1), AliasTargetSchema).readonly(),
   /** Lowest log level the proxy writes (LogTape levels). */
   logLevel: LogLevelSchema,
+  routing: RoutingConfigSchema,
   zed: ZedSyncConfigSchema
 })
 
@@ -228,6 +243,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   providerPrefixes: {},
   aliases: {},
   logLevel: 'info',
+  routing: { reserve: {} },
   zed: {
     providerName: 'Pi Proxy',
     autoSync: false
@@ -307,6 +323,22 @@ function validAliases(value: unknown): Record<string, AliasTarget> {
   return entries
 }
 
+/**
+ * Keeps the `routing.reserve` entries the schema accepts: a provider name and a share from 0 to 1.
+ *
+ * @param value - The field's raw value.
+ * @returns The valid entries; empty when `value` is not a plain object.
+ */
+function validReserves(value: unknown): Record<string, number> {
+  if (!isRecord(value)) return {}
+  const entries: Record<string, number> = {}
+  for (const [provider, candidate] of Object.entries(value)) {
+    const parsed = ReserveShareSchema.safeParse(candidate)
+    if (provider.length > 0 && parsed.success) entries[provider] = parsed.data
+  }
+  return entries
+}
+
 /** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
 type FieldReader<Key extends string> = <T>(
   key: Key,
@@ -382,6 +414,18 @@ function normalizeZedSyncConfig(raw: unknown, corrected: string[]): ZedSyncConfi
 }
 
 /**
+ * Reads the `routing` section, repairing invalid fields.
+ *
+ * @param raw - The section's raw value.
+ * @param corrected - Collects the paths of repaired fields; appended to.
+ * @returns The valid section.
+ */
+function normalizeRoutingConfig(raw: unknown, corrected: string[]): RoutingConfig {
+  const field = fieldReader<keyof RoutingConfig>(raw, corrected, 'routing')
+  return { reserve: field('reserve', RoutingConfigSchema.shape.reserve, validReserves) }
+}
+
+/**
  * Turns any parsed JSON into a valid config: invalid fields are repaired, missing ones defaulted.
  *
  * @remarks
@@ -425,6 +469,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     providerPrefixes: field('providerPrefixes', fields.providerPrefixes, validNameEntries),
     aliases: field('aliases', fields.aliases, validAliases),
     logLevel: field('logLevel', fields.logLevel, () => DEFAULT_CONFIG.logLevel),
+    routing: normalizeRoutingConfig(isRecord(raw) ? raw['routing'] : undefined, corrected),
     zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected)
   }
   reportCorrections(corrected)

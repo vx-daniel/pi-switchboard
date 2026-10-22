@@ -28,16 +28,24 @@ const responsesLogger = proxyLogger('openai', 'responses')
 
 /**
  * One model of an alias's fallback chain (#67) that did not answer, before the one that did: tried
- * and failed, or skipped while cooling down (#68). Documents the response; never parsed.
+ * and failed, skipped while cooling down (#68), or skipped with its provider below its quota
+ * reserve (#69). Documents the response; never parsed.
  */
 const attemptSchema = z.object({
   model: z.string().trim().meta({ description: 'The canonical ID of the model.' }),
-  reason: FailureClassSchema.meta({
-    description: 'Why the chain moved on from it: its failure, or the one it is cooling down from.'
+  reason: z.enum([...FailureClassSchema.options, 'quota']).meta({
+    description:
+      'Why the chain moved on from it: its failure, the one it is cooling down from, or `quota` ' +
+      "when its provider had less than the config's `routing.reserve` left."
   }),
-  skipped: z.literal(true).optional().meta({
-    description: 'Not called: it was cooling down after that failure (#68). Absent when tried.'
-  })
+  skipped: z
+    .literal(true)
+    .optional()
+    .meta({
+      description:
+        'Not called: it was cooling down after that failure (#68), or below its quota reserve ' +
+        '(#69). Absent when tried.'
+    })
 })
 
 /** One model of an alias's fallback chain that did not answer (#67, #68). */

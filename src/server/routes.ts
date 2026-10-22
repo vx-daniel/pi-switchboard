@@ -54,19 +54,28 @@ import {
   SWITCHBOARD_PREFIX,
   UNSUPPORTED_ENDPOINTS
 } from '@proxy/server/openapi'
+import type { Reserve } from '@proxy/server/route-reserve'
 import type { ProxyEnv } from '@proxy/server/types'
 import { type Context, Hono } from 'hono'
 import { describeRoute, validator } from 'hono-openapi'
 
 /**
- * Reads the model exposure config.
+ * What a request reads from the config: the model exposure config, and the quota reserve per
+ * provider that fallback chains keep (`routing.reserve`, #69; none when left out).
+ */
+export interface RequestConfig extends ModelExposureConfig {
+  readonly reserve?: Reserve | undefined
+}
+
+/**
+ * Reads the config a request needs.
  *
  * @remarks
  * In production ({@link fileConfigReader}) this re-reads the config file and pi's settings on each
  * request (small JSON files, negligible next to upstream latency). Tests pass a reader that returns
  * fixed values.
  */
-export type ExposureConfigReader = () => ModelExposureConfig | Promise<ModelExposureConfig>
+export type ExposureConfigReader = () => RequestConfig | Promise<RequestConfig>
 
 /** Logger for chat and model requests. */
 const chatLogger = proxyLogger('server', 'chat')
@@ -74,11 +83,11 @@ const chatLogger = proxyLogger('server', 'chat')
 const httpLogger = proxyLogger('server', 'http')
 
 /**
- * Reads the exposure config from the proxy's config file and pi's `enabledModels` setting.
+ * Reads the request config from the proxy's config file and pi's `enabledModels` setting.
  *
- * @returns the exposure config; `enabledModels` is `undefined` when pi's settings set none
+ * @returns the config; `enabledModels` is `undefined` when pi's settings set none
  */
-export async function fileConfigReader(): Promise<ModelExposureConfig> {
+export async function fileConfigReader(): Promise<RequestConfig> {
   const file = loadConfigFromFile()
   const enabledModels = await getEnabledModels()
   chatLogger.debug('Read exposure config: {modelExposureMode}, {publicModelIdMode}', {
@@ -95,7 +104,8 @@ export async function fileConfigReader(): Promise<ModelExposureConfig> {
     enabledModels,
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
-    aliases: file.aliases
+    aliases: file.aliases,
+    reserve: file.routing.reserve
   }
 }
 
@@ -119,13 +129,13 @@ type Step<T> = { ok: true; value: T } | { ok: false; response: Response }
 /**
  * Computes which models are exposed, from pi's available models and the exposure config.
  *
- * @param configReader - where the exposure config comes from
+ * @param config - the exposure config
  * @returns the exposed models and their scope diagnostics
  * @throws Error when the exposure config is invalid; Hono answers it with 500
  */
-async function getExposure(configReader: ExposureConfigReader): Promise<ModelExposureResult> {
+function exposureFrom(config: ModelExposureConfig): ModelExposureResult {
   const available = getAvailableModels()
-  const outcome = computeModelExposure(available, await configReader())
+  const outcome = computeModelExposure(available, config)
   if (!outcome.ok) {
     // Thrown to Hono, which answers 500: the exposure config cannot serve any request.
     chatLogger.error('Model exposure configuration error: {message}', {
@@ -139,6 +149,17 @@ async function getExposure(configReader: ExposureConfigReader): Promise<ModelExp
     availableModelCount: available.length
   })
   return outcome
+}
+
+/**
+ * Computes which models are exposed, reading the exposure config.
+ *
+ * @param configReader - where the exposure config comes from
+ * @returns the exposed models and their scope diagnostics
+ * @throws Error when the exposure config is invalid; Hono answers it with 500
+ */
+async function getExposure(configReader: ExposureConfigReader): Promise<ModelExposureResult> {
+  return exposureFrom(await configReader())
 }
 
 /**
@@ -291,8 +312,9 @@ async function handleChatCompletion(
   const upstreamApiKey = context.get('upstreamApiKey')
   logValidatedChatRequest(request)
 
-  // Resolve model through the exposure engine
-  const exposure = await getExposure(configReader)
+  // Resolve model through the exposure engine. The config is read once: the reserve comes with it.
+  const requestConfig = await configReader()
+  const exposure = exposureFrom(requestConfig)
   const resolved = resolveExposedModel(exposure, request.model)
   if (resolved === undefined) {
     chatLogger.warn('Rejected chat request: model {requestedModel} is not exposed', {
@@ -335,6 +357,7 @@ async function handleChatCompletion(
     alias: resolved.alias,
     candidates: start.candidates,
     fallbackOn: route.fallbackOn,
+    reserve: requestConfig.reserve ?? {},
     attempts: start.attempts,
     context: built.value,
     request,
