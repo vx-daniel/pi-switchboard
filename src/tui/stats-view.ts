@@ -7,6 +7,7 @@
 
 import { styleText } from 'node:util'
 
+import { visibleWidth } from '@earendil-works/pi-tui'
 import type { RouteTotals } from '@proxy/server/route-totals'
 
 /** Widths of the Stats view's number columns. */
@@ -17,6 +18,10 @@ const ROUTE_WIDTH = { least: 16, most: 44 } as const
 const COST_DECIMALS = 4
 /** The indent before every row. */
 const INDENT = '  '
+/** Rows around the route rows: the start time, the heading and the total. */
+const FRAME_ROWS = 3
+/** Splits text into what a terminal draws as one character. */
+const GRAPHEMES = new Intl.Segmenter('en-US', { granularity: 'grapheme' })
 
 /** The numbers the table shows for one row, or for the total. */
 type Counts = Pick<
@@ -145,14 +150,50 @@ function routeWidth(width: number): number {
 }
 
 /**
+ * Fits a label to the route column by display width, so a wide or combining character does not
+ * misalign the numbers: too long, it keeps its end (the served model, which tells an alias's rows
+ * apart) behind a `…`.
+ *
+ * @param text - the label
+ * @param width - the column's width
+ * @returns the label, exactly `width` columns wide
+ */
+function fitLabel(text: string, width: number): string {
+  let kept = text
+  if (visibleWidth(kept) > width) {
+    const graphemes = Array.from(GRAPHEMES.segment(text), (part) => part.segment)
+    while (graphemes.length > 0 && visibleWidth(`…${graphemes.join('')}`) > width) {
+      graphemes.shift()
+    }
+    kept = `…${graphemes.join('')}`
+  }
+  return kept + ' '.repeat(Math.max(0, width - visibleWidth(kept)))
+}
+
+/**
+ * Fits the route rows to the room left: when they do not fit, the last one says how many more
+ * there are.
+ *
+ * @param rows - one row per route
+ * @param room - the rows available for them
+ * @returns the rows to show
+ */
+function fitRows(rows: readonly string[], room: number): readonly string[] {
+  if (rows.length <= room) return rows
+  if (room <= 0) return []
+  const hidden = rows.length - room + 1
+  return [...rows.slice(0, room - 1), styleText('dim', `${INDENT}… ${String(hidden)} more`)]
+}
+
+/**
  * Renders the Stats view: when counting began, a heading, one row per route, and the total.
  *
  * @param totals - #70's totals, in their stable order
  * @param since - when counting began, in epoch milliseconds
  * @param size - the space available
- * @param size.height - rows
- * @param size.width - columns; the route column narrows to fit, a route too long for it keeps its
- *   end (the served model, which tells an alias's rows apart), and rows are cut at the edge
+ * @param size.height - rows; on a short screen the route rows give way, not the total
+ * @param size.width - columns; the route column narrows to fit ({@link fitLabel}), and rows are
+ *   cut at the edge
  * @returns the rows
  */
 export function statsRows(
@@ -167,13 +208,16 @@ export function statsRows(
   )
   if (totals.length === 0) return [sinceLine, `${INDENT}No requests yet.`].slice(0, size.height)
   const labelWidth = routeWidth(size.width)
-  const label = (text: string): string =>
-    (text.length > labelWidth ? `…${text.slice(-(labelWidth - 1))}` : text).padEnd(labelWidth)
   const titles = COLUMNS.map((column) => column.title.padStart(column.width)).join(' ')
-  const heading = styleText('dim', `${INDENT}${label('route')} ${titles}`)
+  const heading = styleText('dim', `${INDENT}${fitLabel('route', labelWidth)} ${titles}`)
   const rows = totals.map(
-    (route) => `${INDENT}${label(routeLabel(route))} ${countCells(route)}${failureClasses(route)}`
+    (route) =>
+      `${INDENT}${fitLabel(routeLabel(route), labelWidth)} ${countCells(route)}${failureClasses(route)}`
   )
-  const total = styleText('bold', `${INDENT}${label('total')} ${countCells(sum(totals))}`)
-  return [sinceLine, heading, ...rows, total].slice(0, size.height)
+  const total = styleText(
+    'bold',
+    `${INDENT}${fitLabel('total', labelWidth)} ${countCells(sum(totals))}`
+  )
+  const room = size.height - FRAME_ROWS
+  return [sinceLine, heading, ...fitRows(rows, room), total].slice(0, size.height)
 }

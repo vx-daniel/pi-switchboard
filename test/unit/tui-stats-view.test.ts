@@ -104,12 +104,37 @@ describe('the console Stats view', () => {
     expect(visibleWidth(rows[1]?.slice(0, 80) ?? '')).toBeLessThanOrEqual(80)
   })
 
-  // Catches rows drawn past the screen's height.
-  test('cuts at the available height', () => {
+  // Catches rows drawn past the screen's height, and the total cut first on a short screen
+  // (second #196 review): the route rows give way, and the last one says how many are hidden.
+  test('keeps the total on a short screen', () => {
     const many = Array.from({ length: 10 }, (_, index) =>
-      route({ alias: null, model: `mock/model-${String(index)}` })
+      route({ alias: null, model: `mock/model-${String(index)}`, requests: 1 })
     )
 
-    expect(statsRows(many, 0, { height: 4, width: 160 })).toHaveLength(4)
+    const rows = rendered(many, { height: 6, width: 160 })
+
+    expect(rows).toHaveLength(6)
+    expect(rows.slice(2)).toEqual([
+      expect.stringMatching(/^ {2}mock\/model-0 /),
+      expect.stringMatching(/^ {2}mock\/model-1 /),
+      '  … 8 more',
+      expect.stringMatching(/^ {2}total +10 /)
+    ])
+  })
+
+  // Catches columns misaligned by a label measured in UTF-16 units instead of terminal columns:
+  // a wide character takes two columns (second #196 review).
+  test('aligns the numbers after a label with wide characters', () => {
+    const rows = rendered(
+      [
+        route({ alias: '中文别名中文别名中文别名', model: 'mock/ok', requests: 7 }),
+        route({ alias: null, model: 'mock/ok', requests: 7 })
+      ],
+      { height: 20, width: 80 }
+    )
+    const countEnd = (row: string): number => visibleWidth(row.slice(0, row.indexOf('7') + 1))
+
+    expect(rows[2]).toContain('…')
+    expect(countEnd(rows[2] ?? '')).toBe(countEnd(rows[3] ?? ''))
   })
 })

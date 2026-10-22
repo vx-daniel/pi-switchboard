@@ -1641,7 +1641,9 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   cache tokens, and cost. The view redraws on every change (`onRouteTotalsChange`). Cost comes
   right after requests and failures, and the route column narrows (16 to 44 columns; a long route
   keeps its end, the served model, behind a `…`), so an 80-column terminal cuts token counts, not
-  the cost; failure classes are listed in name order.
+  the cost; widths are measured in terminal columns, so a wide character does not misalign them.
+  On a short screen the route rows give way, not the total, and the last one says how many more
+  there are. Failure classes are listed in name order.
 - **Logins** (constitution 3.5.0: Scope and principle III). pi runs every flow and stores every
   credential; the console only shows pi's own screens, in a local terminal, never over HTTP.
   `n` opens pi's provider selector (`OAuthSelectorComponent`, every account and API-key login pi
