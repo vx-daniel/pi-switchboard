@@ -59,8 +59,27 @@ export interface CompletionOptions {
    * time (#68). pi's `onResponse` only sees successes, so this goes through pi's `fetch` option.
    */
   readonly onFailedResponse?: ((response: FailedResponse) => void) | undefined
+  /** Which route and attempt the call is, for its upstream log lines (#70). */
+  readonly route?: UpstreamRoute | undefined
+  /**
+   * Receives each upstream call's final message once it ends, streamed or not, for the route's
+   * usage totals (#70). A call that refuses `prompt_cache_breakpoint` and is retried (#163) ends
+   * twice.
+   */
+  readonly onResult?: ((message: AssistantMessage) => void) | undefined
   /** Receives every response's headers, for the quota they report (#69). */
   readonly onResponseHeaders?: ((headers: Headers) => void) | undefined
+}
+
+/** The route an upstream call is an attempt of: what its log lines are grouped by (#70). */
+export interface UpstreamRoute {
+  /** The alias the request named, or `null` for a request that named a model. */
+  readonly alias: string | null
+  /**
+   * The attempt's number in the request's chain, from 1; cooldown skips and credential refusals
+   * before it count, as in `x_pi.attempts`.
+   */
+  readonly attempt: number
 }
 
 /**
@@ -306,11 +325,12 @@ interface UpstreamCall {
 }
 
 /**
- * Returns the properties every upstream log line carries: where the call went and how long it has
- * run.
+ * Returns the properties every upstream log line carries: where the call went, the route it is an
+ * attempt of, and how long it has run.
  *
  * @param call - the upstream call
- * @returns provider, model ID, API, stream mode and duration so far in milliseconds
+ * @returns provider, model ID, API, stream mode, alias and attempt (when the caller named them) and
+ *   duration so far in milliseconds
  */
 function callProperties(call: UpstreamCall): Record<string, unknown> {
   return {
@@ -318,6 +338,8 @@ function callProperties(call: UpstreamCall): Record<string, unknown> {
     modelId: call.model.id,
     api: call.model.api,
     stream: call.stream,
+    alias: call.options.route?.alias,
+    attempt: call.options.route?.attempt,
     durationMs: Math.round(performance.now() - call.startedAt)
   }
 }
@@ -340,6 +362,8 @@ function logUpstreamStart(
     modelId: model.id,
     api: model.api,
     stream,
+    alias: options.route?.alias,
+    attempt: options.route?.attempt,
     messageCount: context.messages.length,
     toolCount: context.tools?.length ?? 0,
     reasoningEffort: request.reasoning_effort,
@@ -452,6 +476,18 @@ interface UpstreamInput {
 }
 
 /**
+ * Handles an upstream call's end: logs its result and hands the final message to the caller's
+ * `onResult`, for the route's usage totals (#70).
+ *
+ * @param call - the upstream call
+ * @param message - the call's final assistant message
+ */
+function endUpstream(call: UpstreamCall, message: AssistantMessage): void {
+  logUpstreamResult(call, message)
+  call.options.onResult?.(message)
+}
+
+/**
  * Starts an upstream call: builds the options, starts the idle timeout, opens pi's event stream and
  * watches it.
  *
@@ -506,7 +542,7 @@ async function openUpstream(
       ? eventStream
       : relayUpstreamActivity(eventStream, idle, options.signal, model)
   // Resolves with the final message once the stream ends with done or error; it never rejects.
-  void watched.result().then((message) => logUpstreamResult(call, message))
+  void watched.result().then((message) => endUpstream(call, message))
   return watched
 }
 

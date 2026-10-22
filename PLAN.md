@@ -508,6 +508,43 @@ Copilot wasn't logged in, so it is unknown.
   values (`test/fixtures/quota-headers.ts`). Recording them needs a login made for recording
   (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
 
+### Usage by route (#70)
+
+The operator's view of usage, keyed by what the proxy knows: alias × provider × served model. No
+client-supplied key (#177 settled this), and never the request's `user`.
+
+- **Log tags.** Every `pi.complete` line of an upstream call (start, result, throw) carries `alias`
+  (`null` for a request that named a model) and `attempt`, the call's number in the chain from 1.
+  The number counts cooldown skips and credential refusals before it, as `x_pi.attempts` lists
+  them, and matches the `attempt` on the fallback warning. The result line already had the
+  tokens, cache reads and writes, reasoning tokens and `costTotal`.
+- **Running totals in memory** (`src/server/route-totals.ts`), one row per route, written by
+  `chat-dispatch.ts`:
+  - `requests`: each attempt on the model, first or fallback, including a credential refusal
+    (an `auth` attempt in `x_pi.attempts`). A cooldown skip is not a request.
+  - `failures` and `failuresByClass`: an attempt that failed before its answer started, by its
+    class (`failureClass`). A 400 has no class, so it counts in `failures` only. A stream that ends
+    with an error event after it started counts too, though the chain could not move on; it counts
+    once however its relay ends (`streamFailureCounter`), as an error event and a throw out of the
+    relay could both end the same stream. An attempt the client left is a request, not a failure.
+  - `fallbacks`: the chain moving on from this model to the next.
+  - tokens (uncached input, output, cache read, cache write) and `costUsd`: pi's `usage` on the
+    final message of every upstream call, streamed or not, failed ones included (a failure usually
+    reports none). A streamed call's usage is added when the stream ends.
+  - A model refusing `prompt_cache_breakpoint` is called twice in one attempt (#163): both calls'
+    usage is added under the one request. The refusal is a 400, which reports no tokens from the
+    providers seen so far; a provider that did report some would make those rows' tokens per
+    request look higher than one call's.
+  - A request with its own upstream key (`X-Switchboard-Upstream-Api-Key`) counts like any other:
+    it is usage through the route, even though it is not the proxy's login.
+- **Reset on restart.** Nothing persists; the log is the durable record. `routeTotalsSince()` says
+  when counting began. `clearRouteTotals()` empties the table and tells the listeners.
+- **Never pruned.** A row stays until restart or a clear, so an alias renamed or removed in the
+  config (read per request) keeps its rows. They are bounded by alias × model.
+- **Readers.** The terminal console (#61) reads `routeTotals()` in-process and subscribes with
+  `onRouteTotalsChange()`. There is no HTTP view: whether to add `GET /healthz/usage` for headless
+  use stays open on #70.
+
 ### Route handling
 
 `GET /v1/models/{model}` must support URL-encoded full model IDs because both canonical IDs and prefixed public IDs can contain `/`.
@@ -1818,7 +1855,9 @@ Minimum production observability:
   (ids and flags only: never message content or credentials; not written when the model is not
   found)
 - disconnect and abort logging
-- usage logging when available (today only the non-streaming total, at `debug`)
+- usage logging: each upstream call's result line (`pi.complete`, at `debug`) has its tokens and
+  cost, streamed or not, with its `alias` and `attempt` (#70); running totals per route are kept in
+  memory ("Usage by route (#70)")
 
 ## Test strategy
 

@@ -12,7 +12,9 @@
  *
  * Every hop is visible:
  * - a warning per failed attempt, naming the alias, the model, the class and the next model;
- * - `x_pi.attempts` on the answer, non-streamed and in every stream chunk.
+ * - `x_pi.attempts` on the answer, non-streamed and in every stream chunk;
+ * - each attempt's alias and number on its upstream log lines, and the route's running totals
+ *   (`route-totals.ts`, #70): its attempts, failures, fallbacks, tokens and cost.
  *
  * A request without an alias chain, or an alias with one target, behaves exactly as before #67.
  * With a per-request upstream key (`X-Switchboard-Upstream-Api-Key`) nothing falls back: the key is
@@ -21,6 +23,7 @@
  * @packageDocumentation
  */
 
+import type { AssistantMessageEvent } from '@earendil-works/pi-ai'
 import type { FailureClass } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ConversionSuccess } from '@proxy/openai/messages'
@@ -50,6 +53,14 @@ import {
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
 import { cooldownSkip, recordCooldown } from '@proxy/server/route-cooldowns'
+import {
+  recordRouteAttempt,
+  recordRouteFailure,
+  recordRouteFallback,
+  recordRouteUsage,
+  routeKey,
+  streamFailureCounter
+} from '@proxy/server/route-totals'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { Context } from 'hono'
 import { stream as honoStream } from 'hono/streaming'
@@ -319,10 +330,15 @@ export async function findCredentialedStart(
     if (refused === undefined) {
       return { kind: 'ready', candidates: route.candidates.slice(position), attempts }
     }
+    // A refused credential is an attempt that failed `auth`, as `x_pi.attempts` lists it.
+    const key = routeKey(alias, candidate)
+    recordRouteAttempt(key)
+    recordRouteFailure(key, failureClass(refused))
     const next = route.candidates[position + 1]
     if (next === undefined || !route.fallbackOn.has('auth')) {
       return { kind: 'refused', answer: refused }
     }
+    recordRouteFallback(key)
     logFallback(alias, { failed: candidate, next, failure: 'auth', attempt: attempts.length + 1 })
     attempts.push({ model: candidate.canonicalId, reason: 'auth' })
   }
@@ -416,6 +432,24 @@ async function* startingWith<T>(
 }
 
 /**
+ * Relays a started stream's events, counting a failure for an `error` event: the attempt was
+ * answered, but the answer broke off.
+ *
+ * @param events - the stream's events, from its first
+ * @param countFailure - the stream's {@link streamFailureCounter}
+ * @returns a generator that yields every event unchanged
+ */
+async function* countingFailures(
+  events: AsyncIterable<AssistantMessageEvent>,
+  countFailure: (failure: FailureClass | undefined) => void
+): AsyncGenerator<AssistantMessageEvent> {
+  for await (const event of events) {
+    if (event.type === 'error') countFailure(failureClass(mapFailedCall(event.error)))
+    yield event
+  }
+}
+
+/**
  * Tries a streamed completion on one model.
  *
  * @remarks
@@ -460,6 +494,7 @@ async function attemptStream(
     return upstreamFailure(mapFailedCall(failed), failed.errorMessage)
   }
 
+  const key = routeKey(job.alias, candidate)
   const respond = (route: ResponseRoute): Response => {
     const includeUsage = wantsUsage(request)
     honoContext.header('content-type', 'text/event-stream')
@@ -471,9 +506,10 @@ async function attemptStream(
     })
     return honoStream(honoContext, async (stream) => {
       let frameCount = 0
+      const countFailure = streamFailureCounter(key, options.signal)
       try {
         for await (const frame of streamToSSE(
-          startingWith(first, events),
+          countingFailures(startingWith(first, events), countFailure),
           { requestId, route },
           includeUsage
         )) {
@@ -487,6 +523,7 @@ async function attemptStream(
         })
       } catch (err: unknown) {
         const mapped = reportThrownFailure(err)
+        countFailure(failureClass(mapped))
         chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
           frameCount,
           durationMs: Math.round(performance.now() - start)
@@ -545,29 +582,37 @@ async function attemptComplete(
   }
 }
 
+/** Where an attempt sits in the request's chain. */
+interface AttemptStep {
+  /** Whether to check the candidate's credential before calling it (the first's already was). */
+  readonly checkFirst: boolean
+  /** The attempt's number, from 1, counting the skips and refusals in `x_pi.attempts` before it. */
+  readonly attempt: number
+}
+
 /**
  * Runs one candidate: its credential check (the first's was done before images were fetched),
  * then the streamed or non-streamed call, keeping a copy of a 429 or 503 response for its reset
- * time (#68).
+ * time (#68) and adding each upstream call's usage to the route's totals (#70).
  *
  * @param honoContext - the request's Hono context
  * @param candidate - the model to call
  * @param job - the pi context, request and call options
- * @param checkFirst - whether to check the candidate's credential before calling it
+ * @param step - whether to check the credential first, and the attempt's number
  * @returns how the attempt ended, and the failed response the provider sent, if any
  */
 async function runAttempt(
   honoContext: ProxyContext,
   candidate: ExposedModel,
   job: DispatchJob,
-  checkFirst: boolean
+  step: AttemptStep
 ): Promise<{ outcome: AttemptOutcome; captured: FailedResponse | undefined }> {
   chatLogger.debug('Dispatching {model} as {mode}', {
     model: candidate.canonicalId,
     mode: job.request.stream === true ? 'stream' : 'complete',
     upstreamTimeoutMs: job.options.upstreamTimeoutMs
   })
-  const refused = checkFirst
+  const refused = step.checkFirst
     ? await checkCredential(candidate.model, job.options.upstreamApiKey)
     : undefined
   if (refused !== undefined) {
@@ -581,6 +626,7 @@ async function runAttempt(
     return { outcome, captured: undefined }
   }
   let captured: FailedResponse | undefined
+  const key = routeKey(job.alias, candidate)
   const capturing: DispatchJob = {
     ...job,
     options: {
@@ -589,6 +635,10 @@ async function runAttempt(
       // the last failure is the one that says when to come back.
       onFailedResponse: (response) => {
         captured = response
+      },
+      route: { alias: key.alias, attempt: step.attempt },
+      onResult: (message) => {
+        recordRouteUsage(key, message.usage)
       },
       // A request with its own key reports that key's account, not the login others share.
       onResponseHeaders:
@@ -701,19 +751,27 @@ export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob):
   for (const [position, candidate] of job.candidates.entries()) {
     if (skipCooling(job, position, attempts)) continue
     const sentAt = Date.now()
-    const { outcome, captured } = await runAttempt(honoContext, candidate, job, position > 0)
+    const key = routeKey(job.alias, candidate)
+    recordRouteAttempt(key)
+    const { outcome, captured } = await runAttempt(honoContext, candidate, job, {
+      checkFirst: position > 0,
+      attempt: attempts.length + 1
+    })
     if (outcome.kind === 'final') return outcome.response
     if (outcome.kind === 'answered') {
       if (sharedLogin) clearCooldowns(candidate, sentAt)
       return answerWith(outcome.respond, candidate, job, attempts)
     }
-    if (sharedLogin) recordCooldown(candidate, failureClass(outcome.answer), captured)
+    const failed = failureClass(outcome.answer)
+    recordRouteFailure(key, failed)
+    if (sharedLogin) recordCooldown(candidate, failed, captured)
     const next = job.candidates[position + 1]
     const failure = fallbackFor(outcome.answer, next, job.fallbackOn)
     if (failure === undefined || next === undefined) {
       outcome.report()
       return honoContext.json(outcome.answer.body, outcome.answer.status)
     }
+    recordRouteFallback(key)
     logUpstreamDetail(outcome.detail)
     logFallback(job.alias, { failed: candidate, next, failure, attempt: attempts.length + 1 })
     attempts.push({ model: candidate.canonicalId, reason: failure })
