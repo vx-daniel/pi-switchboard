@@ -473,6 +473,8 @@ curl http://localhost:4141/v1/models \
   -H "Authorization: Bearer my-secret-token"
 ```
 
+The scheme is matched in any case (`Bearer`, `bearer`), with one or more spaces before the token, as [RFC 7235](https://www.rfc-editor.org/rfc/rfc7235#section-2.1) allows; the token itself must match exactly. It is compared in constant time, so how long a refusal takes says nothing about how much of a guessed token was right.
+
 The token can also live in the config file (`"authToken": "…"`); a flag or `PI_SWITCHBOARD_AUTH_TOKEN` wins over it, and `"authToken": ""` (the default) turns auth off. An `authToken` that is set but is not a string (`12345`, `true`, `null`, an object) does **not** turn auth off: the proxy refuses to start, logging why (naming the field, never its value) and exiting with status `1`, until the file is fixed or a token is set by flag or environment. `/proxy start` refuses too, with the reason. The settings panel and `/proxy show` say "invalid"; saving another setting from the panel keeps the file's value, and only a choice on the auth row (or `/proxy reset`) replaces it.
 
 An empty override (`--auth-token ''` or `PI_SWITCHBOARD_AUTH_TOKEN=`) refuses to start the same way, naming the flag or variable. The config file's token is not used instead; unset the variable to use it. An empty `PI_SWITCHBOARD_AUTH_TOKEN` in pi's own environment reaches a proxy the extension starts, so `/proxy start` refuses then as well, unless a token is set in `/proxy config`.
