@@ -98,7 +98,17 @@ const main = defineCommand({
 
     // Initialize pi integration; initRegistry logs a models.json load failure itself.
     await initRegistry()
-    const server = listen(config)
+    const server = await listen(config).catch((error: unknown): undefined => {
+      lifecycleLogger.fatal('Cannot listen on {host}:{port}: {error}', {
+        host: config.host,
+        port: config.port,
+        error: error instanceof Error ? error.message : String(error)
+      })
+      process.exitCode = 1
+      return undefined
+    })
+    if (server === undefined) return
+    const listening = server
 
     // --- Graceful shutdown ---
     let shutdownInitiated = false
@@ -116,7 +126,7 @@ const main = defineCommand({
 
       const SHUTDOWN_TIMEOUT_MS = 10_000
 
-      server.close()
+      listening.close()
 
       setTimeout(() => {
         lifecycleLogger.warn('Shutdown timed out after {timeoutMs} ms; forcing exit', {
@@ -131,13 +141,41 @@ const main = defineCommand({
   }
 })
 
-/** The subcommand, if any, and the arguments after it: argv is [node, script, ...arguments]. */
-const [, , subcommand, ...subcommandArgs] = process.argv
-if (subcommand === 'tui') {
+/** Flags that take a value: the argument after one is its value, never a subcommand. */
+const VALUE_FLAGS: ReadonlySet<string> = new Set([
+  ...Object.entries(SERVER_ARGS)
+    .filter(([, definition]) => definition.type === 'string')
+    .map(([name]) => `--${name}`),
+  '--log-format'
+])
+
+/**
+ * Finds `tui` among the arguments: the first one that is neither a flag nor a flag's value, so
+ * `pi-switchboard --port 4000 tui` runs the console as `pi-switchboard tui --port 4000` does.
+ *
+ * @param args - the arguments after the program name
+ * @returns the arguments without `tui` when it is the subcommand, else `undefined`
+ */
+function consoleArguments(args: readonly string[]): string[] | undefined {
+  let index = 0
+  while (args[index]?.startsWith('-') === true) {
+    const flag = args[index] ?? ''
+    index += 1
+    // A flag that takes a value (`--port 4000`, not `--port=4000`) skips that value too.
+    if (!flag.includes('=') && VALUE_FLAGS.has(flag)) index += 1
+  }
+  return args[index] === 'tui' ? args.toSpliced(index, 1) : undefined
+}
+
+/** Where the arguments start in `process.argv`, after node and the script. */
+const FIRST_ARGUMENT = 2
+/** The console's arguments, when the command is `pi-switchboard tui`. */
+const tuiArguments = consoleArguments(process.argv.slice(FIRST_ARGUMENT))
+if (tuiArguments === undefined) {
+  await runMain(main)
+} else {
   // Dynamic on purpose: the console brings pi's interactive UI (pi-tui and pi's login screens),
   // which the headless proxy never loads. citty's subCommands would also run `main` after it.
   const { tuiCommand } = await import('@proxy/tui/command')
-  await runMain(tuiCommand, { rawArgs: subcommandArgs })
-} else {
-  await runMain(main)
+  await runMain(tuiCommand, { rawArgs: tuiArguments })
 }

@@ -18,6 +18,8 @@ import { defineCommand } from 'citty'
 
 /** The most log lines the console keeps for its log view. */
 const LOG_LINES_KEPT = 5000
+/** The log lines printed with a failure, for its context. */
+const RECENT_LINES = 20
 
 /** Why the console cannot run without a terminal to draw on and read keys from. */
 const NOT_INTERACTIVE =
@@ -62,8 +64,16 @@ export const tuiCommand = defineCommand({
       return
     }
     logEffectiveConfig(config)
-    await runConsole(config, logs)
-    // The server is closed; open keep-alive connections and pi's timers would keep the process up.
-    process.exit(0)
+    // The console has restored the terminal and closed the server by the time it settles or
+    // throws; open keep-alive connections and pi's timers would keep the process up, so it exits.
+    const failure = await runConsole(config, logs).then(
+      () => undefined,
+      (error: unknown) =>
+        error instanceof Error ? error : new Error('The console failed', { cause: error })
+    )
+    if (failure === undefined) process.exit(0)
+    const recent = logs.lines().slice(-RECENT_LINES).join('\n')
+    process.stderr.write(`${recent}\npi-switchboard tui stopped: ${failure.message}\n`)
+    process.exit(1)
   }
 })
