@@ -505,8 +505,10 @@ async function attemptStream(
       model: route.model,
       includeUsage
     })
-    active.streaming()
     return honoStream(honoContext, async (stream) => {
+      // Hono starts this before `honoStream` returns, so the dispatch's `settled` sees the stream
+      // and leaves its end to the `finally` below; were it never to run, `settled` ends it.
+      active.streaming()
       let frameCount = 0
       let failed = false
       const countFailure = streamFailureCounter(key, options.signal)

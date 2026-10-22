@@ -67,8 +67,10 @@ import {
   type AccountAction,
   accountActions,
   clampSelection,
+  footerLine,
   moveSelection,
   stepView,
+  tabsLine,
   type View
 } from '@proxy/tui/navigation'
 import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
@@ -214,35 +216,6 @@ function headerLine(
 }
 
 /**
- * Renders the tab bar, marking the current view.
- *
- * @param view - the current view
- * @returns the tab bar line
- */
-function tabsLine(view: View): string {
-  const tabs: readonly (readonly [View, string])[] = [
-    ['logs', ' 1 Logs '],
-    ['accounts', ' 2 Accounts '],
-    ['stats', ' 3 Stats ']
-  ]
-  const shown = tabs.map(([tab, label]) =>
-    tab === view ? styleText(['bold', 'inverse'], label) : label
-  )
-  return ` ${shown.join(' ')}`
-}
-
-/**
- * The footer's key hints for each view, quitting first: a narrow terminal cuts the end of the line.
- */
-const FOOTER: Readonly<Record<View, string>> = {
-  logs: ' q quit (stops the proxy) · ←→ views · ↑↓ PgUp PgDn scroll · End follow · n login · s sidebar',
-  accounts:
-    ' q quit (stops the proxy) · ←→ views · ↑↓ select · Enter actions · v verify all · n login · x logout · s sidebar',
-  stats:
-    ' q quit (stops the proxy) · ←→ views · s sidebar · per alias and served model, since the proxy started'
-}
-
-/**
  * Renders the Accounts view from the console's state.
  *
  * @param state - the console's state: the accounts, the selected row, and the status with the
@@ -352,7 +325,7 @@ function createRootView(
       const rows = [
         headerLine(config, state.status, side !== undefined),
         ...middle,
-        styleText('dim', FOOTER[state.view])
+        footerLine(state.view, sidebarWidth(width) !== undefined)
       ]
       return rows.map((row) => truncateToWidth(row, width))
     },
