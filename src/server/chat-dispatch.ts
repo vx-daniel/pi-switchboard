@@ -138,8 +138,8 @@ function logUpstreamDetail(detail: string | undefined): void {
  * so their line is a warning; any other failure is an error. The level follows the mapped status
  * on purpose: mapping decides whose fault a failure is (a credential problem a provider answers
  * with 400 maps to a 502, so it stays an error), and any future mapping to 400 is a client error
- * too. The raw upstream `detail` stays at debug
- * ({@link logUpstreamDetail}). The request's IDs come from the logging context.
+ * too. The raw upstream `detail` stays at debug ({@link logUpstreamDetail}). The request's IDs
+ * come from the logging context.
  *
  * @param mapped - the status and body the client gets
  * @param detail - the raw upstream error message, or `undefined` when there is none
