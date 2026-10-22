@@ -241,6 +241,43 @@ describe('the console sidebar', () => {
     expect(rows.some((row) => row.startsWith('╭─ RECENT ─'))).toBe(true)
   })
 
+  // Catches a stress trigger that doesn't reorder: a login below its reserve with nothing failed,
+  // or only rejected requests (a client with a wrong model or token), where the title must name
+  // the rejections since nothing failed.
+  test.each([
+    {
+      trigger: 'a login below its reserve',
+      fields: { accounts: [{ ...login('low', [0.95]), belowReserve: true }] },
+      title: 'RECENT'
+    },
+    {
+      trigger: 'rejected requests only',
+      fields: {
+        finished: [
+          done({ model: '', attempt: 0, outcome: 'rejected', status: 401 }),
+          done({ model: '', attempt: 0, outcome: 'rejected', status: 401 })
+        ]
+      },
+      title: 'RECENT · 2 rejected'
+    }
+  ])('under stress from $trigger, puts ACTIVE and RECENT first', ({ fields, title }) => {
+    const rows = rendered(snapshot(fields))
+    const titles = rows.filter((row) => row.startsWith('╭─')).map((row) => row.split(' ')[1])
+
+    expect(titles.slice(0, 3)).toEqual(['PROXY', 'ACTIVE', 'RECENT'])
+    expect(rows.some((row) => row.startsWith(`╭─ ${title} ─`))).toBe(true)
+  })
+
+  // Catches a screen too short even for PROXY and RECENT's summary overflowing instead of being
+  // cut to its height.
+  test('cuts to the height when even the kept panels do not fit', () => {
+    const input = snapshot({ finished: [done({ outcome: 'failed' })] })
+
+    for (const height of [0, 1, 4, 9]) {
+      expect(rendered(input, { height, width: WIDTH })).toHaveLength(height)
+    }
+  })
+
   // Catches the stressed case burying what is happening now: on a short screen with many logins,
   // a cooldown and failures, ACTIVE and RECENT's summary must come before ACCOUNTS and stay
   // visible, the failure count must show in RECENT's title, and quiet logins take one row.

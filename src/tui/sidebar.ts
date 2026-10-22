@@ -547,6 +547,21 @@ function underStress(input: SidebarInput, lastMinute: readonly FinishedRequest[]
 }
 
 /**
+ * Titles the RECENT panel with what went wrong in the last minute: the failures, or, with none,
+ * the rejected requests, so whatever put the proxy under stress is named where a cut list can't
+ * hide it.
+ *
+ * @param lastMinute - the requests that finished in the last minute
+ * @returns the title
+ */
+function recentTitle(lastMinute: readonly FinishedRequest[]): string {
+  const failed = lastMinute.filter((request) => request.outcome === 'failed').length
+  if (failed > 0) return `RECENT · ${String(failed)} failed`
+  const rejected = lastMinute.filter((request) => request.outcome === 'rejected').length
+  return rejected > 0 ? `RECENT · ${String(rejected)} rejected` : 'RECENT'
+}
+
+/**
  * Frames the panels and stacks them.
  *
  * @param specs - the panels, in order
@@ -609,7 +624,6 @@ export function sidebarRows(
     (request) => input.now - request.endedAt < RATE_WINDOW_MS
   )
   const stressed = underStress(input, lastMinute)
-  const failed = lastMinute.filter((request) => request.outcome === 'failed').length
   const recent = recentLines(input, lastMinute, inner)
   const proxy = whole('proxy', 'PROXY', proxyLines(input, inner))
   const accounts = whole(
@@ -624,7 +638,7 @@ export function sidebarRows(
   )
   const recentPanel: PanelSpec = {
     id: 'recent',
-    title: failed > 0 ? `RECENT · ${String(failed)} failed` : 'RECENT',
+    title: recentTitle(lastMinute),
     lines: [...recent.summary, ...recent.list],
     keep: recent.summary.length
   }
