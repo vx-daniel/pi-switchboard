@@ -33,6 +33,7 @@ import {
   setKeybindings,
   TUI_KEYBINDINGS
 } from '@earendil-works/pi-tui'
+import type { ServerType } from '@hono/node-server'
 import type { ServerConfig } from '@proxy/config/env'
 import type { Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
@@ -49,10 +50,12 @@ import {
   type ProviderCredentialStatus,
   summarizeAuthError
 } from '@proxy/pi/registry'
+import { activeRequests, onActiveRequestsChange } from '@proxy/server/active-requests'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
+import { accountRows } from '@proxy/tui/accounts-view'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
@@ -60,11 +63,11 @@ import {
   type AccountAction,
   accountActions,
   clampSelection,
-  LOGIN_ROW,
   moveSelection,
   stepView,
   type View
 } from '@proxy/tui/navigation'
+import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
 import { statsRows } from '@proxy/tui/stats-view'
 import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
@@ -76,16 +79,14 @@ const consoleLogger = proxyLogger('tui')
 
 /** How often the status line and the accounts list are read again. */
 const STATUS_REFRESH_MS = 5000
+/** How often the sidebar's clocks (uptime, elapsed, time left) and connection count move on. */
+const TICK_MS = 1000
 /** How long a logout may take. */
 const LOGOUT_TIMEOUT_MS = 15_000
 /** Lines a page key scrolls the log view by. */
 const PAGE_LINES = 10
 /** Rows the header, the tab bar and the footer take. */
 const CHROME_ROWS = 3
-/** Widths of the accounts view's columns: provider, auth type, source, model count. */
-const COLUMNS = { provider: 22, login: 8, source: 16, models: 4 } as const
-/** Percent in a whole: a window's share used is shown as a percentage. */
-const PERCENT = 100
 
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
@@ -105,6 +106,8 @@ interface ConsoleState extends RefreshState<Status> {
   logView: LogViewport
   /** The selected row of the accounts view; the row after the accounts opens the login. */
   selected: number
+  /** Open client connections, counted every tick; `undefined` before the first count. */
+  connections: number | undefined
 }
 
 /** What the key handlers and the login flow need. */
@@ -113,6 +116,8 @@ interface ConsoleContext {
   readonly logs: LogBuffer
   readonly tui: TuiAltScreen
   readonly state: ConsoleState
+  /** When the console started the proxy, in milliseconds since the epoch. */
+  readonly startedAt: number
   /**
    * Reads the status and accounts again, then redraws.
    *
@@ -181,15 +186,22 @@ function statusParts(status: Status): string[] {
 }
 
 /**
- * Renders the header: version, address, auth and the status line.
+ * Renders the header: version and address, then auth and the status line unless the sidebar shows
+ * them.
  *
  * @param config - the server config
  * @param status - the last status read, or `undefined` before the first
+ * @param withSidebar - whether the sidebar is shown, with the status in its PROXY panel
  * @returns the header line, untruncated
  */
-function headerLine(config: ServerConfig, status: Status | undefined): string {
+function headerLine(
+  config: ServerConfig,
+  status: Status | undefined,
+  withSidebar: boolean
+): string {
   const title = styleText('bold', ` pi-switchboard ${packageJson.version}`)
   const address = `${config.host}:${String(config.port)}`
+  if (withSidebar) return [title, address].join(' · ')
   const parts = [title, address, `auth ${config.proxyAuth.kind}`]
   if (status !== undefined) parts.push(...statusParts(status))
   return parts.join(' · ')
@@ -225,93 +237,6 @@ const FOOTER: Readonly<Record<View, string>> = {
 }
 
 /**
- * Renders whether a provider's credential was verified, when it was.
- *
- * @param account - the provider's status
- * @returns `''` when not verified, else a mark and, on failure, why
- */
-function verification(account: ProviderCredentialStatus): string {
-  if (account.verified === undefined) return ''
-  if (account.verified) return styleText('green', ' ✓ verified')
-  return styleText('red', ` ✗ ${account.error ?? 'failed'}`)
-}
-
-/**
- * Renders a provider's latest quota: the share used of each window it reports, in red with
- * `below reserve` when it has less left than its `routing.reserve` (#69).
- *
- * @param provider - the provider
- * @param reserve - the reserve per provider
- * @returns the cell; `''` when the provider reports no quota
- */
-function quotaCell(provider: string, reserve: Reserve): string {
-  const windows = providerQuota(provider)?.windows ?? []
-  const used = windows
-    .map((window) => `${window.name} ${String(Math.round(window.used * PERCENT))}%`)
-    .join(' ')
-  if (providerBelowReserve(provider, reserve) === undefined) return used
-  return styleText('red', `${used} below reserve`)
-}
-
-/**
- * Renders one provider's credential status: provider, auth type, source, models, quota used,
- * verification.
- *
- * @param account - the provider's status; never the credential itself
- * @param reserve - the reserve per provider, to mark a provider below it
- * @returns the row's text, without its selection mark
- */
-function accountRow(account: ProviderCredentialStatus, reserve: Reserve): string {
-  const login = account.type === 'oauth' ? 'account' : 'API key'
-  const cells = [
-    account.provider.padEnd(COLUMNS.provider),
-    login.padEnd(COLUMNS.login),
-    (account.source ?? '').padEnd(COLUMNS.source),
-    `${String(account.availableModelCount).padStart(COLUMNS.models)} models`,
-    quotaCell(account.provider, reserve)
-  ]
-  return `${cells.join(' ')}${verification(account)}`
-}
-
-/**
- * Marks the selected row of a list: a pointer and reversed colours.
- *
- * @param text - the row's text
- * @param selected - whether it is the selected row
- * @returns the row, indented
- */
-function selectable(text: string, selected: boolean): string {
-  return selected ? styleText('inverse', `› ${text}`) : `  ${text}`
-}
-
-/**
- * Renders the accounts view: pi's configured providers, as the proxy sees them, then the row that
- * opens pi's login selector.
- *
- * @param state - the console's state: the accounts, the selected row (the row after the
- *   accounts is the login row), and the status with the reserve per provider
- * @param height - rows available
- * @returns the rows
- */
-function accountRows(state: ConsoleState, height: number): string[] {
-  const { accounts } = state
-  const reserve = state.status?.reserve ?? {}
-  const titles = [
-    'provider'.padEnd(COLUMNS.provider),
-    'login'.padEnd(COLUMNS.login),
-    'source'.padEnd(COLUMNS.source),
-    'models'.padEnd(COLUMNS.models + ' models'.length),
-    'quota used'
-  ]
-  const current = clampSelection(state.selected, accounts.length)
-  const rows = accounts.map((account, index) =>
-    selectable(accountRow(account, reserve), index === current)
-  )
-  const login = selectable(LOGIN_ROW, current === accounts.length)
-  return [styleText('dim', `  ${titles.join(' ')}`), ...rows, login].slice(0, height)
-}
-
-/**
  * Renders the current view's body.
  *
  * @param context - the console
@@ -326,13 +251,51 @@ function viewRows(
 ): string[] {
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size)
-  if (state.view === 'accounts') return accountRows(state, size.height)
+  if (state.view === 'accounts') {
+    return accountRows(state.accounts, state.selected, state.status?.reserve, size.height)
+  }
   return statsRows(routeTotals(), routeTotalsSince(), size)
 }
 
 /**
- * Creates the console's root component: header, tab bar, the current view, and the footer on the
- * screen's last row.
+ * Gathers what the sidebar shows, now: the proxy's status, each login with its quota, the
+ * cooldowns, the requests in flight and the route totals.
+ *
+ * @param context - the console
+ * @returns the snapshot
+ */
+function sidebarInput(context: ConsoleContext): SidebarInput {
+  const { config, state } = context
+  const now = Date.now()
+  const status: Partial<Status> = state.status ?? {}
+  const reserve = status.reserve ?? {}
+  return {
+    now,
+    proxy: {
+      address: `${config.host}:${String(config.port)}`,
+      proxyAuth: config.proxyAuth.kind,
+      startedAt: context.startedAt,
+      connections: state.connections,
+      exposed: status.exposed,
+      available: status.available,
+      modelsJsonError: status.modelsJsonError !== undefined
+    },
+    accounts: state.accounts.map((account) => ({
+      provider: account.provider,
+      type: account.type,
+      models: account.availableModelCount,
+      quota: providerQuota(account.provider, now),
+      belowReserve: providerBelowReserve(account.provider, reserve, now) !== undefined
+    })),
+    cooldowns: activeCooldowns(now),
+    active: activeRequests(),
+    totals: routeTotals()
+  }
+}
+
+/**
+ * Creates the console's root component: the header, then the tab bar over the current view with
+ * the sidebar beside them on a wide enough terminal, and the footer on the screen's last row.
  *
  * @param context - the console
  * @param terminal - the terminal, for its height
@@ -348,12 +311,25 @@ function createRootView(
     render(width) {
       const height = Math.max(1, terminal.rows - CHROME_ROWS)
       const { state, config } = context
-      const body = viewRows(context, { height, width })
-      const rows = [
-        headerLine(config, state.status),
+      const side = sidebarWidth(width)
+      const mainWidth = side === undefined ? width : width - side - 1
+      const body = viewRows(context, { height, width: mainWidth })
+      const main = [
         tabsLine(state.view),
         ...body,
-        ...Array.from({ length: Math.max(0, height - body.length) }, () => ''),
+        ...Array.from({ length: Math.max(0, height - body.length) }, () => '')
+      ]
+      const middle =
+        side === undefined
+          ? main
+          : besideSidebar(
+              main,
+              sidebarRows(sidebarInput(context), { height: main.length, width: side }),
+              mainWidth
+            )
+      const rows = [
+        headerLine(config, state.status, side !== undefined),
+        ...middle,
         styleText('dim', FOOTER[state.view])
       ]
       return rows.map((row) => truncateToWidth(row, width))
@@ -605,23 +581,35 @@ function settleable(): { promise: Promise<void>; settle: () => void } {
 
 /**
  * Starts what keeps the screen current: a redraw on every log line and every change to the route
- * totals, the status read every few seconds, and stray stderr writes sent to the log view.
+ * totals or the requests in flight, the open connections counted and the sidebar's clocks moved on
+ * every second, the status read every few seconds, and stray stderr writes sent to the log view.
  *
  * @param context - the console
+ * @param server - the proxy's server, whose open connections the sidebar shows
  * @returns a function that stops them all
  */
-function startUpdates(context: ConsoleContext): () => void {
-  const unsubscribeLogs = context.logs.onChange(() => context.tui.requestRender())
-  const unsubscribeTotals = onRouteTotalsChange(() => context.tui.requestRender())
+function startUpdates(context: ConsoleContext, server: ServerType): () => void {
+  const redraw = (): void => context.tui.requestRender()
+  const unsubscribeLogs = context.logs.onChange(redraw)
+  const unsubscribeTotals = onRouteTotalsChange(redraw)
+  const unsubscribeActive = onActiveRequestsChange(redraw)
   const timer = setInterval(
     () => inBackground(context.refresh(), 'Reading the status'),
     STATUS_REFRESH_MS
   )
+  const ticker = setInterval(() => {
+    server.getConnections((error, count) => {
+      if (error === null) context.state.connections = count
+      redraw()
+    })
+  }, TICK_MS)
   const restoreStderr = captureWrites(process.stderr, context.logs)
   return () => {
     clearInterval(timer)
+    clearInterval(ticker)
     unsubscribeLogs()
     unsubscribeTotals()
+    unsubscribeActive()
     restoreStderr()
   }
 }
@@ -690,13 +678,15 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     accounts: [],
     verification: new Map(),
     credentialChanges: new Map(),
-    selected: 0
+    selected: 0,
+    connections: undefined
   }
   const context: ConsoleContext = {
     config,
     logs,
     tui,
     state,
+    startedAt: Date.now(),
     refresh: createRefresh(state, { status: readStatus, accounts: getCredentialStatuses }, () =>
       tui.requestRender()
     ),
@@ -707,7 +697,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     actions.find(([key]) => matchesKey(data, key))?.[1]()
     tui.requestRender()
   })
-  const stopUpdates = startUpdates(context)
+  const stopUpdates = startUpdates(context, server)
   const stopListening = listenForStops(stopped.settle, crashed)
 
   try {

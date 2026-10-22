@@ -1684,7 +1684,20 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   would take PgUp and PgDn first, so the console unbinds them there.
 - **Status.** The header shows the address, proxy auth (`token` or `off`), exposed and available
   models (exposure computed as `/healthz/models` does), active cooldowns and a models.json error,
-  read every 5 s and after each login or logout.
+  read every 5 s and after each login or logout. With the sidebar shown, the header keeps the
+  version and address and the sidebar's PROXY panel shows the rest.
+- **Sidebar** (`sidebar.ts`). On a terminal at least 100 columns wide, the right 30% (34 to 48
+  columns) shows four panels beside the tab bar and the view: PROXY (address, auth, uptime, open
+  connections, models, cooldown count, models.json error), ACCOUNTS (each login with its quota
+  windows as bars, the time to each reset, below-reserve, and its cooldowns), ACTIVE (the chat
+  requests in flight) and TRAFFIC (the route totals summed). Rendering is a function of a
+  snapshot the console gathers per frame; a 1 s tick moves the clocks on and counts the server's
+  open connections (`getConnections`). On a short screen the blank rows between panels go first,
+  then the bottom is cut. The requests in flight come from `active-requests.ts`: the chat route
+  adds one before it dispatches (never message content or a credential), the dispatcher names
+  each attempt's model, and the request ends when the dispatch returns or, for a stream, when the
+  stream closes, whether it finished, failed or the client left. Like the route totals, it is
+  in memory and no HTTP route serves it.
 - **Accounts.** The providers pi has a credential for (`getCredentialStatuses`, as
   `/healthz/creds`): login type, source and model count; never the credential. `↑` `↓` select a
   row (`navigation.ts`; the selection stays on the list when a logout shortens it), and `Enter`
