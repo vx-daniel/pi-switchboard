@@ -424,6 +424,23 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
   rate-limited model would pass after about 38 failures in a row. That bound is the limit of
   `Date`, not a cap. pi's Google adapters refuse a custom `fetch`, so Google models always use
   the default.
+- **Codex over SSE (#185).** pi's Codex adapter tries a WebSocket first (`transport: "auto"`),
+  and `fetch` sees nothing of it. So the proxy passes `transport: "sse"` for
+  `openai-codex-responses` (`transportOptions` in `src/pi/complete.ts`), and the 429 body's
+  `resets_in_seconds` is read. pi throws that 429 with its own wording only ("You have hit your
+  ChatGPT usage limit", no status), so "usage limit" is rate-limit wording in `BY_WORDING`.
+  Before 0.3.1, a Codex limit answered 502 `upstream_error` and started no cooldown.
+
+  Measured live on 2026-10-21 (`gpt-6-luna`, median time to the first event):
+
+  | Calls | WebSocket | SSE |
+  |---|---|---|
+  | One turn, 4 calls each | 1,522 ms | 954 ms |
+  | One turn with a session ID, 4 calls each | 1,199 ms | 916 ms |
+  | Turns 2–6 on a 31k-token history, 10 each | 1,049 ms | 1,071 ms |
+
+  With a session ID the WebSocket sends only the new turns, but that bought nothing measurable at
+  31k tokens. Both transports read 30,720 tokens from the prompt cache.
 - **Applied by routing only, recorded always (principle VI).** Every request's 429 or 503 on the
   proxy's login starts a cooldown, so the state is visible. A request with its own upstream key
   records and clears nothing: its failures are about that key, not the login others share. It
@@ -446,6 +463,50 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
 - **No hidden SDK retries.** pi 1.3.0 builds every SDK client with `maxRetries: 0` and defaults
   its own retry loop (`retryProviderRequest`) to 0, as does its Codex adapter. A 429 therefore
   reaches the proxy at once. #68's proposal to set `maxRetries: 0` per candidate was unneeded.
+
+### Quota (#69)
+
+Subscriptions report on every response how much of each usage window the account has used. The
+proxy keeps the latest report per provider, in memory (`src/pi/quota.ts`). It shows it on
+`/healthz/creds` (per provider, for the operator) and on `/v1/switchboard/models` (per model,
+for clients that pick models themselves, #69's P6 comment). Routing on it, a reserve below which
+a chain skips a provider, is not built yet; it waits on data from this.
+
+**What each subscription sends.** Read from a live probe of each login on 2026-10-21, one call each.
+Copilot wasn't logged in, so it is unknown.
+
+| Provider | Header | Meaning |
+|---|---|---|
+| Anthropic (Claude subscription) | `anthropic-ratelimit-unified-<5h\|7d>-utilization` | Share used, 0–1 (`0.0`, `0.47`) |
+| | `anthropic-ratelimit-unified-<5h\|7d>-reset` | When the window resets, in Unix seconds |
+| | `anthropic-ratelimit-unified-<5h\|7d>-status` | `allowed`, … |
+| | `anthropic-ratelimit-unified-status`, `-reset`, `-representative-claim` | Overall status, its reset, and the window that binds (`five_hour`) |
+| | `-fallback-percentage`, `-overage-status`, `-overage-disabled-reason` | Not kept |
+| Codex (ChatGPT plan) | `x-codex-<primary\|secondary>-used-percent` | Share used, 0–100 (`0`, `2`) |
+| | `x-codex-<primary\|secondary>-reset-at`, `-reset-after-seconds` | When it resets: Unix seconds, and seconds from now |
+| | `x-codex-<primary\|secondary>-window-minutes` | `300` (5 hours), `10080` (7 days) |
+| | `x-codex-plan-type`, `x-codex-active-limit` | `plus`, `premium` |
+| | `x-codex-credits-*`, `-primary-over-secondary-limit-percent` | Not kept |
+
+- **Exact fields only.** The same responses carry `anthropic-organization-id`,
+  `anthropic-workspace-id`, `set-cookie`, request IDs and `x-codex-turn-state`, an opaque token.
+  The proxy reads the window fields, the overall status and the plan by name, and checks each
+  for its type. A share outside 0–1 or a value that isn't a plain number is dropped.
+- **Where they come from.** The capturing `fetch` (#68) passes every response's headers on, success
+  or failure. Codex sends its headers only over SSE, which the proxy uses for Codex (#185). pi's
+  Google adapters refuse a custom `fetch`, so Google reports none.
+- **Never made up.** A provider that reports nothing shows `null`, not zeros. A response without
+  quota headers leaves the last report. A window whose reset has passed is left out, as its
+  share is no longer known; with none left, the provider shows `null`. Once one window has
+  reset, the overall `status` is shown as unknown, as it may have been that window's.
+- **The shared login only.** A request with its own upstream key records nothing, as for
+  cooldowns: its headers report that key's account.
+- **Keyed by provider.** pi has one login per provider, so a provider's report is its login's.
+  Routing one provider over several logins would need the reports keyed by login, or two
+  accounts would overwrite each other; that is a precondition for a reserve (#189 review).
+- **No recordings yet.** Tests use the probe's header names and formats, with fake identifying
+  values (`test/fixtures/quota-headers.ts`). Recording them needs a login made for recording
+  (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
 
 ### Route handling
 
@@ -1129,6 +1190,7 @@ Each entry is pi's catalogue entry for the model, as pi resolves it (`models.jso
 - `context_window`, `max_output_tokens`: in tokens (`Model.contextWindow`, `Model.maxTokens`)
 - `cost`: USD per million tokens for uncached input, output, cache reads and cache writes (`Model.cost`; pi computes a call's cost as rate / 1,000,000 × tokens). `0` where pi has no price. A client can use these as docker-agent `cost` tables, which docker-agent needs to price calls through a custom `base_url` (#177)
 - `cooldown`: `null`, or the model's active cooldown (`reason`, `scope`, `until` in Unix seconds), below "Cooldowns (#68)"
+- `quota`: `null`, or the model's provider's latest quota (`observed_at`, `status`, `plan`, `windows` with `name`, `used` 0–1, `resets_at` in Unix seconds, `window_minutes`, `status`), below "Quota (#69)"
 - new capability fields go here, never on `/v1/models`
 - non-standard routes live under `/v1/switchboard/`, as `/v1/switchboard/agent/completions` would. The prefix was `/v1/pi/` until constitution 2.0.0; `/v1/pi/models` moved here with no alias
 
@@ -1160,12 +1222,12 @@ Use an OpenAI-style shape:
   (`Invalid URL (<METHOD> <path>)`)
 - `413` request body larger than `maxBodySize`
 - `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
-- `429` upstream rate limit (`rate_limit`)
+- `429` upstream rate limit or usage limit (`rate_limit`)
 - `500` internal proxy failure, including an invalid model exposure config
 - `502` upstream auth failure (`upstream_auth_error`), or any other upstream failure
   (`upstream_error`), such as an upstream 404 or 500
 - `503` provider unavailable (`provider_unavailable`, upstream 503) or overloaded
-  (`provider_overloaded`, upstream 529)
+  (`provider_overloaded`, upstream 529, or no status and wording that says it is out of capacity)
 - `504` upstream timeout (`timeout`): an upstream 408 or 504, or the provider sent nothing for
   `upstreamTimeoutMs` (an idle timeout that restarts on every upstream event, raw provider events included (#50), not a cap on the call;
   `src/pi/upstream-idle.ts`)
@@ -1176,10 +1238,15 @@ is read from the fixed positions pi 1.3.0's messages put it in: leading, and onl
 what only a status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 status code (no body)`;
 `429 tokens…` is not a status), after a label (`OpenAI API error (429): …`, `Mistral API error
 (429): …`), Google's `got status: 429.` or its error body's `error.code`. When a status is found it
-decides; the wording (`rate limit`, `too many requests`, `timed out`, `overloaded`,
-`service unavailable`, …, checked in that order) is consulted only when no status is reported
-(Bedrock, network failures, the proxy's own idle timeout), and a number elsewhere in the text never
-counts (#42). The client gets a fixed message and code, never the upstream text. A missing or broken
+decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`, `overloaded`,
+`model is at capacity`, `servers are currently busy`, `experiencing high demand`, `service
+unavailable`, …, checked in that order) is consulted only when no status is reported (Bedrock,
+network failures, the proxy's own idle timeout, pi's Codex usage limit), and a number elsewhere in
+the text never counts (#42). `usage limit` also matches `usage_limit_reached` and
+`subscription_sharing_usage_limit_exceeded`, but not "usage limitations" (#190). The capacity
+wordings are the phrases pi's own retry classifier (`pi-ai/utils/retry`) treats as transient;
+with no status they answer `503 provider_overloaded`, whose class `unavailable` cools the model
+down. The client gets a fixed message and code, never the upstream text. A missing or broken
 upstream credential is refused with `401` before any response starts, streamed or not
 (`checkRequestAuth`).
 

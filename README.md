@@ -176,7 +176,7 @@ Operational endpoints, outside the OpenAI-compatible `/v1` surface:
 |---|---|---|
 | `GET /healthz` | Never | `200 {"status":"ok"}` once the proxy listens and pi's model runtime is loaded. No upstream calls: use it for container healthchecks and liveness probes. |
 | `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`), aliases left out (`aliasDiagnostics`), and active cooldowns (`cooldowns`, [below](#cooldowns)). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model; a cooldown does not fail it. |
-| `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …) and `availableModelCount`. `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
+| `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …), `availableModelCount`, and `quota`, the subscription's latest usage windows ([Quota](#quota)). `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
 
 None of them returns a credential. `/healthz` proves the process is up, not that a provider will accept a request: `GET /healthz/creds?verify=true` is the closest check to that without spending a completion.
 
@@ -363,8 +363,8 @@ An alias can name several models, tried in order, and the failures that move to 
 
 | Class | Failure before the response starts |
 |---|---|
-| `rate_limit` | 429 |
-| `unavailable` | 503, or 529 overloaded |
+| `rate_limit` | 429, or a usage limit (a ChatGPT login's Codex limit) |
+| `unavailable` | 503, 529 overloaded, or a provider saying it is out of capacity |
 | `timeout` | 504, or the upstream idle timeout |
 | `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve) |
 | `refused` | The login can't run the model (`404 model_not_found`) |
@@ -384,11 +384,26 @@ An alias can name several models, tried in order, and the failures that move to 
 A provider that answers 429 is cooled down, so a chain stops calling it first on every request.
 
 - **What cools.** A `429` cools the whole provider: pi has one login per provider, and a subscription's limit covers the account. A `503` or `529` cools only that model.
-- **For how long.** As long as the failed response says: `retry-after-ms` or `retry-after`, a body field such as Codex's `resets_in_seconds` or `resets_at`, OpenAI's `x-ratelimit-reset-*` or Anthropic's `anthropic-ratelimit-*-reset` headers, or the message's own words ("try again in 20s"). There is no cap, so a weekly limit cools the provider until it resets. When the response gives no time, the cooldown grows: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each failure in a row. A stated time or a success starts it over. Google's API doesn't let the proxy read the response, so Google models always use the growing default.
+- **For how long.** As long as the failed response says: `retry-after-ms` or `retry-after`, a body field such as Codex's `resets_in_seconds` or `resets_at`, OpenAI's `x-ratelimit-reset-*` or Anthropic's `anthropic-ratelimit-*-reset` headers, or the message's own words ("try again in 20s"). There is no cap, so a weekly limit cools the provider until it resets. When the response gives no time, the cooldown grows: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each failure in a row. A stated time or a success starts it over. Google's API doesn't let the proxy read the response, so Google models always use the growing default. The proxy calls Codex over SSE rather than pi's default WebSocket, so that it can read Codex's response; a Codex usage limit answers `429` `rate_limit` like any other provider's (#185).
 - **Who skips.** Only a chain whose `fallbackOn` names the class (`rate_limit` for a 429, `unavailable` for a 503) skips a cooling model. A request that names the model, or a chain that names neither, still calls it. When every model left in the chain is cooling, the one whose cooldown ends first is called.
 - **Visible.** A skipped model is listed in `x_pi.attempts` with `"skipped": true` and the reason; the log has a line for each cooldown that starts, ends or is skipped. `/healthz/models` lists the active ones (`scope`, `provider`, `model`, `reason`, `until`, `secondsLeft`, `source`), and `/v1/switchboard/models` gives each model's `cooldown` (`reason`, `scope`, `until` in Unix seconds), so a client can pick another model or wait.
 - **Ended early by a success.** A call to the provider or model that succeeds clears its cooldown, if the call was sent after the cooldown started. Cooldowns live in memory: a restart forgets them. A request that sends its own key (`X-Switchboard-Upstream-Api-Key`) neither starts nor clears one, as it isn't using the proxy's login.
 - **No hidden retries.** pi calls each provider once per attempt (the provider SDKs' own retries are off), so a 429 reaches the proxy at once and the chain moves on without waiting.
+
+#### Quota
+
+Subscriptions report on every response how much of each usage window the account has used. The proxy keeps the latest report per provider and shows it on `/healthz/creds` and, per model, on `/v1/switchboard/models`. A client can check whether a model has room before starting a long run, without making a call.
+
+```json
+"quota": { "observed_at": 1792622040, "status": "allowed", "plan": null, "windows": [
+  { "name": "5h", "used": 0, "resets_at": 1792639800, "window_minutes": 300, "status": "allowed" },
+  { "name": "7d", "used": 0.47, "resets_at": 1792893600, "window_minutes": 10080, "status": "allowed" }] }
+```
+
+- **Who reports.** Anthropic subscriptions (`5h` and `7d` windows) and Codex's ChatGPT plans (`primary`, 5 hours, and `secondary`, 7 days). Google and API-key logins report nothing, and show `null`.
+- **`used`** is the share of the window used, from 0 to 1. A window that has reset since is left out, and a provider with nothing left to show is `null` until its next response.
+- **Only the shared login.** A request that sends its own key records nothing. Only the window fields, status and plan are kept, never an account or organization ID.
+- Routing on quota (skipping a provider that's nearly out) isn't built yet ([#69](https://github.com/vx-daniel/pi-switchboard/issues/69)).
 
 ### Discovering available models
 
@@ -411,12 +426,14 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
 | `context_window`, `max_output_tokens` | In tokens |
 | `cost` | USD per million tokens: `input` (uncached), `output`, `cache_read`, `cache_write`; `0` where pi has no price |
 | `cooldown` | `null`, or the cooldown the model is under after a 429 or 503: `reason`, `scope` (`provider` or `model`), `until` (Unix seconds) ([Cooldowns](#cooldowns)) |
+| `quota` | `null`, or its provider's latest usage windows ([Quota](#quota)) |
 
 ```json
 { "object": "list", "data": [{ "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
   "reasoning_efforts": ["none", "minimal", "low", "medium", "high"], "input": ["text", "image"],
   "context_window": 200000, "max_output_tokens": 64000,
-  "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null }] }
+  "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null,
+  "quota": null }] }
 ```
 
 docker-agent prices a model reached through a custom `base_url` only from a `cost` table in `team.yaml`, so a team can take these prices; without one it records usage but no cost. The path was `GET /v1/pi/models` before 0.1.0; the old path is gone.

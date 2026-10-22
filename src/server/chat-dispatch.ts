@@ -30,6 +30,7 @@ import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
 import { clearCooldowns } from '@proxy/pi/cooldowns'
+import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
 import {
@@ -588,7 +589,14 @@ async function runAttempt(
       // the last failure is the one that says when to come back.
       onFailedResponse: (response) => {
         captured = response
-      }
+      },
+      // A request with its own key reports that key's account, not the login others share.
+      onResponseHeaders:
+        job.options.upstreamApiKey === undefined
+          ? (headers) => {
+              recordQuota(candidate.provider, headers)
+            }
+          : undefined
     }
   }
   const outcome = await (job.request.stream === true
