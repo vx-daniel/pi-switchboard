@@ -15,7 +15,7 @@ Primary goals:
   next (#140)
 - Reuse pi's configured auth and model definitions; run no logins of its own
 - Route requests across pi's logins: aliases, fallback chains, cooldowns, quota awareness, usage by
-  route (#66–#70), under constitution principle VI
+  route (#66–#70) and several logins per provider (#227), under constitution principle VI
 - Support OpenAI function tools where they can be translated safely
 - Stay checked against OpenAI's published spec (#132) and describe itself in OpenAPI (#129)
 
@@ -346,7 +346,7 @@ public and canonical IDs are built:
 - **Visible in the response and the log (principle VI).** `model` stays the target's canonical
   ID. `x_pi.alias` carries the alias, in a non-streamed response and in every stream chunk, and
   only when the request named one, so a request without an alias is unchanged. The chat request
-  log line adds `alias`. There is one login per provider, so no login is reported yet.
+  log line adds `alias`. The login is the provider in the canonical ID (Accounts, #227).
 - **Verbatim.** Names and targets are never trimmed; an empty name or target is dropped by the
   config repair.
 
@@ -387,9 +387,9 @@ A string alias, and a request that names a model, never fall back.
   `{ model, reason }` for each failed attempt, in the body and in every chunk, only when there is
   one. Each hop is a warning (alias, model, class, next model, attempt number), and a success after
   hops is an info line with the attempts. Never content. Principle VI also asks for the serving
-  *login*: pi has one login per provider today, and a chain moves between providers or models,
-  never between logins, so the provider in `model` identifies it. Multi-login routing adds a login
-  field when there is a choice to report.
+  *login*: a login is a provider ID (a second login to the same service is `anthropic-account-2`,
+  Accounts below, #227), so the provider in `model` and in each attempt identifies it, and no
+  separate login field is needed.
 - **Limits.** The idle timeout applies per attempt, so an N-target chain can take N timeouts. There
   is no per-request opt-out: docker-agent can't send a header, and a body field would need a
   principle I exception (#177). A client that wants no fallback names the model, and one that
@@ -502,9 +502,8 @@ Copilot wasn't logged in, so it is unknown.
 - **The shared login only.** A request with its own upstream key records nothing, as for
   cooldowns: its headers report that key's account.
 - **Keyed by provider.** pi has one login per provider, so a provider's report is its login's.
-  Routing one provider over several logins would need the reports keyed by login, or two
-  accounts would overwrite each other (#189 review); the reserve below is per provider for that
-  reason.
+  A second login to the same service is a second provider (`anthropic-account-2`, Accounts
+  below), with a report and a reserve of its own.
 - **No recordings yet.** Tests use the probe's header names and formats, with fake identifying
   values (`test/fixtures/quota-headers.ts`). The recorder keeps a response's quota headers, by
   exact name and nothing else (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), and
@@ -535,6 +534,51 @@ fallback chain skips a provider that is close to its limit, before it refuses:
   reserve. It is not a request in the route totals (#70), as a cooldown skip is not. The
   console's Accounts view shows each provider's share used per window, red with `below reserve`
   when it is.
+
+### Accounts: several logins per provider (#227)
+
+pi stores one credential per provider ID, so a second subscription to the same service needs a
+second provider. `accounts` in `proxy-config.json` (`{ "anthropic": 2 }`, the total count from 2
+to 10) registers `{provider}-account-N` for N from 2, each a copy of one of pi's built-in
+providers under its own ID (`src/pi/accounts.ts`, in `initRegistry`). The convention is
+pi-rotator's and pi-multi-account's, so a login made through either appears here unchanged;
+neither extension is loaded, and neither can act on the proxy's requests (they switch an
+interactive session's model). pi-multiprovider keeps credentials outside pi's store, which the
+Scope rules out. Each extra login is a provider to everything already keyed by provider: it is an
+exposed model of its own (`anthropic-account-2/claude-opus-5-5`), a fallback chain (#67) moves
+to it, cooldowns (#68), quota and the reserve (#69), `x_pi`, the log and the route totals (#70)
+tell the logins apart, and the console's login list (#61) offers it (`Anthropic (account 2)`).
+
+- **A fresh built-in, not the composed provider.** The copy is made from a fresh
+  `builtinProviders()` instance, not from the runtime's provider: the composed one carries the
+  base's `models.json` overrides, `apiKey` included, which must not reach another login, and a
+  dynamic catalog lives in the instance's closure, which copies would otherwise share. A base
+  that is not built in (a `models.json` provider) is skipped with a warning. A `models.json`
+  entry under the copy's own ID composes above it, as for any native provider (checked on pi
+  1.3.0: `baseUrl` and `apiKey` under `groq-account-2` apply to it, and `groq`'s key does not).
+- **Listed under its ID, sent as the base.** `getModels`/`getAllModels` re-key the catalog to the
+  copy's ID, so the proxy's canonical IDs, and everything keyed by `model.provider`, see the
+  login. The runtime resolves auth by that ID (the copy's stored credential; `ANTHROPIC_API_KEY`
+  in the environment configures `anthropic` only). The request itself goes to `base.stream` with
+  `provider: base.id`, because pi's API code keys provider rules by name: `openai`'s ChatGPT
+  sign-in (`isChatGPTSignIn`), `github-copilot`'s headers, `xai`'s reasoning items. Anthropic
+  and Codex key nothing by name (OAuth shaping is by the token's `sk-ant-oat` prefix). pi's
+  assistant message therefore names the base; the proxy reports the login from its route, never
+  from the message. A catalog refresh (`refreshModels`, none of pi 1.3.0's built-ins has one) is
+  translated both ways, as pi's providers restore only models stored under their own ID.
+- **Available before the first request.** A registered provider is only provisionally available
+  until the next availability pass; `initRegistry` runs `refresh({ allowNetwork: false })` once
+  after registering, so the snapshot the routes read includes a login with a stored credential.
+- **Listed once per login.** Principle IV routes only to exposed models, so every model appears
+  once per login on `/v1/models`. In `scoped` mode, pi's `enabledModels` patterns must name the
+  extra login's models too. Listing each model once with the other logins hidden but routable
+  (pi-rotator's `carrierSlot`) would need an amendment to principles IV and VI, and "a request
+  that names a model never falls back"; it can be built on top of this later (#227's B).
+- **Proven offline, not live.** `test/integration/accounts.test.ts` runs `groq` and
+  `groq-account-2` against the mock provider, which tells the logins apart by the key each
+  request carries: both exposed, both on `/healthz/creds`, the chain moving to the second on the
+  first's 429, the cooldown on the first only. A real OAuth refresh and response through a copy
+  need a login made for recording (as #69's recordings do), never a copy of a live login.
 
 ### Usage by route (#70)
 

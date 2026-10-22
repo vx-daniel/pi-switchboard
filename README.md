@@ -366,6 +366,7 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 | `providerPrefixes` | `{}` | Provider key -> custom prefix label overrides |
 | `aliases` | `{}` | Alias -> the canonical ID of an exposed model ([Aliases](#aliases)) |
 | `routing.reserve` | `{}` | Provider -> the share of each quota window, 0–1, that fallback chains keep free ([Quota](#quota)) |
+| `accounts` | `{}` | Provider -> how many logins it has, the first included; `{ "anthropic": 2 }` adds the provider `anthropic-account-2` ([Several logins per provider](#several-logins-per-provider)) |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.
 
@@ -450,6 +451,25 @@ Subscriptions report on every response how much of each usage window the account
   - **Never skips them all.** When every remaining target is below its reserve, the one with the most left is called, so a reserve never fails a request by itself.
   - **Needs a report.** A provider that has reported no quota yet, or never does (Google, API keys), is never skipped.
   - **Visible.** A skip is listed in `x_pi.attempts` as `{ "model": "anthropic/claude-opus-5-5", "reason": "quota", "skipped": true }` and logged at info with the provider, the window and the share left. The console's Accounts view marks a provider `below reserve`.
+
+#### Several logins per provider
+
+pi stores one credential per provider, so a second subscription to the same service needs a second provider. `accounts` in `proxy-config.json` gives a provider more logins:
+
+```json
+{ "accounts": { "anthropic": 2, "openai-codex": 2 } }
+```
+
+- **A provider of its own.** `anthropic-account-2` is a copy of pi's built-in `anthropic` provider under its own ID: the same models, the same login flow, its own credential in pi's `auth.json`. Log in to it from the console (`n` lists it as `Anthropic (account 2)`). pi's own `/login` does not know it unless [pi-rotator](https://pi.dev/packages/pi-rotator) or [pi-multi-account](https://pi.dev/packages/pi-multi-account) registers it: the naming is theirs, so a login made through either appears here unchanged. The count is the total, `2` to `10`, and the base provider is login 1.
+- **Routed like any other.** Its models are exposed models with their own canonical IDs (`anthropic-account-2/claude-opus-5-5`), so a [fallback chain](#fallback-chains) moves to the second login on a rate limit, and cooldowns, [quota](#quota) and its reserve, `x_pi` and the log tell the logins apart:
+
+  ```json
+  { "aliases": { "coding": { "targets": ["anthropic/claude-opus-5-5", "anthropic-account-2/claude-opus-5-5"], "fallbackOn": ["rate_limit"] } } }
+  ```
+
+- **Listed once per login.** Every model appears once per login on `/v1/models`. In `scoped` mode, pi's `enabledModels` patterns must name the extra login's models too.
+- **Built-in providers only.** The base must be one of pi's built-in providers; a `models.json` provider is skipped with a warning, because its key would be copied with it. A `models.json` entry under the login's own ID (`anthropic-account-2`) applies to it; the base's entry does not.
+- **Sent as the base.** Requests go to the provider as the base's would, so provider rules pi keys by name (the `openai` ChatGPT sign-in, `github-copilot`'s headers) hold for every login. Moving between logins loses the provider's prompt cache. Whether several subscriptions may be used this way is between you and the provider.
 
 ### Discovering available models
 

@@ -149,6 +149,7 @@ What the name promises, under constitution principle VI (explicit, visible, expo
 - [x] Cooldowns after rate limits (#68); pi already makes no hidden SDK retries
 - [ ] Quota awareness from provider rate-limit headers (#69): tracked, shown, and kept in reserve by fallback chains (`routing.reserve`); recorded fixtures to come
 - [ ] Usage and cost by route (#70): log tags and in-memory totals done; an HTTP view is undecided
+- [ ] Several logins per provider (#227): `accounts` registers `{provider}-account-N` as providers of their own; a recording through a copy and a console "add login" action to come
 
 ## Phase 6 — More of OpenAI's API
 
