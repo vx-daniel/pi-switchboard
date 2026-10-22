@@ -42,6 +42,7 @@ describe('console navigation', () => {
     expect(accountActions(account('oauth')).map((choice) => choice.label)).toEqual([
       'Verify all logins',
       'Log in again',
+      'Set a label',
       'Log out of anthropic'
     ])
     expect(accountActions(account('api_key'))[1]).toEqual({

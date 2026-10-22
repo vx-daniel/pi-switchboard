@@ -8,7 +8,14 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { getRuntime } from '@proxy/pi/registry'
-import { loginOptions, logoutOptions, runLogin, runLogout } from '@proxy/tui/login'
+import {
+  loginLabels,
+  loginOptions,
+  logoutOptions,
+  runLogin,
+  runLogout,
+  saveLoginLabel
+} from '@proxy/tui/login'
 import { isRecord } from '@proxy/utils/guards'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -223,6 +230,33 @@ describe("the console's login picker", () => {
 
     const after = loginOptions(getRuntime()).find((option) => option.id === PROVIDER)
     expect(after?.status).toMatchObject({ type: 'oauth' })
+  })
+
+  // Catches a label kept anywhere but the proxy's config file (never pi's store), not shown
+  // beside the login in the pickers, or not removed by an empty answer.
+  test('a label is saved in the config file and shown beside the login', async () => {
+    const { screens } = scriptedScreens({
+      choose: 'browser',
+      answer: 'the-code',
+      signal: new AbortController().signal
+    })
+    await runLogin(
+      getRuntime(),
+      { providerId: PROVIDER, type: 'oauth', deviceId: () => DEVICE_ID },
+      screens
+    )
+
+    expect(saveLoginLabel(PROVIDER, '  work  ')).toBe(true)
+
+    expect(loginLabels()).toEqual({ [PROVIDER]: 'work' })
+    expect(storedCredentials()[PROVIDER]).not.toHaveProperty('label')
+    const names = (options: readonly { id: string; name: string }[]): string[] =>
+      options.filter((option) => option.id === PROVIDER).map((option) => option.name)
+    expect(names(loginOptions(getRuntime(), loginLabels()))).toEqual(['Test account · work'])
+    expect(names(await logoutOptions(getRuntime(), loginLabels()))).toEqual(['Test account · work'])
+
+    saveLoginLabel(PROVIDER, '')
+    expect(loginLabels()).toEqual({})
   })
 })
 

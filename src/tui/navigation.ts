@@ -15,7 +15,7 @@ export const VIEWS = ['logs', 'accounts', 'stats'] as const
 export type View = (typeof VIEWS)[number]
 
 /** What can be done to one account from its action menu. */
-export type AccountAction = 'verify' | 'login' | 'logout'
+export type AccountAction = 'verify' | 'login' | 'logout' | 'label'
 
 /** An action on an account, with the label its menu shows. */
 export interface AccountActionChoice {
@@ -72,6 +72,7 @@ export function accountActions(account: ProviderCredentialStatus): readonly Acco
   return [
     { action: 'verify', label: 'Verify all logins' },
     { action: 'login', label: login },
+    { action: 'label', label: 'Set a label' },
     { action: 'logout', label: `Log out of ${account.provider}` }
   ]
 }

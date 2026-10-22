@@ -18,6 +18,7 @@ import type {
   ModelRuntime,
   OAuthSelectorComponent
 } from '@earendil-works/pi-coding-agent'
+import { loadConfigFromFile, type LoginLabels, saveConfigToFile } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import {
   isBuiltinProvider,
@@ -107,23 +108,35 @@ function configuredStatus(runtime: ModelRuntime, providerId: string): Pick<Login
 }
 
 /**
+ * Appends a login's label to its name, when it has one.
+ *
+ * @param name - the provider's display name
+ * @param label - the label, if any
+ * @returns `name · label`, or the name alone
+ */
+function labelled(name: string, label: string | undefined): string {
+  return label === undefined ? name : `${name} · ${label}`
+}
+
+/**
  * Lists the logins pi offers, one entry per provider and login type, as pi's `/login` does.
  *
  * @remarks
  * A provider that is logged in also offers its next login slot (`Anthropic (account 2)`, #227):
  * choosing it registers the slot and runs the same login. A slot already registered is a provider
- * like any other and is listed as itself.
+ * like any other and is listed as itself, with its label when it has one.
  *
  * @param runtime - the proxy's model runtime
+ * @param labels - provider -> the label the operator gave it
  * @returns the entries, sorted by provider name
  */
-export function loginOptions(runtime: ModelRuntime): LoginOption[] {
+export function loginOptions(runtime: ModelRuntime, labels: LoginLabels = {}): LoginOption[] {
   const options: LoginOption[] = []
   const push = (
     provider: Pick<Provider, 'id' | 'name' | 'auth'>,
     status: Pick<LoginOption, 'status'>
   ): void => {
-    const base = { id: provider.id, name: provider.name, ...status }
+    const base = { id: provider.id, name: labelled(provider.name, labels[provider.id]), ...status }
     const { oauth, apiKey } = provider.auth
     if (oauth) {
       const subscription = oauth.isSubscription === true
@@ -154,16 +167,56 @@ export function loginOptions(runtime: ModelRuntime): LoginOption[] {
  * models.json are not stored, so they cannot be logged out of.
  *
  * @param runtime - the proxy's model runtime
+ * @param labels - provider -> the label the operator gave it
  * @returns one entry per stored credential
  */
-export async function logoutOptions(runtime: ModelRuntime): Promise<LoginOption[]> {
+export async function logoutOptions(
+  runtime: ModelRuntime,
+  labels: LoginLabels = {}
+): Promise<LoginOption[]> {
   const stored = await runtime.listCredentials({ signal: AbortSignal.timeout(CATALOG_REFRESH_MS) })
   return stored.map(({ providerId, type }) => ({
     id: providerId,
-    name: providerName(runtime, providerId),
+    name: labelled(providerName(runtime, providerId), labels[providerId]),
     authType: type,
     status: { type, source: 'stored credential' }
   }))
+}
+
+/**
+ * Reads the labels the operator gave logins, from the config file.
+ *
+ * @returns provider -> label
+ */
+export function loginLabels(): LoginLabels {
+  return loadConfigFromFile().labels
+}
+
+/**
+ * Saves a login's label in the config file (`labels`), or removes it.
+ *
+ * @remarks
+ * The label is the operator's description of an account (`work`), kept beside the proxy's own
+ * settings, never in pi's credential store and never sent anywhere. A label that is only
+ * whitespace removes the entry.
+ *
+ * @param providerId - the login
+ * @param label - the label; empty removes it
+ * @returns whether the config file was written
+ */
+export function saveLoginLabel(providerId: string, label: string): boolean {
+  const config = loadConfigFromFile()
+  const { [providerId]: _previous, ...others } = config.labels
+  const trimmed = label.trim()
+  const labels = trimmed.length === 0 ? others : { ...others, [providerId]: trimmed }
+  const written = saveConfigToFile({ ...config, labels })
+  if (written) {
+    loginLogger.info(
+      trimmed.length === 0 ? 'Removed the label of {provider}' : 'Labelled {provider}',
+      { provider: providerId }
+    )
+  }
+  return written
 }
 
 /**

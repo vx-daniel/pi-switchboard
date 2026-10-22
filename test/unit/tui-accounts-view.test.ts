@@ -38,7 +38,8 @@ describe('the console Accounts view', () => {
     const rows = rendered({
       accounts: [account('qwen-token-plan-individual'), account('short')],
       selected: 2,
-      reserve: {}
+      reserve: {},
+      labels: {}
     })
     const loginColumn = (row: string): number => visibleWidth(row.slice(0, row.indexOf('API key')))
 
@@ -59,7 +60,7 @@ describe('the console Accounts view', () => {
         'anthropic-ratelimit-unified-7d-reset': reset
       })
     )
-    const view = { accounts: [account('anthropic')], selected: 0 }
+    const view = { accounts: [account('anthropic')], selected: 0, labels: {} }
 
     expect(rendered({ ...view, reserve: {} })[1]).toMatch(/ 5h 12% 7d 85%$/)
     expect(rendered({ ...view, reserve: { anthropic: 0.2 } })[1]).toMatch(
@@ -72,10 +73,27 @@ describe('the console Accounts view', () => {
     const rows = rendered({
       accounts: [account('alpha'), account('beta')],
       selected: 2,
-      reserve: {}
+      reserve: {},
+      labels: {}
     })
 
     expect(rows.slice(1).map((row) => row.slice(0, 2))).toEqual(['  ', '  ', '› '])
     expect(rows.at(-1)).toBe('› + Log in to a provider…')
+  })
+
+  // Catches a label missing from its login's row, shown on another login, or a long one pushing
+  // the columns after it out of line.
+  test('shows a login label in its own column, cut to the column', () => {
+    const rows = rendered({
+      accounts: [account('anthropic'), account('anthropic-account-2')],
+      selected: 0,
+      reserve: {},
+      labels: { 'anthropic-account-2': 'work subscription' }
+    })
+    const loginColumn = (row: string): number => visibleWidth(row.slice(0, row.indexOf('API key')))
+
+    expect(rows[1]).toMatch(/^› anthropic\s+API key/)
+    expect(rows[2]).toContain('anthropic-account-2    work subscr… API key')
+    expect(loginColumn(rows[1] ?? '')).toBe(loginColumn(rows[2] ?? ''))
   })
 })

@@ -553,6 +553,15 @@ own (`anthropic-account-2/claude-opus-5-5`), a fallback chain (#67) moves to it,
 quota and the reserve (#69), `x_pi`, the log and the route totals (#70) tell the logins apart,
 and the console's Accounts view (#61) shows it.
 
+**Labels.** After a login, the console asks what to call it (`work`); **Set a label** in the
+account's menu changes it. Labels live in `proxy-config.json` as `labels` (provider → text,
+trimmed, 1–40 characters), saved by `saveLoginLabel` (`src/tui/login.ts`) through
+`saveConfigToFile`, never in pi's store and never sent anywhere; they show in the Accounts view's
+`label` column and beside the name in the login and logout lists. The provider's own account
+identity (Anthropic's organization ID on responses, Codex's JWT claims) is deliberately not
+read: #69 keeps no account or organization ID, and a label the operator writes needs nothing from
+the credential.
+
 - **A fresh built-in, not the composed provider.** The copy is made from a fresh
   `builtinProviders()` instance, not from the runtime's provider: the composed one carries the
   base's `models.json` overrides, `apiKey` included, which must not reach another login, and a

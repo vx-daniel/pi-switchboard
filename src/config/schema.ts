@@ -168,6 +168,15 @@ export type RoutingConfig = z.infer<typeof RoutingConfigSchema>
 /** Provider -> the share of each usage window to keep free, from 0 to 1 (`routing.reserve`). */
 export type Reserve = RoutingConfig['reserve']
 
+/** Longest login label the console shows. */
+const MAX_LABEL_LENGTH = 40
+/** A login label: what the operator calls an account, trimmed, non-empty, short. */
+const LabelSchema = z.string().trim().min(1).max(MAX_LABEL_LENGTH)
+/** Provider -> its label; see {@link LabelSchema}. */
+const LabelsSchema = z.record(z.string().min(1), LabelSchema).readonly()
+/** Provider -> the label the console shows beside it (`labels`). */
+export type LoginLabels = z.infer<typeof LabelsSchema>
+
 /** The JSON config file's fields and the values each accepts. */
 const ProxyConfigSchema = z.object({
   /** Bind address. Surrounding whitespace is a typo; empty means unset. */
@@ -198,6 +207,11 @@ const ProxyConfigSchema = z.object({
    * empty: an alias is listed and resolved only while one of its targets is exposed.
    */
   aliases: z.record(z.string().min(1), AliasTargetSchema).readonly(),
+  /**
+   * Provider -> a label the console shows beside it (#227): which account a login is, in your
+   * words (`{ "anthropic-account-2": "work" }`). Never sent anywhere.
+   */
+  labels: LabelsSchema,
   /** Lowest log level the proxy writes (LogTape levels). */
   logLevel: LogLevelSchema,
   routing: RoutingConfigSchema,
@@ -247,6 +261,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   customModels: [],
   providerPrefixes: {},
   aliases: {},
+  labels: {},
   logLevel: 'info',
   routing: { reserve: {} },
   zed: {
@@ -335,6 +350,8 @@ function validEntries<T>(schema: z.ZodType<T>): (value: unknown) => Record<strin
 const validAliases = validEntries(AliasTargetSchema)
 /** Keeps the `routing.reserve` entries the schema accepts: a provider and a share from 0 to 1. */
 const validReserves = validEntries(ReserveShareSchema)
+/** Keeps the `labels` entries the schema accepts: a provider and a short, non-empty label. */
+const validLabels = validEntries(LabelSchema)
 
 /** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
 type FieldReader<Key extends string> = <T>(
@@ -466,6 +483,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     customModels: field('customModels', fields.customModels, validNames),
     providerPrefixes: field('providerPrefixes', fields.providerPrefixes, validNameEntries),
     aliases: field('aliases', fields.aliases, validAliases),
+    labels: field('labels', fields.labels, validLabels),
     logLevel: field('logLevel', fields.logLevel, () => DEFAULT_CONFIG.logLevel),
     routing: normalizeRoutingConfig(isRecord(raw) ? raw['routing'] : undefined, corrected),
     zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected)
