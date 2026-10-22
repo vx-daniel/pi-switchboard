@@ -1,27 +1,24 @@
 <!--
 Sync Impact Report
-Version change: 3.4.0 → 3.5.0 (MINOR)
-Rationale: #61 ships an opt-in console (`pi-switchboard tui`) and a standalone binary. A spike
-(2026-10-21) ran the server, a pi-tui screen and the proxy's ModelRuntime in one process: pi's own
-login screens (`OAuthSelectorComponent`, `LoginDialogComponent`) drove `ModelRuntime.login`, pi
-saved the credential to its `auth.json`, and the new provider's models were served at once. pi
-still runs every login flow and stores every credential; the proxy only hosts pi's screens in a
-local terminal. The Scope said the proxy "does not run logins", which read as forbidding that, so
-it now says what the proxy may do and where. The binary is compiled with Bun, which the stack line
-did not allow; Bun is a build tool for the binary only, and the binary's tests need Bun, so they
-run in their own CI job and in the release workflow, outside the gate.
-MINOR: guidance expanded in the Scope, principle III and the development workflow; no principle
-removed.
+Version change: 3.5.0 → 3.5.1 (PATCH)
+Rationale: #224 added `GET /v1/switchboard/usage`, the stats file's usage over a window, behind
+proxy auth. Principle I's list of today's non-standard routes named only the models list and the
+OpenAPI document. The rule it states (non-OpenAI data under `/v1/switchboard/`, behind auth unless
+it is the document) is unchanged; only the example list catches up.
+PATCH: a clarification; no principle added, removed or changed.
 Modified sections:
-- Scope: pi runs and stores logins; the proxy may present pi's own login flow in a local terminal
-- III. Local-First Safety: no login over HTTP or any other network surface
-- Development Workflow: Bun builds the standalone binary only; its tests are the one check outside
-  the gate
+- I. OpenAI Compatibility: the non-standard routes listed today include
+  `GET /v1/switchboard/usage`
 Templates requiring updates:
-- ✅ AGENTS.md: runtime/tooling line, core constraints
-- ⏳ PLAN.md, README.md: the binary and the console, in the PRs that build them (#61)
+- ✅ AGENTS.md: no change; it defers to PLAN's route lists
+- ✅ PLAN.md, README.md: the route is documented (#225)
 Follow-up TODOs:
 - None.
+
+3.5.0 (2026-10-21): #61's console and standalone binary. The Scope says what the proxy may do with
+logins: pi runs every flow and stores every credential, and the proxy may present pi's own login
+screens in a local terminal only (principle III: never over HTTP or another network surface). Bun
+builds the standalone binary only; its tests are the one check outside the gate.
 
 3.4.0 (2026-10-21): principle I's `prompt_cache_breakpoint` exception covers models on
 `api.openai.com` that refuse it; the first refusal per model is retried once without it (#163).
@@ -93,7 +90,7 @@ Exceptions: a request field MAY be dropped instead of rejected only where it is 
 
 Two kinds of route sit outside the stable surface, and only these:
 - Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs` (Swagger UI for the OpenAPI document). Only `/healthz` and `/docs` may skip proxy authentication; none may return a credential, and `/docs` MUST name no model or provider.
-- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`, and the API's OpenAPI document at `GET /v1/switchboard/openapi.json`). Non-OpenAI capability data goes there, never onto the standard model objects. Of these, only the document may skip proxy authentication, and it MUST name no model, provider or credential.
+- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`, usage from the stats file at `GET /v1/switchboard/usage`, and the API's OpenAPI document at `GET /v1/switchboard/openapi.json`). Non-OpenAI capability data goes there, never onto the standard model objects. Of these, only the document may skip proxy authentication, and it MUST name no model, provider or credential.
 
 Adding a route to either group, or to the stable surface, requires an explicit decision recorded in `PLAN.md`.
 
@@ -186,4 +183,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.5.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-21
+**Version**: 3.5.1 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-22
