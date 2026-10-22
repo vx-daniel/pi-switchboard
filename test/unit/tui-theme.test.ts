@@ -1,5 +1,12 @@
-import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
+import {
+  backgroundAnsi,
+  getTerminalColorMode,
+  parseColor,
+  stripTerminalSequences,
+  visibleWidth
+} from '@earendil-works/pi-tui'
 import { activeTab, chrome, highlight, installConsoleTheme, paint, strong } from '@proxy/tui/theme'
+import { STORM } from '@proxy/tui/tokyonight-storm'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
 /** Where pi keeps its global theme. */
@@ -33,7 +40,12 @@ describe('the console theme', () => {
     installConsoleTheme()
 
     expect(piThemeName()).toBe('tokyonight-storm')
-    for (const painted of [paint('success', 'ok'), strong('ok'), highlight('ok')]) {
+    for (const painted of [
+      paint('success', 'ok'),
+      strong('ok'),
+      highlight('ok'),
+      activeTab('ok')
+    ]) {
       expect(painted).not.toBe('ok')
       expect(stripTerminalSequences(painted)).toBe('ok')
     }
@@ -63,9 +75,9 @@ describe('the console theme', () => {
 
     expect(visibleWidth(painted)).toBe(30)
     expect(stripTerminalSequences(painted).trimEnd()).toBe('tab plain after')
-    // The chrome's own background sequence opens the row: an escape ending at the first `m`.
-    const background = painted.slice(0, painted.indexOf('m') + 1)
-    expect(background.startsWith('\u001b[')).toBe(true)
+    // The chrome is Tokyo Night's highlight background, at the terminal's color mode.
+    const background = backgroundAnsi(parseColor(STORM.bgHighlight), getTerminalColorMode())
+    expect(painted.startsWith(background)).toBe(true)
     // Every end of a background inside the row is followed by the chrome's background again;
     // only the row's own final reset is not.
     const body = painted.slice(0, -'\u001b[49m'.length)

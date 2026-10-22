@@ -59,7 +59,7 @@ import { listen } from '@proxy/server/startup'
 import { accountRows } from '@proxy/tui/accounts-view'
 import { openStatsView, type StatsView, type StatsWindow } from '@proxy/tui/dashboard'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
-import { type LogViewport, logViewRows, scrollLogView } from '@proxy/tui/log-view'
+import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
 import {
   type AccountAction,
@@ -343,11 +343,10 @@ function createRootView(
     },
     handleInput,
     handleMouse(event) {
-      // The wheel scrolls the log view, as ↑ and ↓ do; negative is up, back in the log.
-      if (event.type !== 'wheel' || event.wheelDelta === undefined) return undefined
+      // The wheel scrolls the log view; elsewhere it does nothing.
       const { state } = context
-      if (state.view !== 'logs') return undefined
-      state.logView = scrollLogView(state.logView, context.logs, -event.wheelDelta)
+      if (event.type !== 'wheel' || state.view !== 'logs') return undefined
+      state.logView = wheelLogView(state.logView, context.logs, event)
       return { handled: true }
     },
     invalidate() {
