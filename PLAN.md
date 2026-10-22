@@ -1439,6 +1439,7 @@ src/
 │   ├── command.ts        -- `pi-switchboard tui` (citty)
 │   ├── console.ts        -- the console: pi-tui screen, server in the same process
 │   ├── log-buffer.ts     -- the log view's bounded line buffer
+│   ├── log-view.ts       -- the log view's position: following, or pinned when scrolled back
 │   └── login.ts          -- pi's login flow routed to pi's own screens
 └── utils/
     └── guards.ts         -- isRecord() and other type guards
