@@ -1,4 +1,5 @@
 import {
+  activeRequests,
   beginActiveRequest,
   FINISHED_KEPT,
   finishedRequests,
@@ -43,6 +44,23 @@ describe('the finished requests kept for the console', () => {
     expect(finishedRequests().filter((request) => request.requestId === 'once')).toEqual([
       expect.objectContaining({ outcome: 'failed' })
     ])
+  })
+
+  // Catches a streamed request left in ACTIVE for good when its relay never started: the dispatch
+  // returning must end it, as it does a plain request.
+  test('ends a streamed request whose relay never started when the dispatch returns', () => {
+    const handle = beginActiveRequest({
+      requestId: 'never-relayed',
+      alias: null,
+      model: 'alpha/model',
+      stream: true
+    })
+    handle.settled('failed')
+
+    expect(activeRequests()).toEqual([])
+    expect(finishedRequests()[0]).toEqual(
+      expect.objectContaining({ requestId: 'never-relayed', outcome: 'failed' })
+    )
   })
 
   // Catches a client that left counted as a failure, which would make a healthy upstream look
