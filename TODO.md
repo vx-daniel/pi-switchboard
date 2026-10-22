@@ -430,8 +430,10 @@ serving model and login reported under `x_pi` and in the log.
 
 ## Open decisions
 
-- [ ] Proxy auth and upstream failure contract (#128): item 5 done (an upstream 400 or 422 is
-      `400 upstream_invalid_request`, #147); items 1–4 open
+- [x] Proxy auth and upstream failure contract (#128): constant-time token compare and RFC 7235
+      Bearer scheme (items 1–2); a client's own key refused upstream is
+      `401 upstream_api_key_invalid` and a missing login `502 upstream_credentials_missing`
+      (items 3–4); an upstream 400/422 is `400 upstream_invalid_request` (item 5, #147)
 
 ## Later, not planned: experimental agentic mode
 

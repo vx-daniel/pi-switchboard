@@ -1,6 +1,7 @@
 /**
- * A chat request whose provider credential fails to resolve: the 401 and the default-level logs
- * carry pi's summary of the failure, never the detail after it.
+ * A chat request whose provider credential fails to resolve: the 502
+ * `upstream_credentials_missing` has fixed text, and the default-level logs carry pi's summary of
+ * the failure, never the detail after it.
  *
  * pi's OAuth errors run `<summary>. url=…; body=<token endpoint response>; details=…;
  * stack=<install paths>`. Refreshing a real token is not possible offline, so this uses a
@@ -20,6 +21,16 @@ const LEAKED_DETAIL = 'notarealsecret-token-endpoint-response'
 const LEAKED_PATH = 'notarealsecret-install-path'
 
 let agentDir: FixtureAgentDir
+/** The answer for a provider pi has no usable credential for (#128): fixed, quoting nothing. */
+const CREDENTIALS_MISSING = {
+  error: {
+    message:
+      "pi has no usable credential for the model's provider. Log in with pi on the proxy's host.",
+    type: 'server_error',
+    param: null,
+    code: 'upstream_credentials_missing'
+  }
+}
 /**
  * Every JSON log line written, with its LogTape level (`TRACE`, `DEBUG`, `INFO`, `WARN`, …) and
  * logger.
@@ -62,8 +73,9 @@ afterAll(() => {
 
 describe('chat request with a credential that fails to resolve', () => {
   // Catches pi's raw credential error, which can quote the token endpoint's response and the
-  // install's paths, reaching the client or a log line a default deployment writes.
-  test('answers 401 with the summary only, and keeps the detail out of default-level logs', async () => {
+  // install's paths, reaching the client or a log line a default deployment writes; and a missing
+  // login answered as a 401, which a client reads as its own key being wrong (#128).
+  test('answers 502 upstream_credentials_missing, and keeps the detail out of default-level logs', async () => {
     const response = await testApp().request('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -74,8 +86,8 @@ describe('chat request with a credential that fails to resolve', () => {
     })
     const text = await response.text()
 
-    expect(response.status).toBe(401)
-    expect(text).toContain("Could not resolve request auth for provider 'auth-broken'")
+    expect(response.status).toBe(502)
+    expect(JSON.parse(text)).toEqual(CREDENTIALS_MISSING)
     expect(text).not.toContain(LEAKED_DETAIL)
     expect(text).not.toContain(LEAKED_PATH)
 
@@ -100,8 +112,8 @@ describe('chat request with a credential that fails to resolve', () => {
   })
 
   // Catches the credential check moving after the stream starts: a streaming client would then get
-  // a 200 and a generic upstream error frame instead of a 401 that says what to configure.
-  test('answers a streaming request with the same 401, before any stream', async () => {
+  // a 200 and a generic upstream error frame instead of a 502 that says what to configure.
+  test('answers a streaming request with the same 502, before any stream', async () => {
     const response = await testApp().request('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -112,10 +124,8 @@ describe('chat request with a credential that fails to resolve', () => {
       })
     })
 
-    expect(response.status).toBe(401)
+    expect(response.status).toBe(502)
     expect(response.headers.get('content-type')).toContain('application/json')
-    expect(await response.text()).toContain(
-      "Could not resolve request auth for provider 'auth-broken'"
-    )
+    expect(JSON.parse(await response.text())).toEqual(CREDENTIALS_MISSING)
   })
 })

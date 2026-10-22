@@ -1,5 +1,6 @@
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import {
+  forClientKey,
   invalidRequest,
   mapFailedCall,
   mapUpstreamError,
@@ -157,6 +158,32 @@ describe('mapUpstreamError', () => {
 
     expect(mapped).toEqual(AUTH_FAILED)
     expect(JSON.stringify(mapped)).not.toContain(SECRET)
+  })
+
+  // Catches the client's own key (X-Switchboard-Upstream-Api-Key), refused by the provider,
+  // answered as the proxy's fault (502) or with the provider's text, which can quote the key
+  // (#128); and any other failure changed by it.
+  test('answers a refused client key with 401 upstream_api_key_invalid, nothing else', () => {
+    const refused = forClientKey(
+      mapUpstreamError(new Error(`OpenAI API error (401): Incorrect API key ${SECRET}`))
+    )
+
+    expect(refused).toEqual({
+      status: 401,
+      body: {
+        error: {
+          message: 'The provider rejected the API key in X-Switchboard-Upstream-Api-Key.',
+          type: 'authentication_error',
+          param: null,
+          code: 'upstream_api_key_invalid'
+        }
+      }
+    })
+    expect(JSON.stringify(refused)).not.toContain(SECRET)
+    for (const other of ['OpenAI API error (429): slow down', 'OpenAI API error (500): oops']) {
+      const mapped = mapUpstreamError(new Error(other))
+      expect(forClientKey(mapped)).toBe(mapped)
+    }
   })
 
   // Catches a model the provider login cannot use answered as an outage (502), which a client

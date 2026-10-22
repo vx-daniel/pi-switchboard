@@ -8,14 +8,16 @@
  * Statuses the proxy answers with:
  * - 400: invalid JSON or request field, failed message conversion, context overflow, a request
  *   the provider refused as invalid (its 400 or 422)
- * - 401: proxy auth failure, no upstream credential for the model
+ * - 401: proxy auth failure, the provider refused the client's own key
+ *   (`X-Switchboard-Upstream-Api-Key`, `upstream_api_key_invalid`)
  * - 404: model not found, unsupported endpoint, any other route (`Invalid URL (<method> <path>)`)
  * - 413: request body over the size limit
  * - 422: unsupported or unknown request field, unsupported tool
  * - 429: upstream rate limit or usage limit
  * - 500: anything thrown inside the proxy, an invalid model exposure config included
  *   (`internalError`, answered by `app.onError`)
- * - 502: upstream authentication failure (401, 403), any other upstream error
+ * - 502: upstream refused pi's stored credential (401, 403), pi has no credential for the model's
+ *   provider (`upstream_credentials_missing`), any other upstream error
  * - 503: upstream unavailable (503), overloaded (529) or out of capacity, failed health check
  * - 504: upstream timeout (408, 504, idle timeout)
  *
@@ -141,7 +143,7 @@ function upstreamError(message: string, code?: string): OpenAIError {
 }
 
 /** The statuses an upstream failure is answered with. */
-export type UpstreamErrorStatus = 400 | 404 | 429 | 502 | 503 | 504
+export type UpstreamErrorStatus = 400 | 401 | 404 | 429 | 502 | 503 | 504
 
 /** An upstream failure as the client sees it: a status and a fixed body that quotes nothing. */
 export interface MappedUpstreamError {
@@ -159,10 +161,36 @@ const TIMED_OUT: MappedUpstreamError = {
   status: 504,
   body: upstreamError('Upstream request timed out', 'timeout')
 }
-/** Upstream refused the proxy's credential: 502 `upstream_auth_error`. */
+/** Upstream refused pi's stored credential: 502 `upstream_auth_error`. */
 const AUTH_FAILED: MappedUpstreamError = {
   status: 502,
   body: upstreamError('Upstream authentication failed', 'upstream_auth_error')
+}
+/**
+ * Upstream refused the key the client sent in `X-Switchboard-Upstream-Api-Key` (#128): the
+ * client's own credential, so a 401 tells it to fix it. Fixed text: the provider's message can
+ * quote the key.
+ */
+const CLIENT_KEY_REJECTED: MappedUpstreamError = {
+  status: 401,
+  body: makeError(
+    'The provider rejected the API key in X-Switchboard-Upstream-Api-Key.',
+    'authentication_error',
+    null,
+    'upstream_api_key_invalid'
+  )
+}
+/**
+ * pi has no usable credential for the model's provider (#128): the proxy's own setup is missing,
+ * which the client cannot fix, so it is a 502 like a refused stored credential, not the 401 a bad
+ * proxy token gets. Fixed text: pi's reason can quote a key command or an install path.
+ */
+export const CREDENTIALS_MISSING: MappedUpstreamError = {
+  status: 502,
+  body: upstreamError(
+    "pi has no usable credential for the model's provider. Log in with pi on the proxy's host.",
+    'upstream_credentials_missing'
+  )
 }
 /** Upstream unavailable: 503 `provider_unavailable`. */
 const UNAVAILABLE: MappedUpstreamError = {
@@ -410,4 +438,18 @@ export function mapFailedCall(message: AssistantMessage): MappedUpstreamError {
     return CONTEXT_OVERFLOW
   }
   return mapUpstreamError(new Error(errorText))
+}
+
+/**
+ * Answers a failure for a request that sent its own key in `X-Switchboard-Upstream-Api-Key`.
+ *
+ * @remarks
+ * A refused credential is then the client's key, so it gets 401 `upstream_api_key_invalid`
+ * instead of the 502 pi's stored credential gets (#128). Any other failure is unchanged.
+ *
+ * @param mapped - the failure as {@link mapUpstreamError} or {@link mapFailedCall} mapped it
+ * @returns the 401 for a refused credential, else `mapped`
+ */
+export function forClientKey(mapped: MappedUpstreamError): MappedUpstreamError {
+  return mapped.body.error.code === AUTH_FAILED.body.error.code ? CLIENT_KEY_REJECTED : mapped
 }
