@@ -1,11 +1,13 @@
 /**
- * The chat requests in flight now, in memory, for the terminal console's sidebar (#61).
+ * The chat requests in flight now, and the latest ones that finished, in memory, for the terminal
+ * console's sidebar (#61).
  *
  * @remarks
- * The chat dispatcher (`chat-dispatch.ts`) adds a request when it starts on its chain, names the
- * model each attempt goes to, and removes the request when it ends: for a non-streamed request when
- * the dispatch returns, for a streamed one when the stream closes (finished, failed, or the client
- * left). No HTTP route serves this.
+ * The chat route adds a request before it dispatches; the dispatcher (`chat-dispatch.ts`) names
+ * the model each attempt goes to and marks a stream's first event. The request ends, with how it
+ * ended, when the dispatch returns or, for a stream, when the stream closes (finished, failed, or
+ * the client left). The last {@link FINISHED_KEPT} finished requests are kept, oldest dropped
+ * first. No HTTP route serves this.
  *
  * An entry holds the request's ID, the route and timings, never message content, the request's
  * `user`, or a credential.
@@ -17,6 +19,12 @@ import { proxyLogger } from '@proxy/logging'
 
 /** Logger for a listener that throws: the chat route's category, as the dispatcher records here. */
 const activeLogger = proxyLogger('server', 'chat')
+
+/** How many finished requests are kept: enough for a minute's rate on a busy local proxy. */
+export const FINISHED_KEPT = 500
+
+/** How a request ended: answered, failed (an error answer or a failed stream), or the client left. */
+export type RequestOutcome = 'ok' | 'failed' | 'left'
 
 /** One chat request in flight. */
 export interface ActiveRequest {
@@ -30,10 +38,17 @@ export interface ActiveRequest {
   readonly attempt: number
   /** Whether the client asked for a stream. */
   readonly stream: boolean
-  /** `waiting` until the model answers, `streaming` while a stream is relayed. */
-  readonly phase: 'waiting' | 'streaming'
   /** When the dispatch started, in milliseconds since the epoch. */
   readonly startedAt: number
+  /** When a stream's first event arrived; `undefined` until then, and for a plain request. */
+  readonly firstEventAt: number | undefined
+}
+
+/** One request that finished. */
+export interface FinishedRequest extends ActiveRequest {
+  readonly outcome: RequestOutcome
+  /** When it ended, in milliseconds since the epoch. */
+  readonly endedAt: number
 }
 
 /** What a request starts with. */
@@ -48,16 +63,33 @@ export interface ActiveRequestHandle {
    * @param attempt - the attempt's number, from 1
    */
   attempt(model: string, attempt: number): void
-  /** Marks the request as relaying its stream: {@link ActiveRequestHandle.settled} keeps it. */
-  streaming(): void
-  /** Removes the request; a second call does nothing. */
-  end(): void
-  /** The dispatch returned: removes the request, unless its stream is still being relayed. */
-  settled(): void
+  /**
+   * Marks the stream's first event: the request is relaying its stream, which
+   * {@link ActiveRequestHandle.settled} leaves to {@link ActiveRequestHandle.end}.
+   *
+   * @param now - the current time; `Date.now()` by default
+   */
+  streaming(now?: number): void
+  /**
+   * Ends the request; a second call does nothing.
+   *
+   * @param outcome - how it ended
+   * @param now - the current time; `Date.now()` by default
+   */
+  end(outcome: RequestOutcome, now?: number): void
+  /**
+   * The dispatch returned: ends the request, unless its stream is still being relayed.
+   *
+   * @param outcome - how it ended, if it did
+   * @param now - the current time; `Date.now()` by default
+   */
+  settled(outcome: RequestOutcome, now?: number): void
 }
 
 /** The requests in flight, by a key of their own: two requests can share a client's request ID. */
 const requests = new Map<number, ActiveRequest>()
+/** The finished requests, oldest first, at most {@link FINISHED_KEPT}. */
+const finished: FinishedRequest[] = []
 /** Who is told after each change. */
 const listeners = new Set<() => void>()
 /** The next request's key. */
@@ -80,6 +112,34 @@ function notify(): void {
 }
 
 /**
+ * Names how a request ended.
+ *
+ * @param failed - whether its answer was an error, or its stream failed
+ * @param signal - the client's disconnect signal; aborted, the client left, whatever the answer
+ * @returns the outcome
+ */
+export function requestOutcome(failed: boolean, signal: AbortSignal | undefined): RequestOutcome {
+  if (signal?.aborted === true) return 'left'
+  return failed ? 'failed' : 'ok'
+}
+
+/**
+ * Moves a request from in flight to finished.
+ *
+ * @param key - its key
+ * @param outcome - how it ended
+ * @param now - when
+ */
+function finish(key: number, outcome: RequestOutcome, now: number): void {
+  const request = requests.get(key)
+  if (request === undefined) return
+  requests.delete(key)
+  finished.push({ ...request, outcome, endedAt: now })
+  if (finished.length > FINISHED_KEPT) finished.shift()
+  notify()
+}
+
+/**
  * Adds a request, before its first attempt.
  *
  * @param start - its ID, alias, the model its chain starts on, and whether it streams
@@ -92,27 +152,27 @@ export function beginActiveRequest(
 ): ActiveRequestHandle {
   const key = nextKey
   nextKey += 1
-  requests.set(key, { ...start, attempt: 1, phase: 'waiting', startedAt: now })
+  requests.set(key, { ...start, attempt: 1, startedAt: now, firstEventAt: undefined })
   notify()
   /**
    * Replaces fields of the request while it is still in flight.
    *
    * @param fields - the new values
    */
-  const update = (fields: Partial<Pick<ActiveRequest, 'model' | 'attempt' | 'phase'>>): void => {
+  const update = (
+    fields: Partial<Pick<ActiveRequest, 'model' | 'attempt' | 'firstEventAt'>>
+  ): void => {
     const current = requests.get(key)
     if (current === undefined) return
     requests.set(key, { ...current, ...fields })
     notify()
   }
   return {
-    attempt: (model, attempt) => update({ model, attempt, phase: 'waiting' }),
-    streaming: () => update({ phase: 'streaming' }),
-    end: () => {
-      if (requests.delete(key)) notify()
-    },
-    settled: () => {
-      if (requests.get(key)?.phase !== 'streaming' && requests.delete(key)) notify()
+    attempt: (model, attempt) => update({ model, attempt }),
+    streaming: (at = Date.now()) => update({ firstEventAt: at }),
+    end: (outcome, at = Date.now()) => finish(key, outcome, at),
+    settled: (outcome, at = Date.now()) => {
+      if (requests.get(key)?.firstEventAt === undefined) finish(key, outcome, at)
     }
   }
 }
@@ -127,9 +187,19 @@ export function activeRequests(): readonly ActiveRequest[] {
 }
 
 /**
+ * Returns a snapshot of the finished requests kept.
+ *
+ * @returns them, newest first
+ */
+export function finishedRequests(): readonly FinishedRequest[] {
+  return finished.toReversed()
+}
+
+/**
  * Subscribes to changes.
  *
  * @param listener - called after every change, with no arguments; read {@link activeRequests}
+ *   and {@link finishedRequests}
  * @returns a function that unsubscribes the listener
  */
 export function onActiveRequestsChange(listener: () => void): () => void {

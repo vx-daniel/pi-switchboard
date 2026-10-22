@@ -16,7 +16,12 @@ import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import { MS_PER_SECOND } from '@proxy/config/schema'
 import type { Cooldown } from '@proxy/pi/cooldowns'
 import type { ProviderQuota, QuotaWindow } from '@proxy/pi/quota'
-import type { ActiveRequest } from '@proxy/server/active-requests'
+import {
+  type ActiveRequest,
+  FINISHED_KEPT,
+  type FinishedRequest,
+  type RequestOutcome
+} from '@proxy/server/active-requests'
 import type { RouteTotals } from '@proxy/server/route-totals'
 import { fitLabel, sum } from '@proxy/tui/stats-view'
 
@@ -36,6 +41,16 @@ const RESET_COLUMNS = 8
 const USED_LEVELS = { warn: 0.7, high: 0.9 } as const
 /** Requests in flight listed before the rest are summed up as `+N more`. */
 const MAX_ACTIVE_LISTED = 6
+/** Finished requests listed in the RECENT panel, newest first. */
+const MAX_RECENT_LISTED = 5
+/** The window the RECENT panel's rate and averages cover. */
+const RATE_WINDOW_MS = 60_000
+/** Each outcome's mark and colour in the RECENT panel. */
+const OUTCOME_MARKS: Readonly<Record<RequestOutcome, string>> = {
+  ok: styleText('green', '✓'),
+  failed: styleText('red', '✗'),
+  left: styleText('dim', '↩')
+}
 /** Percent in a whole. */
 const PERCENT = 100
 /** Seconds in a minute, minutes in an hour. */
@@ -94,6 +109,8 @@ export interface SidebarInput {
   readonly cooldowns: readonly Cooldown[]
   /** Chat requests in flight, oldest first. */
   readonly active: readonly ActiveRequest[]
+  /** The finished chat requests kept, newest first. */
+  readonly finished: readonly FinishedRequest[]
   /** #70's route totals since the proxy started. */
   readonly totals: readonly RouteTotals[]
 }
@@ -314,7 +331,7 @@ function activeLines(request: ActiveRequest, now: number, width: number): string
   const model = fitLabel(request.model, modelWidth)
   // A stream waits for the model's first event, then streams; a plain request only waits.
   let state = request.stream ? 'waiting · stream' : 'waiting'
-  if (request.phase === 'streaming') state = styleText('green', 'streaming')
+  if (request.firstEventAt !== undefined) state = styleText('green', 'streaming')
   const details = [request.alias ?? 'direct', state]
   if (request.attempt > 1) details.push(styleText('yellow', `try ${String(request.attempt)}`))
   return [`${model} ${elapsed}`, `  ${details.join(styleText('dim', ' · '))}`]
@@ -334,6 +351,66 @@ function activeRequestLines(input: SidebarInput, width: number): string[] {
     .flatMap((request) => activeLines(request, input.now, width))
   const hidden = input.active.length - MAX_ACTIVE_LISTED
   return hidden > 0 ? [...listed, styleText('dim', `+${String(hidden)} more`)] : listed
+}
+
+/**
+ * Formats a request's time: `850ms`, `2.3s`, then as {@link compactDuration} from a minute.
+ *
+ * @param ms - the time, in milliseconds
+ * @returns the text
+ */
+function latency(ms: number): string {
+  if (ms < MS_PER_SECOND) return `${String(Math.max(0, Math.round(ms)))}ms`
+  if (ms < SIXTY * MS_PER_SECOND) return `${(ms / MS_PER_SECOND).toFixed(1)}s`
+  return compactDuration(ms)
+}
+
+/**
+ * Averages a time over the requests that have one.
+ *
+ * @param times - each request's time, or `undefined` for one without
+ * @returns the average, or `undefined` when none has one
+ */
+function average(times: readonly (number | undefined)[]): number | undefined {
+  const known = times.filter((time) => time !== undefined)
+  if (known.length === 0) return undefined
+  return known.reduce((total, time) => total + time, 0) / known.length
+}
+
+/**
+ * Renders the RECENT panel's lines: the last minute's requests, failures, average time and
+ * average time to a stream's first event, then the latest finished requests.
+ *
+ * @param input - the snapshot
+ * @param width - the content's columns
+ * @returns the lines
+ */
+function recentLines(input: SidebarInput, width: number): string[] {
+  if (input.finished.length === 0) return [styleText('dim', 'none yet')]
+  const lastMinute = input.finished.filter(
+    (request) => input.now - request.endedAt < RATE_WINDOW_MS
+  )
+  // Only the newest FINISHED_KEPT are kept: a full list may be missing some of the minute.
+  const count = `${String(lastMinute.length)}${lastMinute.length >= FINISHED_KEPT ? '+' : ''}`
+  const failed = lastMinute.filter((request) => request.outcome === 'failed').length
+  const failures = failed > 0 ? styleText('red', ` · ${String(failed)} failed`) : ''
+  const lines = [spread('last minute', `${count} req${failures}`, width)]
+  const took = average(lastMinute.map((request) => request.endedAt - request.startedAt))
+  if (took !== undefined) lines.push(spread('  avg time', latency(took), width))
+  const first = average(
+    lastMinute.map((request) =>
+      request.firstEventAt === undefined ? undefined : request.firstEventAt - request.startedAt
+    )
+  )
+  if (first !== undefined) lines.push(spread('  first event', latency(first), width))
+  for (const request of input.finished.slice(0, MAX_RECENT_LISTED)) {
+    const time = latency(request.endedAt - request.startedAt)
+    // The row is the mark, the model and the time, a space between each.
+    const modelWidth = width - visibleWidth(time) - visibleWidth('✓  ')
+    const model = fitLabel(request.model, Math.max(1, modelWidth))
+    lines.push(`${OUTCOME_MARKS[request.outcome]} ${model} ${styleText('dim', time)}`)
+  }
+  return lines
 }
 
 /**
@@ -362,8 +439,8 @@ function trafficLines(input: SidebarInput, width: number): string[] {
 }
 
 /**
- * Renders the sidebar: PROXY, ACCOUNTS, ACTIVE and TRAFFIC panels, a blank row between them when
- * they fit with it.
+ * Renders the sidebar: PROXY, ACCOUNTS, ACTIVE, RECENT and TRAFFIC panels, a blank row between
+ * them when they fit with it.
  *
  * @param input - the snapshot
  * @param size - the space available
@@ -380,6 +457,7 @@ export function sidebarRows(
     panel('PROXY', proxyLines(input, inner), size.width),
     panel(`ACCOUNTS · ${String(input.accounts.length)}`, accountsLines(input, inner), size.width),
     panel(`ACTIVE · ${String(input.active.length)}`, activeRequestLines(input, inner), size.width),
+    panel('RECENT', recentLines(input, inner), size.width),
     panel('TRAFFIC', trafficLines(input, inner), size.width)
   ]
   const tight = panels.flat()

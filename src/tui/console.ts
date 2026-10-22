@@ -50,7 +50,11 @@ import {
   type ProviderCredentialStatus,
   summarizeAuthError
 } from '@proxy/pi/registry'
-import { activeRequests, onActiveRequestsChange } from '@proxy/server/active-requests'
+import {
+  activeRequests,
+  finishedRequests,
+  onActiveRequestsChange
+} from '@proxy/server/active-requests'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
@@ -108,6 +112,8 @@ interface ConsoleState extends RefreshState<Status> {
   selected: number
   /** Open client connections, counted every tick; `undefined` before the first count. */
   connections: number | undefined
+  /** Whether the operator hid the sidebar (`s`). */
+  sidebarHidden: boolean
 }
 
 /** What the key handlers and the login flow need. */
@@ -229,11 +235,11 @@ function tabsLine(view: View): string {
  * The footer's key hints for each view, quitting first: a narrow terminal cuts the end of the line.
  */
 const FOOTER: Readonly<Record<View, string>> = {
-  logs: ' q quit (stops the proxy) · ←→ views · ↑↓ PgUp PgDn scroll · End follow · n login',
+  logs: ' q quit (stops the proxy) · ←→ views · ↑↓ PgUp PgDn scroll · End follow · n login · s sidebar',
   accounts:
-    ' q quit (stops the proxy) · ←→ views · ↑↓ select · Enter actions · v verify all · n login · x logout',
+    ' q quit (stops the proxy) · ←→ views · ↑↓ select · Enter actions · v verify all · n login · x logout · s sidebar',
   stats:
-    ' q quit (stops the proxy) · ←→ views · per alias and served model, since the proxy started'
+    ' q quit (stops the proxy) · ←→ views · s sidebar · per alias and served model, since the proxy started'
 }
 
 /**
@@ -289,6 +295,7 @@ function sidebarInput(context: ConsoleContext): SidebarInput {
     })),
     cooldowns: activeCooldowns(now),
     active: activeRequests(),
+    finished: finishedRequests(),
     totals: routeTotals()
   }
 }
@@ -311,7 +318,7 @@ function createRootView(
     render(width) {
       const height = Math.max(1, terminal.rows - CHROME_ROWS)
       const { state, config } = context
-      const side = sidebarWidth(width)
+      const side = state.sidebarHidden ? undefined : sidebarWidth(width)
       const mainWidth = side === undefined ? width : width - side - 1
       const body = viewRows(context, { height, width: mainWidth })
       const main = [
@@ -557,6 +564,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['n', () => openLogin(context)],
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
+    ['s', () => (state.sidebarHidden = !state.sidebarHidden)],
     [Key.up, () => moveWithin(context, -1)],
     [Key.down, () => moveWithin(context, 1)],
     [Key.pageUp, () => moveWithin(context, -PAGE_LINES)],
@@ -679,7 +687,8 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     verification: new Map(),
     credentialChanges: new Map(),
     selected: 0,
-    connections: undefined
+    connections: undefined,
+    sidebarHidden: false
   }
   const context: ConsoleContext = {
     config,

@@ -35,7 +35,7 @@ import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { convertTools } from '@proxy/openai/tools'
 import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/validate'
 import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
-import { beginActiveRequest } from '@proxy/server/active-requests'
+import { beginActiveRequest, requestOutcome } from '@proxy/server/active-requests'
 import { dispatchChat, findCredentialedStart, planRoute } from '@proxy/server/chat-dispatch'
 import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
@@ -359,8 +359,13 @@ async function handleChatCompletion(
     model: start.candidates[0]?.canonicalId ?? first.canonicalId,
     stream: request.stream === true
   })
+  // The client's disconnect only. The dispatch reads it to tell a client that left from an
+  // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
+  const signal = context.get('abortController').signal
+  // A dispatch that throws ends the request as failed.
+  let failed = true
   try {
-    return await dispatchChat(context, {
+    const response = await dispatchChat(context, {
       requestId,
       alias: resolved.alias,
       candidates: start.candidates,
@@ -369,17 +374,13 @@ async function handleChatCompletion(
       attempts: start.attempts,
       context: built.value,
       request,
-      options: {
-        upstreamApiKey,
-        // The client's disconnect only. The dispatch reads it to tell a client that left from an
-        // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
-        signal: context.get('abortController').signal,
-        upstreamTimeoutMs: config.upstreamTimeoutMs
-      },
+      options: { upstreamApiKey, signal, upstreamTimeoutMs: config.upstreamTimeoutMs },
       active
     })
+    failed = !response.ok
+    return response
   } finally {
-    active.settled()
+    active.settled(requestOutcome(failed, signal))
   }
 }
 

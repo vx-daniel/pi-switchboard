@@ -1,6 +1,6 @@
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import type { Cooldown } from '@proxy/pi/cooldowns'
-import type { ActiveRequest } from '@proxy/server/active-requests'
+import type { ActiveRequest, FinishedRequest } from '@proxy/server/active-requests'
 import type { RouteTotals } from '@proxy/server/route-totals'
 import {
   besideSidebar,
@@ -39,6 +39,7 @@ function snapshot(fields: Partial<SidebarInput> = {}): SidebarInput {
     accounts: [],
     cooldowns: [],
     active: [],
+    finished: [],
     totals: [],
     ...fields
   }
@@ -58,8 +59,31 @@ function request(fields: Partial<ActiveRequest>, ageMs = 12_000): ActiveRequest 
     model: 'alpha/model',
     attempt: 1,
     stream: true,
-    phase: 'waiting',
+    firstEventAt: undefined,
     startedAt: NOW - ageMs,
+    ...fields
+  }
+}
+
+/**
+ * Builds a finished request that ended `endedAgoMs` before {@link NOW}, after `tookMs`.
+ *
+ * @param fields - the fields to set
+ * @param timing - how long ago it ended and how long it took
+ * @param timing.endedAgoMs - how long before {@link NOW} it ended
+ * @param timing.tookMs - how long it ran
+ * @returns the request
+ */
+function done(
+  fields: Partial<FinishedRequest>,
+  timing: { endedAgoMs: number; tookMs: number } = { endedAgoMs: 1000, tookMs: 2300 }
+): FinishedRequest {
+  const endedAt = NOW - timing.endedAgoMs
+  return {
+    ...request({}),
+    startedAt: endedAt - timing.tookMs,
+    endedAt,
+    outcome: 'ok',
     ...fields
   }
 }
@@ -128,7 +152,8 @@ describe('the console sidebar', () => {
             belowReserve: false
           }
         ],
-        active: [request({ model: 'provider/模型-with-a-name-far-too-long-for-the-panel' })]
+        active: [request({ model: 'provider/模型-with-a-name-far-too-long-for-the-panel' })],
+        finished: [done({ model: 'provider/模型-with-a-name-far-too-long-for-the-panel' })]
       }),
       { height: TALL, width: WIDTH }
     )
@@ -142,7 +167,7 @@ describe('the console sidebar', () => {
     const full = rendered(snapshot())
     const gaps = full.filter((row) => row === '').length
 
-    expect(gaps).toBe(3)
+    expect(gaps).toBe(4)
     expect(rendered(snapshot(), { height: full.length - 1, width: WIDTH })).toEqual(
       full.filter((row) => row !== '')
     )
@@ -247,7 +272,7 @@ describe('the console sidebar', () => {
   // list pushing the traffic off the screen.
   test('lists requests in flight with their route and age, and sums up the rest', () => {
     const active = [
-      request({ alias: 'coding', attempt: 2, phase: 'streaming' }, 65_000),
+      request({ alias: 'coding', attempt: 2, firstEventAt: NOW - 60_000 }, 65_000),
       ...Array.from({ length: 7 }, (_, index) =>
         request({ requestId: `req-${String(index)}`, stream: false })
       )
@@ -264,6 +289,37 @@ describe('the console sidebar', () => {
     ])
     expect(lines).toHaveLength(13)
     expect(lines.at(-1)).toBe('+2 more')
+  })
+
+  // Catches the last minute's rate counting older requests or the in-flight ones, a client that
+  // left counted as a failure, a stream's first-event time averaged over plain requests (which have
+  // none), or the latest requests listed oldest first.
+  test('sums up the last minute and lists the latest finished requests', () => {
+    const finished = [
+      done(
+        { model: 'alpha/streamed', firstEventAt: NOW - 3000 },
+        { endedAgoMs: 1000, tookMs: 2400 }
+      ),
+      done({ model: 'alpha/broken', outcome: 'failed' }, { endedAgoMs: 2000, tookMs: 850 }),
+      done({ model: 'alpha/gone', outcome: 'left' }, { endedAgoMs: 3000, tookMs: 4000 }),
+      done({ model: 'alpha/old', outcome: 'failed' }, { endedAgoMs: 61_000, tookMs: 90_000 })
+    ]
+    const lines = panelLines(rendered(snapshot({ finished })), 'RECENT')
+
+    expect(lines.map((line) => line.replaceAll(/ {2,}/g, ' '))).toEqual([
+      'last minute 3 req · 1 failed',
+      ' avg time 2.4s',
+      ' first event 400ms',
+      '✓ alpha/streamed 2.4s',
+      '✗ alpha/broken 850ms',
+      '↩ alpha/gone 4.0s',
+      '✗ alpha/old 1m30s'
+    ])
+  })
+
+  // Catches an empty panel that reads as broken before the first request.
+  test('says so when no request has finished', () => {
+    expect(panelLines(rendered(snapshot()), 'RECENT')).toEqual(['none yet'])
   })
 
   // Catches a traffic panel that does not add up the routes.

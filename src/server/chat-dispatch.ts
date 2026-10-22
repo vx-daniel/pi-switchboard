@@ -36,7 +36,7 @@ import { clearCooldowns } from '@proxy/pi/cooldowns'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
-import type { ActiveRequestHandle } from '@proxy/server/active-requests'
+import { type ActiveRequestHandle, requestOutcome } from '@proxy/server/active-requests'
 import {
   authenticationError,
   type MappedUpstreamError,
@@ -516,10 +516,14 @@ async function attemptStream(
     active.streaming()
     return honoStream(honoContext, async (stream) => {
       let frameCount = 0
+      let failed = false
       const countFailure = streamFailureCounter(key, options.signal)
       try {
         for await (const frame of streamToSSE(
-          countingFailures(startingWith(first, events), countFailure),
+          countingFailures(startingWith(first, events), (failure) => {
+            failed = true
+            countFailure(failure)
+          }),
           { requestId, route },
           includeUsage
         )) {
@@ -533,6 +537,7 @@ async function attemptStream(
         })
       } catch (err: unknown) {
         const mapped = reportThrownFailure(err)
+        failed = true
         countFailure(failureClass(mapped))
         chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
           frameCount,
@@ -541,7 +546,7 @@ async function attemptStream(
         await stream.write(`data: ${JSON.stringify(mapped.body)}\n\n`)
         await stream.write('data: [DONE]\n\n')
       } finally {
-        active.end()
+        active.end(requestOutcome(failed, options.signal))
       }
     })
   }

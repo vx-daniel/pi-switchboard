@@ -9,13 +9,14 @@ import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { clearAllCooldowns } from '@proxy/pi/cooldowns'
-import { activeRequests } from '@proxy/server/active-requests'
+import { activeRequests, finishedRequests } from '@proxy/server/active-requests'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
+  chunk,
   cutOff,
   httpError,
   type MockProvider,
@@ -35,8 +36,10 @@ let agentDir: FixtureAgentDir
 
 beforeAll(async () => {
   mock = await startMockProvider({
-    'answer-mock': sse(textChunks('ok')),
-    'slow-mock': sse(textChunks('a', 'b', 'c'), { intervalMs: CHUNK_INTERVAL_MS }),
+    'answer-mock': sse([...textChunks('ok'), chunk({}, 'stop')]),
+    'slow-mock': sse([...textChunks('a', 'b', 'c'), chunk({}, 'stop')], {
+      intervalMs: CHUNK_INTERVAL_MS
+    }),
     'limited-mock': httpError(429, {
       error: { message: 'Rate limit reached', type: 'rate_limit_error' }
     }),
@@ -114,59 +117,101 @@ function send(
 
 describe('requests in flight', () => {
   // Catches a request missing from the sidebar while it waits on the model, or listed with the
-  // wrong route, and one left listed after the client gave up on it.
-  test('lists a request while the model has not answered, until the client leaves', async () => {
-    const client = new AbortController()
-    const answer = send('alpha/silent-mock', { stream: true, signal: client.signal })
+  // wrong route, and one left listed after the client gave up on it or recorded as a failure.
+  test.each([
+    ['streamed', true],
+    ['non-streamed', false]
+  ])(
+    'lists a %s request until the client leaves, then records that it left',
+    async (_mode, stream) => {
+      const client = new AbortController()
+      const answer = send('alpha/silent-mock', { stream, signal: client.signal })
 
-    await vi.waitFor(() => {
-      expect(activeRequests()).toEqual([
-        expect.objectContaining({
-          alias: null,
-          model: 'alpha/silent-mock',
-          attempt: 1,
-          stream: true,
-          phase: 'waiting'
-        })
-      ])
-    })
-    client.abort()
-    await answer.then((response) => response.text()).catch(() => undefined)
+      await vi.waitFor(() => {
+        expect(activeRequests()).toEqual([
+          expect.objectContaining({
+            alias: null,
+            model: 'alpha/silent-mock',
+            attempt: 1,
+            stream,
+            firstEventAt: undefined
+          })
+        ])
+      })
+      client.abort()
+      await answer.then((response) => response.text()).catch(() => undefined)
 
-    await vi.waitFor(() => {
-      expect(activeRequests()).toEqual([])
-    })
-  })
+      await vi.waitFor(() => {
+        expect(activeRequests()).toEqual([])
+      })
+      expect(finishedRequests()[0]).toEqual(
+        expect.objectContaining({ model: 'alpha/silent-mock', outcome: 'left' })
+      )
+    }
+  )
 
   // Catches a streamed request dropped as soon as its first event is relayed (the dispatch returns
-  // then), or one kept after its stream closed.
+  // then), one kept after its stream closed, or a stream's first event not timed.
   test('keeps a streamed request listed until its stream closes', async () => {
     const response = await send('alpha/slow-mock', { stream: true })
 
     expect(activeRequests()).toEqual([
-      expect.objectContaining({ model: 'alpha/slow-mock', phase: 'streaming' })
+      expect.objectContaining({ model: 'alpha/slow-mock', firstEventAt: expect.any(Number) })
     ])
     await response.text()
     await vi.waitFor(() => {
       expect(activeRequests()).toEqual([])
     })
+    const [done] = finishedRequests()
+    expect(done).toEqual(expect.objectContaining({ model: 'alpha/slow-mock', outcome: 'ok' }))
+    expect(done?.endedAt).toBeGreaterThanOrEqual(done?.firstEventAt ?? Number.POSITIVE_INFINITY)
   })
 
-  // Catches an ending that leaks an entry, so the sidebar counts requests that are long gone: an
-  // answer, a fallback, a refusal, and a stream the provider cut off.
+  // Catches an ending that leaks an entry, so the sidebar counts requests that are long gone, or
+  // one recorded with the wrong outcome or the wrong model: an answer, a fallback, a refusal, and
+  // a stream the provider cut off.
   test.each([
-    ['an answer', 'alpha/answer-mock', false],
-    ['a fallback to the next model', 'coding', false],
-    ['a streamed fallback', 'coding', true],
-    ['a refusal', 'alpha/invalid-mock', false],
-    ['a streamed refusal', 'alpha/invalid-mock', true],
-    ['a stream cut off', 'alpha/cut-mock', true]
-  ])('removes a request that ends in %s', async (_ending, model, stream) => {
+    { ending: 'an answer', model: 'alpha/answer-mock', stream: false, attempt: 1, outcome: 'ok' },
+    {
+      ending: 'a fallback to the next model',
+      model: 'coding',
+      stream: false,
+      attempt: 2,
+      outcome: 'ok'
+    },
+    { ending: 'a streamed fallback', model: 'coding', stream: true, attempt: 2, outcome: 'ok' },
+    {
+      ending: 'a refusal',
+      model: 'alpha/invalid-mock',
+      stream: false,
+      attempt: 1,
+      outcome: 'failed'
+    },
+    {
+      ending: 'a streamed refusal',
+      model: 'alpha/invalid-mock',
+      stream: true,
+      attempt: 1,
+      outcome: 'failed'
+    },
+    {
+      ending: 'a stream cut off',
+      model: 'alpha/cut-mock',
+      stream: true,
+      attempt: 1,
+      outcome: 'failed'
+    }
+  ])('ends a request in $ending and records how', async ({ model, stream, attempt, outcome }) => {
     const response = await send(model, { stream })
     await response.text()
 
     await vi.waitFor(() => {
       expect(activeRequests()).toEqual([])
     })
+    // An alias's request is recorded on the model that answered it.
+    const served = model === 'coding' ? 'alpha/answer-mock' : model
+    expect(finishedRequests()[0]).toEqual(
+      expect.objectContaining({ model: served, attempt, stream, outcome })
+    )
   })
 })
