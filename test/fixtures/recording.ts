@@ -21,7 +21,7 @@ import { dirname, join } from 'node:path'
 
 import * as z from 'zod'
 
-import { listenOnLoopback } from './local-server.ts'
+import { decodeBody, listenOnLoopback, onRequestBody } from './local-server.ts'
 
 /** Where recordings live: `<api>/<scenario>.json`. */
 export const RECORDINGS_DIR = join(import.meta.dirname, 'recordings')
@@ -39,6 +39,20 @@ const KEPT_REQUEST_HEADERS = new Set([
   'user-agent',
   'x-app'
 ])
+
+/**
+ * Response headers worth keeping: the quota a subscription reports (#69, PLAN "Quota"), each by
+ * its exact name. Never a prefix: the same responses carry `anthropic-organization-id`,
+ * `anthropic-workspace-id`, `set-cookie`, request IDs and `x-codex-turn-state`, an opaque token.
+ */
+const KEPT_RESPONSE_HEADER = new RegExp(
+  `^(?:${[
+    'anthropic-ratelimit-unified-(?:5h|7d)-(?:utilization|reset|status)',
+    'anthropic-ratelimit-unified-(?:status|reset|representative-claim)',
+    'x-codex-(?:primary|secondary)-(?:used-percent|reset-at|reset-after-seconds|window-minutes)',
+    'x-codex-(?:plan-type|active-limit)'
+  ].join('|')})$`
+)
 
 /**
  * One body chunk, verbatim. Not `z.string().trim()`: SSE framing is whitespace, and trimming would
@@ -62,6 +76,8 @@ const RecordingSchema = z.object({
   response: z.object({
     status: z.int(),
     contentType: z.string().trim(),
+    /** The quota headers the provider sent (#69), by name; none in recordings made before. */
+    headers: z.record(z.string().trim(), z.string().trim()).optional(),
     /** The body as the provider sent it, split where it arrived, so replay keeps the boundaries. */
     chunks: z.array(RawChunkSchema)
   })
@@ -144,14 +160,16 @@ export function saveRecording(
 }
 
 /**
- * Collects the credential values a request carried, which its recording must not contain.
+ * Collects the values a request carried that its recording must not contain: its credentials, and
+ * the ChatGPT account ID Codex requests name the login by.
  *
- * @param headers - the request headers; `authorization`, `x-api-key` and `cookie` are read
+ * @param headers - the request headers; `authorization`, `x-api-key`, `cookie` and
+ *   `chatgpt-account-id` are read
  * @returns each such header's value, and the value again without a `Bearer ` prefix
  */
 export function credentialsIn(headers: IncomingHttpHeaders): string[] {
   const values: string[] = []
-  for (const headerName of ['authorization', 'x-api-key', 'cookie']) {
+  for (const headerName of ['authorization', 'x-api-key', 'cookie', 'chatgpt-account-id']) {
     const headerValue = headers[headerName]
     if (typeof headerValue === 'string') {
       values.push(headerValue, headerValue.replace(/^Bearer\s+/i, ''))
@@ -172,6 +190,20 @@ function keptHeaders(headers: IncomingHttpHeaders): Record<string, string> {
     if (KEPT_REQUEST_HEADERS.has(headerName) && typeof headerValue === 'string') {
       kept[headerName] = headerValue
     }
+  }
+  return kept
+}
+
+/**
+ * Keeps the response headers worth recording: the quota ones ({@link KEPT_RESPONSE_HEADER}).
+ *
+ * @param headers - the upstream response's headers
+ * @returns the kept headers, by lower-case name
+ */
+function keptResponseHeaders(headers: Headers): Record<string, string> {
+  const kept: Record<string, string> = {}
+  for (const [headerName, headerValue] of headers) {
+    if (KEPT_RESPONSE_HEADER.test(headerName)) kept[headerName] = headerValue
   }
   return kept
 }
@@ -214,12 +246,8 @@ export interface Recorder {
 export async function startRecorder(upstreamOrigin: string): Promise<Recorder> {
   const exchanges: { exchange: CapturedExchange; secrets: string[] }[] = []
   const server: Server = createServer((incoming, response) => {
-    let text = ''
-    incoming.on('data', (part: Buffer) => {
-      text += part.toString()
-    })
-    incoming.on('end', () => {
-      const request = { path: incoming.url ?? '/', headers: incoming.headers, body: text }
+    onRequestBody(incoming, (body) => {
+      const request = { path: incoming.url ?? '/', headers: incoming.headers, body }
       void record(upstreamOrigin, request, response, exchanges)
     })
   })
@@ -244,7 +272,8 @@ const HTTP_BAD_GATEWAY = 502
 interface IncomingRequest {
   readonly path: string
   readonly headers: IncomingHttpHeaders
-  readonly body: string
+  /** The body's bytes, as sent. */
+  readonly body: Buffer
 }
 
 /**
@@ -271,7 +300,8 @@ async function forward(
   const upstream = await fetch(`${upstreamOrigin}${path}`, {
     method: 'POST',
     headers: forwarded,
-    body
+    // As sent: pi's Codex adapter zstd-compresses its bodies (`content-encoding` is forwarded).
+    body: new Uint8Array(body)
   })
   const contentType = upstream.headers.get('content-type') ?? 'application/octet-stream'
   response.writeHead(upstream.status, { 'content-type': contentType })
@@ -290,8 +320,18 @@ async function forward(
   response.end()
   return {
     exchange: {
-      request: { path, headers: keptHeaders(headers), body: parseJson(body) },
-      response: { status: upstream.status, contentType, chunks }
+      request: {
+        path,
+        headers: keptHeaders(headers),
+        // Decoded: pi's Codex adapter zstd-compresses its bodies, and a recording keeps the JSON.
+        body: parseJson(decodeBody(body, headers['content-encoding']))
+      },
+      response: {
+        status: upstream.status,
+        contentType,
+        headers: keptResponseHeaders(upstream.headers),
+        chunks
+      }
     },
     secrets: credentialsIn(headers)
   }
@@ -330,8 +370,8 @@ async function record(
 }
 
 /**
- * Builds a mock reply that serves a recording: its status, content type and body chunks, in the
- * order they arrived.
+ * Builds a mock reply that serves a recording: its status, content type, kept headers (the quota
+ * ones, #69) and body chunks, in the order they arrived.
  *
  * @param recording - the recording to serve
  * @returns the reply, for {@link startMockProvider}
@@ -339,6 +379,7 @@ async function record(
 export function replay(recording: Recording): (response: ServerResponse) => void {
   return (response) => {
     response.writeHead(recording.response.status, {
+      ...recording.response.headers,
       'content-type': recording.response.contentType
     })
     for (const part of recording.response.chunks) response.write(part)

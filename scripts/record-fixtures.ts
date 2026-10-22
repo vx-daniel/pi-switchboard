@@ -1,23 +1,27 @@
 /**
- * Records real Anthropic traffic as replay fixtures
- * (`test/fixtures/recordings/anthropic-messages`).
- * On demand only: `pnpm run test:live:record`. It spends a few cents of quota on the login used.
+ * Records real provider traffic as replay fixtures (`test/fixtures/recordings/<api>`): Anthropic
+ * (`anthropic-messages`) and ChatGPT's Codex (`openai-codex-responses`).
+ * On demand only: `pnpm run test:live:record [<api>/<scenario> | <api> ...]` records the named
+ * scenarios, or all of them. It spends a few cents of quota on the logins used.
  *
- * pi's own Anthropic client sends each scenario through a pass-through recorder
- * (`test/fixtures/recording.ts`) on 127.0.0.1: pi's `models.json` points the `anthropic` provider
- * at it, so the request is exactly what pi sends in production (the Claude Code OAuth headers and
- * system prompt included), and the response is saved as it arrived, minus every credential. A
- * recording that still contains one is refused, not redacted.
+ * pi's own clients send each scenario through a pass-through recorder (`test/fixtures/recording.ts`)
+ * on 127.0.0.1, one per provider: pi's `models.json` points each provider at its recorder, so the
+ * request is exactly what pi sends in production (the Claude Code OAuth headers and system prompt
+ * included), and the response is saved as it arrived, with only its quota headers (#69) and minus
+ * every credential. A recording that still contains one is refused, not redacted.
  *
- * LOGIN: set PI_SWITCHBOARD_RECORD_AGENT_DIR to a pi agent dir holding a login made for recording
- * (`PI_CODING_AGENT_DIR=<dir> pi`, then `/login`). pi reads and refreshes its `auth.json` in place.
- * Never point it at a copy of a login another pi or proxy uses: refreshing an expired OAuth token
- * rotates the refresh token, and every other copy stops working.
+ * LOGIN: set PI_SWITCHBOARD_RECORD_AGENT_DIR to a pi agent dir holding the logins made for
+ * recording (`PI_CODING_AGENT_DIR=<dir> pi`, then `/login` for each provider). pi reads and
+ * refreshes its `auth.json` in place. Never point it at a copy of a login another pi or proxy
+ * uses: refreshing an expired OAuth token rotates the refresh token, and every other copy stops
+ * working.
  *
  * Runs under Node directly (`node scripts/record-fixtures.ts`), so imports are relative with `.ts`.
  *
  * OUTPUT: recordings go to `test/fixtures/recordings`, to be committed; set
  * PI_SWITCHBOARD_RECORD_OUT_DIR to save them somewhere else (the offline test of this script does).
+ * PI_SWITCHBOARD_RECORD_UPSTREAM sends every provider's traffic to one origin instead (the same
+ * test's mock).
  *
  * @packageDocumentation
  */
@@ -36,13 +40,6 @@ import {
 import { ModelRuntime, VERSION } from '@earendil-works/pi-coding-agent'
 
 import { type Recorder, saveRecording, startRecorder } from '../test/fixtures/recording.ts'
-
-/** The pi API every recording is made through and labelled with. */
-const API = 'anthropic-messages'
-/** The pi model each scenario starts from (a scenario may override only its id). */
-const MODEL_ID = 'claude-haiku-5-5'
-/** Upstream the recorder forwards to unless PI_SWITCHBOARD_RECORD_UPSTREAM is set. */
-const DEFAULT_UPSTREAM = 'https://api.anthropic.com'
 
 /** One recorded exchange: what pi is asked, and with which options. */
 interface Scenario {
@@ -85,8 +82,15 @@ const WEATHER_TOOLS: Context['tools'] = [
   }
 ]
 
-/** The scenarios recorded, in order; each name becomes a fixture file name. */
-const SCENARIOS: readonly Scenario[] = [
+/** The quota scenario: the shortest call, for the quota headers its response carries (#69). */
+const QUOTA_SCENARIO: Scenario = {
+  name: 'quota',
+  context: { messages: [userMessage('Reply with exactly: ok.')] },
+  options: { maxTokens: 32 }
+}
+
+/** The Anthropic scenarios, in order; each name becomes a fixture file name. */
+const ANTHROPIC_SCENARIOS: readonly Scenario[] = [
   {
     name: 'text',
     context: { messages: [userMessage('Reply with exactly: Hello from the recorder.')] },
@@ -130,8 +134,57 @@ const SCENARIOS: readonly Scenario[] = [
     modelId: 'claude-recorder-no-such-model',
     context: { messages: [userMessage('Hello')] },
     options: { maxTokens: 16 }
+  },
+  QUOTA_SCENARIO
+]
+
+/** A provider the recorder records, with its scenarios. */
+interface Target {
+  /** pi's provider ID. */
+  readonly provider: string
+  /** How refusals name it. */
+  readonly label: string
+  /** The pi API its recordings are made through and labelled with (the fixture folder). */
+  readonly api: string
+  /** The pi model each scenario starts from (a scenario may override only its id). */
+  readonly modelId: string
+  /** The real provider's origin, the recorder's upstream. */
+  readonly upstream: string
+  /** The path the provider's base URL adds to its origin. */
+  readonly basePath: string
+  /** Options every scenario of the provider is sent with. */
+  readonly options: SimpleStreamOptions
+  readonly scenarios: readonly Scenario[]
+}
+
+/** The providers recorded, in order. */
+const TARGETS: readonly Target[] = [
+  {
+    provider: 'anthropic',
+    label: 'Anthropic',
+    api: 'anthropic-messages',
+    modelId: 'claude-haiku-5-5',
+    upstream: 'https://api.anthropic.com',
+    basePath: '',
+    options: {},
+    scenarios: ANTHROPIC_SCENARIOS
+  },
+  {
+    // Over SSE, as the proxy calls Codex (#185): pi's default WebSocket would bypass the
+    // recorder, and only SSE responses carry the quota headers.
+    provider: 'openai-codex',
+    label: 'ChatGPT (Codex)',
+    api: 'openai-codex-responses',
+    modelId: 'gpt-5.6-luna',
+    upstream: 'https://chatgpt.com',
+    basePath: '/backend-api',
+    options: { transport: 'sse' },
+    scenarios: [QUOTA_SCENARIO]
   }
 ]
+
+/** Where the arguments start in `process.argv`, after node and the script. */
+const FIRST_ARGUMENT = 2
 
 /**
  * Prints a message to stderr and exits with status 1.
@@ -177,32 +230,35 @@ function recordingAgentDir(): string {
  * @remarks
  * Exits via {@link fail} when pi lacks the base model or the recorder saw no request.
  *
- * @param runtime - the pi model runtime pointed at the recorder
- * @param recorder - the running pass-through recorder
- * @param scenario - the exchange to record
+ * @param runtime - the pi model runtime pointed at the recorders
+ * @param recording - the provider's recorder, the provider, and the scenario to record
+ * @param recording.recorder - the provider's pass-through recorder
+ * @param recording.target - the provider the scenario is sent to
+ * @param recording.scenario - the exchange to record
  * @returns the path of the saved recording
  * @throws Error from `saveRecording` when the recording still contains a credential
  */
 async function recordScenario(
   runtime: ModelRuntime,
-  recorder: Recorder,
-  scenario: Scenario
+  recording: { recorder: Recorder; target: Target; scenario: Scenario }
 ): Promise<string> {
-  const base = runtime.getModel('anthropic', MODEL_ID)
-  if (base === undefined) fail(`pi has no anthropic/${MODEL_ID}`)
+  const { recorder, target, scenario } = recording
+  const base = runtime.getModel(target.provider, target.modelId)
+  if (base === undefined) fail(`pi has no ${target.provider}/${target.modelId}`)
   const model: Model<Api> =
     scenario.modelId === undefined ? base : { ...base, id: scenario.modelId }
+  const options = { ...target.options, ...scenario.options }
   for (let attempt = 1; attempt <= (scenario.repeat ?? 1); attempt++) {
     // Sequential on purpose: a repeat must follow the request whose cache it reads.
-    await runtime.streamSimple(model, scenario.context, scenario.options).result()
+    await runtime.streamSimple(model, scenario.context, options).result()
   }
   const captured = recorder.exchanges.at(-1)
-  if (captured === undefined) fail(`${scenario.name}: the recorder saw no request`)
+  if (captured === undefined) fail(`${target.api}/${scenario.name}: the recorder saw no request`)
   const outDir = process.env.PI_SWITCHBOARD_RECORD_OUT_DIR
   return saveRecording(
     {
       version: 1,
-      api: API,
+      api: target.api,
       scenario: scenario.name,
       model: model.id,
       recordedAt: new Date().toISOString(),
@@ -216,39 +272,80 @@ async function recordScenario(
 }
 
 /**
- * Records every scenario against the login in PI_SWITCHBOARD_RECORD_AGENT_DIR.
+ * Picks the scenarios to record from the command line: `<api>/<scenario>` or a whole `<api>`
+ * (`pnpm run test:live:record anthropic-messages/quota openai-codex-responses`); all of them when
+ * none is named.
  *
  * @remarks
- * Starts the recorder (upstream: PI_SWITCHBOARD_RECORD_UPSTREAM, default {@link DEFAULT_UPSTREAM}),
- * writes a temporary `models.json` that points pi's `anthropic` provider at it, and removes that
- * file and stops the recorder when done. Exits via {@link fail} when the dir has no Anthropic
- * login.
+ * Exits via {@link fail} when a name matches no scenario.
+ *
+ * @param names - the command-line arguments
+ * @returns each target with the scenarios chosen from it; targets with none are left out
+ */
+function chosenTargets(names: readonly string[]): { target: Target; scenarios: Scenario[] }[] {
+  const chosen = (target: Target, scenario: Scenario): boolean =>
+    names.length === 0 ||
+    names.includes(target.api) ||
+    names.includes(`${target.api}/${scenario.name}`)
+  const known = new Set(
+    TARGETS.flatMap((target) => [
+      target.api,
+      ...target.scenarios.map((scenario) => `${target.api}/${scenario.name}`)
+    ])
+  )
+  const unknown = names.find((scenarioName) => !known.has(scenarioName))
+  if (unknown !== undefined) fail(`No scenario ${unknown}; one of: ${[...known].join(', ')}`)
+  return TARGETS.map((target) => ({
+    target,
+    scenarios: target.scenarios.filter((scenario) => chosen(target, scenario))
+  })).filter((choice) => choice.scenarios.length > 0)
+}
+
+/**
+ * Records the chosen scenarios against the login in PI_SWITCHBOARD_RECORD_AGENT_DIR.
+ *
+ * @remarks
+ * Starts one recorder per provider (upstream: PI_SWITCHBOARD_RECORD_UPSTREAM when set, for the
+ * offline test, else the provider's own), writes a temporary `models.json` that points each
+ * provider at its recorder, and removes that file and stops the recorders when done. Exits via
+ * {@link fail} when the dir has no login for a chosen provider.
  */
 async function main(): Promise<void> {
   const agentDir = recordingAgentDir()
-  const recorder = await startRecorder(
-    process.env.PI_SWITCHBOARD_RECORD_UPSTREAM ?? DEFAULT_UPSTREAM
+  const chosen = chosenTargets(process.argv.slice(FIRST_ARGUMENT))
+  const upstreamOverride = process.env.PI_SWITCHBOARD_RECORD_UPSTREAM
+  const recorders = await Promise.all(
+    chosen.map(async ({ target }) => startRecorder(upstreamOverride ?? target.upstream))
   )
   const modelsDir = mkdtempSync(join(tmpdir(), 'pi-proxy-record-'))
   try {
     const modelsPath = join(modelsDir, 'models.json')
-    writeFileSync(
-      modelsPath,
-      JSON.stringify({ providers: { anthropic: { baseUrl: recorder.baseUrl } } })
+    const providers = Object.fromEntries(
+      chosen.map(({ target }, targetIndex) => [
+        target.provider,
+        { baseUrl: `${recorders[targetIndex]?.baseUrl ?? ''}${target.basePath}` }
+      ])
     )
+    writeFileSync(modelsPath, JSON.stringify({ providers }))
     process.env.PI_CODING_AGENT_DIR = agentDir
     // The login stays where it is (refreshed in place); only models.json is the recorder's.
     const runtime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath })
-    if (!runtime.isUsingOAuth('anthropic') && !runtime.hasConfiguredAuth('anthropic')) {
-      fail(`No Anthropic login in ${agentDir}`)
+    for (const { target } of chosen) {
+      if (!runtime.isUsingOAuth(target.provider) && !runtime.hasConfiguredAuth(target.provider)) {
+        fail(`No ${target.label} login in ${agentDir}`)
+      }
     }
-    for (const scenario of SCENARIOS) {
-      // Sequential on purpose: each recording is the recorder's latest exchange.
-      const path = await recordScenario(runtime, recorder, scenario)
-      process.stdout.write(`recorded ${scenario.name} -> ${path}\n`)
+    for (const [targetIndex, { target, scenarios }] of chosen.entries()) {
+      const recorder = recorders[targetIndex]
+      if (recorder === undefined) continue
+      for (const scenario of scenarios) {
+        // Sequential on purpose: each recording is its recorder's latest exchange.
+        const path = await recordScenario(runtime, { recorder, target, scenario })
+        process.stdout.write(`recorded ${target.api}/${scenario.name} -> ${path}\n`)
+      }
     }
   } finally {
-    await recorder.close()
+    await Promise.all(recorders.map(async (recorder) => recorder.close()))
     rmSync(modelsDir, { recursive: true, force: true })
   }
 }

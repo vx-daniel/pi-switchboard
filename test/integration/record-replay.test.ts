@@ -58,7 +58,19 @@ beforeAll(async () => {
     'echo-key': (response, request) => {
       const key = request.headers.authorization ?? ''
       void sse([...textChunks(`you sent ${key}`), finishChunk('stop')])(response, request)
-    }
+    },
+    // Quota headers among identifying ones, as both subscriptions send them.
+    'quota': sse([...textChunks('ok'), finishChunk('stop')], {
+      headers: {
+        'anthropic-ratelimit-unified-5h-utilization': '0.02',
+        'anthropic-ratelimit-unified-status': 'allowed',
+        'anthropic-organization-id': 'notarealsecret-organization',
+        'x-codex-primary-used-percent': '7',
+        'x-codex-plan-type': 'plus',
+        'x-codex-turn-state': 'notarealsecret-turn-state',
+        'set-cookie': 'session=notarealsecret-cookie'
+      }
+    })
   })
   recorder = await startRecorder(upstream.origin)
   recordingsDir = mkdtempSync(join(tmpdir(), 'pi-proxy-recordings-'))
@@ -186,6 +198,40 @@ describe('record and replay', () => {
     expect(() =>
       saveRecording(named(captured.exchange, 'echo-key'), captured.secrets, recordingsDir)
     ).toThrow('contains a credential')
+  })
+
+  // Catches the quota headers lost on the way into a recording or out of a replay (the quota
+  // tests replay them, #69), or an identifying header (organization, cookie, turn token) kept.
+  test('keeps only the quota headers, and replay sends them back', async () => {
+    await useProvider(`${recorder.baseUrl}/v1`, 'quota')
+    await chat('quota')
+    const captured = recorder.exchanges.at(-1)
+    if (captured === undefined) throw new Error('the recorder captured nothing')
+    const kept = {
+      'anthropic-ratelimit-unified-5h-utilization': '0.02',
+      'anthropic-ratelimit-unified-status': 'allowed',
+      'x-codex-primary-used-percent': '7',
+      'x-codex-plan-type': 'plus'
+    }
+    expect(captured.exchange.response.headers).toEqual(kept)
+
+    const replayer = await startMockProvider({
+      quota: replay(named(captured.exchange, 'quota'))
+    })
+    try {
+      const replayed = await fetch(`${replayer.origin}/v1/chat/completions`, {
+        method: 'POST',
+        body: JSON.stringify({ model: 'quota' })
+      })
+      await replayed.body?.cancel()
+      expect(
+        Object.fromEntries(
+          Object.keys(kept).map((headerName) => [headerName, replayed.headers.get(headerName)])
+        )
+      ).toEqual(kept)
+    } finally {
+      await replayer.close()
+    }
   })
 })
 
