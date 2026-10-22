@@ -151,7 +151,8 @@ function routeWidth(width: number): number {
  * @param since - when counting began, in epoch milliseconds
  * @param size - the space available
  * @param size.height - rows
- * @param size.width - columns; the route column narrows to fit, and rows are cut at the edge
+ * @param size.width - columns; the route column narrows to fit, a route too long for it keeps its
+ *   end (the served model, which tells an alias's rows apart), and rows are cut at the edge
  * @returns the rows
  */
 export function statsRows(
@@ -167,7 +168,7 @@ export function statsRows(
   if (totals.length === 0) return [sinceLine, `${INDENT}No requests yet.`].slice(0, size.height)
   const labelWidth = routeWidth(size.width)
   const label = (text: string): string =>
-    (text.length > labelWidth ? `${text.slice(0, labelWidth - 1)}…` : text).padEnd(labelWidth)
+    (text.length > labelWidth ? `…${text.slice(-(labelWidth - 1))}` : text).padEnd(labelWidth)
   const titles = COLUMNS.map((column) => column.title.padStart(column.width)).join(' ')
   const heading = styleText('dim', `${INDENT}${label('route')} ${titles}`)
   const rows = totals.map(

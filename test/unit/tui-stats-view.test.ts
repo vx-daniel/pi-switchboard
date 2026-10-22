@@ -99,7 +99,8 @@ describe('the console Stats view', () => {
     const row = rows[2] ?? ''
 
     expect(row.slice(0, 80)).toContain('$1.5000')
-    expect(row).toContain('…')
+    // Shortened from the front: the served model is what tells an alias's rows apart.
+    expect(row).toMatch(/^ {2}…\S*long-model-id /)
     expect(visibleWidth(rows[1]?.slice(0, 80) ?? '')).toBeLessThanOrEqual(80)
   })
 
