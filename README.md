@@ -555,10 +555,10 @@ curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141
 
 ## Standalone binary
 
-Each GitHub release carries the proxy as one executable for Linux and macOS (x64 and arm64): `pi-switchboard-linux-x64`, `pi-switchboard-linux-arm64`, `pi-switchboard-darwin-x64`, `pi-switchboard-darwin-arm64`, and a `SHA256SUMS` file. It needs no Node and no pi install: pi is compiled in. Windows is not built yet.
+Each GitHub release after 0.3.0 carries the proxy as one executable for Linux and macOS (x64 and arm64): `pi-switchboard-linux-x64`, `pi-switchboard-linux-arm64`, `pi-switchboard-darwin-x64`, `pi-switchboard-darwin-arm64`, and a `SHA256SUMS` file. It needs no Node and no pi install: pi is compiled in. Windows is not built yet. 0.3.0 and earlier have no binaries: their source predates it.
 
 ```bash
-version=<version>   # e.g. 0.2.0
+version=<version>   # a release after 0.3.0
 base="https://github.com/vx-daniel/pi-switchboard/releases/download/pi-switchboard-v$version"
 curl -LO "$base/pi-switchboard-linux-x64" -LO "$base/SHA256SUMS"
 sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
@@ -570,7 +570,7 @@ chmod +x pi-switchboard-linux-x64
 Every binary is run (`--version`) on its own platform, Linux and macOS on x64 and arm64, before the release workflow uploads it, and each asset has a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) that `gh attestation verify` checks.
 
 - **macOS.** The binaries are not signed with a Developer ID, so Gatekeeper blocks the first run. After checking the checksum, remove the quarantine flag: `xattr -d com.apple.quarantine pi-switchboard-darwin-arm64`. Apple Silicon also needs a valid code signature. Bun writes an ad-hoc one when it compiles for macOS, and the release workflow runs the arm64 binary on macOS before uploading it, but if the shell only prints `killed` when you start it, the signature is missing or broken: sign it ad hoc yourself with `codesign --sign - ./pi-switchboard-darwin-arm64` (add `--force` to replace a broken one) and run it again.
-- **Logins come from pi's `auth.json`.** The binary reads the same `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) as the npm package, so log in with pi first. Logging in from the binary itself comes with its terminal console ([#61](https://github.com/vx-daniel/pi-switchboard/issues/61)).
+- **Logins come from pi's `auth.json`.** The binary reads the same `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) as the npm package: log in with pi, or in the binary's own console, `./pi-switchboard-linux-x64 tui` ([The console](#the-console-logs-logins-and-status-at-a-terminal)).
 - **Same options.** Flags, `PI_SWITCHBOARD_*` variables and `proxy-config.json` work as in [Configuration](#configuration). The binary never reads a `.env` or `bunfig.toml` from the directory it starts in.
 
 ## Architecture
