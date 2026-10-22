@@ -335,6 +335,17 @@ describe('tui', () => {
     })
     expect(stderr.join('')).toContain('pi-switchboard tui needs an interactive terminal')
   })
+
+  // Catches a flag's value taken for the subcommand: `--log-format tui` is the headless CLI with
+  // an invalid format, not the console (third #195 review).
+  test('a flag whose value is tui stays headless', async () => {
+    await runCli(['--log-format', 'tui'])
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect(stderr).toEqual(['--log-format must be one of: pretty, json\n'])
+  })
 })
 
 describe('--config', () => {
