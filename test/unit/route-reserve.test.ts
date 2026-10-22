@@ -133,8 +133,8 @@ describe('reserveSkip', () => {
     expect(reserveSkip([SOL, OPUS], 0, rules, NOW)).toBeUndefined()
   })
 
-  // Catches a provider below its reserve skipped for one the chain will skip anyway (second #208
-  // review): a later candidate cooling down after a 429 is no alternative, so the first is called.
+  // Catches a provider below its reserve skipped for one the chain will skip anyway: a later
+  // candidate cooling down after a 429 is no alternative, so the first is called.
   test('a later candidate that is cooling down is no alternative', () => {
     reported('anthropic', { fiveHour: 0.9, sevenDay: 0.1 })
     startCooldown(SOL, 'rate_limit', 60_000, NOW)
@@ -145,9 +145,9 @@ describe('reserveSkip', () => {
     })
   })
 
-  // Catches the reserve and the cooldowns disagreeing on what an alternative is (third #208
-  // review): with every later candidate cooling down, the one below its reserve is called rather
-  // than a cooling one, and a cooldown for a class the alias doesn't name is no cooldown to it.
+  // Catches the reserve and the cooldowns disagreeing on what an alternative is: with every later
+  // candidate cooling down, the one below its reserve is called rather than a cooling one, and a
+  // cooldown for a class the alias doesn't name is no cooldown to it.
   test('every later candidate cooling down, or cooling for an unnamed class', () => {
     reported('anthropic', { fiveHour: 0.9, sevenDay: 0.1 })
     startCooldown(SOL, 'rate_limit', 60_000, NOW)

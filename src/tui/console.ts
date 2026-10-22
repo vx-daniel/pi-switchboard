@@ -38,7 +38,6 @@ import type { Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
-import { providerQuota } from '@proxy/pi/quota'
 import {
   getAvailableModels,
   getCredentialStatuses,
@@ -49,10 +48,10 @@ import {
   type ProviderCredentialStatus,
   summarizeAuthError
 } from '@proxy/pi/registry'
-import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
+import { accountRows } from '@proxy/tui/accounts-view'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
@@ -60,7 +59,6 @@ import {
   type AccountAction,
   accountActions,
   clampSelection,
-  LOGIN_ROW,
   moveSelection,
   stepView,
   type View
@@ -82,10 +80,6 @@ const LOGOUT_TIMEOUT_MS = 15_000
 const PAGE_LINES = 10
 /** Rows the header, the tab bar and the footer take. */
 const CHROME_ROWS = 3
-/** Widths of the accounts view's columns: provider, auth type, source, model count. */
-const COLUMNS = { provider: 22, login: 8, source: 16, models: 4 } as const
-/** Percent in a whole: a window's share used is shown as a percentage. */
-const PERCENT = 100
 
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
@@ -225,92 +219,20 @@ const FOOTER: Readonly<Record<View, string>> = {
 }
 
 /**
- * Renders whether a provider's credential was verified, when it was.
+ * Renders the Accounts view from the console's state.
  *
- * @param account - the provider's status
- * @returns `''` when not verified, else a mark and, on failure, why
- */
-function verification(account: ProviderCredentialStatus): string {
-  if (account.verified === undefined) return ''
-  if (account.verified) return styleText('green', ' ✓ verified')
-  return styleText('red', ` ✗ ${account.error ?? 'failed'}`)
-}
-
-/**
- * Renders a provider's latest quota: the share used of each window it reports, in red with
- * `below reserve` when it has less left than its `routing.reserve` (#69).
- *
- * @param provider - the provider
- * @param reserve - the reserve per provider
- * @returns the cell; `''` when the provider reports no quota
- */
-function quotaCell(provider: string, reserve: Reserve): string {
-  const windows = providerQuota(provider)?.windows ?? []
-  const used = windows
-    .map((window) => `${window.name} ${String(Math.round(window.used * PERCENT))}%`)
-    .join(' ')
-  if (providerBelowReserve(provider, reserve) === undefined) return used
-  return styleText('red', `${used} below reserve`)
-}
-
-/**
- * Renders one provider's credential status: provider, auth type, source, models, quota used,
- * verification.
- *
- * @param account - the provider's status; never the credential itself
- * @param reserve - the reserve per provider, to mark a provider below it
- * @returns the row's text, without its selection mark
- */
-function accountRow(account: ProviderCredentialStatus, reserve: Reserve): string {
-  const login = account.type === 'oauth' ? 'account' : 'API key'
-  const cells = [
-    // A name longer than its column (`qwen-token-plan-individual`, a models.json provider) is cut
-    // with `…`, so the columns after it stay aligned.
-    truncateToWidth(account.provider, COLUMNS.provider, '…', true),
-    login.padEnd(COLUMNS.login),
-    truncateToWidth(account.source ?? '', COLUMNS.source, '…', true),
-    `${String(account.availableModelCount).padStart(COLUMNS.models)} models`,
-    quotaCell(account.provider, reserve)
-  ]
-  return `${cells.join(' ')}${verification(account)}`
-}
-
-/**
- * Marks the selected row of a list: a pointer and reversed colours.
- *
- * @param text - the row's text
- * @param selected - whether it is the selected row
- * @returns the row, indented
- */
-function selectable(text: string, selected: boolean): string {
-  return selected ? styleText('inverse', `› ${text}`) : `  ${text}`
-}
-
-/**
- * Renders the accounts view: pi's configured providers, as the proxy sees them, then the row that
- * opens pi's login selector.
- *
- * @param state - the console's state: the accounts, the selected row (the row after the
- *   accounts is the login row), and the status with the reserve per provider
+ * @param state - the console's state: the accounts, the selected row, and the status with the
+ *   reserve per provider
  * @param height - rows available
  * @returns the rows
  */
-function accountRows(state: ConsoleState, height: number): string[] {
-  const { accounts } = state
-  const reserve = state.status?.reserve ?? {}
-  const titles = [
-    'provider'.padEnd(COLUMNS.provider),
-    'login'.padEnd(COLUMNS.login),
-    'source'.padEnd(COLUMNS.source),
-    'models'.padEnd(COLUMNS.models + ' models'.length),
-    'quota used'
-  ]
-  const current = clampSelection(state.selected, accounts.length)
-  const rows = accounts.map((account, index) =>
-    selectable(accountRow(account, reserve), index === current)
-  )
-  const login = selectable(LOGIN_ROW, current === accounts.length)
-  return [styleText('dim', `  ${titles.join(' ')}`), ...rows, login].slice(0, height)
+function accountsViewRows(state: ConsoleState, height: number): string[] {
+  const view = {
+    accounts: state.accounts,
+    selected: state.selected,
+    reserve: state.status?.reserve ?? {}
+  }
+  return accountRows(view, height)
 }
 
 /**
@@ -328,7 +250,7 @@ function viewRows(
 ): string[] {
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size)
-  if (state.view === 'accounts') return accountRows(state, size.height)
+  if (state.view === 'accounts') return accountsViewRows(state, size.height)
   return statsRows(routeTotals(), routeTotalsSince(), size)
 }
 

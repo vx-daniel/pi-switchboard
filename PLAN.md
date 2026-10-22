@@ -1643,6 +1643,7 @@ src/
 ├── sync/
 │   └── zed.ts            -- Zed settings.json model sync
 ├── tui/
+│   ├── accounts-view.ts  -- the Accounts view's rows: providers, quota used, the login row
 │   ├── command.ts        -- `pi-switchboard tui` (citty)
 │   ├── console.ts        -- the console: pi-tui screen, server in the same process
 │   ├── log-buffer.ts     -- the log view's bounded line buffer
