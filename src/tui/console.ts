@@ -264,9 +264,11 @@ function quotaCell(provider: string, reserve: Reserve): string {
 function accountRow(account: ProviderCredentialStatus, reserve: Reserve): string {
   const login = account.type === 'oauth' ? 'account' : 'API key'
   const cells = [
-    account.provider.padEnd(COLUMNS.provider),
+    // A name longer than its column (`qwen-token-plan-individual`, a models.json provider) is cut
+    // with `…`, so the columns after it stay aligned.
+    truncateToWidth(account.provider, COLUMNS.provider, '…', true),
     login.padEnd(COLUMNS.login),
-    (account.source ?? '').padEnd(COLUMNS.source),
+    truncateToWidth(account.source ?? '', COLUMNS.source, '…', true),
     `${String(account.availableModelCount).padStart(COLUMNS.models)} models`,
     quotaCell(account.provider, reserve)
   ]

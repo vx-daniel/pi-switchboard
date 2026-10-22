@@ -145,6 +145,22 @@ describe('reserveSkip', () => {
     })
   })
 
+  // Catches the reserve and the cooldowns disagreeing on what an alternative is (third #208
+  // review): with every later candidate cooling down, the one below its reserve is called rather
+  // than a cooling one, and a cooldown for a class the alias doesn't name is no cooldown to it.
+  test('every later candidate cooling down, or cooling for an unnamed class', () => {
+    reported('anthropic', { fiveHour: 0.9, sevenDay: 0.1 })
+    startCooldown(SOL, 'rate_limit', 60_000, NOW)
+    startCooldown(FLASH, 'rate_limit', 30_000, NOW)
+    const rules = keeping({ anthropic: 0.2 })
+
+    expect(reserveSkip([OPUS, SOL, FLASH], 0, rules, NOW)).toBeUndefined()
+
+    clearAllCooldowns()
+    startCooldown(SOL, 'unavailable', 60_000, NOW)
+    expect(reserveSkip([OPUS, SOL], 0, rules, NOW)).toMatchObject({ provider: 'anthropic' })
+  })
+
   // Catches a stale report holding a provider back after its window reset: a window whose reset
   // has passed no longer counts.
   test('ignores a window that has reset since it was reported', () => {
