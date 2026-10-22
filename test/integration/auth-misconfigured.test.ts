@@ -222,3 +222,18 @@ describe('saving the config keeps an invalid authToken', () => {
     expect(proxyConfigOnDisk()).toEqual({ ...DEFAULT_CONFIG, port: 5151 })
   })
 })
+
+describe('where the token came from', () => {
+  // Catches the console misjudging a flag or env token as the file's: turning it off would then be
+  // saved, yet come back at the next start, or the file's token treated as the flag's.
+  test('a flag or env token is recorded as such, the file’s is not', () => {
+    writeProxyConfig({ authToken: 'notarealsecret-file-token' })
+    expect(loadConfig().proxyAuthOverride).toBeUndefined()
+
+    vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', ENV_TOKEN)
+    expect(loadConfig().proxyAuthOverride).toBe('PI_SWITCHBOARD_AUTH_TOKEN')
+    expect(loadConfig({ authToken: 'notarealsecret-flag-token' }).proxyAuthOverride).toBe(
+      '--auth-token'
+    )
+  })
+})

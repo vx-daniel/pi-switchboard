@@ -166,16 +166,24 @@ function turnOff(
   save: (token: string) => boolean
 ): void {
   target.proxyAuth.set({ kind: 'off' })
-  if (override !== undefined) {
+  if (override === undefined) {
+    if (save('')) {
+      authLogger.warn('Proxy auth is off; saved to {path}', { path: getConfigPath() })
+    } else {
+      authLogger.warn(
+        'Proxy auth is off, but the change could not be saved: it lasts until the proxy stops'
+      )
+    }
+    // A token from the console replaced the flag's; the flag or env var still wins at startup.
+    if (target.override !== undefined) {
+      authLogger.warn('{source} still sets the token when the proxy next starts', {
+        source: target.override
+      })
+    }
+  } else {
     authLogger.warn('Proxy auth is off until the proxy restarts; {source} turns it on again then', {
       source: override
     })
-  } else if (save('')) {
-    authLogger.warn('Proxy auth is off; saved to {path}', { path: getConfigPath() })
-  } else {
-    authLogger.warn(
-      'Proxy auth is off, but the change could not be saved: it lasts until the proxy stops'
-    )
   }
   if (!isLoopbackHost(target.host)) {
     authLogger.warn(
