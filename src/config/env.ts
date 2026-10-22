@@ -31,7 +31,7 @@ import { proxyLogger } from '@proxy/logging'
 const configLogger = proxyLogger('config')
 
 /** Where an override token came from: the flag wins over the env var. */
-type OverrideSource = '--auth-token' | 'PI_SWITCHBOARD_AUTH_TOKEN'
+export type OverrideSource = '--auth-token' | 'PI_SWITCHBOARD_AUTH_TOKEN'
 
 /** A token set by flag or env var, which wins over the config file's. */
 interface TokenOverride {
@@ -128,6 +128,11 @@ export interface ServerConfig {
   readonly port: number
   /** Whether and how requests must authenticate; see `ProxyAuth`. */
   readonly proxyAuth: ProxyAuth
+  /**
+   * The flag or env var that set the token, when one did; absent for the config file's token or
+   * auth off. The console says it applies again at the next start when auth is turned off.
+   */
+  readonly proxyAuthOverride?: OverrideSource
   /** Whether agentic mode is enabled. */
   readonly agenticEnabled: boolean
   /** Whether remote image URL fetching is enabled. */
@@ -351,6 +356,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     host,
     port,
     proxyAuth,
+    ...(override === undefined ? {} : { proxyAuthOverride: override.source }),
     agenticEnabled,
     remoteImagesEnabled,
     docsUiEnabled,

@@ -96,7 +96,14 @@ export function tabsLine(view: View): string {
  * The footer's key hints for each view, quitting first: a narrow terminal cuts the end of the line.
  */
 const FOOTER: Readonly<Record<View, readonly string[]>> = {
-  logs: ['q quit (stops the proxy)', '←→ views', '↑↓ PgUp PgDn scroll', 'End follow', 'n login'],
+  logs: [
+    'q quit (stops the proxy)',
+    '←→ views',
+    '↑↓ PgUp PgDn scroll',
+    'End follow',
+    'n login',
+    'p proxy auth'
+  ],
   accounts: [
     'q quit (stops the proxy)',
     '←→ views',
@@ -104,9 +111,17 @@ const FOOTER: Readonly<Record<View, readonly string[]>> = {
     'Enter actions',
     'v verify all',
     'n login',
-    'x logout'
+    'x logout',
+    'p proxy auth'
   ],
-  stats: ['q quit (stops the proxy)', '←→ views', 't today', 'w week', 'a all 30 days']
+  stats: [
+    'q quit (stops the proxy)',
+    '←→ views',
+    't today',
+    'w week',
+    'a all 30 days',
+    'p proxy auth'
+  ]
 }
 /** The hints before the sidebar's: quitting and moving between views. */
 const HINTS_BEFORE_SIDEBAR = 2

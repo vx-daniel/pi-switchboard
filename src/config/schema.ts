@@ -606,8 +606,9 @@ export interface SaveConfigOptions {
  *
  * @param config - The config to write.
  * @param options - How to treat an invalid `authToken` already in the file.
+ * @returns whether the file was written
  */
-export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions = {}): void {
+export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions = {}): boolean {
   const configPath = getConfigPath()
   const normalized = normalizeConfig(config)
   // A config loaded from a file with an invalid authToken carries the repaired ''. Writing it would
@@ -624,12 +625,14 @@ export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions
     writeFileSync(tempPath, `${JSON.stringify(written, null, '\t')}\n`, 'utf-8')
     renameSync(tempPath, configPath)
     configLogger.debug('Saved config file {path}', { path: configPath })
+    return true
   } catch (error) {
     configLogger.warn('Could not save config file {path} ({code}); changes were not written', {
       path: configPath,
       code: errorCode(error)
     })
     if (existsSync(tempPath)) unlinkSync(tempPath)
+    return false
   }
 }
 

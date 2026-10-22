@@ -22,7 +22,6 @@ import {
   Key,
   type KeyId,
   matchesKey,
-  type OverlayHandle,
   ProcessTerminal,
   truncateToWidth,
   TuiAltScreen,
@@ -52,12 +51,14 @@ import {
   finishedRequests,
   onActiveRequestsChange
 } from '@proxy/server/active-requests'
+import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
 import { accountRows } from '@proxy/tui/accounts-view'
 import { openStatsView, type StatsView, type StatsWindow } from '@proxy/tui/dashboard'
+import { pickLabel, showDialog } from '@proxy/tui/dialogs'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
 import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
@@ -71,6 +72,7 @@ import {
   tabsLine,
   type View
 } from '@proxy/tui/navigation'
+import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
 import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
 import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
@@ -126,6 +128,8 @@ interface ConsoleContext {
   readonly state: ConsoleState
   /** When the console started the proxy, in milliseconds since the epoch. */
   readonly startedAt: number
+  /** The proxy auth the server applies, which the auth menu (`p`) changes. */
+  readonly proxyAuth: ProxyAuthSwitch
   /** The Stats view: the dashboard, or the totals since the proxy started without stats. */
   readonly statsView: StatsView
   /**
@@ -199,21 +203,17 @@ function statusParts(status: Status): string[] {
  * Renders the header: version and address, then auth and the status line unless the sidebar shows
  * them.
  *
- * @param config - the server config
- * @param status - the last status read, or `undefined` before the first
+ * @param context - the console: its config, its last status read, and the auth applied now
  * @param withSidebar - whether the sidebar is shown, with the status in its PROXY panel
  * @returns the header line, untruncated
  */
-function headerLine(
-  config: ServerConfig,
-  status: Status | undefined,
-  withSidebar: boolean
-): string {
+function headerLine(context: ConsoleContext, withSidebar: boolean): string {
+  const { config, state } = context
   const title = strong(paint('accent', ` pi-switchboard ${packageJson.version}`))
   const address = `${config.host}:${String(config.port)}`
   if (withSidebar) return [title, address].join(' · ')
-  const parts = [title, address, `auth ${config.proxyAuth.kind}`]
-  if (status !== undefined) parts.push(...statusParts(status))
+  const parts = [title, address, `auth ${context.proxyAuth.current().kind}`]
+  if (state.status !== undefined) parts.push(...statusParts(state.status))
   return parts.join(' · ')
 }
 
@@ -269,7 +269,7 @@ function sidebarInput(context: ConsoleContext): SidebarInput {
     now,
     proxy: {
       address: `${config.host}:${String(config.port)}`,
-      proxyAuth: config.proxyAuth.kind,
+      proxyAuth: context.proxyAuth.current().kind,
       startedAt: context.startedAt,
       connections: state.connections,
       exposed: status.exposed,
@@ -321,7 +321,7 @@ function createRootView(
   return {
     render(width) {
       const height = Math.max(1, terminal.rows - CHROME_ROWS)
-      const { state, config } = context
+      const { state } = context
       const side = state.sidebarHidden ? undefined : sidebarWidth(width)
       const mainWidth = side === undefined ? width : width - side - 1
       const body = viewRows(context, { height, width: mainWidth })
@@ -335,7 +335,7 @@ function createRootView(
           ? main
           : besideSidebar(main, sidebarChrome(context, main.length, side), mainWidth)
       const rows = [
-        chrome(headerLine(config, state.status, side !== undefined), width),
+        chrome(headerLine(context, side !== undefined), width),
         ...middle,
         footerLine(state.view, sidebarWidth(width) !== undefined)
       ]
@@ -356,17 +356,6 @@ function createRootView(
 }
 
 /**
- * Shows a component in the middle of the screen, with keyboard focus.
- *
- * @param tui - the screen
- * @param component - the component, one of pi's selectors or its login dialog
- * @returns the overlay's handle
- */
-function showDialog(tui: TuiAltScreen, component: Component): OverlayHandle {
-  return tui.showOverlay(component, { width: '80%', maxHeight: '80%', anchor: 'center' })
-}
-
-/**
  * Shows pi's selector for a choice a login asks for, such as the login method.
  *
  * @param tui - the screen
@@ -375,28 +364,15 @@ function showDialog(tui: TuiAltScreen, component: Component): OverlayHandle {
  * @param prompt.options - the options, each with its ID and label
  * @returns the chosen option's ID; rejects with `Login cancelled` when cancelled
  */
-function selectOption(
+async function selectOption(
   tui: TuiAltScreen,
   prompt: { readonly message: string; readonly options: readonly { id: string; label: string }[] }
 ): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const labels = prompt.options.map((option) => option.label)
-    const selector = new ExtensionSelectorComponent(
-      prompt.message,
-      labels,
-      (label) => {
-        handle.hide()
-        const option = prompt.options.find((candidate) => candidate.label === label)
-        if (option === undefined) reject(new Error('Login cancelled'))
-        else resolve(option.id)
-      },
-      () => {
-        handle.hide()
-        reject(new Error('Login cancelled'))
-      }
-    )
-    const handle = showDialog(tui, selector)
-  })
+  const labels = prompt.options.map((option) => option.label)
+  const label = await pickLabel(tui, prompt.message, labels)
+  const option = prompt.options.find((candidate) => candidate.label === label)
+  if (option === undefined) throw new Error('Login cancelled')
+  return option.id
 }
 
 /**
@@ -576,6 +552,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
     ['s', () => (state.sidebarHidden = !state.sidebarHidden)],
+    ['p', () => inBackground(openAuthMenu(context.tui, context.config, context.proxyAuth), 'Auth')],
     ['t', pickWindow('today')],
     ['w', pickWindow('week')],
     ['a', pickWindow('all')],
@@ -684,8 +661,8 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     })
   )
   await initRegistry()
-  const server = await listen(config)
-  const statsView = openStatsView(config.statsEnabled)
+  const proxyAuth = createProxyAuthSwitch(config.proxyAuth)
+  const server = await listen(config, proxyAuth)
   const terminal = new ProcessTerminal()
   // `auto` moves further on a fast wheel spin, for terminals that send one event per notch.
   const tui = new TuiAltScreen(terminal, undefined, undefined, { wheelScrollLines: 'auto' })
@@ -713,7 +690,8 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     tui,
     state,
     startedAt: Date.now(),
-    statsView,
+    proxyAuth,
+    statsView: openStatsView(config.statsEnabled),
     refresh: createRefresh(state, { status: readStatus, accounts: getCredentialStatuses }, () =>
       tui.requestRender()
     ),
@@ -738,7 +716,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     stopUpdates()
     stopListening()
     server.close()
-    statsView.close()
+    context.statsView.close()
   }
   if (crash instanceof Error) throw crash
   if (crash !== undefined) {
