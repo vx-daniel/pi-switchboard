@@ -72,6 +72,7 @@ export function installConsoleTheme(noColor: string | undefined = process.env.NO
 export function paint(color: ConsoleColor, text: string): string {
   return active === undefined ? text : active.fg(color, text)
 }
+
 /**
  * Makes text bold. pi-tui's `styleText` rather than the theme's `bold`, which emits nothing on a
  * terminal that calls itself `dumb` while its colors still work.
