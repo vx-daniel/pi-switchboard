@@ -46,3 +46,27 @@ jobs:
 
       - name: Gate (oxfmt + oxlint + type check + tests + build)
         run: pnpm run check:all
+
+  # The standalone binary (#61): compiled with Bun, then run against the fixtures (test/binary). Bun
+  # is build-only (CONSTITUTION.md 3.5.0), so this is its own job, never part of `check:all` or the
+  # pre-commit hook; the gate above stays Node-only.
+  binary:
+    name: binary
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
+
+      - uses: voidzero-dev/setup-vp@68f39c78aaf39be468cabd2afb09c162574c84af # v1.21.2
+        with:
+          node-version: '24'
+          cache: true
+        env:
+          VP_GIT_HOOKS: '0'
+
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: 1.4.3
+
+      - name: Build the binary and run it against the fixtures
+        run: pnpm run test:binary
