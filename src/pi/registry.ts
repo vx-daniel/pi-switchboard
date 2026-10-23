@@ -115,8 +115,15 @@ export async function initRegistry(): Promise<string | undefined> {
   )
   if (accounts.length > 0) {
     // A registered provider is only provisionally available until the next availability pass;
-    // this one settles it, from the stored credentials alone, before the snapshot is read.
-    await runtime.refresh({ allowNetwork: false })
+    // this one settles it, from the stored credentials alone, before the snapshot is read. Should
+    // it fail, the proxy starts anyway: the provisional entries stand until the next pass.
+    try {
+      await runtime.refresh({ allowNetwork: false })
+    } catch (error) {
+      registryLogger.warn('Refreshing availability after registering logins failed: {reason}', {
+        reason: error instanceof Error ? error.message : String(error)
+      })
+    }
   }
   registryLogger.info('Model runtime ready with {availableModelCount} available models', {
     availableModelCount: runtime.getAvailableSnapshot().length,
