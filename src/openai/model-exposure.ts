@@ -37,8 +37,10 @@ import type {
   PublicModelIdMode
 } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import type { ThinkingLevelsOf } from '@proxy/openai/effort-levels'
 import { type AliasDiagnostic, exposeAliases } from '@proxy/openai/model-aliases'
 import { groupLogins } from '@proxy/openai/model-logins'
+import type { ReasoningEffort } from '@proxy/openai/schemas'
 import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
 
 /** Logger for model exposure. */
@@ -62,6 +64,11 @@ export interface ExposedModel {
   readonly login: string
   /** The alias, when this entry is one: the target's model under a name from the config (#66). */
   readonly alias?: string
+  /**
+   * The effort an alias runs this target at, replacing the request's (#230). Only on an alias's
+   * entries, and only when its config sets one; the model supports it.
+   */
+  readonly reasoningEffort?: ReasoningEffort
   /**
    * An alias's fallback chain (#67): every exposed target, this entry's own first, and the
    * failures that move to the next. Only on an alias entry.
@@ -495,12 +502,15 @@ function exposedEntry(
  *
  * @param available - the models with auth configured (`getAvailableModels()`)
  * @param config - the model exposure configuration
+ * @param thinkingLevels - pi's `getSupportedThinkingLevels`, to check an alias target's effort
+ *   (#230); passed in so that exposure loads without pi (#165)
  * @returns the exposed models and lookup maps, or the error for duplicate prefix labels or
  *   (in "universal" mode) a model ID two providers share
  */
 export function computeModelExposure(
   available: readonly Model<Api>[],
-  config: ModelExposureConfig
+  config: ModelExposureConfig,
+  thinkingLevels: ThinkingLevelsOf
 ): ModelExposureOutcome {
   // 0. One model per provider, whatever its logins (#227): a login slot's models are the base's.
   const groups = groupLogins(available)
@@ -577,7 +587,7 @@ export function computeModelExposure(
     }
   )
 
-  const aliased = exposeAliases(config.aliases, byPublicId, byCanonicalId)
+  const aliased = exposeAliases(config.aliases, byPublicId, byCanonicalId, thinkingLevels)
   return {
     ok: true,
     models,

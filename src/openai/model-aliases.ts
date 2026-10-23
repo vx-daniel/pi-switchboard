@@ -12,13 +12,24 @@
  *   in order, for the chat route (`src/server/chat-dispatch.ts`).
  * - **Never shadows a model.** An alias named like an exposed public or canonical ID is left out,
  *   and the model keeps its name. `/healthz/models` reports it and answers 503.
+ * - **Runs a target at the effort it sets** (#230): `{ model, reasoningEffort }` replaces the
+ *   request's `reasoning_effort` on that model. An effort the model doesn't support is a
+ *   configuration error, never clamped: the target is left out (`effort-unsupported`), and
+ *   `/healthz/models` answers 503.
  * - **Resolved last:** public ID, then canonical ID, then alias (`resolveExposedModel`).
  *
  * @packageDocumentation
  */
 
-import type { AliasTarget } from '@proxy/config/schema'
+import {
+  type AliasModel,
+  type AliasTarget,
+  aliasFallbackOn,
+  aliasModels,
+  isAliasChain
+} from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { effortsOfLevels, type ThinkingLevelsOf } from '@proxy/openai/effort-levels'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import * as z from 'zod'
 
@@ -30,7 +41,7 @@ const exposureLogger = proxyLogger('openai', 'exposure')
  * and is never parsed.
  */
 export const aliasDiagnosticSchema = z.object({
-  code: z.enum(['shadows-model', 'target-not-exposed']),
+  code: z.enum(['shadows-model', 'target-not-exposed', 'effort-unsupported']),
   alias: z.string().trim().meta({ description: 'The alias, as written.' }),
   target: z.string().trim().meta({ description: 'The canonical ID it names, as written.' }),
   message: z.string().trim()
@@ -48,26 +59,29 @@ export interface ExposedAliases {
   readonly diagnostics: readonly AliasDiagnostic[]
 }
 
-/** The shadowing aliases the last warning named: exposure is computed per request. */
-let lastShadowing = ''
+/** The aliases each warning last named, by diagnostic code: exposure is computed per request. */
+const lastWarned: Partial<Record<AliasDiagnostic['code'], string>> = {}
 
 /**
- * Warns about aliases named like a model, once per distinct set.
+ * Warns about the aliases with one kind of configuration error, once per distinct set.
  *
  * @param diagnostics - this computation's alias diagnostics
+ * @param code - the kind to warn about
+ * @param message - the warning, with an `{aliases}` placeholder
  */
-function warnShadowing(diagnostics: readonly AliasDiagnostic[]): void {
-  const shadowing = diagnostics
-    .filter((diagnostic) => diagnostic.code === 'shadows-model')
+function warnOnce(
+  diagnostics: readonly AliasDiagnostic[],
+  code: AliasDiagnostic['code'],
+  message: string
+): void {
+  const named = diagnostics
+    .filter((diagnostic) => diagnostic.code === code)
     .map((diagnostic) => diagnostic.alias)
-  const key = JSON.stringify(shadowing)
-  if (key === lastShadowing) return
-  lastShadowing = key
-  if (shadowing.length === 0) return
-  exposureLogger.warn(
-    'Ignoring aliases named like an exposed model, which keeps its name: {aliases}. Rename them',
-    { aliasCount: shadowing.length, aliases: shadowing }
-  )
+  const key = JSON.stringify(named)
+  if (key === (lastWarned[code] ?? '[]')) return
+  lastWarned[code] = key
+  if (named.length === 0) return
+  exposureLogger.warn(message, { aliasCount: named.length, aliases: named })
 }
 
 /**
@@ -76,38 +90,58 @@ function warnShadowing(diagnostics: readonly AliasDiagnostic[]): void {
  * @param aliases - alias -> one canonical ID, or `{ targets, fallbackOn }`, from the config
  * @param byPublicId - the exposed models by public ID
  * @param byCanonicalId - the exposed models by canonical ID
+ * @param thinkingLevels - pi's `getSupportedThinkingLevels`, to check a target's effort (#230)
  * @returns the exposed aliases, and a diagnostic for each alias or target left out
  */
 export function exposeAliases(
   aliases: Readonly<Record<string, AliasTarget>>,
   byPublicId: ReadonlyMap<string, ExposedModel>,
-  byCanonicalId: ReadonlyMap<string, ExposedModel>
+  byCanonicalId: ReadonlyMap<string, ExposedModel>,
+  thinkingLevels: ThinkingLevelsOf
 ): ExposedAliases {
   const exposed: ExposedModel[] = []
   const byAlias = new Map<string, ExposedModel>()
   const diagnostics: AliasDiagnostic[] = []
   for (const [alias, target] of Object.entries(aliases)) {
-    const targets = typeof target === 'string' ? [target] : target.targets
+    const targets = aliasModels(target)
     if (byPublicId.has(alias) || byCanonicalId.has(alias)) {
       diagnostics.push({
         code: 'shadows-model',
         alias,
-        target: targets.join(', '),
+        target: targets.map(({ model }) => model).join(', '),
         message: `Alias "${alias}" is an exposed model's ID; that model keeps it and the alias is ignored. Rename the alias.`
       })
       continue
     }
-    const candidates = exposedTargets(alias, targets, byCanonicalId, diagnostics)
+    const candidates = exposedTargets(
+      alias,
+      targets,
+      { byCanonicalId, thinkingLevels },
+      diagnostics
+    )
     const [first] = candidates
     if (first === undefined) continue
-    const entry: ExposedModel =
-      typeof target === 'string'
-        ? { ...first, publicId: alias, alias }
-        : { ...first, publicId: alias, alias, route: { candidates, fallbackOn: target.fallbackOn } }
+    const entry: ExposedModel = isAliasChain(target)
+      ? {
+          ...first,
+          publicId: alias,
+          alias,
+          route: { candidates, fallbackOn: aliasFallbackOn(target) }
+        }
+      : { ...first, publicId: alias, alias }
     exposed.push(entry)
     byAlias.set(alias, entry)
   }
-  warnShadowing(diagnostics)
+  warnOnce(
+    diagnostics,
+    'shadows-model',
+    'Ignoring aliases named like an exposed model, which keeps its name: {aliases}. Rename them'
+  )
+  warnOnce(
+    diagnostics,
+    'effort-unsupported',
+    'Leaving out alias targets set to a reasoning effort their model does not support: {aliases}'
+  )
   if (diagnostics.length > 0) {
     exposureLogger.debug('{diagnosticCount} aliases are not exposed', {
       diagnosticCount: diagnostics.length,
@@ -118,22 +152,27 @@ export function exposeAliases(
 }
 
 /**
- * Looks an alias's targets up among the exposed models, in order, reporting each one that is not.
+ * Looks an alias's targets up among the exposed models, in order, reporting each one that is not,
+ * or that is set to an effort its model doesn't support.
  *
  * @param alias - the alias
- * @param targets - its canonical IDs, as written
- * @param byCanonicalId - the exposed models by canonical ID
- * @param diagnostics - receives a `target-not-exposed` diagnostic per missing target; appended to
- * @returns the exposed targets, in the alias's order
+ * @param targets - its models, as written
+ * @param lookup - the exposed models by canonical ID, and pi's `getSupportedThinkingLevels`
+ * @param diagnostics - receives a diagnostic per target left out; appended to
+ * @returns the exposed targets, in the alias's order, each with the effort it runs at
  */
 function exposedTargets(
   alias: string,
-  targets: readonly string[],
-  byCanonicalId: ReadonlyMap<string, ExposedModel>,
+  targets: readonly AliasModel[],
+  lookup: {
+    readonly byCanonicalId: ReadonlyMap<string, ExposedModel>
+    readonly thinkingLevels: ThinkingLevelsOf
+  },
   diagnostics: AliasDiagnostic[]
 ): ExposedModel[] {
+  const { byCanonicalId, thinkingLevels } = lookup
   const candidates: ExposedModel[] = []
-  for (const target of targets) {
+  for (const { model: target, reasoningEffort } of targets) {
     const model = byCanonicalId.get(target)
     if (model === undefined) {
       diagnostics.push({
@@ -142,8 +181,20 @@ function exposedTargets(
         target,
         message: `Alias "${alias}" names "${target}", which is not an exposed model's canonical ID (provider/model-id).`
       })
-    } else {
+    } else if (reasoningEffort === undefined) {
       candidates.push(model)
+    } else {
+      const supported = effortsOfLevels(thinkingLevels(model.model))
+      if (supported.includes(reasoningEffort)) {
+        candidates.push({ ...model, reasoningEffort })
+      } else {
+        diagnostics.push({
+          code: 'effort-unsupported',
+          alias,
+          target,
+          message: `Alias "${alias}" runs "${target}" at reasoning effort "${reasoningEffort}", which it does not support. It supports: ${supported.join(', ')}.`
+        })
+      }
     }
   }
   return candidates

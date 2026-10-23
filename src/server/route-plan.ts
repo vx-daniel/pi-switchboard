@@ -43,8 +43,11 @@ function hasImage(request: ChatCompletionRequest): boolean {
  * @returns its logins in order, or the model alone when it has one login
  */
 function perLogin(exposed: ExposedModel): readonly ExposedModel[] {
-  const { logins } = exposed
-  return logins === undefined ? [exposed] : logins.map((login) => ({ ...login, logins }))
+  const { logins, reasoningEffort } = exposed
+  if (logins === undefined) return [exposed]
+  // A login's entry is the model's, not the alias target's: carry the target's effort (#230).
+  const effort = reasoningEffort === undefined ? {} : { reasoningEffort }
+  return logins.map((login) => ({ ...login, logins, ...effort }))
 }
 
 /**

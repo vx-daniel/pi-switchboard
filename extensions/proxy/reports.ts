@@ -4,10 +4,13 @@
  * @packageDocumentation
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
+import { type Api, getSupportedThinkingLevels, type Model } from '@earendil-works/pi-ai'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
+  aliasFallbackOn,
+  aliasModels,
   configFileAuthTokenInvalid,
+  isAliasChain,
   loadConfigFromFile,
   type ProxyConfig
 } from '@vx-daniel/pi-switchboard/config'
@@ -58,7 +61,11 @@ export async function buildConfigReport(state: ProxyState): Promise<string> {
   const enabledModels =
     config.modelExposureMode === 'scoped' ? await getSessionEnabledModels(state) : undefined
   const models = getSessionAvailableModels(state)
-  const outcome = computeModelExposure(models, await buildExposureConfig(state))
+  const outcome = computeModelExposure(
+    models,
+    await buildExposureConfig(state),
+    getSupportedThinkingLevels
+  )
   if (!outcome.ok) {
     reportsLogger.warn('Model exposure error in /proxy show: {message}', {
       message: outcome.message
@@ -174,11 +181,13 @@ function formatExposurePolicy(
     )
     lines.push(`prefixes: ${pairs.join(', ')}`)
   }
-  const aliasPairs = Object.entries(config.aliases).map(([alias, target]) =>
-    typeof target === 'string'
-      ? `${alias}=${target}`
-      : `${alias}=${target.targets.join(' > ')} (on ${target.fallbackOn.join(', ') || 'nothing'})`
-  )
+  const aliasPairs = Object.entries(config.aliases).map(([alias, target]) => {
+    const models = aliasModels(target).map(({ model, reasoningEffort }) =>
+      reasoningEffort === undefined ? model : `${model}@${reasoningEffort}`
+    )
+    if (!isAliasChain(target)) return `${alias}=${models.join('')}`
+    return `${alias}=${models.join(' > ')} (on ${aliasFallbackOn(target).join(', ') || 'nothing'})`
+  })
   if (aliasPairs.length > 0) lines.push(`aliases: ${aliasPairs.join(', ')}`)
   return lines
 }
@@ -248,7 +257,11 @@ export async function showModels(state: ProxyState, context: ExtensionContext): 
 export async function buildModelsReport(state: ProxyState): Promise<Report> {
   state.config = loadConfigFromFile()
   const models = getSessionAvailableModels(state)
-  const outcome = computeModelExposure(models, await buildExposureConfig(state))
+  const outcome = computeModelExposure(
+    models,
+    await buildExposureConfig(state),
+    getSupportedThinkingLevels
+  )
 
   if (!outcome.ok) {
     reportsLogger.warn('Model exposure error in /proxy models: {message}', {
@@ -326,7 +339,11 @@ export async function buildVerifyReport(state: ProxyState): Promise<Report> {
   const { config } = state
   const models = getSessionAvailableModels(state)
   // Run the full exposure computation to catch ID/prefix errors
-  const outcome = computeModelExposure(models, await buildExposureConfig(state))
+  const outcome = computeModelExposure(
+    models,
+    await buildExposureConfig(state),
+    getSupportedThinkingLevels
+  )
   const issues = collectExposureIssues(config, models, outcome)
   const exposedCount = outcome.ok ? outcome.models.length : 0
 

@@ -4,7 +4,7 @@
  * they resolve to, and the warning about aliases named like a model.
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
+import { type Api, getSupportedThinkingLevels, type Model } from '@earendil-works/pi-ai'
 import { resetSync } from '@logtape/logtape'
 import type { AliasTarget } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
@@ -56,15 +56,19 @@ function exposeWith(
   aliases: Record<string, AliasTarget>,
   overrides: Partial<ModelExposureConfig> = {}
 ): ModelExposureResult {
-  const outcome = computeModelExposure(MODELS, {
-    publicModelIdMode: 'collision-prefixed',
-    modelExposureMode: 'scoped',
-    enabledModels: undefined,
-    customModels: [],
-    providerPrefixes: {},
-    aliases,
-    ...overrides
-  })
+  const outcome = computeModelExposure(
+    MODELS,
+    {
+      publicModelIdMode: 'collision-prefixed',
+      modelExposureMode: 'scoped',
+      enabledModels: undefined,
+      customModels: [],
+      providerPrefixes: {},
+      aliases,
+      ...overrides
+    },
+    getSupportedThinkingLevels
+  )
   if (!outcome.ok) throw new Error(outcome.message)
   return outcome
 }

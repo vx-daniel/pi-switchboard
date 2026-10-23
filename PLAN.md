@@ -394,6 +394,31 @@ A string alias, and a request that names a model, never fall back.
   principle I exception (#177). A client that wants no fallback names the model, and one that
   wants a shorter chain uses another alias.
 
+### Reasoning effort per alias target (#230)
+
+An alias target may be `{ model, reasoningEffort }` instead of a canonical ID, alone or in
+`targets` (`AliasModelSchema`, `src/config/schema.ts`; `aliasModels` reads either form). The config
+repair drops an entry without its model or with an unknown effort. The effort is the operator's
+choice for that name, so it replaces the request's (a principle I exception, constitution 3.7.0):
+
+- **Exposure.** `exposeAliases` checks each target's effort against its model's ladder (pi's
+  `getSupportedThinkingLevels`, passed into `computeModelExposure` so exposure loads without pi,
+  #165). An unsupported effort is a configuration error, never a clamp: the target is left out
+  with an `effort-unsupported` diagnostic, which, like `shadows-model`, makes `/healthz/models`
+  answer 503 and logs one warning per distinct set. A chain keeps its other targets. A kept target
+  carries `ExposedModel.reasoningEffort`, and `planRoute`'s per-login expansion keeps it.
+- **Dispatch.** `withAliasEffort` (`src/server/alias-effort.ts`) gives each attempt the request
+  with its target's effort, so every hop runs at its own. A target without one keeps the
+  request's, clamped as usual.
+- **Visible (principle VI).** `x_pi.reasoning_effort: { requested, applied }` (#175) is always
+  present on such an answer: `requested` is the client's value or `null`, `applied` the target's.
+  Each `x_pi.attempts` entry carries the `reasoning_effort` its target set. The chat request line
+  adds `reasoningEffort` and `aliasEffort`; replacing a different client value is logged at info
+  the first time per alias, then at debug.
+- **Listing.** `/v1/switchboard/models` lists such an alias's `reasoning_efforts` as its one
+  effort, with `reasoning_effort_fixed: true` (false on every other entry). `/v1/models` is
+  unchanged.
+
 ### Cooldowns (#68)
 
 A 429 or 503 is remembered, so a chain stops calling a failing provider first on every request.

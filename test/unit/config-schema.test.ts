@@ -184,6 +184,32 @@ describe('normalizeConfig', () => {
     expect(result.aliases).toEqual({ chain })
   })
 
+  // Catches a target with an effort kept without its model or with an effort nobody defined, or
+  // a model object without an effort kept (it would look like an alias that sets one): each is
+  // dropped, and the valid single and chain forms beside them are kept as written (#230).
+  test('keeps targets that set a valid effort and drops the invalid ones', () => {
+    const reviewer = { model: 'anthropic/opus', reasoningEffort: 'high' }
+    const builder = {
+      targets: [{ model: 'anthropic/opus', reasoningEffort: 'high' }, 'openai/gpt'],
+      fallbackOn: ['rate_limit']
+    }
+    const result = normalizeConfig({
+      aliases: {
+        reviewer,
+        builder,
+        'no-effort': { model: 'anthropic/opus' },
+        'bad-effort': { model: 'anthropic/opus', reasoningEffort: 'extreme' },
+        'no-model': { reasoningEffort: 'high' },
+        'bad-in-chain': {
+          targets: [{ model: 'anthropic/opus', reasoningEffort: 'turbo' }],
+          fallbackOn: []
+        }
+      }
+    })
+
+    expect(result.aliases).toEqual({ reviewer, builder })
+  })
+
   // Catches one bad reserve costing the others, or a share outside 0–1 kept: a reserve above 1
   // would skip a provider whenever it reports quota, and a negative one never would (#69).
   test('keeps the valid quota reserves and drops the invalid ones', () => {

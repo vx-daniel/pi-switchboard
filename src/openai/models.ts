@@ -151,7 +151,12 @@ const piModelCapabilitiesSchema = z
       description:
         'The `reasoning_effort` values the model runs at as asked, lowest first. Any other value ' +
         'is accepted and clamped to the nearest level the model supports. `["none"]` for a ' +
-        'model without reasoning.'
+        "model without reasoning. For an alias that sets its target's effort, that effort alone."
+    }),
+    reasoning_effort_fixed: z.boolean().meta({
+      description:
+        "True for an alias that sets its target's effort (#230): a request's `reasoning_effort` " +
+        'is replaced by the one listed. False otherwise.'
     }),
     input: z.array(z.enum(['text', 'image'])).meta({ description: 'What the model accepts.' }),
     context_window: z.int().nonnegative().meta({ description: 'The context window, in tokens.' }),
@@ -257,7 +262,7 @@ function loginField(login: ExposedModel): PiModelList['data'][number]['logins'][
 /**
  * Builds the `/v1/switchboard/models` response: every exposed model, with pi's catalogue entry,
  * its cooldown (#68) and its provider's quota (#69), and each of its logins (#227). An alias
- * carries its target's (#66).
+ * carries its first target's (#66), with that target's effort when it sets one (#230).
  *
  * @param models - the exposed models, in list order
  * @returns the list response
@@ -273,7 +278,12 @@ export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
         id: publicId,
         provider: exposed.provider,
         reasoning: model.reasoning,
-        reasoning_efforts: supportedReasoningEfforts(model),
+        // An alias's forced effort replaces any the request sends (#230).
+        reasoning_efforts:
+          exposed.reasoningEffort === undefined
+            ? supportedReasoningEfforts(model)
+            : [exposed.reasoningEffort],
+        reasoning_effort_fixed: exposed.reasoningEffort !== undefined,
         input: [...model.input],
         context_window: model.contextWindow,
         max_output_tokens: model.maxTokens,

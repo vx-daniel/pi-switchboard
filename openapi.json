@@ -183,7 +183,8 @@
                   "type": "string",
                   "enum": [
                     "shadows-model",
-                    "target-not-exposed"
+                    "target-not-exposed",
+                    "effort-unsupported"
                   ]
                 },
                 "alias": {
@@ -206,7 +207,7 @@
               ],
               "additionalProperties": false
             },
-            "description": "Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the check fail), or naming no exposed model (`target-not-exposed`)."
+            "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), both of which make the check fail, or naming no exposed model (`target-not-exposed`)."
           },
           "cooldowns": {
             "type": "array",
@@ -541,7 +542,11 @@
                 "max"
               ]
             },
-            "description": "The `reasoning_effort` values the model runs at as asked, lowest first. Any other value is accepted and clamped to the nearest level the model supports. `[\"none\"]` for a model without reasoning."
+            "description": "The `reasoning_effort` values the model runs at as asked, lowest first. Any other value is accepted and clamped to the nearest level the model supports. `[\"none\"]` for a model without reasoning. For an alias that sets its target's effort, that effort alone."
+          },
+          "reasoning_effort_fixed": {
+            "type": "boolean",
+            "description": "True for an alias that sets its target's effort (#230): a request's `reasoning_effort` is replaced by the one listed. False otherwise."
           },
           "input": {
             "type": "array",
@@ -922,6 +927,7 @@
           "provider",
           "reasoning",
           "reasoning_efforts",
+          "reasoning_effort_fixed",
           "input",
           "context_window",
           "max_output_tokens",
@@ -1256,7 +1262,8 @@
                             "type": "string",
                             "enum": [
                               "shadows-model",
-                              "target-not-exposed"
+                              "target-not-exposed",
+                              "effort-unsupported"
                             ]
                           },
                           "alias": {
@@ -1279,7 +1286,7 @@
                         ],
                         "additionalProperties": false
                       },
-                      "description": "Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the check fail), or naming no exposed model (`target-not-exposed`)."
+                      "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), both of which make the check fail, or naming no exposed model (`target-not-exposed`)."
                     },
                     "cooldowns": {
                       "type": "array",
@@ -2807,7 +2814,7 @@
                           "type": "string"
                         },
                         "reasoning_effort": {
-                          "description": "What the request asked for and what the model that answered runs at (#175); present only when the request set `reasoning_effort`.",
+                          "description": "What the request asked for and what the model that answered runs at (#175); present only when the request set `reasoning_effort` or the alias's target sets an effort (#230).",
                           "type": "object",
                           "properties": {
                             "requested": {
@@ -2841,7 +2848,7 @@
                                 "xhigh",
                                 "max"
                               ],
-                              "description": "The effort the proxy asked pi to run the model at: `requested` when the model supports it, else the nearest level it does. pi's adapter may still translate it for the provider."
+                              "description": "The effort the proxy asked pi to run the model at: the alias target's when it sets one (#230), else `requested` when the model supports it, else the nearest level it does. pi's adapter may still translate it for the provider."
                             }
                           },
                           "required": [
@@ -2863,6 +2870,19 @@
                               "login": {
                                 "description": "The login tried (`anthropic`, `anthropic-2`), when the model has more than one (#227). Absent otherwise.",
                                 "type": "string"
+                              },
+                              "reasoning_effort": {
+                                "description": "The effort the alias's target runs it at (#230), replacing the request's. Absent when the target sets none.",
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
                               },
                               "reason": {
                                 "type": "string",
@@ -3043,7 +3063,7 @@
                           "type": "string"
                         },
                         "reasoning_effort": {
-                          "description": "What the request asked for and what the model that answered runs at (#175); present only when the request set `reasoning_effort`.",
+                          "description": "What the request asked for and what the model that answered runs at (#175); present only when the request set `reasoning_effort` or the alias's target sets an effort (#230).",
                           "type": "object",
                           "properties": {
                             "requested": {
@@ -3077,7 +3097,7 @@
                                 "xhigh",
                                 "max"
                               ],
-                              "description": "The effort the proxy asked pi to run the model at: `requested` when the model supports it, else the nearest level it does. pi's adapter may still translate it for the provider."
+                              "description": "The effort the proxy asked pi to run the model at: the alias target's when it sets one (#230), else `requested` when the model supports it, else the nearest level it does. pi's adapter may still translate it for the provider."
                             }
                           },
                           "required": [
@@ -3099,6 +3119,19 @@
                               "login": {
                                 "description": "The login tried (`anthropic`, `anthropic-2`), when the model has more than one (#227). Absent otherwise.",
                                 "type": "string"
+                              },
+                              "reasoning_effort": {
+                                "description": "The effort the alias's target runs it at (#230), replacing the request's. Absent when the target sets none.",
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
                               },
                               "reason": {
                                 "type": "string",

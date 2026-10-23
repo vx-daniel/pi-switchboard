@@ -10,7 +10,7 @@
  * - Resolution: public ID, canonical fallback, hidden model rejection
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
+import { type Api, getSupportedThinkingLevels, type Model } from '@earendil-works/pi-ai'
 import type { ModelExposureConfig } from '@proxy/openai/model-exposure'
 import { computeModelExposure, resolveExposedModel } from '@proxy/openai/model-exposure'
 import { describe, expect, test } from 'vite-plus/test'
@@ -71,7 +71,7 @@ function expose(
   models: readonly Model<Api>[],
   config: ModelExposureConfig
 ): ReturnType<typeof computeModelExposure> {
-  return computeModelExposure(models, config)
+  return computeModelExposure(models, config, getSupportedThinkingLevels)
 }
 
 // ---------------------------------------------------------------------------

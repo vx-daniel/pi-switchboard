@@ -382,7 +382,7 @@ Most clients only let you pick a model name, so an alias is the routing control 
 ```
 
 - **Request it like a model.** `"model": "coding"` is answered by `anthropic/claude-opus-5-5`. The response's `model` is the target's canonical ID, so you see which model answered, and `x_pi.alias` is `coding`, in a non-streamed response and in every stream chunk. The request log line names the alias too.
-- **Listed beside the models.** `coding` appears in `GET /v1/models` (with the target's provider as `owned_by`), in `GET /v1/models/coding`, and in `GET /v1/switchboard/models` with the target's `reasoning_efforts`.
+- **Listed beside the models.** `coding` appears in `GET /v1/models` (with the target's provider as `owned_by`), in `GET /v1/models/coding`, and in `GET /v1/switchboard/models` with the target's `reasoning_efforts` (or the one effort the alias sets, [below](#reasoning-effort-per-alias)).
 - **Only while its target is exposed.** An alias never reaches a model the exposure config hides: leave the target out of `enabledModels` (or `customModels`) and the alias disappears too. `/healthz/models` then lists it as `target-not-exposed`.
 - **Never shadows a model.** An alias named like an exposed model's public or canonical ID is ignored, and the model keeps its name. `/healthz/models` answers `503` and lists it as `shadows-model`, and the proxy logs a warning. Rename the alias.
 - **Used as written.** Names and targets are not trimmed or normalized; a mistyped target matches no model. An entry with an empty name or target is dropped with the config warning.
@@ -416,6 +416,30 @@ An alias can name several models, tried in order, and the failures that move to 
 - **No fallback with your own key.** A request with `X-Switchboard-Upstream-Api-Key` runs on the first target only: the key is one provider's.
 - **No opt-out per request.** To avoid a chain, name the model directly (its canonical ID); for a shorter chain, define another alias.
 - **Timeouts add up.** The upstream idle timeout applies to each attempt, so a three-model chain can wait up to three timeouts before failing.
+
+#### Reasoning effort per alias
+
+A team picks a model by job, and the job settles how hard it thinks as well: a reviewer is Opus at `high`, a builder Sonnet at `medium`. A target can set the effort it runs at, as `{ "model", "reasoningEffort" }`, alone or as an entry of `targets`:
+
+```json
+{ "aliases": {
+  "reviewer": { "model": "anthropic/claude-opus-5-5", "reasoningEffort": "high" },
+  "builder": { "model": "anthropic/claude-sonnet-5-5", "reasoningEffort": "medium" },
+  "builder-high": {
+    "targets": [
+      { "model": "anthropic/claude-opus-5-5", "reasoningEffort": "high" },
+      { "model": "anthropic/claude-sonnet-5-5", "reasoningEffort": "high" }
+    ],
+    "fallbackOn": ["rate_limit", "unavailable"]
+  }
+} }
+```
+
+- **The alias's effort wins.** A request naming `reviewer` runs Opus at `high`, whatever `reasoning_effort` it sent. Each target of a chain runs at its own effort, because effort ladders differ by model. A target written as a plain ID keeps the request's effort, clamped as for a model named directly.
+- **Reported.** The response carries `x_pi.reasoning_effort: { "requested": "low", "applied": "high" }`, in the body and every stream chunk; `requested` is `null` when the request sent none. Each `x_pi.attempts` entry carries the `reasoning_effort` its target set. The request log line adds `reasoningEffort` and `aliasEffort`, and replacing a different value the client sent is logged at `info` the first time per alias, then at `debug`.
+- **An effort the model doesn't support is a mistake in the config, not a clamp.** That target is left out: `/healthz/models` answers `503` and lists it as `effort-unsupported`, and the proxy logs a warning. A chain keeps its other targets, and the alias is dropped only when none is left. `GET /v1/switchboard/models` lists each model's supported efforts.
+- **Listed as fixed.** In `GET /v1/switchboard/models`, such an alias's `reasoning_efforts` is just its effort, and `reasoning_effort_fixed` is `true`.
+- **Names.** These examples use lowercase kebab-case; the config takes any name exactly as written.
 
 #### Cooldowns
 
