@@ -9,6 +9,10 @@
  * (`test/fixtures/agent-dir.ts`); `test/conformance` (the `live` project) is the only place that
  * uses a real login.
  *
+ * Nor may one reach the network: a call to anything but this machine fails at once. pi refreshes
+ * provider catalogs from `pi.dev` after a login, which made a test's time depend on pi.dev's
+ * latency; offline, pi keeps its built-in catalog.
+ *
  * @packageDocumentation
  */
 
@@ -38,6 +42,23 @@ for (const variableName of Object.keys(process.env)) {
 /** The empty agent directory pi is pointed at; deleted after the file's tests. */
 const emptyAgentDir = mkdtempSync(join(tmpdir(), 'pi-proxy-offline-'))
 process.env.PI_CODING_AGENT_DIR = emptyAgentDir
+
+/** Hosts an offline test may reach: the mock provider, the recorder, the proxy itself. */
+const LOOPBACK: Readonly<Record<string, true>> = {
+  '127.0.0.1': true,
+  'localhost': true,
+  '[::1]': true,
+  '::1': true
+}
+
+/** The fetch the offline guard passes loopback calls to. */
+const realFetch = globalThis.fetch
+globalThis.fetch = (input, init) => {
+  const url = new URL(input instanceof Request ? input.url : String(input))
+  return LOOPBACK[url.hostname] === true
+    ? realFetch(input, init)
+    : Promise.reject(new TypeError(`offline test: no network access to ${url.hostname}`))
+}
 
 afterAll(() => {
   rmSync(emptyAgentDir, { recursive: true, force: true })
