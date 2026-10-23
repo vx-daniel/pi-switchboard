@@ -78,7 +78,7 @@ pi-switchboard --version
 pi-switchboard tui            # takes the same flags as pi-switchboard
 ```
 
-`pi-switchboard tui` runs the proxy with a full-screen console. Quitting it (`q` or Ctrl+C) stops the proxy. It needs a terminal; from a script or a service, run `pi-switchboard` without `tui`. `←` `→` or `Tab` move between the views (`1` `2` `3` jump to one), and the footer lists the keys of the view you are on.
+`pi-switchboard tui` runs the proxy with a full-screen console. Quitting it (`q` or Ctrl+C) stops the proxy. It needs a terminal; from a script or a service, run `pi-switchboard` without `tui`. `←` `→` or `Tab` move between the views (`1` to `4` jump to one), and the footer lists the keys of the view you are on.
 
 - **Logs (`1`).** The live log, redacted as on stderr, in a narrower pretty layout than the CLI's: the time only and a shorter category, so the message has room. A line wider than the terminal wraps. It follows new lines; the mouse wheel or `↑` `↓` `PgUp` `PgDn` scroll back, `End` follows again. The console keeps the last 5000 lines.
 - **Accounts (`2`).** Each provider pi has a credential for: account or API key, its label, where pi found it, how many of its models are available, and the share used of each quota window it reports (`5h 12% 7d 47%`; red with `below reserve` under its [reserve](#quota)). `↑` `↓` select a provider and `Enter` opens what you can do with it: verify the logins (which may refresh an account's token), log in again or enter a new API key, set a label, or log out. The last row, **+ Log in to a provider…**, opens pi's login list. `v` verifies every login from anywhere in the view.
@@ -90,6 +90,7 @@ pi-switchboard tui            # takes the same flags as pi-switchboard
   - **ERRORS:** failed attempts by failure class, and rejected requests by HTTP status.
 
   It covers every proxy that writes to the same agent dir, and reads the file again every 5 seconds; the proxy writes it every 5 seconds. With stats off (`--no-stats`), or a file that can't be opened or read, the view shows the totals per alias and served model since the proxy started instead (#70), counted in memory, and says why.
+- **Models (`4`).** The exposed models, with their provider, the reasoning efforts each supports and any cooldown, then every [alias](#aliases) with its targets, each target's effort, `fallbackOn`, and in red why the proxy leaves it or a target out (`target-not-exposed`, `shadows-model`, `effort-unsupported`). `↑` `↓` select a row and `Enter` acts on it: on an alias, a menu to rename it, edit its targets and their efforts (add, set the effort, move up or down, remove), set the failures it falls back on, or delete it; on a model, or on the last row, **+ New alias…**, a new alias. Targets are picked from the exposed models and efforts from the model's own list, and a name with whitespace, one taken by a model or another alias, or an empty one is refused with the reason. Every change is written to `proxy-config.json` at once and used by the next request, with no restart.
 - **Status line.** The address (`host:port`, without `http://`, to fit a narrow terminal), whether proxy auth is on, how many models are exposed and available (`26/26 exposed`), active cooldowns, and a `models.json` error if there is one. With the sidebar shown, the header keeps only the version and address and the rest moves to the sidebar.
 - **Sidebar.** On a terminal 100 columns or wider, a panel on the right shows the proxy at a glance beside any view, redrawn every second; `s` hides it and shows it again:
   - **PROXY:** address, proxy auth, uptime, open client connections, exposed and available models, how many cooldowns are active, and a `models.json` error.
@@ -386,7 +387,7 @@ Most clients only let you pick a model name, so an alias is the routing control 
 - **Only while its target is exposed.** An alias never reaches a model the exposure config hides: leave the target out of `enabledModels` (or `customModels`) and the alias disappears too. `/healthz/models` then lists it as `target-not-exposed`.
 - **Never shadows a model.** An alias named like an exposed model's public or canonical ID is ignored, and the model keeps its name. `/healthz/models` answers `503` and lists it as `shadows-model`, and the proxy logs a warning. Rename the alias.
 - **Used as written.** Names and targets are not trimmed or normalized; a mistyped target matches no model. An entry with an empty name or target is dropped with the config warning.
-- **In pi,** `/proxy show` lists the aliases and any left out. Editing them in the settings panel can come later.
+- **Edited in the console.** `pi-switchboard tui`'s Models view (`4`) creates, edits and deletes aliases ([above](#the-console-logs-logins-and-status-at-a-terminal)). **In pi,** `/proxy show` lists the aliases and any left out; editing them in pi's settings panel can come later.
 
 #### Fallback chains
 

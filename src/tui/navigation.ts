@@ -9,7 +9,7 @@ import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import { activeTab, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */
-export const VIEWS = ['logs', 'accounts', 'stats'] as const
+export const VIEWS = ['logs', 'accounts', 'stats', 'models'] as const
 
 /** One of the console's views. */
 export type View = (typeof VIEWS)[number]
@@ -87,7 +87,8 @@ export function tabsLine(view: View): string {
   const tabs: readonly (readonly [View, string])[] = [
     ['logs', ' 1 Logs '],
     ['accounts', ' 2 Accounts '],
-    ['stats', ' 3 Stats ']
+    ['stats', ' 3 Stats '],
+    ['models', ' 4 Models ']
   ]
   const shown = tabs.map(([tab, label]) => (tab === view ? activeTab(label) : label))
   return ` ${shown.join(' ')}`
@@ -121,6 +122,13 @@ const FOOTER: Readonly<Record<View, readonly string[]>> = {
     't today',
     'w week',
     'a all 30 days',
+    'p proxy auth'
+  ],
+  models: [
+    'q quit (stops the proxy)',
+    '←→ views',
+    '↑↓ select',
+    'Enter edit or add an alias',
     'p proxy auth'
   ]
 }

@@ -26,8 +26,8 @@ import {
 } from '@earendil-works/pi-tui'
 import type { ServerType } from '@hono/node-server'
 import type { ServerConfig } from '@proxy/config/env'
-import type { LoginLabels, Reserve } from '@proxy/config/schema'
-import { computeModelExposure } from '@proxy/openai/model-exposure'
+import type { AliasTarget, LoginLabels, Reserve } from '@proxy/config/schema'
+import { computeModelExposure, type ModelExposureResult } from '@proxy/openai/model-exposure'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
 import { providerQuota } from '@proxy/pi/quota'
 import {
@@ -49,10 +49,12 @@ import { listen } from '@proxy/server/startup'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { accountRows } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
+import { openSelectedModelsItem } from '@proxy/tui/console-models'
 import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
 import { loginLabels } from '@proxy/tui/login'
+import { modelsItems, modelsRows, modelsViewData } from '@proxy/tui/models-view'
 import { footerLine, moveSelection, stepView, tabsLine, type View } from '@proxy/tui/navigation'
 import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
 import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
@@ -82,6 +84,10 @@ interface Status {
   readonly reserve: Reserve
   /** Provider -> the label the operator gave the login (`labels`). */
   readonly labels: LoginLabels
+  /** The exposure the Models view lists and the alias editor checks names against (#230). */
+  readonly exposure: ModelExposureResult | undefined
+  /** The configured aliases, exposed or not. */
+  readonly aliases: Readonly<Record<string, AliasTarget>>
 }
 
 /** The console's state, which every render reads. */
@@ -91,6 +97,8 @@ interface ConsoleState extends RefreshState<Status> {
   logView: LogViewport
   /** The selected row of the accounts view; the row after the accounts opens the login. */
   selected: number
+  /** The selected row of the Models view: a model, an alias, or the new-alias row (#230). */
+  modelsSelected: number
   /** Open client connections, counted every tick; `undefined` before the first count. */
   connections: number | undefined
   /** Whether the operator hid the sidebar (`s`). */
@@ -136,7 +144,9 @@ async function readStatus(): Promise<Status> {
     cooldowns: activeCooldowns().length,
     modelsJsonError: getModelsJsonError(),
     reserve: config.reserve ?? {},
-    labels: loginLabels()
+    labels: loginLabels(),
+    exposure: exposure.ok ? exposure : undefined,
+    aliases: config.aliases
   }
 }
 
@@ -194,6 +204,18 @@ function accountsViewRows(state: ConsoleState, height: number): string[] {
 }
 
 /**
+ * Renders the Models view from the console's state.
+ *
+ * @param state - the console's state: the last exposure and aliases read, and the selected row
+ * @param height - rows available
+ * @returns the rows
+ */
+function modelsViewRows(state: ConsoleState, height: number): string[] {
+  const data = modelsViewData(state.status?.exposure, state.status?.aliases)
+  return modelsRows({ ...data, selected: state.modelsSelected }, height)
+}
+
+/**
  * Renders the current view's body.
  *
  * @param context - the console
@@ -209,6 +231,7 @@ function viewRows(
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size)
   if (state.view === 'accounts') return accountsViewRows(state, size.height)
+  if (state.view === 'models') return modelsViewRows(state, size.height)
   return context.statsView.rows(state.statsWindow, size)
 }
 
@@ -315,6 +338,18 @@ function createRootView(
 }
 
 /**
+ * Moves the selection in the Models view, stopping at its ends.
+ *
+ * @param state - the console's state: the last status read and the selected row
+ * @param step - rows to move: negative moves up
+ * @returns the row moved to
+ */
+function moveModelsSelection(state: ConsoleState, step: number): number {
+  const items = modelsItems(modelsViewData(state.status?.exposure, state.status?.aliases))
+  return moveSelection(state.modelsSelected, items.length - 1, step)
+}
+
+/**
  * Moves within the current view: scrolls the logs, or moves the selection in the accounts.
  *
  * @param context - the console
@@ -325,7 +360,7 @@ function moveWithin(context: ConsoleContext, step: number): void {
   if (state.view === 'logs') state.logView = scrollLogView(state.logView, context.logs, -step)
   else if (state.view === 'accounts') {
     state.selected = moveSelection(state.selected, state.accounts.length, step)
-  }
+  } else if (state.view === 'models') state.modelsSelected = moveModelsSelection(state, step)
 }
 
 /**
@@ -346,6 +381,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['1', () => (state.view = 'logs')],
     ['2', () => (state.view = 'accounts')],
     ['3', () => (state.view = 'stats')],
+    ['4', () => (state.view = 'models')],
     [Key.tab, () => (state.view = stepView(state.view, 1))],
     [Key.right, () => (state.view = stepView(state.view, 1))],
     [Key.shift('tab'), () => (state.view = stepView(state.view, -1))],
@@ -354,6 +390,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
       Key.enter,
       () => {
         if (state.view === 'accounts') openSelected(context)
+        else if (state.view === 'models') openSelectedModelsItem(context)
       }
     ],
     ['n', () => openLogin(context)],
@@ -488,6 +525,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     verification: new Map(),
     credentialChanges: new Map(),
     selected: 0,
+    modelsSelected: 0,
     connections: undefined,
     sidebarHidden: false,
     statsWindow: 'today'
