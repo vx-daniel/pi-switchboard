@@ -151,12 +151,14 @@ const piModelCapabilitiesSchema = z
       description:
         'The `reasoning_effort` values the model runs at as asked, lowest first. Any other value ' +
         'is accepted and clamped to the nearest level the model supports. `["none"]` for a ' +
-        "model without reasoning. For an alias that sets its target's effort, that effort alone."
+        'model without reasoning. For an alias whose first target sets its effort, that effort ' +
+        'alone.'
     }),
     reasoning_effort_fixed: z.boolean().meta({
       description:
-        "True for an alias that sets its target's effort (#230): a request's `reasoning_effort` " +
-        'is replaced by the one listed. False otherwise.'
+        "True for an alias whose first target sets its effort (#230): a request's " +
+        '`reasoning_effort` is replaced by the one listed. A fallback chain lists its first ' +
+        "target; a later target runs at its own effort, or the request's. False otherwise."
     }),
     input: z.array(z.enum(['text', 'image'])).meta({ description: 'What the model accepts.' }),
     context_window: z.int().nonnegative().meta({ description: 'The context window, in tokens.' }),

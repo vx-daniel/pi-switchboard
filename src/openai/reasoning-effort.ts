@@ -6,8 +6,9 @@
  * Pi: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
  *
  * "none" is pi's "off"; every other effort is the pi level of the same name
- * (`src/openai/effort-levels.ts`). A model supports a subset of the levels (`getSupportedThinkingLevels`): only "off" without reasoning, no "off" for
- * a model that always reasons, "xhigh" and "max" only when its definition maps them.
+ * (`src/openai/effort-levels.ts`). A model supports a subset of the levels
+ * (`getSupportedThinkingLevels`): only "off" without reasoning, no "off" for a model that always
+ * reasons, "xhigh" and "max" only when its definition maps them.
  *
  * @packageDocumentation
  */

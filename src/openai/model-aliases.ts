@@ -78,6 +78,7 @@ function warnOnce(
     .filter((diagnostic) => diagnostic.code === code)
     .map((diagnostic) => diagnostic.alias)
   const key = JSON.stringify(named)
+  // Nothing warned yet is the empty set; a set that clears and comes back is warned again.
   if (key === (lastWarned[code] ?? '[]')) return
   lastWarned[code] = key
   if (named.length === 0) return
