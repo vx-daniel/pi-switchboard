@@ -783,7 +783,7 @@ Reason:
 - `tool_choice`
 - assistant `tool_calls`
 - `tool` role messages
-- `reasoning_effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`): an effort the model does not support is clamped with pi's `clampThinkingLevel` (nearest supported level above, else below) and logged at debug, not rejected (#43). `max` is pi's `max` level (#132); on a model without it, it is the model's highest level. A client that sends one effort to every model must keep working when the model changes; `GET /v1/switchboard/models` lists each model's supported efforts
+- `reasoning_effort` (`none`, `minimal`, `low`, `medium`, `high`, `xhigh`, `max`): an effort the model does not support is clamped with pi's `clampThinkingLevel` (nearest supported level above, else below), not rejected (#43). `max` is pi's `max` level (#132); on a model without it, it is the model's highest level. A client that sends one effort to every model must keep working when the model changes; `GET /v1/switchboard/models` lists each model's supported efforts. The response reports the clamp as `x_pi.reasoning_effort: { requested, applied }`, in the body and every chunk, whenever the request set `reasoning_effort`; `applied` is computed for the model that answered (after an alias's fallback, the later one) and is the level asked of pi, which a pi adapter may still translate. The first clamp per model (`provider/id`) is logged at info, later ones at debug, as dropped temperatures are (#175)
 - `response_format` (`text`, `json_object`, `json_schema`)
 - `top_p`
 - `frequency_penalty`

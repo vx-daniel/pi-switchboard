@@ -58,6 +58,45 @@ export function thinkingLevelFor(model: Model<Api>, effort: ReasoningEffort): Ef
   return { level, clamped: level !== asked }
 }
 
+/** The OpenAI effort each pi thinking level is reported as: the inverse of the map above. */
+const EFFORT_BY_THINKING_LEVEL: Readonly<Record<ModelThinkingLevel, ReasoningEffort>> = {
+  off: 'none',
+  minimal: 'minimal',
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+  xhigh: 'xhigh',
+  max: 'max'
+}
+
+/**
+ * What a request asked for and what it ran at, as `x_pi.reasoning_effort` reports it (#175).
+ *
+ * @remarks
+ * `applied` is the level the proxy asks pi for, in OpenAI's vocabulary. A pi adapter can still
+ * translate it for the provider (a model's `thinkingLevelMap` may send `max` as `xhigh`).
+ */
+export interface EffortReport {
+  /** The request's `reasoning_effort`, or `null` when it set none. */
+  readonly requested: ReasoningEffort | null
+  /** The effort the model runs at: `requested` when it supports it, else the clamped level. */
+  readonly applied: ReasoningEffort
+}
+
+/**
+ * Reports the effort a request runs at on a model.
+ *
+ * @param model - the pi model the request runs on
+ * @param effort - the request's `reasoning_effort`
+ * @returns what was asked, and what the model runs at
+ */
+export function effortReport(model: Model<Api>, effort: ReasoningEffort): EffortReport {
+  return {
+    requested: effort,
+    applied: EFFORT_BY_THINKING_LEVEL[thinkingLevelFor(model, effort).level]
+  }
+}
+
 /**
  * Lists the efforts `model` runs at as asked, without clamping.
  *

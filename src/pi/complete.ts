@@ -100,13 +100,20 @@ function combineSignals(
 }
 
 /**
+ * Models, as `provider/id`, a clamped `reasoning_effort` has been logged for in this process;
+ * each is logged at info once (#175), as dropped temperatures are.
+ */
+const modelsWithClampedEffort = new Set<string>()
+
+/**
  * Converts `reasoning_effort` to the thinking level `model` runs at (`thinkingLevelFor`).
  *
  * @remarks
  * pi has no "off" option: an absent `reasoning` is off. pi's adapters mostly clamp too, but
  * Anthropic's does not: without this, "none" on a model that always reasons would get the
  * provider's default effort (#41), and an unsupported level the adapter's own fallback (#43). A
- * clamped level is logged at debug.
+ * clamped level is logged at info the first time per model, then at debug; the client sees it in
+ * `x_pi.reasoning_effort`.
  *
  * @param model - the pi model
  * @param effort - the request's `reasoning_effort`
@@ -118,15 +125,19 @@ function reasoningLevel(
 ): SimpleStreamOptions['reasoning'] {
   const { level, clamped } = thinkingLevelFor(model, effort)
   if (clamped) {
-    completeLogger.debug(
-      'Clamped reasoning_effort {reasoningEffort} to thinking level {thinkingLevel} for {modelId}',
-      () => ({
-        reasoningEffort: effort,
-        thinkingLevel: level,
-        modelId: model.id,
-        supportedEfforts: supportedReasoningEfforts(model)
-      })
-    )
+    const key = `${model.provider}/${model.id}`
+    const firstForModel = !modelsWithClampedEffort.has(key)
+    modelsWithClampedEffort.add(key)
+    const message =
+      'Clamped reasoning_effort {reasoningEffort} to thinking level {thinkingLevel} for {modelId}'
+    const properties = {
+      reasoningEffort: effort,
+      thinkingLevel: level,
+      modelId: model.id,
+      supportedEfforts: supportedReasoningEfforts(model)
+    }
+    if (firstForModel) completeLogger.info(message, properties)
+    else completeLogger.debug(message, properties)
   }
   return level === 'off' ? undefined : level
 }

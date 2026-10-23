@@ -2806,6 +2806,50 @@
                           "description": "The login that answered (`anthropic`, `anthropic-2`), when the model has more than one (#227); absent otherwise.",
                           "type": "string"
                         },
+                        "reasoning_effort": {
+                          "description": "What the request asked for and what the model that answered runs at (#175); present only when the request set `reasoning_effort`.",
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "minimal",
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The `reasoning_effort` the request sent, or null when it sent none."
+                            },
+                            "applied": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "minimal",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max"
+                              ],
+                              "description": "The effort the proxy asked pi to run the model at: `requested` when the model supports it, else the nearest level it does. pi's adapter may still translate it for the provider."
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "applied"
+                          ],
+                          "additionalProperties": false
+                        },
                         "attempts": {
                           "description": "The models an alias tried before the one that answered, in order, and why each failed (#67); present only when one did.",
                           "type": "array",
@@ -2997,6 +3041,50 @@
                         "login": {
                           "description": "The login that answered (`anthropic`, `anthropic-2`), when the model has more than one (#227); absent otherwise.",
                           "type": "string"
+                        },
+                        "reasoning_effort": {
+                          "description": "What the request asked for and what the model that answered runs at (#175); present only when the request set `reasoning_effort`.",
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "minimal",
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The `reasoning_effort` the request sent, or null when it sent none."
+                            },
+                            "applied": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "minimal",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max"
+                              ],
+                              "description": "The effort the proxy asked pi to run the model at: `requested` when the model supports it, else the nearest level it does. pi's adapter may still translate it for the provider."
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "applied"
+                          ],
+                          "additionalProperties": false
                         },
                         "attempts": {
                           "description": "The models an alias tried before the one that answered, in order, and why each failed (#67); present only when one did.",
