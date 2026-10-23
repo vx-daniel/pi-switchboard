@@ -1,7 +1,7 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { stripTerminalSequences } from '@earendil-works/pi-tui'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
-import { modelsRows, type ModelsView } from '@proxy/tui/models-view'
+import { modelsItemAt, modelsRows, type ModelsView, modelsViewData } from '@proxy/tui/models-view'
 import { describe, expect, test } from 'vite-plus/test'
 
 /**
@@ -82,6 +82,23 @@ describe('the console Models view', () => {
       ) as unknown,
       '      target-not-exposed: not exposed',
       '  + New alias…'
+    ])
+  })
+
+  // Catches a selection left past the end after a delete opening nothing, or the wrong row.
+  test('a selection past the end acts on the new-alias row', () => {
+    const data = { models: [exposed('m0')], aliases: { only: 'alpha/m0' }, diagnostics: [] }
+
+    expect(modelsItemAt(data, 1)).toMatchObject({ kind: 'alias', name: 'only' })
+    expect(modelsItemAt(data, 9)).toEqual({ kind: 'new' })
+  })
+
+  // Catches an invalid exposure config shown as an empty list, which looks like no models at all.
+  test('says why when the exposure config is invalid', () => {
+    const data = modelsViewData({ exposure: undefined, aliases: {}, exposed: 'duplicate prefix' })
+
+    expect(rendered({ ...data, selected: 0 }, 5)).toEqual([
+      '  Models unavailable: duplicate prefix'
     ])
   })
 })

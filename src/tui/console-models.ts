@@ -66,6 +66,19 @@ export interface AliasEditor {
   refresh(): Promise<void>
 }
 
+/** What the editor says when `proxy-config.json` could not be written; the log says why. */
+const NOT_WRITTEN = 'Could not write proxy-config.json; nothing changed. The log says why.'
+
+/**
+ * Tells the operator something that needs no answer, as a selector with one option.
+ *
+ * @param editor - the dialogs
+ * @param message - what to say
+ */
+async function notify(editor: AliasEditor, message: string): Promise<void> {
+  await editor.screens.select(message, ['OK'])
+}
+
 /**
  * Asks for an alias name until it is one the proxy accepts, showing why the last was refused.
  *
@@ -108,8 +121,15 @@ async function pickTarget(
   const chosen = model ?? (await editor.screens.select(title, ids))
   if (chosen === undefined) return undefined
   const exposed = editor.exposure.byCanonicalId.get(chosen)
-  // A target that is not exposed has no ladder to offer: only the request's effort is safe.
-  const efforts = exposed === undefined ? [] : supportedReasoningEfforts(exposed.model)
+  if (exposed === undefined) {
+    // No ladder to check an effort against; changing it would only clear the one set.
+    await notify(
+      editor,
+      `${chosen} is not exposed, so its effort can't be checked; it is unchanged.`
+    )
+    return undefined
+  }
+  const efforts = supportedReasoningEfforts(exposed.model)
   const label = await editor.screens.select(`Reasoning effort for ${chosen}`, [
     REQUEST_EFFORT,
     ...efforts
@@ -120,7 +140,7 @@ async function pickTarget(
 }
 
 /**
- * Saves an alias, then reads the status again.
+ * Saves an alias, then reads the status again; says so when the file could not be written.
  *
  * @param editor - the editor
  * @param name - the alias
@@ -133,8 +153,8 @@ async function save(
   draft: AliasDraft,
   previousName?: string
 ): Promise<void> {
-  saveAlias(name, draft, previousName)
-  await editor.refresh()
+  if (saveAlias(name, draft, previousName)) await editor.refresh()
+  else await notify(editor, NOT_WRITTEN)
 }
 
 /**
@@ -291,7 +311,7 @@ async function rename(editor: AliasEditor, name: string, draft: AliasDraft): Pro
 }
 
 /**
- * Deletes an alias once the operator confirms.
+ * Deletes an alias once the operator confirms; says so when the file could not be written.
  *
  * @param editor - the editor
  * @param name - the alias
@@ -299,8 +319,8 @@ async function rename(editor: AliasEditor, name: string, draft: AliasDraft): Pro
 async function confirmDelete(editor: AliasEditor, name: string): Promise<void> {
   const sure = await editor.screens.select(`Delete the alias ${name}?`, ['Delete it', 'Keep it'])
   if (sure !== 'Delete it') return
-  deleteAlias(name)
-  await editor.refresh()
+  if (deleteAlias(name)) await editor.refresh()
+  else await notify(editor, NOT_WRITTEN)
 }
 
 /** An alias's menu: each entry and what it does. */
@@ -338,7 +358,7 @@ export async function runModelsItem(editor: AliasEditor, item: ModelsItem): Prom
 export function openSelectedModelsItem(context: ConsoleContext): void {
   const { status, modelsSelected } = context.state
   if (status?.exposure === undefined) return
-  const item = modelsItemAt(modelsViewData(status.exposure, status.aliases), modelsSelected)
+  const item = modelsItemAt(modelsViewData(status), modelsSelected)
   const editor: AliasEditor = {
     screens: {
       select: (title, labels) => pickLabel(context.tui, title, labels),

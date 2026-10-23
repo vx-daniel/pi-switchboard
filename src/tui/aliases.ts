@@ -107,7 +107,8 @@ export function saveAlias(name: string, draft: AliasDraft, previousName?: string
   const target = targetOf(draft)
   const existing = previousName ?? name
   const written = writeAliases((aliases) => {
-    if (!(existing in aliases)) return { ...aliases, [name]: target }
+    // Own keys only: `in` would find `constructor` on any object, and the save would write nothing.
+    if (!Object.hasOwn(aliases, existing)) return { ...aliases, [name]: target }
     // Rebuilt in order, so a renamed or edited alias keeps its place in the file and the lists.
     return Object.fromEntries(
       Object.entries(aliases).map(([alias, current]) =>

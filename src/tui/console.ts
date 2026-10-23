@@ -211,8 +211,7 @@ function accountsViewRows(state: ConsoleState, height: number): string[] {
  * @returns the rows
  */
 function modelsViewRows(state: ConsoleState, height: number): string[] {
-  const data = modelsViewData(state.status?.exposure, state.status?.aliases)
-  return modelsRows({ ...data, selected: state.modelsSelected }, height)
+  return modelsRows({ ...modelsViewData(state.status), selected: state.modelsSelected }, height)
 }
 
 /**
@@ -345,7 +344,7 @@ function createRootView(
  * @returns the row moved to
  */
 function moveModelsSelection(state: ConsoleState, step: number): number {
-  const items = modelsItems(modelsViewData(state.status?.exposure, state.status?.aliases))
+  const items = modelsItems(modelsViewData(state.status))
   return moveSelection(state.modelsSelected, items.length - 1, step)
 }
 

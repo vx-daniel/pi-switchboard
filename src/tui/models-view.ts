@@ -33,6 +33,8 @@ export interface ModelsData {
   readonly aliases: Readonly<Record<string, AliasTarget>>
   /** Why aliases or their targets are left out. */
   readonly diagnostics: readonly AliasDiagnostic[]
+  /** Why nothing is listed: the exposure config's error. */
+  readonly unavailable?: string
 }
 
 /** What the Models view shows. */
@@ -41,22 +43,30 @@ export interface ModelsView extends ModelsData {
   readonly selected: number
 }
 
+/** What the view reads from the console's last status. */
+export interface ModelsStatus {
+  /** The exposure last read; `undefined` with an invalid exposure config. */
+  readonly exposure: ModelExposureResult | undefined
+  /** The configured aliases. */
+  readonly aliases: Readonly<Record<string, AliasTarget>>
+  /** The exposed model count, or why the exposure config is invalid. */
+  readonly exposed: number | string
+}
+
 /**
  * Gathers what the view lists from the console's last status.
  *
- * @param exposure - the exposure last read, or `undefined` before the first read or with an
- *   invalid exposure config
- * @param aliases - the configured aliases, or `undefined` before the first read
- * @returns the models, the aliases and their diagnostics; none before the first read
+ * @param status - the last status read, or `undefined` before the first read
+ * @returns the models, the aliases and their diagnostics, and why there are none when the
+ *   exposure config is invalid; nothing before the first read
  */
-export function modelsViewData(
-  exposure: ModelExposureResult | undefined,
-  aliases: Readonly<Record<string, AliasTarget>> | undefined
-): ModelsData {
+export function modelsViewData(status: ModelsStatus | undefined): ModelsData {
+  const exposed = status?.exposed
   return {
-    models: exposure?.models ?? [],
-    aliases: aliases ?? {},
-    diagnostics: exposure?.aliasDiagnostics ?? []
+    models: status?.exposure?.models ?? [],
+    aliases: status?.aliases ?? {},
+    diagnostics: status?.exposure?.aliasDiagnostics ?? [],
+    ...(typeof exposed === 'string' ? { unavailable: exposed } : {})
   }
 }
 
@@ -162,9 +172,12 @@ function selectable(text: string, selected: boolean): string {
  * @param view - the models, the aliases with their diagnostics, and the selection
  * @param height - rows available
  * @param now - the time now, for cooldowns
- * @returns the rows
+ * @returns the rows; one line saying why when the exposure config is invalid
  */
 export function modelsRows(view: ModelsView, height: number, now: number = Date.now()): string[] {
+  if (view.unavailable !== undefined) {
+    return [paint('error', `  Models unavailable: ${view.unavailable}`)]
+  }
   const items = modelsItems(view)
   const current = Math.min(Math.max(view.selected, 0), items.length - 1)
   const rows: string[] = []

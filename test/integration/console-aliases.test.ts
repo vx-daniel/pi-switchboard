@@ -5,7 +5,7 @@
  * deployed (its config file read per request) against the mock provider.
  */
 
-import { readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
@@ -140,7 +140,7 @@ async function enterOn(
     aliases,
     refresh: () => Promise.resolve()
   }
-  const item = pick(modelsItems(modelsViewData(current, aliases)))
+  const item = pick(modelsItems(modelsViewData({ exposure: current, aliases, exposed: 0 })))
   if (item === undefined) throw new Error('No such row')
   await runModelsItem(editor, item)
   return seen
@@ -320,5 +320,59 @@ describe('the console alias editor', () => {
     await enterOn(aliasRow('drop'), ['Delete', 'Delete it'])
     expect(Object.keys(loadConfigFromFile().aliases)).toEqual(['keep'])
     expect((await ask('drop')).status).toBe(404)
+  })
+  // Catches a name that is a key every object has (`constructor`) taken for an existing alias:
+  // the save would rewrite nothing and still log that it saved.
+  test('an alias named like an object prototype key is saved', async () => {
+    setAliases({})
+
+    await enterOn(newRow, ['alpha/quick-mock', "The request's effort (not fixed)"], ['constructor'])
+
+    expect(loadConfigFromFile().aliases).toEqual({ constructor: 'alpha/quick-mock' })
+  })
+
+  // Catches a write that failed shown as a success: the view would refresh with nothing changed
+  // and no word why.
+  test('a config file that cannot be written is reported, and nothing is saved', async () => {
+    const path = join(agentDir.path, 'proxy-config.json')
+    rmSync(path)
+    // A directory where the file should be: reading falls back to the defaults, writing fails.
+    mkdirSync(path)
+    try {
+      const seen = await enterOn(newRow, ['alpha/quick-mock', 'low', 'OK'], ['reviewer'])
+
+      expect(seen.titles.at(-1)).toMatch(/^Could not write proxy-config\.json/u)
+    } finally {
+      rmSync(path, { recursive: true })
+    }
+  })
+
+  // Catches an effort silently cleared on a target that is not exposed, which has no ladder to
+  // pick from.
+  test("an unexposed target's effort is left as it is", async () => {
+    setAliases({
+      chain: {
+        targets: ['alpha/quick-mock', { model: 'alpha/gone', reasoningEffort: 'high' }],
+        fallbackOn: ['rate_limit']
+      }
+    })
+
+    const seen = await enterOn(aliasRow('chain'), [
+      'Targets and efforts',
+      '2. alpha/gone @high',
+      'Set the reasoning effort',
+      'OK',
+      'Done'
+    ])
+
+    expect(seen.titles).toContain(
+      "alpha/gone is not exposed, so its effort can't be checked; it is unchanged."
+    )
+    expect(loadConfigFromFile().aliases).toEqual({
+      chain: {
+        targets: ['alpha/quick-mock', { model: 'alpha/gone', reasoningEffort: 'high' }],
+        fallbackOn: ['rate_limit']
+      }
+    })
   })
 })
