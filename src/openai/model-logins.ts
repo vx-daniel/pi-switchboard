@@ -1,5 +1,5 @@
 /**
- * One exposed model, several logins (#227): a `{provider}-account-N` login's models are the base
+ * One exposed model, several logins (#227): a `{provider}-N` login's models are the base
  * provider's models under another credential, so they are not exposed as models of their own.
  * The base's model stands for all of them, and routing picks the login.
  *
@@ -7,7 +7,7 @@
  * `groupLogins` runs on pi's available models before exposure filters them: in `scoped` mode the
  * operator's `enabledModels` patterns name the base provider, and a login's models are matched
  * through it. A login whose base is not available (logged out of `anthropic`, still logged in to
- * `anthropic-account-2`) stands in for it, under the base's name.
+ * `anthropic-2`) stands in for it, under the base's name.
  *
  * @packageDocumentation
  */

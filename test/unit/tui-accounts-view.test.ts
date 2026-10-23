@@ -85,15 +85,15 @@ describe('the console Accounts view', () => {
   // the columns after it out of line.
   test('shows a login label in its own column, cut to the column', () => {
     const rows = rendered({
-      accounts: [account('anthropic'), account('anthropic-account-2')],
+      accounts: [account('anthropic'), account('anthropic-2')],
       selected: 0,
       reserve: {},
-      labels: { 'anthropic-account-2': 'work subscription' }
+      labels: { 'anthropic-2': 'work subscription' }
     })
     const loginColumn = (row: string): number => visibleWidth(row.slice(0, row.indexOf('API key')))
 
     expect(rows[1]).toMatch(/^› anthropic\s+API key/)
-    expect(rows[2]).toContain('anthropic-account-2    work subscr… API key')
+    expect(rows[2]).toContain('anthropic-2            work subscr… API key')
     expect(loginColumn(rows[1] ?? '')).toBe(loginColumn(rows[2] ?? ''))
   })
 })

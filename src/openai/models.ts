@@ -179,7 +179,7 @@ const piModelCapabilitiesSchema = z
         z.object({
           id: z.string().trim().meta({
             description:
-              'The login: the provider, or one of its extra logins (`anthropic-account-2`, #227).'
+              'The login: the provider, or one of its extra logins (`anthropic-2`, #227).'
           }),
           cooldown: cooldownSchema,
           quota: quotaSchema

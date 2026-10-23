@@ -1,5 +1,5 @@
 /**
- * Several logins per provider (#227), end to end: a stored `groq-account-2` credential gets its
+ * Several logins per provider (#227), end to end: a stored `groq-2` credential gets its
  * provider at startup, a copy of pi's built-in `groq` provider with its own credential in pi's
  * store. The model is listed once, under the base's name, and the proxy picks the login: the
  * second when the first is rate limited. The console adds and drops further slots. The proxy runs
@@ -75,11 +75,11 @@ beforeAll(async () => {
     modelsJson: {
       providers: {
         'groq': { baseUrl: `${mock.origin}/v1`, apiKey: FIRST_KEY },
-        'groq-account-2': { baseUrl: `${mock.origin}/v1` },
-        'groq-account-3': { baseUrl: `${mock.origin}/v1` }
+        'groq-2': { baseUrl: `${mock.origin}/v1` },
+        'groq-3': { baseUrl: `${mock.origin}/v1` }
       }
     },
-    authJson: { 'groq-account-2': { type: 'api_key', key: SECOND_KEY } }
+    authJson: { 'groq-2': { type: 'api_key', key: SECOND_KEY } }
   })
   setConfig({})
 })
@@ -151,9 +151,9 @@ describe('a second login', () => {
     )
     expect(ids).toContain(`groq:${MODEL}`)
     expect(ids.filter((ownedId) => ownedId.endsWith(`:${MODEL}`))).toHaveLength(1)
-    expect(ids.some((ownedId) => ownedId.includes('groq-account-2'))).toBe(false)
+    expect(ids.some((ownedId) => ownedId.includes('groq-2'))).toBe(false)
 
-    expect(await loginsOfModel()).toEqual(['groq', 'groq-account-2'])
+    expect(await loginsOfModel()).toEqual(['groq', 'groq-2'])
 
     const creds = await jsonBody(
       await createApp(testConfig(), fileConfigReader).request('/healthz/creds')
@@ -161,7 +161,7 @@ describe('a second login', () => {
     const providers = isRecord(creds) && Array.isArray(creds['providers']) ? creds['providers'] : []
     expect(
       providers.map((provider: unknown) => (isRecord(provider) ? provider['provider'] : undefined))
-    ).toEqual(expect.arrayContaining(['groq', 'groq-account-2']))
+    ).toEqual(expect.arrayContaining(['groq', 'groq-2']))
   })
 
   // Catches the second login sending the first login's key, the request not moving to it on the
@@ -175,7 +175,7 @@ describe('a second login', () => {
     expect(answer.body).toMatchObject({
       model: `groq/${MODEL}`,
       x_pi: {
-        login: 'groq-account-2',
+        login: 'groq-2',
         attempts: [{ model: `groq/${MODEL}`, login: 'groq', reason: 'rate_limit' }]
       }
     })
@@ -185,9 +185,7 @@ describe('a second login', () => {
     expect(activeCooldown({ provider: 'groq', canonicalId: `groq/${MODEL}` })?.provider).toBe(
       'groq'
     )
-    expect(
-      activeCooldown({ provider: 'groq-account-2', canonicalId: `groq/${MODEL}` })
-    ).toBeUndefined()
+    expect(activeCooldown({ provider: 'groq-2', canonicalId: `groq/${MODEL}` })).toBeUndefined()
   })
 
   // Catches a cooling login called again by the next request, or the skip hidden: the first login
@@ -199,7 +197,7 @@ describe('a second login', () => {
     expect(answer.upstreamKeys).toEqual([SECOND_KEY])
     expect(answer.body).toMatchObject({
       x_pi: {
-        login: 'groq-account-2',
+        login: 'groq-2',
         attempts: [{ model: `groq/${MODEL}`, login: 'groq', reason: 'rate_limit', skipped: true }]
       }
     })
@@ -221,7 +219,7 @@ describe('a second login', () => {
 
   // Catches the slot's ID still resolving as a model: a client picks models, never logins.
   test('is not a model a request can name', async () => {
-    expect((await ask(`groq-account-2/${MODEL}`)).status).toBe(404)
+    expect((await ask(`groq-2/${MODEL}`)).status).toBe(404)
   })
 
   // Catches the console offering no way to add a login: a logged-in provider's next free slot
@@ -230,10 +228,10 @@ describe('a second login', () => {
   test('the login list offers the next free slot of a logged-in provider only', () => {
     const options = loginOptions(getRuntime()).map((option) => `${option.id}: ${option.name}`)
 
-    expect(options).toContain('groq-account-2: Groq (account 2)')
-    expect(options).toContain('groq-account-3: Groq (account 3)')
-    expect(options.filter((option) => option.startsWith('groq-account-'))).toHaveLength(2)
-    expect(options.some((option) => option.includes('-account-2-account-'))).toBe(false)
+    expect(options).toContain('groq-2: Groq 2')
+    expect(options).toContain('groq-3: Groq 3')
+    expect(options.filter((option) => option.startsWith('groq-'))).toHaveLength(2)
+    expect(options.some((option) => option.includes('-2-'))).toBe(false)
     expect(options.some((option) => option.startsWith('anthropic-account-'))).toBe(false)
   })
 
@@ -248,16 +246,16 @@ describe('a second login', () => {
 
     await runLogin(
       getRuntime(),
-      { providerId: 'groq-account-3', type: 'api_key', deviceId: () => 'device' },
+      { providerId: 'groq-3', type: 'api_key', deviceId: () => 'device' },
       screens
     )
 
-    expect(await loginsOfModel()).toEqual(['groq', 'groq-account-2', 'groq-account-3'])
+    expect(await loginsOfModel()).toEqual(['groq', 'groq-2', 'groq-3'])
     const ids = (await listed('/v1/models')).map((model: unknown) =>
       isRecord(model) ? model['id'] : undefined
     )
     expect(ids.filter((modelId) => modelId === MODEL)).toHaveLength(1)
-    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-account-4')
+    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-4')
   })
 
   // Catches a cancelled login leaving an empty slot behind, which would then be listed as a
@@ -271,29 +269,29 @@ describe('a second login', () => {
     })
     const login = runLogin(
       getRuntime(),
-      { providerId: 'groq-account-4', type: 'api_key', deviceId: () => 'device' },
+      { providerId: 'groq-4', type: 'api_key', deviceId: () => 'device' },
       screens
     )
     cancel.abort()
 
     await expect(login).rejects.toThrow()
-    expect(getRuntime().getRegisteredNativeProvider('groq-account-4')).toBeUndefined()
-    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-account-4')
+    expect(getRuntime().getRegisteredNativeProvider('groq-4')).toBeUndefined()
+    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-4')
   })
 
   // Catches a logout that removes the credential but keeps the slot as a provider (it would stay
   // in the login list unconfigured, and the next login would skip its number) or keeps its label
   // (the next login under the ID, maybe another account, would wear it).
   test('logging out of a slot drops it and its label, and offers its number again', async () => {
-    saveLoginLabel('groq-account-3', 'third')
+    saveLoginLabel('groq-3', 'third')
 
-    await runLogout(getRuntime(), 'groq-account-3', new AbortController().signal)
+    await runLogout(getRuntime(), 'groq-3', new AbortController().signal)
 
-    expect(getRuntime().getRegisteredNativeProvider('groq-account-3')).toBeUndefined()
-    expect(loginLabels()).not.toHaveProperty('groq-account-3')
-    expect(await loginsOfModel()).toEqual(['groq', 'groq-account-2'])
+    expect(getRuntime().getRegisteredNativeProvider('groq-3')).toBeUndefined()
+    expect(loginLabels()).not.toHaveProperty('groq-3')
+    expect(await loginsOfModel()).toEqual(['groq', 'groq-2'])
     const options = loginOptions(getRuntime()).map((option) => option.id)
-    expect(options).toContain('groq-account-3')
-    expect(options).not.toContain('groq-account-4')
+    expect(options).toContain('groq-3')
+    expect(options).not.toContain('groq-4')
   })
 })

@@ -223,7 +223,7 @@ const ProxyConfigSchema = z.object({
   aliases: z.record(z.string().min(1), AliasTargetSchema).readonly(),
   /**
    * Provider -> a label the console shows beside it (#227): which account a login is, in your
-   * words (`{ "anthropic-account-2": "work" }`). Never sent anywhere.
+   * words (`{ "anthropic-2": "work" }`). Never sent anywhere.
    */
   labels: LabelsSchema,
   /** Lowest log level the proxy writes (LogTape levels). */

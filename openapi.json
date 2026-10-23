@@ -755,7 +755,7 @@
               "properties": {
                 "id": {
                   "type": "string",
-                  "description": "The login: the provider, or one of its extra logins (`anthropic-account-2`, #227)."
+                  "description": "The login: the provider, or one of its extra logins (`anthropic-2`, #227)."
                 },
                 "cooldown": {
                   "anyOf": [
@@ -2803,7 +2803,7 @@
                           "type": "string"
                         },
                         "login": {
-                          "description": "The login that answered (`anthropic`, `anthropic-account-2`), when the model has more than one (#227); absent otherwise.",
+                          "description": "The login that answered (`anthropic`, `anthropic-2`), when the model has more than one (#227); absent otherwise.",
                           "type": "string"
                         },
                         "attempts": {
@@ -2817,7 +2817,7 @@
                                 "description": "The canonical ID of the model."
                               },
                               "login": {
-                                "description": "The login tried (`anthropic`, `anthropic-account-2`), when the model has more than one (#227). Absent otherwise.",
+                                "description": "The login tried (`anthropic`, `anthropic-2`), when the model has more than one (#227). Absent otherwise.",
                                 "type": "string"
                               },
                               "reason": {
@@ -2995,7 +2995,7 @@
                           "type": "string"
                         },
                         "login": {
-                          "description": "The login that answered (`anthropic`, `anthropic-account-2`), when the model has more than one (#227); absent otherwise.",
+                          "description": "The login that answered (`anthropic`, `anthropic-2`), when the model has more than one (#227); absent otherwise.",
                           "type": "string"
                         },
                         "attempts": {
@@ -3009,7 +3009,7 @@
                                 "description": "The canonical ID of the model."
                               },
                               "login": {
-                                "description": "The login tried (`anthropic`, `anthropic-account-2`), when the model has more than one (#227). Absent otherwise.",
+                                "description": "The login tried (`anthropic`, `anthropic-2`), when the model has more than one (#227). Absent otherwise.",
                                 "type": "string"
                               },
                               "reason": {

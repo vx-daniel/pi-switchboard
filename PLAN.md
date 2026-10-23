@@ -501,7 +501,7 @@ Copilot wasn't logged in, so it is unknown.
 - **The shared login only.** A request with its own upstream key records nothing, as for
   cooldowns: its headers report that key's account.
 - **Keyed by provider.** pi has one login per provider, so a provider's report is its login's.
-  A second login to the same service is a second provider (`anthropic-account-2`, Accounts
+  A second login to the same service is a second provider (`anthropic-2`, Accounts
   below), with a report and a reserve of its own.
 - **No recordings yet.** Tests use the probe's header names and formats, with fake identifying
   values (`test/fixtures/quota-headers.ts`). The recorder keeps a response's quota headers, by
@@ -537,14 +537,14 @@ fallback chain skips a provider that is close to its limit, before it refuses:
 ### Accounts: several logins per provider (#227)
 
 pi stores one credential per provider ID, so a second subscription to the same service is a
-second login: `{provider}-account-N` for N from 2, each a copy of one of pi's built-in providers
+second login: `{provider}-N` for N from 2, each a copy of one of pi's built-in providers
 under its own ID (`src/pi/accounts.ts`). Nothing is configured; the store is the record. At
-startup `initRegistry` registers a provider for every `{provider}-account-N` credential pi lists
+startup `initRegistry` registers a provider for every `{provider}-N` credential pi lists
 (`registerStoredAccounts`); in the console, the login list offers each logged-in built-in
-provider's next free slot (`Anthropic (account 2)`), `runLogin` registers the slot before pi's
+provider's next free slot (`Anthropic 2`), `runLogin` registers the slot before pi's
 login and drops it again if the login fails or is cancelled, and `runLogout` drops it with the
-credential, so its number is reused. The convention is pi-rotator's and pi-multi-account's, so a
-login made through either appears here unchanged; neither extension is loaded, and neither can
+credential, so its number is reused. The idea is pi-rotator's and pi-multi-account's; their `{provider}-account-N`
+form is read as well, so a login made through either is served; neither extension is loaded, and neither can
 act on the proxy's requests (they switch an interactive session's model). pi-multiprovider keeps
 credentials outside pi's store, which the Scope rules out.
 
@@ -555,7 +555,7 @@ carries `logins` (`ExposedModel.login` is the serving provider ID; `provider` th
 order routing tries them, base first, then slots by number. A model only a slot has (logged out
 of the base) stands in under the base's name. `scoped` mode's `enabledModels` patterns match the
 base, so they cover every login. A login's ID is not a public or canonical ID: a request naming
-`anthropic-account-2/claude-opus-5-5` gets 404.
+`anthropic-2/claude-opus-5-5` gets 404.
 
 **Routing picks the login** (`src/server/route-plan.ts`, `route-hops.ts`). `planRoute` expands
 each candidate model into one candidate per login. A hop between two logins of one model follows
@@ -588,9 +588,9 @@ the credential.
   `builtinProviders()` instance, not from the runtime's provider: the composed one carries the
   base's `models.json` overrides, `apiKey` included, which must not reach another login, and a
   dynamic catalog lives in the instance's closure, which copies would otherwise share. A base
-  that is not built in (a `models.json` provider) offers no slot, and a stored `acme-account-2`
+  that is not built in (a `models.json` provider) offers no slot, and a stored `acme-2`
   credential is left alone with a warning. A `models.json` entry under the copy's own ID composes
-  above it, as for any native provider (checked on pi 1.3.0: a `baseUrl` under `groq-account-2`
+  above it, as for any native provider (checked on pi 1.3.0: a `baseUrl` under `groq-2`
   applies to the copy's catalog, and `groq`'s key does not). Such an entry makes pi's
   `getProvider` answer before the slot is registered, so registration checks
   `getRegisteredNativeProvider`, and the console's login list offers the slot once.
@@ -607,12 +607,12 @@ the credential.
   until the next availability pass; `initRegistry` runs `refresh({ allowNetwork: false })` once
   after registering, so the snapshot the routes read includes a login with a stored credential.
 - **Proven offline, not live.** `test/integration/accounts.test.ts` runs `groq` and a stored
-  `groq-account-2` against the mock provider, which tells the logins apart by the key each
+  `groq-2` against the mock provider, which tells the logins apart by the key each
   request carries: the model listed once, owned by `groq`, with both logins on
   `/v1/switchboard/models` and `/healthz/creds`; a plain-named request moving to the second login
   on the first's 429 with `x_pi.login` and the attempt's `login`; the cooling first login skipped
   by the next request; no hop with `routing.logins.fallbackOn: []`; the slot's ID answering 404;
-  then the login list offering `groq-account-3`, a scripted API-key login to it joining the
+  then the login list offering `groq-3`, a scripted API-key login to it joining the
   model's logins at once, a cancelled login leaving no provider, and a logout dropping the slot
   and its label. A real OAuth refresh and response through a copy need a login made for
   recording (as #69's recordings do), never a copy of a live login.

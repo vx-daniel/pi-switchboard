@@ -33,7 +33,7 @@ function candidate(provider: string, id: string, login = provider): ExposedModel
 }
 
 const OPUS = candidate('anthropic', 'opus')
-const OPUS_2 = candidate('anthropic', 'opus', 'anthropic-account-2')
+const OPUS_2 = candidate('anthropic', 'opus', 'anthropic-2')
 const SOL = candidate('openai-codex', 'sol')
 
 describe('nextFor', () => {

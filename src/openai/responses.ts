@@ -39,7 +39,7 @@ const attemptSchema = z.object({
     .optional()
     .meta({
       description:
-        'The login tried (`anthropic`, `anthropic-account-2`), when the model has more than one ' +
+        'The login tried (`anthropic`, `anthropic-2`), when the model has more than one ' +
         '(#227). Absent otherwise.'
     }),
   reason: z.enum([...FailureClassSchema.options, 'quota']).meta({
@@ -77,7 +77,7 @@ export const loginSchema = z
   .optional()
   .meta({
     description:
-      'The login that answered (`anthropic`, `anthropic-account-2`), when the model has more ' +
+      'The login that answered (`anthropic`, `anthropic-2`), when the model has more ' +
       'than one (#227); absent otherwise.'
   })
 

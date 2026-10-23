@@ -1,10 +1,10 @@
 <!--
 Sync Impact Report
 Version change: 3.5.1 → 3.6.0 (MINOR)
-Rationale: #227 gave a provider several logins (`anthropic-account-2`). Under principle IV as
+Rationale: #227 gave a provider several logins (`anthropic-2`). Under principle IV as
 written, a second login had to be an exposed model of its own to be routable, so every model of
 the provider was listed twice and collision-prefixed (`anthropic/claude-opus-5-5`,
-`anthropic-account-2/claude-opus-5-5`), which broke clients that filter on plain names (j5).
+`anthropic-2/claude-opus-5-5`), which broke clients that filter on plain names (j5).
 The amendment makes a login a routing detail of one exposed model, as principle VI's "which
 model and login served it" already anticipated: the model is listed once under the base's name,
 routing picks the login, and the response and log say which.
@@ -131,7 +131,7 @@ Tests MUST never read the developer's pi login or provider credentials. Offline 
 Rationale: the project is designed for personal or workstation-local use. Safety defaults reduce the chance that a convenience feature becomes a security problem.
 
 ### IV. Model and Header Discipline
-Canonical model identifiers MUST remain `provider/model-id` internally. Public model IDs, exposure rules, and provider prefix labels MUST be explicit, configurable, and validated. Exposure MUST follow the configuration exactly as written: model IDs and prefix labels are never normalized, so a mistyped entry matches no model rather than exposing one. Hidden models MUST NOT become reachable through fallback resolution. A provider's extra login (`{provider}-account-N`, #227) is not a model: its models are the base provider's, exposed once under the base's name, and the login is a routing detail reported under principle VI.
+Canonical model identifiers MUST remain `provider/model-id` internally. Public model IDs, exposure rules, and provider prefix labels MUST be explicit, configurable, and validated. Exposure MUST follow the configuration exactly as written: model IDs and prefix labels are never normalized, so a mistyped entry matches no model rather than exposing one. Hidden models MUST NOT become reachable through fallback resolution. A provider's extra login (`{provider}-N`, #227) is not a model: its models are the base provider's, exposed once under the base's name, and the login is a routing detail reported under principle VI.
 
 The proxy MUST reserve `Authorization` for proxy authentication compatibility, and upstream credential overrides MUST use proxy-specific headers.
 

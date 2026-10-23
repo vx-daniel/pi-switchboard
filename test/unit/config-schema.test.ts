@@ -227,7 +227,7 @@ describe('normalizeConfig', () => {
   test('keeps the valid login labels, trimmed, and drops the invalid ones', () => {
     const result = normalizeConfig({
       labels: {
-        'anthropic-account-2': '  work  ',
+        'anthropic-2': '  work  ',
         'openai-codex': 'personal',
         'google': '',
         'xai': '   ',
@@ -237,7 +237,7 @@ describe('normalizeConfig', () => {
       }
     })
 
-    expect(result.labels).toEqual({ 'anthropic-account-2': 'work', 'openai-codex': 'personal' })
+    expect(result.labels).toEqual({ 'anthropic-2': 'work', 'openai-codex': 'personal' })
     expect(normalizeConfig({}).labels).toEqual({})
   })
 
@@ -258,7 +258,7 @@ describe('normalizeConfig', () => {
       customModels: ['openai/gpt-4o'],
       providerPrefixes: { openai: 'oai' },
       aliases: { coding: 'openai/gpt-4o' },
-      labels: { 'anthropic-account-2': 'work' },
+      labels: { 'anthropic-2': 'work' },
       logLevel: 'debug',
       routing: { reserve: { anthropic: 0.2 }, logins: { fallbackOn: ['rate_limit', 'auth'] } },
       zed: { providerName: 'My Proxy', autoSync: true }

@@ -4,7 +4,7 @@
  *
  * @remarks
  * - **Configured, per login.** `routing.reserve` in the config file (`{ "anthropic": 0.2 }`),
- *   keyed by the login (`anthropic-account-2` has its own entry, #227); a login left out, or one
+ *   keyed by the login (`anthropic-2` has its own entry, #227); a login left out, or one
  *   that reports no quota (Google, API keys), is never skipped.
  * - **The worse window decides.** A subscription reports several windows (a 5-hour and a 7-day
  *   one); the provider is below its reserve when any of them has less than that share left.

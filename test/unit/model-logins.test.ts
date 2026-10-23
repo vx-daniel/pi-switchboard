@@ -31,11 +31,12 @@ function makeModel(provider: string, id: string): Model<Api> {
 
 describe('groupLogins', () => {
   // Catches a slot's models grouped with the wrong model, listed as models of their own, or the
-  // logins out of order (the base must be tried first, then slots by number, whatever pi's order).
+  // logins out of order (the base must be tried first, then slots by number, whatever pi's order
+  // or the slot's ID form).
   test("groups a slot's models under the base's, base first, slots by number", () => {
     const base = makeModel('anthropic', 'opus')
     const third = makeModel('anthropic-account-3', 'opus')
-    const second = makeModel('anthropic-account-2', 'opus')
+    const second = makeModel('anthropic-2', 'opus')
     const other = makeModel('anthropic', 'haiku')
 
     const groups = groupLogins([third, base, other, second])
@@ -47,7 +48,7 @@ describe('groupLogins', () => {
     expect(groups[0]?.primary).toBe(base)
     expect(groups[0]?.logins.map((login) => login.provider)).toEqual([
       'anthropic',
-      'anthropic-account-2',
+      'anthropic-2',
       'anthropic-account-3'
     ])
     expect(groups[1]?.logins).toEqual([other])
@@ -56,7 +57,7 @@ describe('groupLogins', () => {
   // Catches a model only a slot has (logged out of the base, or a catalog difference) vanishing:
   // it stands in for the base, under the base's provider, and is served by that login.
   test('a model only a slot has is exposed under the base provider', () => {
-    const slotOnly = makeModel('openai-codex-account-2', 'gpt')
+    const slotOnly = makeModel('openai-codex-2', 'gpt')
 
     const [group] = groupLogins([slotOnly])
 
@@ -64,10 +65,10 @@ describe('groupLogins', () => {
     expect(group?.logins).toEqual([slotOnly])
   })
 
-  // Catches a provider merely named like a slot (a models.json `acme-account-2`, which no built-in
+  // Catches a provider merely named like a slot (a models.json `acme-2`, which no built-in
   // `acme` backs) taken for one: it is a provider of its own.
   test('a provider named like a slot of no built-in provider is its own', () => {
-    const acme = makeModel('acme-account-2', 'chat')
+    const acme = makeModel('acme-2', 'chat')
 
     const [group] = groupLogins([acme])
 

@@ -66,7 +66,7 @@ const CATALOG_REFRESH_MS = 15_000
  * Returns a provider's display name, or its ID when pi does not know it.
  *
  * @remarks
- * A login slot that is not registered yet (`anthropic-account-2` before its first login) is named
+ * A login slot that is not registered yet (`anthropic-2` before its first login) is named
  * after its base, as it will be once registered.
  *
  * @param runtime - the proxy's model runtime
@@ -87,10 +87,10 @@ export function providerName(runtime: ModelRuntime, providerId: string): string 
  *
  * @param baseName - the base provider's display name
  * @param number - the login's number, from 2
- * @returns `{baseName} (account {number})`
+ * @returns `{baseName} {number}`
  */
 function accountName(baseName: string, number: number): string {
-  return `${baseName} (account ${String(number)})`
+  return `${baseName} ${String(number)}`
 }
 
 /**
@@ -122,7 +122,7 @@ function labelled(name: string, label: string | undefined): string {
  * Lists the logins pi offers, one entry per provider and login type, as pi's `/login` does.
  *
  * @remarks
- * A provider that is logged in also offers its next login slot (`Anthropic (account 2)`, #227):
+ * A provider that is logged in also offers its next login slot (`Anthropic 2`, #227):
  * choosing it registers the slot and runs the same login. A slot already registered is a provider
  * like any other and is listed as itself, with its label when it has one.
  *
@@ -285,7 +285,7 @@ function show({ dialog }: LoginScreens, event: AuthEvent): void {
  * @remarks
  * pi stores the credential in its `auth.json` and updates the runtime the server answers from, so
  * the provider's models are served at once, with no restart. A failed catalog refresh is logged
- * and keeps the cached list, as pi does. A login slot (`anthropic-account-2`, #227) is registered
+ * and keeps the cached list, as pi does. A login slot (`anthropic-2`, #227) is registered
  * as a provider first, and dropped again if its login fails or is cancelled.
  *
  * @param runtime - the proxy's model runtime
