@@ -36,7 +36,12 @@ let agentDir: FixtureAgentDir
 
 beforeAll(async () => {
   const answer = sse([...textChunks('ok'), finishChunk('stop')])
-  mock = await startMockProvider({ 'deep-mock': answer, 'quick-mock': answer })
+  mock = await startMockProvider({
+    'deep-mock': answer,
+    'quick-mock': answer,
+    'claude-opus-5': answer,
+    'claude-opus-5-5': answer
+  })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
       providers: {
@@ -48,6 +53,14 @@ beforeAll(async () => {
             { id: 'deep-mock', reasoning: true },
             { id: 'quick-mock', reasoning: true }
           ]
+        },
+        // Two Opus models that reach the mock, for family aliases (#231); pi's other Anthropic
+        // models are listed too, and never called.
+        anthropic: {
+          baseUrl: `${mock.origin}/v1`,
+          api: 'openai-completions',
+          apiKey: MOCK_KEY,
+          models: [{ id: 'claude-opus-5' }, { id: 'claude-opus-5-5' }]
         }
       }
     }
@@ -187,7 +200,7 @@ describe('the console alias editor', () => {
 
     const seen = await enterOn(
       newRow,
-      ['alpha/deep-mock', 'high'],
+      ['A model', 'alpha/deep-mock', 'high'],
       ['builder high', 'deep-mock', 'taken', 'reviewer']
     )
 
@@ -328,7 +341,11 @@ describe('the console alias editor', () => {
   test('an alias named like an object prototype key is saved', async () => {
     setAliases({})
 
-    await enterOn(newRow, ['alpha/quick-mock', "The request's effort (not fixed)"], ['constructor'])
+    await enterOn(
+      newRow,
+      ['A model', 'alpha/quick-mock', "The request's effort (not fixed)"],
+      ['constructor']
+    )
 
     expect(loadConfigFromFile().aliases).toEqual({ constructor: 'alpha/quick-mock' })
   })
@@ -341,7 +358,7 @@ describe('the console alias editor', () => {
     // A directory where the file should be: reading falls back to the defaults, writing fails.
     mkdirSync(path)
     try {
-      const seen = await enterOn(newRow, ['alpha/quick-mock', 'low', 'OK'], ['reviewer'])
+      const seen = await enterOn(newRow, ['A model', 'alpha/quick-mock', 'low', 'OK'], ['reviewer'])
 
       expect(seen.titles.at(-1)).toMatch(/^Could not write proxy-config\.json/u)
     } finally {
@@ -422,7 +439,7 @@ describe('the console alias editor', () => {
       return 'alpha/deep-mock'
     }
 
-    const created = await enterOn(newRow, [addedMeanwhile, 'high', 'OK'], ['reviewer'])
+    const created = await enterOn(newRow, ['A model', addedMeanwhile, 'high', 'OK'], ['reviewer'])
 
     expect(created.titles.at(-1)).toBe(
       'An alias named "reviewer" was added meanwhile; nothing changed.'
@@ -430,6 +447,64 @@ describe('the console alias editor', () => {
     expect(loadConfigFromFile().aliases).toEqual({
       first: 'alpha/quick-mock',
       reviewer: 'alpha/quick-mock'
+    })
+  })
+
+  // Catches a family alias the editor can't create, or one written as a fixed model (it would
+  // never move).
+  test('a new alias can follow a family, and serves its newest model', async () => {
+    setAliases({})
+
+    const seen = await enterOn(
+      newRow,
+      [
+        'A model family (follows the newest)',
+        'anthropic/claude-opus',
+        "The request's effort (not fixed)"
+      ],
+      ['opus-latest']
+    )
+
+    expect(seen.options[1]).toContain('anthropic/claude-opus')
+    expect(loadConfigFromFile().aliases).toEqual({
+      'opus-latest': { family: 'anthropic/claude-opus' }
+    })
+    expect(await ask('opus-latest')).toEqual({
+      status: 200,
+      upstream: [['claude-opus-5-5', undefined]]
+    })
+  })
+
+  // Catches a pin offered outside the family, not saved, or not cleared by Follow newest.
+  test('Pin to… holds a family alias on one model, and Follow newest lets it go', async () => {
+    setAliases({ 'opus-latest': { family: 'anthropic/claude-opus' } })
+
+    const pinned = await enterOn(aliasRow('opus-latest'), ['Pin to…', 'anthropic/claude-opus-5'])
+    const pinnedConfig = loadConfigFromFile().aliases
+    const pinnedAnswer = await ask('opus-latest')
+    await enterOn(aliasRow('opus-latest'), ['Follow newest'])
+
+    expect(pinned.options[0]).toEqual([
+      'Rename',
+      'Pin to…',
+      'Follow newest',
+      'Targets and efforts',
+      'Fall back on (fallbackOn)',
+      'Delete'
+    ])
+    expect(pinned.options[1]?.slice(0, 2)).toEqual([
+      'anthropic/claude-opus-5-5',
+      'anthropic/claude-opus-5'
+    ])
+    expect(pinned.options[1]?.every((member) => member.startsWith('anthropic/claude-opus-'))).toBe(
+      true
+    )
+    expect(pinnedConfig).toEqual({
+      'opus-latest': { family: 'anthropic/claude-opus', pin: 'anthropic/claude-opus-5' }
+    })
+    expect(pinnedAnswer.upstream).toEqual([['claude-opus-5', undefined]])
+    expect(loadConfigFromFile().aliases).toEqual({
+      'opus-latest': { family: 'anthropic/claude-opus' }
     })
   })
 })

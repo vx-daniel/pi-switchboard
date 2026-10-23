@@ -12,7 +12,8 @@ import {
   configFileAuthTokenInvalid,
   isAliasChain,
   loadConfigFromFile,
-  type ProxyConfig
+  type ProxyConfig,
+  targetSummary
 } from '@vx-daniel/pi-switchboard/config'
 import {
   computeModelExposure,
@@ -182,8 +183,10 @@ function formatExposurePolicy(
     lines.push(`prefixes: ${pairs.join(', ')}`)
   }
   const aliasPairs = Object.entries(config.aliases).map(([alias, target]) => {
-    const models = aliasModels(target).map(({ model, reasoningEffort }) =>
-      reasoningEffort === undefined ? model : `${model}@${reasoningEffort}`
+    const models = aliasModels(target).map((aliasTarget) =>
+      aliasTarget.reasoningEffort === undefined
+        ? targetSummary(aliasTarget)
+        : `${targetSummary(aliasTarget)}@${aliasTarget.reasoningEffort}`
     )
     if (!isAliasChain(target)) return `${alias}=${models.join('')}`
     return `${alias}=${models.join(' > ')} (on ${aliasFallbackOn(target).join(', ') || 'nothing'})`

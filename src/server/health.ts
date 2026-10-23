@@ -33,7 +33,11 @@ import {
   PublicModelIdModeSchema
 } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
-import { aliasDiagnosticSchema } from '@proxy/openai/model-aliases'
+import {
+  aliasDiagnosticSchema,
+  familyResolutionSchema,
+  MISCONFIGURED_ALIAS
+} from '@proxy/openai/model-aliases'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
 import { scopeDiagnosticSchema } from '@proxy/pi/model-scope'
@@ -90,8 +94,16 @@ const modelsHealthSchema = z
     aliasDiagnostics: z.array(aliasDiagnosticSchema).meta({
       description:
         'Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), ' +
-        "set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), both " +
-        'of which make the check fail, or naming no exposed model (`target-not-exposed`).'
+        "set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), " +
+        'following a family no rule knows (`family-unknown`, #231) or pinned outside it ' +
+        '(`pin-outside-family`), all of which make the check fail; naming no exposed model ' +
+        "(`target-not-exposed`); or a family member whose version the rule can't read " +
+        '(`family-unparsed`, never picked).'
+    }),
+    familyAliases: z.array(familyResolutionSchema).meta({
+      description:
+        'What each family alias target resolves to now (#231): its pin, else the newest exposed ' +
+        'member, with a newer member the exposure config hides.'
     }),
     cooldowns: z
       .array(
@@ -267,8 +279,8 @@ function failedCheck(context: HealthContext, check: string, error: unknown): Res
  * @param context - the request's Hono context
  * @param configReader - where the model exposure config comes from
  * @returns 200 with the model report, or 503 with the same report when no model is exposed, the
- *   exposure config is invalid, an alias is named like an exposed model, or an alias target is set
- *   to an effort its model doesn't support
+ *   exposure config is invalid, or an alias is misconfigured (named like an exposed model, set to
+ *   an effort its model doesn't support, following an unknown family, or pinned outside it)
  */
 async function checkModels(
   context: HealthContext,
@@ -280,10 +292,12 @@ async function checkModels(
   const exposedModelCount = exposure.ok ? exposure.models.length : 0
   const aliasDiagnostics = exposure.ok ? [...exposure.aliasDiagnostics] : []
   // An alias named like a model is ignored, and the model keeps its name (#66); a target set to an
-  // effort its model doesn't support is left out (#230). Requests still work, but the config does
-  // not do what it says. A target that is not exposed may be on purpose, and is only listed.
-  const misconfiguredAliasCount = aliasDiagnostics.filter(
-    (diagnostic) => diagnostic.code !== 'target-not-exposed'
+  // effort its model doesn't support is left out (#230), and so is a family no rule knows or a pin
+  // outside its family (#231). Requests still work, but the config does not do what it says. A
+  // target that is not exposed may be on purpose, and an unreadable family member is the
+  // catalogue's doing: both are only listed.
+  const misconfiguredAliasCount = aliasDiagnostics.filter((diagnostic) =>
+    MISCONFIGURED_ALIAS.has(diagnostic.code)
   ).length
   const healthy = exposure.ok && exposedModelCount > 0 && misconfiguredAliasCount === 0
   const body: ModelsHealth = {
@@ -298,6 +312,8 @@ async function checkModels(
     scopeDiagnostics: exposure.ok ? [...exposure.scopeDiagnostics] : [],
     // Alias names and their targets come from the config file: model names, not secrets.
     aliasDiagnostics,
+    // Model names from the config and pi's catalogue, not secrets.
+    familyAliases: exposure.ok ? [...exposure.familyResolutions] : [],
     // Provider and model names only, never a credential.
     cooldowns: activeCooldowns().map((cooldown) => ({
       scope: cooldown.scope,

@@ -1,6 +1,7 @@
 /**
  * The console's Models view (#230): the exposed models, then every configured alias with its
- * targets, efforts, `fallbackOn` and any diagnostic, then the row that adds an alias.
+ * targets, efforts, `fallbackOn`, what each family target resolves to (#231) and any diagnostic,
+ * then the row that adds an alias.
  *
  * @remarks
  * The selection moves over every row: Enter on a model starts a new alias for it, on an alias
@@ -11,8 +12,15 @@
  */
 
 import { truncateToWidth } from '@earendil-works/pi-tui'
-import { type AliasTarget, aliasFallbackOn, aliasModels, isAliasChain } from '@proxy/config/schema'
-import type { AliasDiagnostic } from '@proxy/openai/model-aliases'
+import {
+  type AliasModel,
+  type AliasTarget,
+  aliasFallbackOn,
+  aliasModels,
+  isAliasChain,
+  isFamilyTarget
+} from '@proxy/config/schema'
+import type { AliasDiagnostic, FamilyResolution } from '@proxy/openai/model-aliases'
 import type { ExposedModel, ModelExposureResult } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { activeCooldown, loginSubject } from '@proxy/pi/cooldowns'
@@ -33,6 +41,8 @@ export interface ModelsData {
   readonly aliases: Readonly<Record<string, AliasTarget>>
   /** Why aliases or their targets are left out. */
   readonly diagnostics: readonly AliasDiagnostic[]
+  /** What each family target resolves to now (#231). */
+  readonly families: readonly FamilyResolution[]
   /** Why nothing is listed: the exposure config's error. */
   readonly unavailable?: string
 }
@@ -66,6 +76,7 @@ export function modelsViewData(status: ModelsStatus | undefined): ModelsData {
     models: status?.exposure?.models ?? [],
     aliases: status?.aliases ?? {},
     diagnostics: status?.exposure?.aliasDiagnostics ?? [],
+    families: status?.exposure?.familyResolutions ?? [],
     ...(typeof exposed === 'string' ? { unavailable: exposed } : {})
   }
 }
@@ -137,16 +148,65 @@ function modelRow(model: ExposedModel, now: number): string {
 }
 
 /**
+ * Shortens a canonical ID to its model ID, for a family's members: the family names the provider.
+ *
+ * @param canonicalId - `provider/model-id`
+ * @returns the model ID
+ */
+function modelIdOf(canonicalId: string): string {
+  return canonicalId.slice(canonicalId.indexOf('/') + 1)
+}
+
+/**
+ * Renders a family target with what it resolves to: `→ claude-opus-5-5 (newest)`, or its pin and
+ * the newest, and a newer member the exposure config hides.
+ *
+ * @param family - the family target's family
+ * @param resolution - what it resolves to now, or `undefined` for an unknown family
+ * @returns the cell
+ */
+function familyCell(family: string, resolution: FamilyResolution | undefined): string {
+  if (resolution === undefined) return family
+  const newest = resolution.newest === null ? 'none exposed' : modelIdOf(resolution.newest)
+  const shown =
+    resolution.pin === null
+      ? `${family} → ${newest} (newest)`
+      : `${family} pinned: ${modelIdOf(resolution.pin)} · newest: ${newest}`
+  if (resolution.newerHidden === null) return shown
+  return `${shown}${paint('dim', ` · newer hidden: ${modelIdOf(resolution.newerHidden)}`)}`
+}
+
+/**
+ * Renders one alias target, with the effort it sets.
+ *
+ * @param target - the target
+ * @param resolution - what it resolves to, for a family target
+ * @returns the cell
+ */
+function targetCell(target: AliasModel, resolution: FamilyResolution | undefined): string {
+  const shown = isFamilyTarget(target) ? familyCell(target.family, resolution) : target.model
+  return target.reasoningEffort === undefined ? shown : `${shown} @${target.reasoningEffort}`
+}
+
+/**
  * Renders one alias: its name, its targets each with the effort it sets, and `fallbackOn`.
  *
  * @param name - the alias
  * @param target - what it names
+ * @param families - what the family targets resolve to now
  * @returns the row's text, without its selection mark
  */
-function aliasRow(name: string, target: AliasTarget): string {
+function aliasRow(
+  name: string,
+  target: AliasTarget,
+  families: readonly FamilyResolution[]
+): string {
   const targets = aliasModels(target)
-    .map(({ model, reasoningEffort }) =>
-      reasoningEffort === undefined ? model : `${model} @${reasoningEffort}`
+    .map((aliasTarget, position) =>
+      targetCell(
+        aliasTarget,
+        families.find((family) => family.alias === name && family.position === position)
+      )
     )
     .join(' › ')
   const fallback = isAliasChain(target)
@@ -195,7 +255,7 @@ export function modelsRows(view: ModelsView, height: number, now: number = Date.
     if (listed.kind === 'model') rows.push(selectable(modelRow(listed.model, now), isCurrent))
     else if (listed.kind === 'new') rows.push(selectable(NEW_ALIAS_ROW, isCurrent))
     else {
-      rows.push(selectable(aliasRow(listed.name, listed.target), isCurrent))
+      rows.push(selectable(aliasRow(listed.name, listed.target, view.families), isCurrent))
       for (const diagnostic of view.diagnostics.filter(({ alias }) => alias === listed.name)) {
         rows.push(paint('error', `      ${diagnostic.code}: ${diagnostic.message}`))
       }

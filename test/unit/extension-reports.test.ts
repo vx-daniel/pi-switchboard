@@ -134,6 +134,7 @@ describe('with models on two providers', () => {
         stateWith(agentDir, {
           aliases: {
             quiet: { model: 'alpha/a1', reasoningEffort: 'none' },
+            steady: { family: 'anthropic/claude-opus', pin: 'anthropic/claude-opus-5' },
             chain: {
               targets: [{ model: 'alpha/a1', reasoningEffort: 'none' }, 'alpha/a2'],
               fallbackOn: ['rate_limit']
@@ -142,7 +143,7 @@ describe('with models on two providers', () => {
         })
       )
       expect(report).toEqual(
-        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: scoped | aliases: quiet=alpha/a1@none, chain=alpha/a1@none > alpha/a2 (on rate_limit) | exposed: ${ALL_EXPOSED_PREVIEW}`
+        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: scoped | aliases: quiet=alpha/a1@none, steady=anthropic/claude-opus (pinned anthropic/claude-opus-5), chain=alpha/a1@none > alpha/a2 (on rate_limit) | exposed: ${ALL_EXPOSED_PREVIEW} | aliases ignored: steady (target-not-exposed)`
       )
     })
 

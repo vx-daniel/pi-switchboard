@@ -15,10 +15,15 @@ import {
   type AliasModel,
   type AliasTarget,
   type FailureClass,
-  FailureClassSchema
+  FailureClassSchema,
+  type FamilyTarget,
+  isFamilyTarget,
+  targetSummary
 } from '@proxy/config/schema'
 import type { ModelExposureResult } from '@proxy/openai/model-exposure'
+import { KNOWN_FAMILIES, scanFamily } from '@proxy/openai/model-families'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
+import type { ReasoningEffort } from '@proxy/openai/schemas'
 import {
   type AliasDraft,
   type AliasSaveMode,
@@ -38,6 +43,14 @@ const REQUEST_EFFORT = "The request's effort (not fixed)"
 const DONE = 'Done'
 /** The option that adds a target. */
 const ADD_TARGET = '+ Add a target…'
+/** The new-alias option that follows a family's newest model (#231). */
+const FAMILY_KIND = 'A model family (follows the newest)'
+/** What a new alias can name, when it wasn't started from a model's row. */
+const NEW_KINDS = ['A model', FAMILY_KIND]
+/** The actions that only a family target has (#231). */
+const PIN_TO = 'Pin to…'
+/** Clears a family target's pin. */
+const FOLLOW_NEWEST = 'Follow newest'
 
 /** The dialogs the editor asks through. */
 export interface AliasScreens {
@@ -105,6 +118,51 @@ async function askAliasName(
 }
 
 /**
+ * Asks the effort a model runs at, offering only the levels it supports.
+ *
+ * @param editor - the dialogs and the exposure
+ * @param canonicalId - the model
+ * @returns the effort, `null` for the request's, or `undefined` when cancelled or not exposed
+ */
+async function pickEffort(
+  editor: AliasEditor,
+  canonicalId: string
+): Promise<ReasoningEffort | null | undefined> {
+  const exposed = editor.exposure.byCanonicalId.get(canonicalId)
+  if (exposed === undefined) {
+    // No ladder to check an effort against; changing it would only clear the one set.
+    await notify(
+      editor,
+      `${canonicalId} is not exposed, so its effort can't be checked; it is unchanged.`
+    )
+    return undefined
+  }
+  const efforts = supportedReasoningEfforts(exposed.model)
+  const label = await editor.screens.select(`Reasoning effort for ${canonicalId}`, [
+    REQUEST_EFFORT,
+    ...efforts
+  ])
+  if (label === undefined) return undefined
+  return efforts.find((level) => level === label) ?? null
+}
+
+/**
+ * Sets the effort a target runs at, or clears it for the request's.
+ *
+ * @param target - the target
+ * @param effort - the effort, or `null` for the request's
+ * @returns the target with that effort
+ */
+function withEffort(target: AliasModel, effort: ReasoningEffort | null): AliasModel {
+  if (isFamilyTarget(target)) {
+    const { reasoningEffort: _family, ...family } = target
+    return effort === null ? family : { ...family, reasoningEffort: effort }
+  }
+  const { reasoningEffort: _model, ...model } = target
+  return effort === null ? model : { ...model, reasoningEffort: effort }
+}
+
+/**
  * Asks for a model and the effort it runs at, offering only exposed models and the levels the
  * model supports.
  *
@@ -121,23 +179,85 @@ async function pickTarget(
   const ids = editor.exposure.models.map((exposed) => exposed.canonicalId)
   const chosen = model ?? (await editor.screens.select(title, ids))
   if (chosen === undefined) return undefined
-  const exposed = editor.exposure.byCanonicalId.get(chosen)
-  if (exposed === undefined) {
-    // No ladder to check an effort against; changing it would only clear the one set.
-    await notify(
-      editor,
-      `${chosen} is not exposed, so its effort can't be checked; it is unchanged.`
-    )
+  const effort = await pickEffort(editor, chosen)
+  if (effort === undefined) return undefined
+  return effort === null ? { model: chosen } : { model: chosen, reasoningEffort: effort }
+}
+
+/**
+ * Lists a family's exposed members: those with a version newest first, then the others (dated
+ * snapshots, unreadable IDs), which only a pin can name.
+ *
+ * @param editor - the exposure
+ * @param family - the family
+ * @returns their canonical IDs; none for an unknown family
+ */
+function familyMembers(editor: AliasEditor, family: string): string[] {
+  const scan = scanFamily(family, editor.exposure.byCanonicalId.keys())
+  if (scan === undefined) return []
+  const newestFirst = scan.members.map((member) => member.canonicalId)
+  return [...newestFirst, ...scan.all.filter((member) => !newestFirst.includes(member))]
+}
+
+/**
+ * Finds the model a family target serves now, as exposure resolves it: its pin, else the newest
+ * exposed member.
+ *
+ * @param editor - the exposure
+ * @param target - the family target
+ * @returns its canonical ID, or `undefined` when the family has no exposed member
+ */
+function familyModel(editor: AliasEditor, target: FamilyTarget): string | undefined {
+  return (
+    target.pin ??
+    scanFamily(target.family, editor.exposure.byCanonicalId.keys())?.members[0]?.canonicalId
+  )
+}
+
+/**
+ * Asks for a family to follow, among those with an exposed member, and the effort it runs at.
+ *
+ * @param editor - the dialogs and the exposure
+ * @returns the family target, or `undefined` when cancelled or none has an exposed member
+ */
+async function pickFamilyTarget(editor: AliasEditor): Promise<FamilyTarget | undefined> {
+  const families = KNOWN_FAMILIES.filter((family) => familyMembers(editor, family).length > 0)
+  if (families.length === 0) {
+    await notify(editor, 'No model family has an exposed model.')
     return undefined
   }
-  const efforts = supportedReasoningEfforts(exposed.model)
-  const label = await editor.screens.select(`Reasoning effort for ${chosen}`, [
-    REQUEST_EFFORT,
-    ...efforts
-  ])
-  if (label === undefined) return undefined
-  const effort = efforts.find((level) => level === label)
-  return effort === undefined ? { model: chosen } : { model: chosen, reasoningEffort: effort }
+  const family = await editor.screens.select('Family to follow (its newest model)', families)
+  if (family === undefined) return undefined
+  const model = familyModel(editor, { family })
+  const effort = model === undefined ? null : await pickEffort(editor, model)
+  if (effort === undefined) return undefined
+  return effort === null ? { family } : { family, reasoningEffort: effort }
+}
+
+/**
+ * Asks which exposed member of its family to pin a family target to.
+ *
+ * @param editor - the dialogs and the exposure
+ * @param target - the family target
+ * @returns the target pinned, or `undefined` when cancelled
+ */
+async function pinTo(editor: AliasEditor, target: FamilyTarget): Promise<FamilyTarget | undefined> {
+  const pin = await editor.screens.select(
+    `Pin ${target.family} to`,
+    familyMembers(editor, target.family)
+  )
+  return pin === undefined ? undefined : { ...target, pin }
+}
+
+/**
+ * Clears a family target's pin, so it follows the newest again.
+ *
+ * @param target - the family target
+ * @returns the target without its pin
+ */
+function followNewest(target: FamilyTarget): FamilyTarget {
+  const { pin: _cleared, ...following } = target
+  return following
 }
 
 /**
@@ -164,7 +284,7 @@ async function save(
 }
 
 /**
- * Creates an alias: its name, its first model and that model's effort.
+ * Creates an alias: its name, then a model or a family (#231) and the effort it runs at.
  *
  * @param editor - the editor
  * @param model - the model to start from, when the alias was started from a model's row
@@ -172,7 +292,13 @@ async function save(
 async function newAlias(editor: AliasEditor, model?: string): Promise<void> {
   const name = await askAliasName(editor, 'Name for the new alias (e.g. reviewer, builder-high)')
   if (name === undefined) return
-  const target = await pickTarget(editor, `Model for ${name}`, model)
+  const kind =
+    model === undefined ? await editor.screens.select(`${name} names`, NEW_KINDS) : undefined
+  if (model === undefined && kind === undefined) return
+  const target =
+    kind === FAMILY_KIND
+      ? await pickFamilyTarget(editor)
+      : await pickTarget(editor, `Model for ${name}`, model)
   if (target !== undefined) {
     await save(editor, name, { models: [target], fallbackOn: [] }, { creating: true })
   }
@@ -213,9 +339,24 @@ const TARGET_ACTIONS: Readonly<
 > = {
   'Set the reasoning effort': async (editor, models, index) => {
     const current = models[index]
-    if (current === undefined) return undefined
-    const target = await pickTarget(editor, '', current.model)
-    return target === undefined ? undefined : models.with(index, target)
+    const model =
+      current === undefined || !isFamilyTarget(current)
+        ? current?.model
+        : familyModel(editor, current)
+    if (current === undefined || model === undefined) return undefined
+    const effort = await pickEffort(editor, model)
+    return effort === undefined ? undefined : models.with(index, withEffort(current, effort))
+  },
+  [PIN_TO]: async (editor, models, index) => {
+    const current = models[index]
+    if (current === undefined || !isFamilyTarget(current)) return undefined
+    const pinned = await pinTo(editor, current)
+    return pinned === undefined ? undefined : models.with(index, pinned)
+  },
+  [FOLLOW_NEWEST]: (_editor, models, index) => {
+    const current = models[index]
+    if (current === undefined || !isFamilyTarget(current)) return Promise.resolve(undefined)
+    return Promise.resolve(models.with(index, followNewest(current)))
   },
   'Move up': (_editor, models, index) => Promise.resolve(swapped(models, index, index - 1)),
   'Move down': (_editor, models, index) => Promise.resolve(swapped(models, index, index + 1)),
@@ -225,15 +366,27 @@ const TARGET_ACTIONS: Readonly<
 }
 
 /**
+ * Lists what can be done to a target: a family target can also be pinned, or follow the newest.
+ *
+ * @param target - the target
+ * @returns the menu's options
+ */
+function targetActions(target: AliasModel | undefined): string[] {
+  const actions = Object.keys(TARGET_ACTIONS)
+  if (target !== undefined && isFamilyTarget(target)) return actions
+  return actions.filter((action) => action !== PIN_TO && action !== FOLLOW_NEWEST)
+}
+
+/**
  * Shows an alias's targets, each with its effort, and the menu's other rows.
  *
  * @param models - the targets
  * @returns one label per target, in order
  */
 function targetLabels(models: readonly AliasModel[]): string[] {
-  return models.map(({ model, reasoningEffort }, index) => {
-    const effort = reasoningEffort === undefined ? '' : ` @${reasoningEffort}`
-    return `${String(index + 1)}. ${model}${effort}`
+  return models.map((target, index) => {
+    const effort = target.reasoningEffort === undefined ? '' : ` @${target.reasoningEffort}`
+    return `${String(index + 1)}. ${targetSummary(target)}${effort}`
   })
 }
 
@@ -258,7 +411,7 @@ async function targetsStep(
     return target === undefined ? undefined : [...models, target]
   }
   const index = rows.indexOf(choice)
-  const action = await editor.screens.select(choice, Object.keys(TARGET_ACTIONS))
+  const action = await editor.screens.select(choice, targetActions(models[index]))
   const change = action === undefined ? undefined : TARGET_ACTIONS[action]
   return change === undefined ? undefined : change(editor, models, index)
 }
@@ -356,9 +509,24 @@ export async function runModelsItem(editor: AliasEditor, item: ModelsItem): Prom
     await newAlias(editor, item.kind === 'model' ? item.model.canonicalId : undefined)
     return
   }
-  const choice = await editor.screens.select(`Alias ${item.name}`, Object.keys(ALIAS_ACTIONS))
+  const draft = draftOf(item.target)
+  const [only] = draft.models
+  // A single family target is pinned from the alias's own menu; a chain's from its targets.
+  const family = draft.models.length === 1 && only !== undefined && isFamilyTarget(only)
+  const options = Object.keys(ALIAS_ACTIONS)
+  const choice = await editor.screens.select(
+    `Alias ${item.name}`,
+    family ? [...options.slice(0, 1), PIN_TO, FOLLOW_NEWEST, ...options.slice(1)] : options
+  )
+  if (choice === PIN_TO || choice === FOLLOW_NEWEST) {
+    const next = await TARGET_ACTIONS[choice]?.(editor, draft.models, 0)
+    if (next !== undefined) {
+      await save(editor, item.name, { ...draft, models: next }, { previousName: item.name })
+    }
+    return
+  }
   const action = choice === undefined ? undefined : ALIAS_ACTIONS[choice]
-  await action?.(editor, item.name, draftOf(item.target))
+  await action?.(editor, item.name, draft)
 }
 
 /**

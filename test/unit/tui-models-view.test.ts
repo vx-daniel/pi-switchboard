@@ -42,7 +42,13 @@ describe('the console Models view', () => {
   // would edit an alias they can't see.
   test('scrolls to keep the selected alias on screen', () => {
     const models = Array.from({ length: 20 }, (_, position) => exposed(`m${String(position)}`))
-    const view = { models, aliases: { reviewer: 'alpha/m1' }, diagnostics: [], selected: 20 }
+    const view = {
+      models,
+      aliases: { reviewer: 'alpha/m1' },
+      diagnostics: [],
+      families: [],
+      selected: 20
+    }
 
     const rows = rendered(view, 6)
 
@@ -71,6 +77,7 @@ describe('the console Models view', () => {
             message: 'not exposed'
           }
         ],
+        families: [],
         selected: 0
       },
       10
@@ -86,9 +93,61 @@ describe('the console Models view', () => {
     ])
   })
 
+  // Catches a family alias shown without what it serves now, a pin shown as if it followed the
+  // newest, or a hidden newer model left unmentioned (#231).
+  test('shows what each family alias resolves to, its pin and a hidden newer model', () => {
+    const family = 'anthropic/claude-opus'
+    const rows = rendered(
+      {
+        models: [],
+        aliases: {
+          'opus-latest': { family, reasoningEffort: 'high' },
+          'opus-steady': { family, pin: 'anthropic/claude-opus-5' }
+        },
+        diagnostics: [],
+        families: [
+          {
+            alias: 'opus-latest',
+            position: 0,
+            family,
+            pin: null,
+            resolved: 'anthropic/claude-opus-5-5',
+            newest: 'anthropic/claude-opus-5-5',
+            newerHidden: 'anthropic/claude-opus-6'
+          },
+          {
+            alias: 'opus-steady',
+            position: 0,
+            family,
+            pin: 'anthropic/claude-opus-5',
+            resolved: 'anthropic/claude-opus-5',
+            newest: 'anthropic/claude-opus-5-5',
+            newerHidden: null
+          }
+        ],
+        selected: 0
+      },
+      10
+    )
+
+    expect(rows.slice(2, 4)).toEqual([
+      expect.stringMatching(
+        /^› opus-latest +anthropic\/claude-opus → claude-opus-5-5 \(newest\) · newer hidden: claude-opus-6 @high$/u
+      ) as unknown,
+      expect.stringMatching(
+        /^ {2}opus-steady +anthropic\/claude-opus pinned: claude-opus-5 · newest: claude-opus-5-5$/u
+      ) as unknown
+    ])
+  })
+
   // Catches a selection left past the end after a delete opening nothing, or the wrong row.
   test('a selection past the end acts on the new-alias row', () => {
-    const data = { models: [exposed('m0')], aliases: { only: 'alpha/m0' }, diagnostics: [] }
+    const data = {
+      models: [exposed('m0')],
+      aliases: { only: 'alpha/m0' },
+      diagnostics: [],
+      families: []
+    }
 
     expect(modelsItemAt(data, 1)).toMatchObject({ kind: 'alias', name: 'only' })
     expect(modelsItemAt(data, 9)).toEqual({ kind: 'new' })
