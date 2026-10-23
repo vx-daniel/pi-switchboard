@@ -46,4 +46,15 @@ describe("an extra login and the base's environment key", () => {
       auth: { apiKey: STORED_KEY }
     })
   })
+
+  // Catches the case this guards against: a login registered at startup whose credential is then
+  // removed outside the proxy (pi's logout in another process) falling back to the base's
+  // environment key, and so serving on the base's account under its own name.
+  test('an extra login whose credential is removed is no longer configured', async () => {
+    const runtime = getRuntime()
+    await runtime.logout('anthropic-3')
+
+    expect(runtime.getRegisteredNativeProvider('anthropic-3')).toBeDefined()
+    expect(await runtime.getAuth('anthropic-3')).toBeUndefined()
+  })
 })
