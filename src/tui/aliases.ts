@@ -17,6 +17,7 @@ import {
   type FailureClass,
   aliasFallbackOn,
   aliasModels,
+  isFamilyTarget,
   loadConfigFromFile,
   saveConfigToFile
 } from '@proxy/config/schema'
@@ -46,15 +47,17 @@ export function draftOf(target: AliasTarget): AliasDraft {
  * Builds the config entry for an alias: the shortest form that says the same thing.
  *
  * @param draft - the editor's alias, with at least one model
- * @returns a canonical ID or `{ model, reasoningEffort }` for one model without fallback classes,
- *   else `{ targets, fallbackOn }`
+ * @returns a canonical ID, `{ model, reasoningEffort }` or `{ family, … }` for one target without
+ *   fallback classes, else `{ targets, fallbackOn }`
  */
 function targetOf(draft: AliasDraft): AliasTarget {
-  const targets = draft.models.map((aliasModel) =>
-    aliasModel.reasoningEffort === undefined
+  const targets = draft.models.map((aliasModel) => {
+    // A family is always an object; a model without an effort is its plain ID.
+    if (isFamilyTarget(aliasModel)) return aliasModel
+    return aliasModel.reasoningEffort === undefined
       ? aliasModel.model
       : { model: aliasModel.model, reasoningEffort: aliasModel.reasoningEffort }
-  )
+  })
   const [only] = targets
   if (targets.length === 1 && only !== undefined && draft.fallbackOn.length === 0) return only
   return { targets, fallbackOn: draft.fallbackOn }

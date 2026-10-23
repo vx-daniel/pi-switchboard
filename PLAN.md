@@ -419,6 +419,42 @@ choice for that name, so it replaces the request's (a principle I exception, con
   effort, with `reasoning_effort_fixed: true` (false on every other entry). `/v1/models` is
   unchanged.
 
+### Family aliases (#231)
+
+An alias target may be `{ family, pin?, reasoningEffort? }`: the family's newest exposed model, or
+`pin` while it is set (`FamilyTargetSchema`, `src/config/schema.ts`). The operator opts in per alias;
+nothing is built in (principle VI).
+
+- **Newest** (`src/openai/model-families.ts`, `scanFamily`). pi's catalogue has no release date
+  (#176), so the version is read from the model ID by one rule per provider: Anthropic
+  `claude-{tier}-{major}[-{minor}]` (tiers `claude-opus`, `claude-sonnet`, `claude-haiku`,
+  `claude-fable`; a `-YYYYMMDD` snapshot is a member a pin may name, never the newest), Codex
+  `gpt-{version}-{tier}` (tiers `sol`, `luna`, `terra`, `astra`, a dotted version). A family is
+  `provider/tier`, never a pattern; one no rule knows is `family-unknown`. A member the rule can't
+  read is never picked and is `family-unparsed`. Versions compare number by number, a missing
+  number counting as 0. Moving to release dates later changes only `scanFamily`, no config.
+- **Resolution** runs inside `exposeAliases`, so on every request (and on each `/healthz/models`
+  and console read): logins, logouts and catalogue refreshes move the alias with no restart. It
+  resolves among the exposed models only (principle IV); the newest available member, when newer
+  and hidden, is reported as `newerHidden`. A pin holds the alias: a pin that is not exposed is
+  `target-not-exposed`, never replaced by the newest; a pin outside the family is
+  `pin-outside-family`. The resolved model then goes through the same lookup and effort check as a
+  named target, so a family can set `reasoningEffort` and be a chain target.
+- **Visible (principle VI).** A family target that resolves to another model than last time logs
+  one warning (alias, family, old and new model); the first resolution, and a pinned target, log
+  nothing. The last resolution per alias and target is kept in memory per process.
+  `/healthz/models` lists `familyAliases` (`{ alias, position, family, pin, resolved, newest,
+  newerHidden }`). `family-unknown` and `pin-outside-family` join `shadows-model` and
+  `effort-unsupported` as diagnostics that answer 503 (`MISCONFIGURED_ALIAS`); `family-unparsed`
+  and `target-not-exposed` are only listed. Responses are as for any alias: `model` is the
+  resolved canonical ID, `x_pi.alias` the family alias.
+- **Exposure stays pi-free** (#165): the rules work on IDs, and `computeModelExposure` passes every
+  available model's canonical ID for `newerHidden`.
+- **Console.** The Models view shows each family target's resolution, pin and hidden newer model;
+  the alias menu of a single family target adds **Pin to…** (the family's exposed members) and
+  **Follow newest**, the targets menu offers both for a family target in a chain, and **+ New
+  alias…** asks for a model or a family. Each saves through `saveConfigToFile`.
+
 ### Cooldowns (#68)
 
 A 429 or 503 is remembered, so a chain stops calling a failing provider first on every request.

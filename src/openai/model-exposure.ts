@@ -38,7 +38,11 @@ import type {
 } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ThinkingLevelsOf } from '@proxy/openai/effort-levels'
-import { type AliasDiagnostic, exposeAliases } from '@proxy/openai/model-aliases'
+import {
+  type AliasDiagnostic,
+  exposeAliases,
+  type FamilyResolution
+} from '@proxy/openai/model-aliases'
 import { groupLogins } from '@proxy/openai/model-logins'
 import type { ReasoningEffort } from '@proxy/openai/schemas'
 import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
@@ -122,6 +126,8 @@ export interface ModelExposureResult {
   readonly byAlias: ReadonlyMap<string, ExposedModel>
   /** Configured aliases left out: named like an exposed model, or naming no exposed model. */
   readonly aliasDiagnostics: readonly AliasDiagnostic[]
+  /** What each family alias target resolves to now (#231). */
+  readonly familyResolutions: readonly FamilyResolution[]
 }
 
 /** A failed exposure computation: a config conflict that makes public IDs ambiguous. */
@@ -587,7 +593,12 @@ export function computeModelExposure(
     }
   )
 
-  const aliased = exposeAliases(config.aliases, byPublicId, byCanonicalId, thinkingLevels)
+  const aliased = exposeAliases(config.aliases, {
+    byPublicId,
+    byCanonicalId,
+    availableIds: groups.map(({ primary }) => `${primary.provider}/${primary.id}`),
+    thinkingLevels
+  })
   return {
     ok: true,
     models,
@@ -596,7 +607,8 @@ export function computeModelExposure(
     scopeDiagnostics,
     aliases: aliased.aliases,
     byAlias: aliased.byAlias,
-    aliasDiagnostics: aliased.diagnostics
+    aliasDiagnostics: aliased.diagnostics,
+    familyResolutions: aliased.families
   }
 }
 

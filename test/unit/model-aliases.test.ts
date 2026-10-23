@@ -192,3 +192,160 @@ describe('the warning about aliases named like a model', () => {
     expect(lines).toHaveLength(3)
   })
 })
+
+/**
+ * Computes the exposure of a catalogue with these aliases, every model exposed.
+ *
+ * @param available - the models pi has a login for
+ * @param aliases - the aliases
+ * @param customModels - when given, exposes only these canonical IDs ("custom" mode)
+ * @returns the exposure; the test fails when the config is invalid
+ */
+function exposeCatalogue(
+  available: readonly Model<Api>[],
+  aliases: Record<string, AliasTarget>,
+  customModels?: readonly string[]
+): ModelExposureResult {
+  const outcome = computeModelExposure(
+    available,
+    {
+      publicModelIdMode: 'collision-prefixed',
+      modelExposureMode: customModels === undefined ? 'scoped' : 'custom',
+      enabledModels: undefined,
+      customModels: customModels ?? [],
+      providerPrefixes: {},
+      aliases
+    },
+    getSupportedThinkingLevels
+  )
+  if (!outcome.ok) throw new Error(outcome.message)
+  return outcome
+}
+
+/** Opus as pi lists it, plus Copilot's Opus, which is another provider's. */
+const OPUS = [
+  makeModel('anthropic', 'claude-opus-4-8'),
+  makeModel('anthropic', 'claude-opus-5'),
+  makeModel('github-copilot', 'claude-opus-6')
+]
+/** A newer Opus, as a catalogue update or a login adds it. */
+const NEWER_OPUS = makeModel('anthropic', 'claude-opus-5-5')
+
+describe('family aliases follow the newest exposed model (#231)', () => {
+  let lines: string[] = []
+
+  afterEach(() => {
+    resetSync()
+    lines = []
+  })
+
+  // Catches a family alias fixed at its first resolution (a catalogue change or a login would need
+  // a restart), a move that goes unlogged, or one logged on every computation.
+  test('moves when a newer model appears or goes, warning once per move', () => {
+    const alias = { 'opus-moves': { family: 'anthropic/claude-opus' } }
+    configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
+
+    const before = exposeCatalogue(OPUS, alias)
+    const added = exposeCatalogue([...OPUS, NEWER_OPUS], alias)
+    exposeCatalogue([...OPUS, NEWER_OPUS], alias)
+    const removed = exposeCatalogue(OPUS, alias)
+
+    expect(resolved(before, 'opus-moves')?.['canonicalId']).toBe('anthropic/claude-opus-5')
+    expect(resolved(added, 'opus-moves')?.['canonicalId']).toBe('anthropic/claude-opus-5-5')
+    expect(resolved(removed, 'opus-moves')?.['canonicalId']).toBe('anthropic/claude-opus-5')
+    const moves = lines.filter((line) => line.includes('now follows'))
+    expect(moves).toHaveLength(2)
+    expect(moves[0]).toContain('"model":"anthropic/claude-opus-5-5"')
+    expect(moves[0]).toContain('"previousModel":"anthropic/claude-opus-5"')
+  })
+
+  // Catches the baseline lost while the family has nothing exposed: the next model served must be
+  // compared with the last one clients were billed on, and the same model coming back is no move.
+  test('a move across a gap with nothing exposed is logged against the last model served', () => {
+    const alias = { 'opus-gap': { family: 'anthropic/claude-opus' } }
+    const sonnetOnly = [makeModel('anthropic', 'claude-sonnet-5')]
+    configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
+
+    exposeCatalogue(OPUS, alias)
+    exposeCatalogue(sonnetOnly, alias)
+    exposeCatalogue(OPUS, alias)
+    expect(lines.filter((line) => line.includes('now follows'))).toEqual([])
+
+    exposeCatalogue(sonnetOnly, alias)
+    exposeCatalogue([...OPUS, NEWER_OPUS], alias)
+    const moves = lines.filter((line) => line.includes('now follows'))
+    expect(moves).toHaveLength(1)
+    expect(moves[0]).toContain('"previousModel":"anthropic/claude-opus-5"')
+  })
+
+  // Catches a hidden model reached through the family (principle IV), or the hiding going unseen.
+  test('a hidden newer model is honoured and noted', () => {
+    const exposure = exposeCatalogue(
+      [...OPUS, NEWER_OPUS],
+      { 'opus-hidden': { family: 'anthropic/claude-opus' } },
+      ['anthropic/claude-opus-4-8', 'anthropic/claude-opus-5']
+    )
+
+    expect(resolved(exposure, 'opus-hidden')?.['canonicalId']).toBe('anthropic/claude-opus-5')
+    expect(exposure.familyResolutions).toEqual([
+      {
+        alias: 'opus-hidden',
+        position: 0,
+        family: 'anthropic/claude-opus',
+        pin: null,
+        resolved: 'anthropic/claude-opus-5',
+        newest: 'anthropic/claude-opus-5',
+        newerHidden: 'anthropic/claude-opus-5-5'
+      }
+    ])
+  })
+
+  // Catches a pin that moves with the family, or a hidden pin quietly replaced by the newest: the
+  // operator pinned for a reason.
+  test('a pin holds, and a hidden pin is not exposed rather than replaced', () => {
+    const pinned = {
+      'opus-pinned': { family: 'anthropic/claude-opus', pin: 'anthropic/claude-opus-4-8' }
+    }
+
+    const held = exposeCatalogue([...OPUS, NEWER_OPUS], pinned)
+    const hidden = exposeCatalogue([...OPUS, NEWER_OPUS], pinned, ['anthropic/claude-opus-5-5'])
+
+    expect(resolved(held, 'opus-pinned')?.['canonicalId']).toBe('anthropic/claude-opus-4-8')
+    expect(resolved(hidden, 'opus-pinned')).toBeUndefined()
+    expect(hidden.aliasDiagnostics).toEqual([
+      expect.objectContaining({ code: 'target-not-exposed', target: 'anthropic/claude-opus-4-8' })
+    ])
+  })
+
+  // Catches a family no rule knows resolved by guessing, or a pin outside its family accepted.
+  test('an unknown family and a pin outside the family are configuration errors', () => {
+    const exposure = exposeCatalogue(OPUS, {
+      'gpt-latest': { family: 'openai/gpt' },
+      'opus-odd': { family: 'anthropic/claude-opus', pin: 'github-copilot/claude-opus-6' }
+    })
+
+    expect(exposure.aliases).toEqual([])
+    expect(exposure.aliasDiagnostics.map(({ code, target }) => ({ code, target }))).toEqual([
+      { code: 'family-unknown', target: 'openai/gpt' },
+      { code: 'pin-outside-family', target: 'github-copilot/claude-opus-6' }
+    ])
+  })
+
+  // Catches a family target in a chain resolved once for the whole chain, or the chain dropped
+  // when its family has nothing exposed.
+  test('a family can be one target of a chain', () => {
+    const exposure = exposeCatalogue(OPUS, {
+      'opus-chain': {
+        targets: [{ family: 'anthropic/claude-sonnet' }, { family: 'anthropic/claude-opus' }],
+        fallbackOn: ['rate_limit']
+      }
+    })
+
+    expect(
+      exposure.byAlias.get('opus-chain')?.route?.candidates.map(({ canonicalId }) => canonicalId)
+    ).toEqual(['anthropic/claude-opus-5'])
+    expect(exposure.aliasDiagnostics).toEqual([
+      expect.objectContaining({ code: 'target-not-exposed', target: 'anthropic/claude-sonnet' })
+    ])
+  })
+})

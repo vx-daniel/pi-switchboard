@@ -143,18 +143,41 @@ export type FailureClass = z.infer<typeof FailureClassSchema>
  * One model an alias runs at a reasoning effort it sets (#230): the request's `reasoning_effort`
  * is replaced by `reasoningEffort` on this model, and the response reports both.
  */
-const EffortTargetSchema = z.object({
-  model: VerbatimNameSchema,
-  reasoningEffort: z.enum(REASONING_EFFORTS)
-})
+const EffortTargetSchema = z
+  .object({
+    model: VerbatimNameSchema,
+    reasoningEffort: z.enum(REASONING_EFFORTS)
+  })
+  .strict()
 
-/** One of an alias's models: a canonical ID, or one with the effort it runs at (#230). */
-const AliasModelSchema = z.union([VerbatimNameSchema, EffortTargetSchema])
+/**
+ * A model family an alias follows (#231): the newest exposed model of `family`, a provider and
+ * tier keyword (`anthropic/claude-opus`, `openai-codex/sol`), or `pin` while one is set. Optionally
+ * at an effort, as {@link EffortTargetSchema}.
+ */
+const FamilyTargetSchema = z
+  .object({
+    family: VerbatimNameSchema,
+    pin: VerbatimNameSchema.optional(),
+    reasoningEffort: z.enum(REASONING_EFFORTS).optional()
+  })
+  .strict()
+/** A family target: see {@link FamilyTargetSchema}. */
+export type FamilyTarget = z.infer<typeof FamilyTargetSchema>
+
+/**
+ * One of an alias's models: a canonical ID, one with the effort it runs at (#230), or a family
+ * that follows the newest model (#231). Both object forms are strict, so an entry mixing their
+ * keys (`{ model, family }`) matches neither and is dropped with the config warning, rather than
+ * read as one of them with the other's key ignored.
+ */
+const AliasModelSchema = z.union([VerbatimNameSchema, EffortTargetSchema, FamilyTargetSchema])
 
 /**
  * What an alias names (#66, #67): one model, or models tried in order, moving to the next only on
  * the failures `fallbackOn` names (principle VI: the configuration names them). Each model is a
- * canonical ID, or `{ model, reasoningEffort }` to run it at that effort (#230).
+ * canonical ID, `{ model, reasoningEffort }` to run it at that effort (#230), or `{ family, pin?,
+ * reasoningEffort? }` to follow a family's newest model (#231).
  */
 const AliasTargetSchema = z.union([
   AliasModelSchema,
@@ -179,16 +202,53 @@ export function isAliasChain(target: AliasTarget): target is AliasChain {
   return typeof target === 'object' && 'targets' in target
 }
 
-/** One of an alias's models, whichever way the config wrote it. */
-export interface AliasModel {
+/** One named model of an alias, whichever way the config wrote it. */
+export interface ModelTarget {
   /** The canonical ID, as written. */
   readonly model: string
   /** The effort the alias runs it at, replacing the request's (#230); absent to keep the request's. */
   readonly reasoningEffort?: ReasoningEffort
 }
 
+/** One of an alias's targets: a named model, or a family it follows (#231). */
+export type AliasModel = ModelTarget | FamilyTarget
+
 /**
- * Lists an alias's models in order, each with the effort it sets, if any.
+ * Says whether an alias target follows a family rather than naming a model.
+ *
+ * @param target - one of an alias's targets
+ * @returns whether it is `{ family, … }`
+ */
+export function isFamilyTarget(target: AliasModel): target is FamilyTarget {
+  return 'family' in target
+}
+
+/**
+ * Names an alias target for logs, lists and diagnostics: its canonical ID, or its family.
+ *
+ * @param target - one of an alias's targets
+ * @returns the canonical ID, or the family keyword
+ */
+export function targetName(target: AliasModel): string {
+  return isFamilyTarget(target) ? target.family : target.model
+}
+
+/**
+ * Describes an alias target for `/proxy show` and the console: its canonical ID, or its family
+ * with the pin or `(newest)`; the effort is added by the caller.
+ *
+ * @param target - one of an alias's targets
+ * @returns the description
+ */
+export function targetSummary(target: AliasModel): string {
+  if (!isFamilyTarget(target)) return target.model
+  return target.pin === undefined
+    ? `${target.family} (newest)`
+    : `${target.family} (pinned ${target.pin})`
+}
+
+/**
+ * Lists an alias's targets in order, each with the effort it sets, if any.
  *
  * @param target - what the alias names, as the config holds it
  * @returns its models: one for a single target, the chain's otherwise

@@ -210,6 +210,32 @@ describe('normalizeConfig', () => {
     expect(result.aliases).toEqual({ reviewer, builder })
   })
 
+  // Catches an entry mixing a model and a family read as one of them with the other key silently
+  // ignored (#231): it is dropped with the config warning, beside valid family targets.
+  test('keeps family targets, and drops one that also names a model', () => {
+    const latest = { family: 'anthropic/claude-opus' }
+    const steady = {
+      family: 'anthropic/claude-opus',
+      pin: 'anthropic/claude-opus-5',
+      reasoningEffort: 'high'
+    }
+    const result = normalizeConfig({
+      aliases: {
+        latest,
+        steady,
+        'mixed': { model: 'anthropic/claude-opus-5', family: 'anthropic/claude-opus' },
+        'mixed-effort': {
+          model: 'anthropic/claude-opus-5',
+          family: 'anthropic/claude-opus',
+          reasoningEffort: 'high'
+        },
+        'no-family': { pin: 'anthropic/claude-opus-5' }
+      }
+    })
+
+    expect(result.aliases).toEqual({ latest, steady })
+  })
+
   // Catches one bad reserve costing the others, or a share outside 0–1 kept: a reserve above 1
   // would skip a provider whenever it reports quota, and a negative one never would (#69).
   test('keeps the valid quota reserves and drops the invalid ones', () => {

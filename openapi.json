@@ -184,7 +184,10 @@
                   "enum": [
                     "shadows-model",
                     "target-not-exposed",
-                    "effort-unsupported"
+                    "effort-unsupported",
+                    "family-unknown",
+                    "pin-outside-family",
+                    "family-unparsed"
                   ]
                 },
                 "alias": {
@@ -193,7 +196,7 @@
                 },
                 "target": {
                   "type": "string",
-                  "description": "The canonical ID it names, as written."
+                  "description": "The canonical ID or family it names, as written; for `family-unparsed`, a member pi has (exposed or hidden) whose version the family rule cannot read."
                 },
                 "message": {
                   "type": "string"
@@ -207,7 +210,84 @@
               ],
               "additionalProperties": false
             },
-            "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), both of which make the check fail, or naming no exposed model (`target-not-exposed`)."
+            "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), following a family no rule knows (`family-unknown`, #231) or pinned outside it (`pin-outside-family`), all of which make the check fail; naming no exposed model (`target-not-exposed`); or a family member whose version the rule can't read (`family-unparsed`, never picked)."
+          },
+          "familyAliases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "alias": {
+                  "type": "string",
+                  "description": "The alias, as written."
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "The target's place in the alias, from 0."
+                },
+                "family": {
+                  "type": "string",
+                  "description": "The family it follows, as written."
+                },
+                "pin": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The canonical ID it is pinned to."
+                },
+                "resolved": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The canonical ID it serves now: the pin, else the newest exposed member."
+                },
+                "newest": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The newest exposed member."
+                },
+                "newerHidden": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "A newer member pi has that the exposure config hides; the alias honours the hiding."
+                }
+              },
+              "required": [
+                "alias",
+                "position",
+                "family",
+                "pin",
+                "resolved",
+                "newest",
+                "newerHidden"
+              ],
+              "additionalProperties": false
+            },
+            "description": "What each family alias target resolves to now (#231): its pin, else the newest exposed member, with a newer member the exposure config hides."
           },
           "cooldowns": {
             "type": "array",
@@ -294,6 +374,7 @@
           "exposureError",
           "scopeDiagnostics",
           "aliasDiagnostics",
+          "familyAliases",
           "cooldowns",
           "modelsJsonError"
         ],
@@ -1263,7 +1344,10 @@
                             "enum": [
                               "shadows-model",
                               "target-not-exposed",
-                              "effort-unsupported"
+                              "effort-unsupported",
+                              "family-unknown",
+                              "pin-outside-family",
+                              "family-unparsed"
                             ]
                           },
                           "alias": {
@@ -1272,7 +1356,7 @@
                           },
                           "target": {
                             "type": "string",
-                            "description": "The canonical ID it names, as written."
+                            "description": "The canonical ID or family it names, as written; for `family-unparsed`, a member pi has (exposed or hidden) whose version the family rule cannot read."
                           },
                           "message": {
                             "type": "string"
@@ -1286,7 +1370,84 @@
                         ],
                         "additionalProperties": false
                       },
-                      "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), both of which make the check fail, or naming no exposed model (`target-not-exposed`)."
+                      "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), following a family no rule knows (`family-unknown`, #231) or pinned outside it (`pin-outside-family`), all of which make the check fail; naming no exposed model (`target-not-exposed`); or a family member whose version the rule can't read (`family-unparsed`, never picked)."
+                    },
+                    "familyAliases": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "alias": {
+                            "type": "string",
+                            "description": "The alias, as written."
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "The target's place in the alias, from 0."
+                          },
+                          "family": {
+                            "type": "string",
+                            "description": "The family it follows, as written."
+                          },
+                          "pin": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The canonical ID it is pinned to."
+                          },
+                          "resolved": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The canonical ID it serves now: the pin, else the newest exposed member."
+                          },
+                          "newest": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The newest exposed member."
+                          },
+                          "newerHidden": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "A newer member pi has that the exposure config hides; the alias honours the hiding."
+                          }
+                        },
+                        "required": [
+                          "alias",
+                          "position",
+                          "family",
+                          "pin",
+                          "resolved",
+                          "newest",
+                          "newerHidden"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "What each family alias target resolves to now (#231): its pin, else the newest exposed member, with a newer member the exposure config hides."
                     },
                     "cooldowns": {
                       "type": "array",
@@ -1373,6 +1534,7 @@
                     "exposureError",
                     "scopeDiagnostics",
                     "aliasDiagnostics",
+                    "familyAliases",
                     "cooldowns",
                     "modelsJsonError"
                   ],

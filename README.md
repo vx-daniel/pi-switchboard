@@ -90,7 +90,7 @@ pi-switchboard tui            # takes the same flags as pi-switchboard
   - **ERRORS:** failed attempts by failure class, and rejected requests by HTTP status.
 
   It covers every proxy that writes to the same agent dir, and reads the file again every 5 seconds; the proxy writes it every 5 seconds. With stats off (`--no-stats`), or a file that can't be opened or read, the view shows the totals per alias and served model since the proxy started instead (#70), counted in memory, and says why.
-- **Models (`4`).** The exposed models, with their provider, the reasoning efforts each supports and any cooldown, then every [alias](#aliases) with its targets, each target's effort, `fallbackOn`, and in red why the proxy leaves it or a target out (`target-not-exposed`, `shadows-model`, `effort-unsupported`). `↑` `↓` select a row and `Enter` acts on it: on an alias, a menu to rename it, edit its targets and their efforts (add, set the effort, move up or down, remove), set the failures it falls back on, or delete it; on a model, or on the last row, **+ New alias…**, a new alias. Targets are picked from the exposed models and efforts from the model's own list, and a name with whitespace, one taken by a model or another alias, or an empty one is refused with the reason. Every change is written to `proxy-config.json` at once and used by the next request, with no restart.
+- **Models (`4`).** The exposed models, with their provider, the reasoning efforts each supports and any cooldown, then every [alias](#aliases) with its targets, each target's effort, `fallbackOn`, and in red why the proxy leaves it or a target out (`target-not-exposed`, `shadows-model`, `effort-unsupported`). A [family alias](#family-aliases-follow-the-newest-model) shows what it resolves to (`anthropic/claude-opus → claude-opus-5-5 (newest)`, or its pin beside the newest), and a newer model the exposure config hides. `↑` `↓` select a row and `Enter` acts on it: on an alias, a menu to rename it, pin a family alias to one of its models or let it follow the newest again, edit its targets and their efforts (add, set the effort, move up or down, remove, and pin or unpin a family target), set the failures it falls back on, or delete it; on a model, a new alias for it; on the last row, **+ New alias…**, a new alias for a model or a family. Targets are picked from the exposed models and efforts from the model's own list, and a name with whitespace, one taken by a model or another alias, or an empty one is refused with the reason. Every change is written to `proxy-config.json` at once and used by the next request, with no restart.
 - **Status line.** The address (`host:port`, without `http://`, to fit a narrow terminal), whether proxy auth is on, how many models are exposed and available (`26/26 exposed`), active cooldowns, and a `models.json` error if there is one. With the sidebar shown, the header keeps only the version and address and the rest moves to the sidebar.
 - **Sidebar.** On a terminal 100 columns or wider, a panel on the right shows the proxy at a glance beside any view, redrawn every second; `s` hides it and shows it again:
   - **PROXY:** address, proxy auth, uptime, open client connections, exposed and available models, how many cooldowns are active, and a `models.json` error.
@@ -441,6 +441,25 @@ A team picks a model by job, and the job settles how hard it thinks as well: a r
 - **An effort the model doesn't support is a mistake in the config, not a clamp.** That target is left out: `/healthz/models` answers `503` and lists it as `effort-unsupported`, and the proxy logs a warning. A chain keeps its other targets, and the alias is dropped only when none is left. `GET /v1/switchboard/models` lists each model's supported efforts.
 - **Listed as fixed.** In `GET /v1/switchboard/models`, such an alias's `reasoning_efforts` is just its effort, and `reasoning_effort_fixed` is `true`.
 - **Names.** These examples use lowercase kebab-case; the config takes any name exactly as written.
+
+#### Family aliases: follow the newest model
+
+A plain alias names one model, so a new model means editing it. A family alias names a family instead, and the proxy follows its newest model:
+
+```json
+{ "aliases": {
+  "opus-latest": { "family": "anthropic/claude-opus" },
+  "codex-sol-latest": { "family": "openai-codex/sol", "reasoningEffort": "high" },
+  "opus-steady": { "family": "anthropic/claude-opus", "pin": "anthropic/claude-opus-5" }
+} }
+```
+
+- **Families.** A provider and a tier: `anthropic/claude-opus`, `anthropic/claude-sonnet`, `anthropic/claude-haiku`, `anthropic/claude-fable`, and `openai-codex/sol`, `luna`, `terra`, `astra`. You can't write a pattern; a family the proxy doesn't know is ignored, and `/healthz/models` answers `503` with `family-unknown`.
+- **Newest by the version in the ID.** pi's catalogue has no release dates, so the proxy reads the version from the model ID: `claude-opus-5-5` is newer than `claude-opus-5` and `claude-opus-4-8`; `gpt-6.1-sol` is newer than `gpt-6-sol`. A dated snapshot (`claude-opus-4-5-20251101`) is never picked over its undated ID. A model in the family whose version can't be read is never picked, and is listed in `/healthz/models` as `family-unparsed`.
+- **Among the exposed models only.** If the newest is hidden by the exposure config, the alias follows the newest exposed one, and `/healthz/models` names the hidden one (`newerHidden`). A family with nothing exposed is `target-not-exposed`.
+- **It moves by itself, loudly.** It is resolved on every request, so a catalogue update, a login or a logout moves it on the next request, with no restart. Each move is logged once at `warning`, with the old and the new model. `/healthz/models` lists what each family alias resolves to (`familyAliases`), and the console's Models view shows it.
+- **`pin` holds it** on one model of the family until you clear it (the console's **Pin to…** and **Follow newest**). A pinned alias never moves; while its pin is hidden or logged out, it is `target-not-exposed`, never the newest instead. A pin outside the family answers `503` with `pin-outside-family`.
+- **Like any alias otherwise.** The response's `model` is the model that answered and `x_pi.alias` the family alias. A family can set a `reasoningEffort` ([above](#reasoning-effort-per-alias)), checked against the model it resolves to, and can be one entry of a chain's `targets`.
 
 #### Cooldowns
 
