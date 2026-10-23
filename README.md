@@ -291,7 +291,7 @@ Control which models appear in the API:
 | `scoped` (default) | Expose the models pi's global `enabledModels` setting selects (`/scoped-models` in pi, or `settings.json`), resolved as pi resolves them: exact `provider/id`, bare IDs, globs such as `anthropic/*` or `*sonnet*`, and `:level` suffixes. As in pi, a bare word also matches by substring of a model's ID or name (`opus` selects an Opus model), and a pattern several providers match exposes all of them (listed as `ambiguous`): write `provider/id` to pick one. With no `enabledModels`, every model with credentials, as `all`. Patterns that match nothing are listed in `/healthz/models`. pi's `--models` flag is per session, so it does not apply |
 | `custom` | Expose an explicit allowlist of canonical IDs (`customModels`), matched exactly |
 
-pi lists every model a provider offers, including some the login's plan cannot run: with a ChatGPT login, Codex refuses `gpt-5.5` and `gpt-5.3-codex-spark`, for example. Such a model answers `404` `model_not_found` ("not available with the provider login the proxy uses"), and the proxy logs the refusal as an error. To stop exposing it, select the models you can use in pi's `enabledModels` (`scoped`), or list them in `customModels` (`custom`).
+pi can list a model the login's plan cannot run: with a ChatGPT login, Codex refused `gpt-5.5` and `gpt-5.3-codex-spark`, which pi 1.4.0 dropped from its catalog for that reason. Such a model answers `404` `model_not_found` ("not available with the provider login the proxy uses"), and the proxy logs the refusal as an error. To stop exposing it, select the models you can use in pi's `enabledModels` (`scoped`), or list them in `customModels` (`custom`).
 
 ### Canonical model IDs
 
@@ -725,7 +725,7 @@ Every binary is run (`--version`) on its own platform (Linux and macOS, and Wind
 - **`@earendil-works/pi-ai`** — the types `Model`, `Usage`, `AssistantMessageEvent`, `JsonObject`
 - **`@earendil-works/pi-coding-agent`** — `ModelRuntime` (credentials, catalog and request auth; completions run through its `streamSimple()`, non-streaming ones read the stream's final message) and `SettingsManager`
 
-Requires Pi 1.x (`^1.3.0`). Pi 1.0 is the first release whose Anthropic client identifies as Claude Code 2.1.280, which Anthropic requires for Opus 5.5 and Fable 5.1; Pi 0.x identified as 2.1.75 and those models were refused.
+Requires Pi 1.x (`^1.4.0`). Pi 1.0 is the first release whose Anthropic client identifies as Claude Code 2.1.280, which Anthropic requires for Opus 5.5 and Fable 5.1; Pi 0.x identified as 2.1.75 and those models were refused.
 
 ## Security defaults
 

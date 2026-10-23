@@ -424,6 +424,11 @@ describe('mapFailedCall', () => {
       'Anthropic request too large (413)',
       `413 {"type":"error","error":{"type":"request_too_large","message":"${QUOTED}"}}`
     ],
+    // pi 1.4.0: a 413 is an overflow whatever its body says (a 502 on 1.3.0).
+    [
+      'Copilot request too large (413), no overflow wording',
+      `github-copilot API error (413): {"message":"failed to parse request","code":""}`
+    ],
     [
       'OpenAI Responses',
       `OpenAI API error (400): Your input exceeds the context window of this model. ${QUOTED}`

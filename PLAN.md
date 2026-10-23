@@ -676,8 +676,9 @@ the credential.
   sign-in (`isChatGPTSignIn`), `github-copilot`'s headers, `xai`'s reasoning items. Anthropic
   and Codex key nothing by name (OAuth shaping is by the token's `sk-ant-oat` prefix). pi's
   assistant message therefore names the base; the proxy reports the login from its route, never
-  from the message. A catalog refresh (`refreshModels`, none of pi 1.3.0's built-ins has one) is
-  translated both ways, as pi's providers restore only models stored under their own ID.
+  from the message. A catalog refresh (`refreshModels`; of pi's built-ins, in 1.3.0 and 1.4.0,
+  only `radius` has one) is translated both ways, as pi's providers restore only models stored
+  under their own ID.
 - **Available before the first request.** A registered provider is only provisionally available
   until the next availability pass; `initRegistry` runs `refresh({ allowNetwork: false })` once
   after registering, so the snapshot the routes read includes a login with a stored credential.
@@ -929,6 +930,16 @@ drops a blank user message, user text part or assistant text block. A blank tool
 its text, which Claude accepts, as it did the trimmed `""` (checked live, 2026-10-20). A
 whitespace-only `stop` sequence is the exception: Claude refuses it, as it refused the trimmed
 `""`, and the client gets a 502 for its own field (#147).
+
+A whitespace-only `tool` message elsewhere also reaches pi as sent (#145), and since pi 1.4.0 the
+adapters, not the proxy, decide what the provider sees (read from pi-ai 1.4.0's `dist`):
+
+| API | A tool result that is only whitespace |
+|---|---|
+| OpenAI chat completions, OpenAI Responses, Codex | pi's placeholder `(no tool output)` (pi 1.3.0 sent the whitespace) |
+| Google | `""` (pi 1.3.0 sent the whitespace) |
+| Mistral | `(no tool output)`, as in 1.3.0; Mistral's adapter also trims a tool result that has text |
+| Anthropic | the whitespace, as above |
 
 ### Prompt cache breakpoints
 
@@ -1506,10 +1517,14 @@ wrong, so only the proxy token and a client's own key get one.
 
 Context overflow (#40): `mapFailedCall` runs pi's `isContextOverflow` on the failed call's final
 message, which recognizes overflow wording from about 15 providers (Anthropic, OpenAI, Google,
-Bedrock, Mistral, OpenRouter, …), before the status mapping. A reported status other than 400 or 413
-rules it out, so a 429 that says "too many tokens" stays a rate limit. A provider that accepts an
-over-long prompt and answers anyway (input beyond the context window, or a `length` stop with no
-output) is not an error: the answer goes to the client and a warning is logged.
+Bedrock, Mistral, OpenRouter, …), before the status mapping. Since pi 1.4.0 it also counts any
+provider 413 as an overflow, whatever the body says (GitHub Copilot answers a too-large request
+with `413 failed to parse request`), so a 413 is a `400 context_length_exceeded`, not a 502, and
+no longer moves a chain whose `fallbackOn` names `upstream_error` (a 400 has no failure class). A
+reported status other than 400 or 413 rules it out, so a 429 that says "too many tokens" stays a
+rate limit. A provider that accepts an over-long prompt and answers anyway (input beyond the
+context window, or a `length` stop with no output) is not an error: the answer goes to the client
+and a warning is logged.
 
 Provider rejections (#147, #128 item 5): an upstream 400 or 422 that is not a context overflow is
 the provider refusing a field the client sent, such as Claude's `top_p` on 4.7 and later, a forced
