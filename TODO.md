@@ -340,6 +340,10 @@ unsupported parameters clearly instead of silently ignoring them.
 - [x] `anyOf` is correctly listed as supported in PLAN.md (TODO item was stale)
 - [x] Update PLAN.md known gaps section to reflect resolved `tool_choice` and `strict` fixes
 
+### Clamped `reasoning_effort` unreported
+
+- [x] Report `x_pi.reasoning_effort: { requested, applied }` in the body and every chunk when the request sets `reasoning_effort`, for the model that answered; log the first clamp per model at info (#175)
+
 ## Pi 1.x migration [DONE]
 
 - [x] Depend on `@earendil-works/pi-*` `^1.3.0` (Pi 1.0 is the first release whose Anthropic client sends Claude Code 2.1.280, which Opus 5.5 requires)
@@ -425,7 +429,8 @@ serving model and login reported under `x_pi` and in the log.
 - [ ] Quota awareness (#69): research, tracking (`/healthz/creds`, `/v1/switchboard/models`, the console's Accounts view) and the per-provider reserve a fallback chain keeps (`routing.reserve`) done; the recorder keeps the quota headers and records a `quota` call for Anthropic and Codex; the recordings themselves, from a login made for recording, still to do
 - [ ] Usage and cost by route (#70): done are the `alias` and `attempt` on the upstream log lines, the running totals per alias × provider × model in memory (`src/server/route-totals.ts`) for the console (#61), and per-minute stats kept across restarts in SQLite (`src/stats/`, #216); open is whether to serve them at `GET /healthz/usage`
 - [x] Stats dashboard (#216): the stats store and recorder, and the console's Stats view rebuilt on its queries (today, week and 30 days; overview, timeline, models, errors)
-- [ ] Several logins per provider (#227): `{provider}-N` logins (copies of pi's built-ins, own credential in pi's store, requests sent as the base), registered at startup for every stored slot credential and by the console's login list, which offers each logged-in provider's next slot; logout drops the slot; a label per login (asked after a login, `Set a label` in the menu, `labels` in the config) shown in the Accounts view and the pickers; a login is not a model (constitution 3.6.0): the model is listed once and routing picks the login (`routing.logins.fallbackOn`, default `rate_limit`), reported as `x_pi.login`, with cooldowns, quota, reserve and totals per login and `/v1/switchboard/models` listing each model's logins; proven offline against the mock provider; a recorded fixture through a copy (from a login made for recording) still to do; open: a console action that puts a login first
+- [x] Several logins per provider (#227): `{provider}-N` logins (copies of pi's built-ins, own credential in pi's store, requests sent as the base, never configured by the base's environment key), registered at startup for every stored slot credential and by the console's login list, which offers each logged-in provider's next slot; logout drops the slot; a label per login (asked after a login, `Set a label` in the menu, `labels` in the config) shown in the Accounts view and the pickers; a login is not a model (constitution 3.6.0): the model is listed once and routing picks the login (`routing.logins.fallbackOn`, default `rate_limit`), reported as `x_pi.login`, with cooldowns, quota, reserve and totals per login and `/v1/switchboard/models` listing each model's logins; proven offline against the mock provider
+- [ ] Logins, follow-up (#233): a recorded fixture through a copy (from a login made for recording); open: a console action that puts a login first
 
 ## Phase 6 — More of OpenAI's API
 

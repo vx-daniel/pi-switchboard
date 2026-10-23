@@ -28,6 +28,7 @@ import type { FailureClass, Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ConversionSuccess } from '@proxy/openai/messages'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
+import { effortReport } from '@proxy/openai/reasoning-effort'
 import { type Attempt, buildChatCompletion, type ResponseRoute } from '@proxy/openai/responses'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
@@ -650,11 +651,14 @@ function answerWith(
     )
   }
   const { login } = attemptOf(candidate)
+  const effort = job.request.reasoning_effort
   return respond({
     model: candidate.canonicalId,
     ...(login === undefined ? {} : { login }),
     ...(job.alias === undefined ? {} : { alias: job.alias }),
-    attempts
+    attempts,
+    // The model that answered decides what the effort ran at (#175), not the one asked for.
+    ...(effort === undefined ? {} : { reasoningEffort: effortReport(candidate.model, effort) })
   })
 }
 

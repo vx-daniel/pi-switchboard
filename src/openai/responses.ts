@@ -21,6 +21,8 @@ import type {
 } from '@earendil-works/pi-ai'
 import { FailureClassSchema } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import type { EffortReport } from '@proxy/openai/reasoning-effort'
+import { REASONING_EFFORTS } from '@proxy/openai/schemas'
 import * as z from 'zod'
 
 /** Logger for non-streaming response building. */
@@ -81,6 +83,26 @@ export const loginSchema = z
       'than one (#227); absent otherwise.'
   })
 
+/** `x_pi.reasoning_effort`: documents the response; never parsed. */
+export const reasoningEffortSchema = z
+  .object({
+    requested: z
+      .enum(REASONING_EFFORTS)
+      .nullable()
+      .meta({ description: 'The `reasoning_effort` the request sent, or null when it sent none.' }),
+    applied: z.enum(REASONING_EFFORTS).meta({
+      description:
+        'The effort the proxy asked pi to run the model at: `requested` when the model supports ' +
+        "it, else the nearest level it does. pi's adapter may still translate it for the provider."
+    })
+  })
+  .optional()
+  .meta({
+    description:
+      'What the request asked for and what the model that answered runs at (#175); present ' +
+      'only when the request set `reasoning_effort`.'
+  })
+
 /** Which model answered a request, and how the request got to it (#66, #67, #227). */
 export interface ResponseRoute {
   /** The canonical ID of the model that answered, reported as `model`. */
@@ -91,6 +113,8 @@ export interface ResponseRoute {
   readonly alias?: string
   /** The alias's failed attempts before `model`, reported as `x_pi.attempts`. */
   readonly attempts?: readonly Attempt[]
+  /** The effort asked for and applied on `model`, reported as `x_pi.reasoning_effort`. */
+  readonly reasoningEffort?: EffortReport
 }
 
 /** The `x_pi` fields a route adds. */
@@ -98,11 +122,12 @@ export interface RouteFields {
   readonly alias?: string
   readonly login?: string
   readonly attempts?: Attempt[]
+  readonly reasoning_effort?: EffortReport
 }
 
 /**
- * Returns the `x_pi` fields a route adds: the alias, the login, and the failed attempts, each
- * only when there is one, so a request without them is unchanged.
+ * Returns the `x_pi` fields a route adds: the alias, the login, the failed attempts and the
+ * effort report, each only when there is one, so a request without them is unchanged.
  *
  * @param route - how the request got to the model that answered
  * @returns the fields to spread into `x_pi`
@@ -113,7 +138,8 @@ export function routeFields(route: ResponseRoute): RouteFields {
     ...(route.login === undefined ? {} : { login: route.login }),
     ...(route.attempts === undefined || route.attempts.length === 0
       ? {}
-      : { attempts: [...route.attempts] })
+      : { attempts: [...route.attempts] }),
+    ...(route.reasoningEffort === undefined ? {} : { reasoning_effort: route.reasoningEffort })
   }
 }
 
@@ -208,6 +234,7 @@ export const openAIChatCompletionSchema = z
           description: 'The alias the request named (#66); present only when it named one.'
         }),
         login: loginSchema,
+        reasoning_effort: reasoningEffortSchema,
         attempts: attemptsSchema
       })
       .meta({

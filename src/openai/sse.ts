@@ -20,6 +20,7 @@ import {
   finishReasonSchema,
   mapFinishReason,
   loginSchema,
+  reasoningEffortSchema,
   mapUsage,
   openAIUsageSchema,
   type ResponseRoute,
@@ -85,6 +86,7 @@ export const sseChunkSchema = z
           .optional()
           .meta({ description: 'The alias the request named (#66).' }),
         login: loginSchema,
+        reasoning_effort: reasoningEffortSchema,
         attempts: attemptsSchema
       })
       .optional()
