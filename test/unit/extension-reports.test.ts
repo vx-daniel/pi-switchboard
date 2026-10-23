@@ -127,6 +127,25 @@ describe('with models on two providers', () => {
       )
     })
 
+    // Catches `/proxy show` dropping a target's effort (#230), or showing a one-target alias as a
+    // chain: the operator reads there what each alias runs at.
+    test('aliases with the effort each target sets', async () => {
+      const report = await buildConfigReport(
+        stateWith(agentDir, {
+          aliases: {
+            quiet: { model: 'alpha/a1', reasoningEffort: 'none' },
+            chain: {
+              targets: [{ model: 'alpha/a1', reasoningEffort: 'none' }, 'alpha/a2'],
+              fallbackOn: ['rate_limit']
+            }
+          }
+        })
+      )
+      expect(report).toEqual(
+        `${DEFAULT_SERVER_LINE}\nid mode: collision-prefixed | exposure: scoped | aliases: quiet=alpha/a1@none, chain=alpha/a1@none > alpha/a2 (on rate_limit) | exposed: ${ALL_EXPOSED_PREVIEW}`
+      )
+    })
+
     // Catches scoped mode with an empty pattern list printing an "enabled: 0" field.
     test('scoped with an empty pattern list', async () => {
       const report = await buildConfigReport(stateWith(agentDir, {}, []))
