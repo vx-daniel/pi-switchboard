@@ -21,6 +21,7 @@ import type { ModelExposureResult } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import {
   type AliasDraft,
+  type AliasSaveMode,
   aliasNameProblem,
   deleteAlias,
   draftOf,
@@ -140,21 +141,26 @@ async function pickTarget(
 }
 
 /**
- * Saves an alias, then reads the status again; says so when the file could not be written.
+ * Saves an alias, then reads the status again; says why when nothing was saved.
  *
  * @param editor - the editor
  * @param name - the alias
  * @param draft - its models and `fallbackOn`
- * @param previousName - the name it had, when renamed
+ * @param mode - whether it is new, or the name it had
+ * @returns whether it was saved
  */
 async function save(
   editor: AliasEditor,
   name: string,
   draft: AliasDraft,
-  previousName?: string
-): Promise<void> {
-  if (saveAlias(name, draft, previousName)) await editor.refresh()
-  else await notify(editor, NOT_WRITTEN)
+  mode: AliasSaveMode
+): Promise<boolean> {
+  const outcome = saveAlias(name, draft, mode)
+  if (outcome === 'written') await editor.refresh()
+  else if (outcome === 'name-taken') {
+    await notify(editor, `An alias named "${name}" was added meanwhile; nothing changed.`)
+  } else await notify(editor, NOT_WRITTEN)
+  return outcome === 'written'
 }
 
 /**
@@ -167,7 +173,9 @@ async function newAlias(editor: AliasEditor, model?: string): Promise<void> {
   const name = await askAliasName(editor, 'Name for the new alias (e.g. reviewer, builder-high)')
   if (name === undefined) return
   const target = await pickTarget(editor, `Model for ${name}`, model)
-  if (target !== undefined) await save(editor, name, { models: [target], fallbackOn: [] })
+  if (target !== undefined) {
+    await save(editor, name, { models: [target], fallbackOn: [] }, { creating: true })
+  }
 }
 
 /**
@@ -267,9 +275,10 @@ async function editTargets(editor: AliasEditor, name: string, start: AliasDraft)
   for (;;) {
     const next = await targetsStep(editor, name, models)
     if (next === 'done') return
-    if (next !== undefined) {
+    // The menu keeps building on what is saved: a failed save must not carry into the next one.
+    const draft = { models: next ?? models, fallbackOn: start.fallbackOn }
+    if (next !== undefined && (await save(editor, name, draft, { previousName: name }))) {
       models = next
-      await save(editor, name, { models, fallbackOn: start.fallbackOn })
     }
   }
 }
@@ -295,7 +304,7 @@ async function editFallbackOn(editor: AliasEditor, name: string, start: AliasDra
   }
   // In the schema's order, whatever order they were ticked in.
   const fallbackOn = classes.filter((failure) => chosen.has(failure))
-  await save(editor, name, { ...start, fallbackOn })
+  await save(editor, name, { ...start, fallbackOn }, { previousName: name })
 }
 
 /**
@@ -307,7 +316,9 @@ async function editFallbackOn(editor: AliasEditor, name: string, start: AliasDra
  */
 async function rename(editor: AliasEditor, name: string, draft: AliasDraft): Promise<void> {
   const renamed = await askAliasName(editor, `New name for ${name}`, name)
-  if (renamed !== undefined && renamed !== name) await save(editor, renamed, draft, name)
+  if (renamed !== undefined && renamed !== name) {
+    await save(editor, renamed, draft, { previousName: name })
+  }
 }
 
 /**

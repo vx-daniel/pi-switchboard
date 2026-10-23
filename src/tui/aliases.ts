@@ -82,41 +82,64 @@ export function aliasNameProblem(
   return undefined
 }
 
+/** How a save ended: written, refused because the name is another alias's, or not written. */
+export type AliasWrite = 'written' | 'name-taken' | 'not-written'
+
 /**
  * Writes the config's aliases, keeping everything else in the file.
  *
- * @param change - rewrites the aliases
- * @returns whether the file was written
+ * @remarks
+ * Read, changed and written without a lock: the console is one operator's local tool, and the
+ * file is otherwise written only when that operator saves from pi or the console. The read is
+ * the file's state now, not the view's, so a name taken since the view was read is still caught.
+ *
+ * @param change - rewrites the aliases, or returns `undefined` to refuse the change
+ * @returns how it ended
  */
 function writeAliases(
-  change: (aliases: Readonly<Record<string, AliasTarget>>) => Record<string, AliasTarget>
-): boolean {
+  change: (
+    aliases: Readonly<Record<string, AliasTarget>>
+  ) => Record<string, AliasTarget> | undefined
+): AliasWrite {
   const config = loadConfigFromFile()
-  return saveConfigToFile({ ...config, aliases: change(config.aliases) })
+  const aliases = change(config.aliases)
+  if (aliases === undefined) return 'name-taken'
+  return saveConfigToFile({ ...config, aliases }) ? 'written' : 'not-written'
 }
 
+/** Whether a save creates an alias, or edits (and maybe renames) the one named `previousName`. */
+export type AliasSaveMode = { readonly creating: true } | { readonly previousName: string }
+
 /**
- * Saves an alias, in place when it exists (renamed when `previousName` differs), else last.
+ * Saves an alias: a new one last, an edited one in its place (under its new name, if renamed).
+ *
+ * @remarks
+ * A new alias, or a rename, onto a name the file already has is refused rather than overwriting
+ * that alias: it may have been added since the editor read the config. An edited alias that has
+ * been deleted meanwhile is added again, last.
  *
  * @param name - the alias's name
  * @param draft - its models and `fallbackOn`
- * @param previousName - the name it had, when editing an existing alias
- * @returns whether the file was written
+ * @param mode - whether it is new, or the name it had
+ * @returns how the save ended
  */
-export function saveAlias(name: string, draft: AliasDraft, previousName?: string): boolean {
+export function saveAlias(name: string, draft: AliasDraft, mode: AliasSaveMode): AliasWrite {
   const target = targetOf(draft)
-  const existing = previousName ?? name
-  const written = writeAliases((aliases) => {
-    // Own keys only: `in` would find `constructor` on any object, and the save would write nothing.
-    if (!Object.hasOwn(aliases, existing)) return { ...aliases, [name]: target }
+  const previousName = 'previousName' in mode ? mode.previousName : undefined
+  const outcome = writeAliases((aliases) => {
+    // Own keys only: `in` would find `constructor` on any object.
+    if (name !== previousName && Object.hasOwn(aliases, name)) return undefined
+    if (previousName === undefined || !Object.hasOwn(aliases, previousName)) {
+      return { ...aliases, [name]: target }
+    }
     // Rebuilt in order, so a renamed or edited alias keeps its place in the file and the lists.
     return Object.fromEntries(
       Object.entries(aliases).map(([alias, current]) =>
-        alias === existing ? [name, target] : [alias, current]
+        alias === previousName ? [name, target] : [alias, current]
       )
     )
   })
-  if (written) {
+  if (outcome === 'written') {
     if (previousName !== undefined && previousName !== name) {
       configLogger.info('Renamed alias {previousAlias} to {alias}', {
         alias: name,
@@ -126,7 +149,7 @@ export function saveAlias(name: string, draft: AliasDraft, previousName?: string
       configLogger.info('Saved alias {alias}', { alias: name, targetCount: draft.models.length })
     }
   }
-  return written
+  return outcome
 }
 
 /**
@@ -140,6 +163,6 @@ export function deleteAlias(name: string): boolean {
     const { [name]: _deleted, ...others } = aliases
     return others
   })
-  if (written) configLogger.info('Deleted alias {alias}', { alias: name })
-  return written
+  if (written === 'written') configLogger.info('Deleted alias {alias}', { alias: name })
+  return written === 'written'
 }

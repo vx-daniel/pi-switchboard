@@ -42,13 +42,14 @@ describe('the console Models view', () => {
   // would edit an alias they can't see.
   test('scrolls to keep the selected alias on screen', () => {
     const models = Array.from({ length: 20 }, (_, position) => exposed(`m${String(position)}`))
-    const rows = rendered(
-      { models, aliases: { reviewer: 'alpha/m1' }, diagnostics: [], selected: 20 },
-      6
-    )
+    const view = { models, aliases: { reviewer: 'alpha/m1' }, diagnostics: [], selected: 20 }
+
+    const rows = rendered(view, 6)
 
     expect(rows).toHaveLength(6)
     expect(rows.at(-1)).toMatch(/^› reviewer +alpha\/m1$/u)
+    // Shorter than the headings: the selected row alone.
+    expect(rendered(view, 1)).toEqual([expect.stringMatching(/^› reviewer/u)])
   })
 
   // Catches an alias the proxy leaves out shown as if it worked: its diagnostic is under it.

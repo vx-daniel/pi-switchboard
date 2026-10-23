@@ -112,13 +112,14 @@ interface Seen {
  * Runs Enter on one Models view row, with dialogs that answer from scripts.
  *
  * @param pick - finds the row among the view's items
- * @param picks - the selectors' answers, in order; `undefined` cancels
+ * @param picks - the selectors' answers, in order; `undefined` cancels, and a function answers
+ *   with what it returns, after acting as someone else would while the dialog is open
  * @param typed - the inputs' answers, in order; `undefined` cancels
  * @returns what the dialogs saw
  */
 async function enterOn(
   pick: (items: readonly ModelsItem[]) => ModelsItem | undefined,
-  picks: (string | undefined)[],
+  picks: (string | undefined | (() => string))[],
   typed: (string | undefined)[] = []
 ): Promise<Seen> {
   const seen: Seen = { titles: [], options: [] }
@@ -129,7 +130,8 @@ async function enterOn(
       select: (title, labels) => {
         seen.titles.push(title)
         seen.options.push(labels)
-        return Promise.resolve(picks.shift())
+        const answer = picks.shift()
+        return Promise.resolve(typeof answer === 'function' ? answer() : answer)
       },
       input: (title) => {
         seen.titles.push(title)
@@ -373,6 +375,61 @@ describe('the console alias editor', () => {
         targets: ['alpha/quick-mock', { model: 'alpha/gone', reasoningEffort: 'high' }],
         fallbackOn: ['rate_limit']
       }
+    })
+  })
+
+  // Catches a failed save the menu keeps building on: the operator is told nothing changed, yet
+  // the next successful save would write the failed edit too.
+  test('after a failed save, the next edit starts from what was saved', async () => {
+    const path = join(agentDir.path, 'proxy-config.json')
+    setAliases({ builder: 'alpha/quick-mock' })
+    const blockWrites = (): string => {
+      rmSync(path)
+      // A directory where the file should be: reading falls back to the defaults, writing fails.
+      mkdirSync(path)
+      return 'medium'
+    }
+    const allowWrites = (): string => {
+      rmSync(path, { recursive: true })
+      setAliases({ builder: 'alpha/quick-mock' })
+      return 'OK'
+    }
+
+    const seen = await enterOn(aliasRow('builder'), [
+      'Targets and efforts',
+      '+ Add a target…',
+      'alpha/deep-mock',
+      blockWrites,
+      allowWrites,
+      '1. alpha/quick-mock',
+      'Set the reasoning effort',
+      'low',
+      'Done'
+    ])
+
+    expect(seen.options.at(-1)).toEqual(['1. alpha/quick-mock @low', '+ Add a target…', 'Done'])
+    expect(loadConfigFromFile().aliases).toEqual({
+      builder: { model: 'alpha/quick-mock', reasoningEffort: 'low' }
+    })
+  })
+
+  // Catches a new alias overwriting one added since the editor read the config (pi's settings,
+  // another console, a hand edit). A rename onto such a name takes the same check.
+  test('a name taken while the dialog was open is refused, not overwritten', async () => {
+    setAliases({ first: 'alpha/quick-mock' })
+    const addedMeanwhile = (): string => {
+      setAliases({ first: 'alpha/quick-mock', reviewer: 'alpha/quick-mock' })
+      return 'alpha/deep-mock'
+    }
+
+    const created = await enterOn(newRow, [addedMeanwhile, 'high', 'OK'], ['reviewer'])
+
+    expect(created.titles.at(-1)).toBe(
+      'An alias named "reviewer" was added meanwhile; nothing changed.'
+    )
+    expect(loadConfigFromFile().aliases).toEqual({
+      first: 'alpha/quick-mock',
+      reviewer: 'alpha/quick-mock'
     })
   })
 })
