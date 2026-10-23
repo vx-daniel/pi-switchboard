@@ -84,16 +84,6 @@ describe('the usage answer', () => {
     expect(reads()).toBe(3)
   })
 
-  // Catches a repeated `window` refused, or its later value used: the first one counts, as with
-  // `verify` on /healthz/creds.
-  test('a repeated window counts by its first value', () => {
-    const { store } = emptyStore()
-    const answer = createUsageAnswer(true, () => store)
-
-    expect(answer(['week', 'year'], NOW)).toMatchObject({ status: 200, body: { window: 'week' } })
-    expect(answer(['year', 'week'], NOW).status).toBe(400)
-  })
-
   // Catches a window without traffic answered with missing fields instead of empty lists.
   test('a window without traffic has empty lists and a full timeline', () => {
     const { store } = emptyStore()

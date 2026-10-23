@@ -302,7 +302,8 @@
                   ]
                 },
                 "provider": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "The login's provider ID."
                 },
                 "model": {
                   "anyOf": [
@@ -1462,7 +1463,8 @@
                             ]
                           },
                           "provider": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "The login's provider ID."
                           },
                           "model": {
                             "anyOf": [
@@ -2647,6 +2649,260 @@
               ]
             },
             "description": "`today` (from local midnight; the default), `week` (the last 7 days) or `all` (the last 30 days, all the stats file keeps)."
+          }
+        ]
+      }
+    },
+    "/v1/switchboard/cooldowns": {
+      "delete": {
+        "operationId": "clearCooldowns",
+        "tags": [
+          "Switchboard"
+        ],
+        "summary": "End cooldowns early",
+        "description": "Not OpenAI's (#182): ends the cooldowns a 429, 503 or 529 started, so a fallback chain calls those models again at once. No query ends every one; `provider` ends a login's, `model` a model's own, and both end both. The next failure without a time waits 60 s again.",
+        "responses": {
+          "200": {
+            "description": "The cooldowns ended; empty when none was active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "list"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "provider",
+                              "model"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "description": "The login's provider ID."
+                          },
+                          "model": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The canonical ID, for a model."
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "rate_limit",
+                              "unavailable"
+                            ]
+                          },
+                          "until": {
+                            "type": "string",
+                            "description": "When it ends, as an ISO 8601 time."
+                          },
+                          "secondsLeft": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "response",
+                              "backoff"
+                            ],
+                            "description": "Whether the failed response gave the time, or the growing default did (60 s, 180 s, then doubling)."
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "provider",
+                          "model",
+                          "reason",
+                          "until",
+                          "secondsLeft",
+                          "source"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The cooldowns that were active and are now ended, soonest end first."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No login by the `provider` ID serves an exposed model or is cooling down (`login_not_found`), or no model by the `model` ID is exposed or cooling down (`model_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "description": "A login's provider ID, such as `anthropic-2`: ends its cooldown after a 429."
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "description": "A model's canonical or public ID: ends the model's own cooldown after a 503 or 529, not its logins'."
           }
         ]
       }

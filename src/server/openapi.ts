@@ -25,6 +25,7 @@ import { openAIModelListSchema, openAIModelSchema, piModelListSchema } from '@pr
 import { openAIChatCompletionSchema } from '@proxy/openai/responses'
 import { chatCompletionRequestSchema } from '@proxy/openai/schemas'
 import { sseChunkSchema } from '@proxy/openai/sse'
+import { clearedCooldownsSchema } from '@proxy/server/cooldowns'
 import { openAIErrorSchema } from '@proxy/server/errors'
 import { usageSchema } from '@proxy/server/usage'
 import { type DescribeRouteOptions, type GenerateSpecOptions, resolver } from 'hono-openapi'
@@ -76,33 +77,55 @@ export const chatHeadersSchema = z.object({
 })
 
 /**
- * `GET /healthz/creds`'s query. Only `true` verifies; any other value is the same as none. A
- * repeated `verify` reaches the validator as an array, and its first value counts, as
- * `c.req.query()` read it before validation; rejecting it would answer in hono-openapi's error
- * shape, not OpenAI's. Surrounding spaces are trimmed (the repo's Zod lint rule), so `%20true`
- * verifies too.
+ * A query value a route judges itself, so a bad one is refused in OpenAI's error shape rather
+ * than hono-openapi's. A repeated name reaches the validator as an array; see
+ * {@link firstQueryValue}. Surrounding spaces are trimmed (the repo's Zod lint rule).
  */
+const queryValueSchema = z.union([z.string().trim(), z.array(z.string().trim())])
+
+/**
+ * Reads a query value as the routes count it: a repeated name by its first value, as
+ * `c.req.query()` read it before validation.
+ *
+ * @param value - the value the validator passed
+ * @returns the value, or `undefined` when it was not sent
+ */
+export function firstQueryValue(value: string | readonly string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : value?.[0]
+}
+
+/** `GET /healthz/creds`'s query. Only `true` verifies; any other value is the same as none. */
 export const credentialsQuerySchema = z.object({
-  verify: z
-    .union([z.string().trim(), z.array(z.string().trim())])
+  verify: queryValueSchema
     .optional()
     .meta({ description: '`true` asks pi to resolve each credential now.' })
 })
 
 /**
- * The query of `GET /v1/switchboard/usage`. Any string is accepted here and the route judges it,
- * so an unknown window is refused in OpenAI's error shape (`400`, `param: window`), as with
- * `verify` above.
+ * The query of `GET /v1/switchboard/usage`. An unknown window is refused in OpenAI's error shape
+ * (`400`, `param: window`).
  */
 export const usageQuerySchema = z.object({
-  window: z
-    .union([z.string().trim(), z.array(z.string().trim())])
-    .optional()
-    .meta({
-      description:
-        '`today` (from local midnight; the default), `week` (the last 7 days) or `all` (the ' +
-        'last 30 days, all the stats file keeps).'
-    })
+  window: queryValueSchema.optional().meta({
+    description:
+      '`today` (from local midnight; the default), `week` (the last 7 days) or `all` (the ' +
+      'last 30 days, all the stats file keeps).'
+  })
+})
+
+/**
+ * The query of `DELETE /v1/switchboard/cooldowns` (#182). A name nothing is known by is refused in
+ * OpenAI's error shape (`404`).
+ */
+export const cooldownsQuerySchema = z.object({
+  provider: queryValueSchema.optional().meta({
+    description: "A login's provider ID, such as `anthropic-2`: ends its cooldown after a 429."
+  }),
+  model: queryValueSchema.optional().meta({
+    description:
+      "A model's canonical or public ID: ends the model's own cooldown after a 503 or 529, not " +
+      "its logins'."
+  })
 })
 
 /** The prefix of the proxy's own routes, outside OpenAI's API (constitution, principle I). */
@@ -282,6 +305,26 @@ export const usageDescription: DescribeRouteOptions = {
     401: UNAUTHORIZED,
     503: errorResponse(
       'Stats are off (`--no-stats`), or the stats file could not be read (`stats_unavailable`).'
+    )
+  }
+}
+
+/** `DELETE /v1/switchboard/cooldowns`. */
+export const clearCooldownsDescription: DescribeRouteOptions = {
+  operationId: 'clearCooldowns',
+  tags: [SWITCHBOARD_TAG],
+  summary: 'End cooldowns early',
+  description:
+    "Not OpenAI's (#182): ends the cooldowns a 429, 503 or 529 started, so a fallback chain calls " +
+    "those models again at once. No query ends every one; `provider` ends a login's, `model` a " +
+    "model's own, and both end both. The next failure without a time waits 60 s again.",
+  responses: {
+    200: jsonResponse('The cooldowns ended; empty when none was active.', clearedCooldownsSchema),
+    401: UNAUTHORIZED,
+    404: errorResponse(
+      'No login by the `provider` ID serves an exposed model or is cooling down ' +
+        '(`login_not_found`), or no model by the `model` ID is exposed or cooling down ' +
+        '(`model_not_found`).'
     )
   }
 }

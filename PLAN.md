@@ -153,8 +153,9 @@ document is registered before the auth middleware in `createApp`; `/docs` is out
 What the document covers: every route the proxy serves, which a test checks against the app's
 route table.
 
-- the stable routes, `GET /v1/switchboard/models` and `GET /v1/switchboard/usage`, with their
-  request and response schemas, error statuses and the bearer scheme;
+- the stable routes, `GET /v1/switchboard/models`, `GET /v1/switchboard/usage` and
+  `DELETE /v1/switchboard/cooldowns`, with their request and response schemas, error statuses and
+  the bearer scheme;
 - the health endpoints, under "Operational", with their bodies (`/healthz` needs no token);
 - the document and the docs page, under "Documentation". `/docs` is registered whatever the
   config, so the document does not depend on `docsUi`;
@@ -460,8 +461,9 @@ nothing is built in (principle VI).
 A 429 or 503 is remembered, so a chain stops calling a failing provider first on every request.
 State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/route-cooldowns.ts`.
 
-- **Scope.** A 429 (`rate_limit`) cools the **provider**: pi has one login per provider, and a
-  subscription's limit covers the account. A 503 or 529 (`unavailable`) cools the **model**.
+- **Scope.** A 429 (`rate_limit`) cools the **login** that met it (#227: `anthropic-2` apart from
+  `anthropic`): a subscription's limit covers the account. A 503 or 529 (`unavailable`) cools the
+  **model**, under every login.
 - **Length: from the failed response, no cap** (`src/pi/reset-time.ts`). pi calls `onResponse`
   only after a success (except Codex), so the proxy passes pi a `fetch` (`capturingFetch`) that
   copies each 429, 503 and 529 (status, headers, and up to 16 KiB of the body, from a clone).
@@ -520,6 +522,13 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
 - **Ended by a success.** A call that succeeds clears its provider's and its model's cooldowns,
   if they started before that call was sent. A call sent earlier was taken while the provider
   still had room, so it says nothing about the limit that started a newer cooldown.
+- **Ended by the operator (#182).** `DELETE /v1/switchboard/cooldowns` (below) and the console's
+  `c` end cooldowns at once, for a limit the operator knows has lifted or a wrong time a provider
+  sent; both call `clearCooldownsFor`. There is no ceiling on a cooldown's length (#68's decision
+  stands): a real weekly limit is honored until the operator says otherwise. The clear drops the
+  streak with the cooldown, so the next failure without a time waits 60 s again, and skips the
+  send-time check a success makes. Each cooldown it ends is an info line (`Cooldown of {scope}
+  {name} cleared by the operator`), names only.
 - **No hidden SDK retries.** pi 1.3.0 builds every SDK client with `maxRetries: 0` and defaults
   its own retry loop (`retryProviderRequest`) to 0, as does its Codex adapter. A 429 therefore
   reaches the proxy at once. #68's proposal to set `maxRetries: 0` per candidate was unneeded.
@@ -1429,6 +1438,29 @@ Not part of OpenAI's API (#224): the stats file's usage over a window, for a pro
 - reads the store through its own connection, opened on the first request (WAL lets it read while the recorder writes). The reads are synchronous, on the thread that serves requests, so one window's answer is reused for 5 s, the recorder's own write interval: a burst of requests reads the file once. A file that won't open or read answers `503` `stats_unavailable` and is closed (a failed close is logged, not thrown) and opened again on the next request; stats off (`--no-stats`) is `503` `stats_unavailable` too, never empty numbers. The connection lives until the process exits: the route has no server lifecycle to close it on, and a WAL reader holds no lock
 - routes, counts, timings, tokens and cost only: never message content, the request's `user`, or a credential. A rejected request's model is the client's text, already capped by the recorder
 
+### `DELETE /v1/switchboard/cooldowns`
+
+Not part of OpenAI's API (#182): ends cooldowns early, without a restart. Behind proxy auth like
+every `/v1/*` route. Decided on #182 (constitution 3.8.0): a route rather than a config ceiling,
+which would reverse #68's decision to honor a provider's time, and beside a console key, which
+alone would not reach a proxy run without the console (`/proxy start`, the Docker image). It is the
+one route that writes state, and it writes only the cooldowns fallback chains read: it calls no
+provider and changes no configuration.
+
+- no query ends every cooldown. `?provider=` names a login's provider ID (`anthropic-2`) and ends
+  its cooldown after a 429; `?model=` names a model by its canonical or public ID and ends the
+  model's own cooldown after a 503 or 529, not its logins' (a 429 is the login's limit, cleared by
+  `provider`). Both end both. A repeated name counts by its first value, as `window` does above
+- a name nothing is known by is `404` `invalid_request_error`: `login_not_found` (`param:
+  "provider"`) for a login that serves no exposed model and is not cooling down, `model_not_found`
+  (`param: "model"`) for a model that is neither exposed nor cooling down. A name is checked
+  against the active cooldowns first, so a cooldown on a login or model the exposure config has hidden
+  since can still be ended by name; the exposure is read only when no cooldown matches
+- `200` with `{ object: "list", data }`: the cooldowns that were active and are now ended, in the
+  shape `/healthz/models` lists them (`cooldownView`, `src/server/cooldowns.ts`), soonest end
+  first; empty when the name is known but nothing was cooling. A cooldown already over is
+  forgotten with its streak but not listed
+
 ## Error contract
 
 Use an OpenAI-style shape:
@@ -1806,8 +1838,9 @@ src/
 │   └── index.ts          -- LogTape setup, categories, level guide, redaction (exported via ./logging)
 ├── server/
 │   ├── app.ts            -- Hono app assembly (middleware + routes)
-│   ├── routes.ts         -- GET /v1/models, GET /v1/models/:model, GET /v1/switchboard/models and /usage, POST /v1/chat/completions
+│   ├── routes.ts         -- GET /v1/models, GET /v1/models/:model, the /v1/switchboard/ routes, POST /v1/chat/completions
 │   ├── usage.ts          -- GET /v1/switchboard/usage: the stats file's usage over a window
+│   ├── cooldowns.ts      -- DELETE /v1/switchboard/cooldowns, and the cooldown shape /healthz/models lists
 │   ├── health.ts         -- GET /healthz, /healthz/models, /healthz/creds
 │   ├── middleware.ts     -- request-id, proxy-auth, body size limit, disconnect detection
 │   ├── errors.ts         -- OpenAI-style error helpers, upstream error mapping
@@ -1883,6 +1916,10 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   models (exposure computed as `/healthz/models` does), active cooldowns and a models.json error,
   read every 5 s and after each login or logout. With the sidebar shown, the header keeps the
   version and address and the sidebar's PROXY panel shows the rest.
+- **Ending cooldowns** (#182). `c` in the Accounts and Models views, the two that show cooldowns
+  and list the key, ends every cooldown (`clearCooldownsFor({})`), as
+  `DELETE /v1/switchboard/cooldowns` does with no query, then reads the status again. One login's
+  or one model's is ended through the route.
 - **Sidebar** (`sidebar.ts`). On a terminal at least 100 columns wide, the right 30% (34 to 48
   columns) shows five panels beside the tab bar and the view; `s` hides and shows it. PROXY
   (address, auth, uptime, open connections, models, cooldown count, models.json error),

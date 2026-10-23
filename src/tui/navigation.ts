@@ -114,7 +114,8 @@ const FOOTER: Readonly<Record<View, readonly string[]>> = {
     'v verify all',
     'n login',
     'x logout',
-    'p proxy auth'
+    'p proxy auth',
+    'c clear cooldowns'
   ],
   stats: [
     'q quit (stops the proxy)',
@@ -129,7 +130,8 @@ const FOOTER: Readonly<Record<View, readonly string[]>> = {
     '←→ views',
     '↑↓ select',
     'Enter edit or add an alias',
-    'p proxy auth'
+    'p proxy auth',
+    'c clear cooldowns'
   ]
 }
 /** The hints before the sidebar's: quitting and moving between views. */

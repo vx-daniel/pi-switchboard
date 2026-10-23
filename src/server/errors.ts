@@ -90,6 +90,22 @@ export function modelNotFound(modelId: string): OpenAIError {
 }
 
 /**
+ * Builds the `login_not_found` body for the `provider` field: no login by that ID serves an
+ * exposed model or is cooling down (#182).
+ *
+ * @param login - the login's provider ID the client named, quoted in the message
+ * @returns the error body
+ */
+export function loginNotFound(login: string): OpenAIError {
+  return makeError(
+    `No login '${login}' serves an exposed model or is cooling down`,
+    'invalid_request_error',
+    'provider',
+    'login_not_found'
+  )
+}
+
+/**
  * Builds an `unsupported_parameter` body.
  *
  * @param param - the unsupported request field
