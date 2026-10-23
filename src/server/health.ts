@@ -27,11 +27,7 @@
  */
 
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
-import {
-  ModelExposureModeSchema,
-  MS_PER_SECOND,
-  PublicModelIdModeSchema
-} from '@proxy/config/schema'
+import { ModelExposureModeSchema, PublicModelIdModeSchema } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import {
   aliasDiagnosticSchema,
@@ -48,9 +44,11 @@ import {
   getModelsJsonError,
   providerCredentialStatusSchema
 } from '@proxy/pi/registry'
+import { cooldownView, cooldownViewSchema } from '@proxy/server/cooldowns'
 import { HTTP_SERVICE_UNAVAILABLE } from '@proxy/server/http-status'
 import {
   credentialsQuerySchema,
+  firstQueryValue,
   jsonResponse,
   OPERATIONAL_TAG,
   UNAUTHORIZED
@@ -105,31 +103,11 @@ const modelsHealthSchema = z
         'What each family alias target resolves to now (#231): its pin, else the newest exposed ' +
         'member, with a newer member the exposure config hides.'
     }),
-    cooldowns: z
-      .array(
-        z.object({
-          scope: z.enum(['provider', 'model']),
-          provider: z.string().trim(),
-          model: z
-            .string()
-            .trim()
-            .nullable()
-            .meta({ description: 'The canonical ID, for a model.' }),
-          reason: z.enum(['rate_limit', 'unavailable']),
-          until: z.string().trim().meta({ description: 'When it ends, as an ISO 8601 time.' }),
-          secondsLeft: z.int().nonnegative(),
-          source: z.enum(['response', 'backoff']).meta({
-            description:
-              'Whether the failed response gave the time, or the growing default did (60 s, ' +
-              '180 s, then doubling).'
-          })
-        })
-      )
-      .meta({
-        description:
-          'Active cooldowns after a 429 (the provider) or a 503/529 (the model), soonest end ' +
-          'first (#68). They do not fail the check.'
-      }),
+    cooldowns: z.array(cooldownViewSchema).meta({
+      description:
+        'Active cooldowns after a 429 (the provider) or a 503/529 (the model), soonest end ' +
+        'first (#68). They do not fail the check.'
+    }),
     modelsJsonError: z.string().trim().nullable().meta({
       description: 'Why `models.json` did not load; a parse error says only where, never what.'
     })
@@ -288,6 +266,7 @@ async function checkModels(
 ): Promise<Response> {
   const config = await configReader()
   const available = getAvailableModels()
+  const now = Date.now()
   const exposure = computeModelExposure(available, config, getSupportedThinkingLevels)
   const exposedModelCount = exposure.ok ? exposure.models.length : 0
   const aliasDiagnostics = exposure.ok ? [...exposure.aliasDiagnostics] : []
@@ -315,15 +294,7 @@ async function checkModels(
     // Model names from the config and pi's catalogue, not secrets.
     familyAliases: exposure.ok ? [...exposure.familyResolutions] : [],
     // Provider and model names only, never a credential.
-    cooldowns: activeCooldowns().map((cooldown) => ({
-      scope: cooldown.scope,
-      provider: cooldown.provider,
-      model: cooldown.model ?? null,
-      reason: cooldown.reason,
-      until: new Date(cooldown.until).toISOString(),
-      secondsLeft: Math.max(0, Math.ceil((cooldown.until - Date.now()) / MS_PER_SECOND)),
-      source: cooldown.source
-    })),
+    cooldowns: activeCooldowns(now).map((cooldown) => cooldownView(cooldown, now)),
     modelsJsonError: getModelsJsonError() ?? null
   }
   if (!healthy) {
@@ -402,10 +373,8 @@ export function createHealthRoutes(configReader: ExposureConfigReader): Hono<Pro
     validator('query', credentialsQuerySchema),
     async (context) => {
       const { verify } = context.req.valid('query')
-      // A repeated `verify` counts by its first value (`credentialsQuerySchema`).
-      const verifyValue = Array.isArray(verify) ? verify[0] : verify
       try {
-        return await checkCredentials(context, verifyValue === 'true')
+        return await checkCredentials(context, firstQueryValue(verify) === 'true')
       } catch (error) {
         return failedCheck(context, 'credentials', error)
       }

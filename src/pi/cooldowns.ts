@@ -3,7 +3,7 @@
  * until when, kept in memory for the life of the process.
  *
  * @remarks
- * - **Scope.** A 429 (`rate_limit`) cools the whole **provider**: pi has one login per provider, and
+ * - **Scope.** A 429 (`rate_limit`) cools the **login** that met it (#227), every model it serves:
  *   a subscription's limits apply to the account. A 503 or 529 (`unavailable`) cools the **model**.
  * - **Length.** The time the failed response gives (`src/pi/reset-time.ts`), however long. When it
  *   gives none, a growing default: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each
@@ -13,6 +13,8 @@
  *   alias's fallback chain skips a cooling model, and only when its `fallbackOn` names the class
  *   (principle VI): a request that names a model still calls it.
  * - **Ended by a success.** A call that succeeds clears its provider's and its model's cooldowns.
+ * - **Ended by the operator** (#182): `DELETE /v1/switchboard/cooldowns` and the console's `c`
+ *   ({@link clearCooldownsFor}), for a limit the operator knows has lifted.
  *
  * @packageDocumentation
  */
@@ -95,14 +97,25 @@ export function backoffMs(streak: number): number {
 }
 
 /**
- * Names the map key of a provider's or a model's cooldown.
+ * Names what a cooldown of this scope cools: the login for a provider's, the model for a model's.
  *
  * @param scope - provider or model
  * @param subject - the model
+ * @returns the login's provider ID, or the model's canonical ID
+ */
+function nameOf(scope: Cooldown['scope'], subject: CooldownSubject): string {
+  return scope === 'provider' ? subject.provider : subject.canonicalId
+}
+
+/**
+ * Names the map key of a provider's or a model's cooldown.
+ *
+ * @param scope - provider or model
+ * @param name - the login's provider ID, or the model's canonical ID ({@link nameOf})
  * @returns the key
  */
-function keyOf(scope: Cooldown['scope'], subject: CooldownSubject): string {
-  return scope === 'provider' ? `provider:${subject.provider}` : `model:${subject.canonicalId}`
+function keyOf(scope: Cooldown['scope'], name: string): string {
+  return `${scope}:${name}`
 }
 
 /**
@@ -121,7 +134,7 @@ export function startCooldown(
   now: number = Date.now()
 ): Cooldown {
   const scope = reason === 'rate_limit' ? 'provider' : 'model'
-  const key = keyOf(scope, subject)
+  const key = keyOf(scope, nameOf(scope, subject))
   const streak = waitMs === undefined ? (cooldowns.get(key)?.streak ?? 0) + 1 : 0
   const cooldown: Cooldown = {
     scope,
@@ -138,7 +151,7 @@ export function startCooldown(
   endLogged.delete(key)
   cooldownLogger.info('Cooling down {scope} {name} for {seconds} s after {reason} ({source})', {
     scope,
-    name: scope === 'provider' ? subject.provider : subject.canonicalId,
+    name: nameOf(scope, subject),
     seconds: Math.ceil((cooldown.until - now) / MS_PER_SECOND),
     reason,
     source: cooldown.source,
@@ -161,14 +174,14 @@ export function startCooldown(
  */
 export function clearCooldowns(subject: CooldownSubject, sentAt: number): void {
   for (const scope of ['provider', 'model'] as const) {
-    const key = keyOf(scope, subject)
+    const key = keyOf(scope, nameOf(scope, subject))
     const cooldown = cooldowns.get(key)
     if (cooldown === undefined || cooldown.since >= sentAt) continue
     cooldowns.delete(key)
     endLogged.delete(key)
     cooldownLogger.info('Cooldown of {scope} {name} cleared: {model} answered', {
       scope,
-      name: scope === 'provider' ? subject.provider : subject.canonicalId,
+      name: nameOf(scope, subject),
       model: subject.canonicalId
     })
   }
@@ -206,8 +219,8 @@ export function activeCooldown(
   subject: CooldownSubject,
   now: number = Date.now()
 ): Cooldown | undefined {
-  const provider = activeAt(keyOf('provider', subject), now)
-  const model = activeAt(keyOf('model', subject), now)
+  const provider = activeAt(keyOf('provider', nameOf('provider', subject)), now)
+  const model = activeAt(keyOf('model', nameOf('model', subject)), now)
   if (provider === undefined) return model
   if (model === undefined) return provider
   return model.until > provider.until ? model : provider
@@ -224,6 +237,48 @@ export function activeCooldowns(now: number = Date.now()): Cooldown[] {
     .map((key) => activeAt(key, now))
     .filter((cooldown): cooldown is Cooldown => cooldown !== undefined)
     .toSorted((left, right) => left.until - right.until)
+}
+
+/** What an operator clears (#182): a login's cooldown, a model's, both, or, naming neither, all. */
+export interface CooldownTarget {
+  /** A login's provider ID: its cooldown after a 429. */
+  readonly provider?: string | undefined
+  /** A canonical model ID: the model's own cooldown after a 503 or 529, not its logins'. */
+  readonly model?: string | undefined
+}
+
+/**
+ * Ends cooldowns early at the operator's word (#182): the target's, or every one.
+ *
+ * @remarks
+ * Unlike {@link clearCooldowns}, nothing is checked against a send time: the operator knows the
+ * limit has lifted. The streak goes too, so the next failure without a time waits 60 s again. A
+ * cooldown already over is forgotten with its streak but neither logged nor returned.
+ *
+ * @param target - the login and the model whose cooldowns to end; neither ends all
+ * @param now - the current time
+ * @returns the cooldowns that were active, soonest end first
+ */
+export function clearCooldownsFor(target: CooldownTarget, now: number = Date.now()): Cooldown[] {
+  const named = [
+    target.provider === undefined ? undefined : keyOf('provider', target.provider),
+    target.model === undefined ? undefined : keyOf('model', target.model)
+  ].filter((key): key is string => key !== undefined)
+  const keys = named.length === 0 ? [...cooldowns.keys()] : named
+  const cleared: Cooldown[] = []
+  for (const key of keys) {
+    const cooldown = cooldowns.get(key)
+    if (cooldown === undefined) continue
+    cooldowns.delete(key)
+    endLogged.delete(key)
+    if (cooldown.until <= now) continue
+    cleared.push(cooldown)
+    cooldownLogger.info('Cooldown of {scope} {name} cleared by the operator', {
+      scope: cooldown.scope,
+      name: cooldown.model ?? cooldown.provider
+    })
+  }
+  return cleared.toSorted((left, right) => left.until - right.until)
 }
 
 /**

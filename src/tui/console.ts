@@ -28,7 +28,7 @@ import type { ServerType } from '@hono/node-server'
 import type { ServerConfig } from '@proxy/config/env'
 import type { AliasTarget, LoginLabels, Reserve } from '@proxy/config/schema'
 import { computeModelExposure, type ModelExposureResult } from '@proxy/openai/model-exposure'
-import { activeCooldowns } from '@proxy/pi/cooldowns'
+import { activeCooldowns, clearCooldownsFor } from '@proxy/pi/cooldowns'
 import { providerQuota } from '@proxy/pi/quota'
 import {
   getAvailableModels,
@@ -374,6 +374,12 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
   const pickWindow = (window: StatsWindow) => (): void => {
     if (state.view === 'stats') state.statsWindow = window
   }
+  // Ends every cooldown (#182), in the views whose footer lists the key; the route ends one.
+  const clearCooldowns = (): void => {
+    if (state.view !== 'accounts' && state.view !== 'models') return
+    clearCooldownsFor({})
+    inBackground(context.refresh(), 'Reading the status')
+  }
   return [
     ['q', () => context.quit()],
     [Key.ctrl('c'), () => context.quit()],
@@ -396,6 +402,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['x', () => inBackground(openLogout(context), 'Logout')],
     ['v', () => inBackground(context.refresh(true), 'Verifying the logins')],
     ['s', () => (state.sidebarHidden = !state.sidebarHidden)],
+    ['c', clearCooldowns],
     ['p', () => inBackground(openAuthMenu(context.tui, context.config, context.proxyAuth), 'Auth')],
     ['t', pickWindow('today')],
     ['w', pickWindow('week')],

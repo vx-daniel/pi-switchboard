@@ -237,16 +237,16 @@ export type UsageAnswer =
  *
  * @param statsEnabled - whether the proxy keeps stats
  * @param open - opens the stats file at a path; `openStatsStore` but in tests
- * @returns a function from the `window` query value and the time to the answer
+ * @returns a function from the `window` query value (its first, when repeated) and the time to
+ *   the answer
  */
 export function createUsageAnswer(
   statsEnabled: boolean,
   open: (path: string) => UsageStore = openStatsStore
-): (window: string | readonly string[] | undefined, now: number) => UsageAnswer {
+): (window: string | undefined, now: number) => UsageAnswer {
   const read = createUsageReader(statsEnabled, open)
   return (window, now) => {
-    // A repeated `window` counts by its first value, as `verify` does on /healthz/creds.
-    const asked = (typeof window === 'string' ? window : window?.[0]) ?? 'today'
+    const asked = window ?? 'today'
     if (!isStatsWindow(asked)) {
       return {
         status: HTTP_BAD_REQUEST,

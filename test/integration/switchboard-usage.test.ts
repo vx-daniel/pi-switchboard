@@ -164,6 +164,19 @@ describe('GET /v1/switchboard/usage', () => {
     })
   })
 
+  // Catches a repeated `window` failing the query validator into hono-openapi's own 400 shape, or
+  // its later value used: the first one counts, as with `verify` on /healthz/creds.
+  test.each([
+    ['window=week&window=year', 200],
+    ['window=year&window=week', 400]
+  ])('?%s counts by the first value', async (query, status) => {
+    const app = testApp({ ...testConfig(), statsEnabled: true })
+
+    const response = await app.request(`/v1/switchboard/usage?${query}`)
+
+    expect(response.status).toBe(status)
+  })
+
   // Catches `--no-stats` answered with empty numbers, which would read as a proxy with no traffic.
   test('answers 503 when stats are off', async () => {
     const app = testApp({ ...testConfig(), statsEnabled: false })

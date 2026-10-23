@@ -11,6 +11,7 @@ import {
   backoffMs,
   clearAllCooldowns,
   clearCooldowns,
+  clearCooldownsFor,
   loginSubject,
   startCooldown
 } from '@proxy/pi/cooldowns'
@@ -136,6 +137,44 @@ describe('cooldowns', () => {
     expect(activeCooldown(OPUS, NOW)).toBeDefined()
     clearCooldowns(OPUS, NOW)
     expect(activeCooldown(OPUS, NOW)).toBeDefined()
+  })
+})
+
+describe('clearCooldownsFor (#182)', () => {
+  // Catches a clear that leaves the growing default where it was, so the next unexplained failure
+  // waits 6 minutes instead of 60 s, or one that keeps a cooldown that started after the last send
+  // (the operator's clear has no send time to check).
+  test('ends a fresh cooldown and starts the default over', () => {
+    startCooldown(OPUS, 'rate_limit', undefined, NOW)
+    startCooldown(OPUS, 'rate_limit', undefined, NOW)
+
+    expect(clearCooldownsFor({ provider: 'anthropic' }, NOW)).toEqual([
+      expect.objectContaining({ scope: 'provider', provider: 'anthropic', streak: 2 })
+    ])
+    expect(activeCooldown(OPUS, NOW)).toBeUndefined()
+    expect(startCooldown(OPUS, 'rate_limit', undefined, NOW).until).toBe(NOW + MINUTE)
+  })
+
+  // Catches a model's clear lifting its login's limit, a login's clear lifting a model's overload,
+  // or naming nothing clearing nothing.
+  test('a login names its cooldown, a model its own, and neither names all', () => {
+    startCooldown(OPUS, 'rate_limit', 30_000, NOW)
+    startCooldown(SOL, 'unavailable', 60_000, NOW)
+
+    expect(clearCooldownsFor({ model: 'anthropic/opus' }, NOW)).toEqual([])
+    expect(clearCooldownsFor({ provider: 'openai-codex' }, NOW)).toEqual([])
+    expect(clearCooldownsFor({}, NOW).map((cooldown) => cooldown.scope)).toEqual([
+      'provider',
+      'model'
+    ])
+    expect([activeCooldown(OPUS, NOW), activeCooldown(SOL, NOW)]).toEqual([undefined, undefined])
+  })
+
+  // Catches an ended cooldown reported as cleared: the operator would read it as still running.
+  test('a cooldown already over is not reported', () => {
+    startCooldown(OPUS, 'rate_limit', 30_000, NOW)
+
+    expect(clearCooldownsFor({}, NOW + 30_000)).toEqual([])
   })
 })
 

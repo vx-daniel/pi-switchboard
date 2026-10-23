@@ -378,3 +378,147 @@ describe('a Codex usage limit (#185)', () => {
     ])
   })
 })
+
+/**
+ * Sends `DELETE /v1/switchboard/cooldowns`.
+ *
+ * @param query - the query string, without `?`
+ * @param config - the server config; {@link testConfig} by default
+ * @param headers - request headers
+ * @returns the status and the parsed body
+ */
+async function clearCooldowns(
+  query = '',
+  config = testConfig(),
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: unknown }> {
+  const response = await createApp(config, fileConfigReader).request(
+    `/v1/switchboard/cooldowns${query === '' ? '' : `?${query}`}`,
+    { method: 'DELETE', headers }
+  )
+  return { status: response.status, body: await response.json() }
+}
+
+describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
+  // Catches the clear not reaching the state routing reads: after it, the chain must call the
+  // login again at once, not wait out the 429's time, and /healthz/models must stop listing it.
+  test("clearing a login's cooldown has the next chain request call it again", async () => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+    limiting = false
+
+    const cleared = await clearCooldowns('provider=alpha')
+
+    expect(cleared).toEqual({
+      status: 200,
+      body: {
+        object: 'list',
+        data: [
+          expect.objectContaining({
+            scope: 'provider',
+            provider: 'alpha',
+            reason: 'rate_limit',
+            secondsLeft: RETRY_AFTER_SECONDS
+          })
+        ]
+      }
+    })
+    expect((await ask('chain')).upstream).toEqual(['limited-mock'])
+    expect(await listedCooldowns()).toEqual([])
+  })
+
+  // Catches a public model ID not resolved to the canonical ID the cooldown is kept under, so the
+  // clear answers 200 and ends nothing.
+  test('a model is named by its public ID as well', async () => {
+    setAliases({
+      overload: {
+        targets: ['gamma/unavailable-mock', 'beta/answer-mock'],
+        fallbackOn: ['unavailable']
+      }
+    })
+    await ask('overload')
+
+    const cleared = await clearCooldowns('model=unavailable-mock')
+
+    expect(cleared.status).toBe(200)
+    expect(cleared.body).toMatchObject({
+      data: [{ scope: 'model', model: 'gamma/unavailable-mock' }]
+    })
+    expect(await listedCooldowns()).toEqual([])
+  })
+
+  // Catches a typo answered like a clear that found nothing, or one that ends something anyway.
+  test.each([
+    ['provider=alhpa', 'provider', 'login_not_found'],
+    ['model=alpha/nope', 'model', 'model_not_found']
+  ])('?%s is a 404 and clears nothing', async (query, param, code) => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+
+    const refused = await clearCooldowns(query)
+
+    expect(refused).toEqual({
+      status: 404,
+      body: { error: expect.objectContaining({ type: 'invalid_request_error', param, code }) }
+    })
+    expect(await listedCooldowns()).toHaveLength(1)
+  })
+
+  // Catches a name checked against the exposure alone: a cooldown on a login or model the
+  // exposure config has hidden since would then be a 404, and only clearing everything would end it.
+  test('a login or model hidden since it cooled can still be named', async () => {
+    setAliases({
+      chain: CHAIN,
+      overload: {
+        targets: ['gamma/unavailable-mock', 'beta/answer-mock'],
+        fallbackOn: ['unavailable']
+      }
+    })
+    await ask('chain')
+    await ask('overload')
+    writeFileSync(
+      join(agentDir.path, 'proxy-config.json'),
+      JSON.stringify({ modelExposureMode: 'custom', customModels: ['beta/answer-mock'] })
+    )
+    const listed = await getJson('/v1/models')
+    expect(listed['data']).toEqual([expect.objectContaining({ id: 'answer-mock' })])
+
+    const cleared = await clearCooldowns('provider=alpha&model=gamma/unavailable-mock')
+
+    expect(cleared.status).toBe(200)
+    expect(cleared.body).toMatchObject({
+      data: [
+        { scope: 'provider', provider: 'alpha' },
+        { scope: 'model', model: 'gamma/unavailable-mock' }
+      ]
+    })
+    expect(await listedCooldowns()).toEqual([])
+  })
+
+  // Catches a repeated name failing the query validator into hono-openapi's own 400 shape, or its
+  // later value used: the first one counts, as with `window` on /v1/switchboard/usage.
+  test.each([
+    ['provider=alpha&provider=alhpa', 200],
+    ['provider=alhpa&provider=alpha', 404]
+  ])('?%s counts by the first value', async (query, status) => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+
+    expect((await clearCooldowns(query)).status).toBe(status)
+  })
+
+  // Catches the one route that writes state reachable without the proxy token.
+  test('needs the proxy token when auth is on', async () => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+    const token = 'notarealsecret-cooldowns-token'
+    const config = { ...testConfig(), proxyAuth: { kind: 'token', token } as const }
+
+    expect((await clearCooldowns('', config)).status).toBe(401)
+    expect(await listedCooldowns()).toHaveLength(1)
+    expect(await clearCooldowns('', config, { Authorization: `Bearer ${token}` })).toMatchObject({
+      status: 200,
+      body: { data: [{ provider: 'alpha' }] }
+    })
+  })
+})

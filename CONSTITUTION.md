@@ -1,22 +1,24 @@
 <!--
 Sync Impact Report
-Version change: 3.6.0 → 3.7.0 (MINOR)
-Rationale: #230 lets an alias set a reasoning effort per target (`reviewer` is Opus at `high`),
-because a team picks a model by job and the job settles the effort as well. That effort replaces
-the client's `reasoning_effort` on that target, which principle I allows only for a listed drop:
-the client's value does not reach the model. The amendment lists it, with its reason and how both
-values are reported.
-MINOR: principle I's exceptions materially expanded; no principle added or removed.
+Version change: 3.7.0 → 3.8.0 (MINOR)
+Rationale: #182 lets the operator end a cooldown early without a restart, for a limit the
+operator knows has lifted or a wrong time a provider sent. Principle I's list of today's
+non-standard routes names `DELETE /v1/switchboard/cooldowns`, the first route that writes state,
+and says what it may change.
+MINOR: materially expanded guidance (a route that writes state, and what it may change); no
+principle added or removed.
 Modified sections:
-- I. OpenAI Compatibility: an alias target's `reasoningEffort` replaces the request's
-  `reasoning_effort`, reported as `x_pi.reasoning_effort: { requested, applied }` and logged (the
-  first different client value per alias at `info`, later ones at `debug`); an effort the target's
-  model doesn't support is a configuration error, never a clamp
+- I. OpenAI Compatibility: the non-standard routes list `DELETE /v1/switchboard/cooldowns`, which
+  changes only which candidates fallback chains skip, and calls no provider
 Templates requiring updates:
-- ✅ AGENTS.md: "Core constraints" lists the new permitted replacement
-- ✅ PLAN.md, README.md: the Aliases sections describe it
+- ✅ PLAN.md: the decision under "Cooldowns (#68)" and the route's section
+- ✅ README.md: the route table and the cooldowns section
+- ✅ AGENTS.md: "Core constraints" names the one route that writes state
 Follow-up TODOs:
 - None.
+
+3.7.0 (2026-10-23): an alias target's `reasoningEffort` replaces the request's `reasoning_effort`
+on that model (#230), a listed replacement reported as `x_pi.reasoning_effort` and logged.
 
 3.6.0 (2026-10-23): #227 gave a provider several logins. Principle IV makes a provider's extra
 login a routing detail of one exposed model, not a model of its own: its models are the base's,
@@ -103,7 +105,7 @@ Exceptions: a request field MAY be dropped instead of rejected only where it is 
 
 Two kinds of route sit outside the stable surface, and only these:
 - Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs` (Swagger UI for the OpenAPI document). Only `/healthz` and `/docs` may skip proxy authentication; none may return a credential, and `/docs` MUST name no model or provider.
-- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`, usage from the stats file at `GET /v1/switchboard/usage`, and the API's OpenAPI document at `GET /v1/switchboard/openapi.json`). Non-OpenAI capability data goes there, never onto the standard model objects. Of these, only the document may skip proxy authentication, and it MUST name no model, provider or credential.
+- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`, usage from the stats file at `GET /v1/switchboard/usage`, ending cooldowns early at `DELETE /v1/switchboard/cooldowns`, and the API's OpenAPI document at `GET /v1/switchboard/openapi.json`). Non-OpenAI capability data goes there, never onto the standard model objects. Of these, only the document may skip proxy authentication, and it MUST name no model, provider or credential. Only the cooldowns route writes state, and only the cooldowns fallback chains read: it calls no provider and changes no configuration.
 
 Adding a route to either group, or to the stable surface, requires an explicit decision recorded in `PLAN.md`.
 
@@ -196,4 +198,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.7.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23
+**Version**: 3.8.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23

@@ -6,6 +6,8 @@
  * - `GET  /v1/models`
  * - `GET  /v1/models/{model}` (URL-encoded IDs with slashes work)
  * - `GET  /v1/switchboard/models` (not OpenAI's: pi's capabilities for each exposed model)
+ * - `GET  /v1/switchboard/usage` (not OpenAI's: usage from the stats file)
+ * - `DELETE /v1/switchboard/cooldowns` (not OpenAI's: ends cooldowns early, #182)
  * - `POST /v1/chat/completions`
  * - a fixed list of OpenAI endpoints the proxy does not implement, answered with 404
  *
@@ -38,6 +40,7 @@ import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/val
 import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
 import { beginActiveRequest, requestOutcome } from '@proxy/server/active-requests'
 import { dispatchChat, findCredentialedStart } from '@proxy/server/chat-dispatch'
+import { clearCooldownsAnswer } from '@proxy/server/cooldowns'
 import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
   HTTP_BAD_REQUEST,
@@ -48,7 +51,10 @@ import { jsonBodyMiddleware } from '@proxy/server/middleware'
 import {
   chatHeadersSchema,
   chatRequestBodySchema,
+  clearCooldownsDescription,
+  cooldownsQuerySchema,
   createChatCompletionDescription,
+  firstQueryValue,
   listModelCapabilitiesDescription,
   listModelsDescription,
   modelPathSchema,
@@ -406,6 +412,66 @@ async function handleChatCompletion(
 }
 
 /**
+ * Adds the `/v1/switchboard/` routes, which are not OpenAI's (constitution, principle I): pi's
+ * capabilities, usage from the stats file, and ending cooldowns.
+ *
+ * @param routes - the app to add them to
+ * @param config - the server config, for whether stats are kept
+ * @param configReader - where the exposure config comes from
+ */
+function addSwitchboardRoutes(
+  routes: Hono<ProxyEnv>,
+  config: ServerConfig,
+  configReader: ExposureConfigReader
+): void {
+  // --- GET /v1/switchboard/models ---
+  // pi's capabilities for each exposed model, which PLAN keeps off /v1/models.
+  routes.get(
+    `${SWITCHBOARD_PREFIX}/models`,
+    describeRoute(listModelCapabilitiesDescription),
+    async (context) => {
+      const exposure = await getExposure(configReader)
+      chatLogger.debug('Listing capabilities of {modelCount} models and {aliasCount} aliases', {
+        modelCount: exposure.models.length,
+        aliasCount: exposure.aliases.length
+      })
+      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
+    }
+  )
+
+  // --- GET /v1/switchboard/usage ---
+  // The stats file's usage over a window, for a proxy run without the console.
+  const answerUsage = createUsageAnswer(config.statsEnabled)
+  routes.get(
+    `${SWITCHBOARD_PREFIX}/usage`,
+    describeRoute(usageDescription),
+    validator('query', usageQuerySchema),
+    (context) => {
+      const answer = answerUsage(firstQueryValue(context.req.valid('query').window), Date.now())
+      return context.json(answer.body, answer.status)
+    }
+  )
+
+  // --- DELETE /v1/switchboard/cooldowns ---
+  // Ends cooldowns early (#182), for an operator who knows a limit has lifted. The only route
+  // that writes state; it changes what fallback chains skip, and calls no provider.
+  routes.delete(
+    `${SWITCHBOARD_PREFIX}/cooldowns`,
+    describeRoute(clearCooldownsDescription),
+    validator('query', cooldownsQuerySchema),
+    async (context) => {
+      const { provider, model } = context.req.valid('query')
+      const answer = await clearCooldownsAnswer(
+        { provider: firstQueryValue(provider), model: firstQueryValue(model) },
+        () => getExposure(configReader),
+        Date.now()
+      )
+      return context.json(answer.body, answer.status)
+    }
+  )
+}
+
+/**
  * Builds the OpenAI-compatible routes.
  *
  * @param config - the server config, passed to the chat handler
@@ -432,33 +498,7 @@ export function createRoutes(
     return context.json(buildModelList([...exposure.models, ...exposure.aliases]))
   })
 
-  // --- GET /v1/switchboard/models ---
-  // Not OpenAI's: pi's capabilities for each exposed model, which PLAN keeps off /v1/models.
-  routes.get(
-    `${SWITCHBOARD_PREFIX}/models`,
-    describeRoute(listModelCapabilitiesDescription),
-    async (context) => {
-      const exposure = await getExposure(configReader)
-      chatLogger.debug('Listing capabilities of {modelCount} models and {aliasCount} aliases', {
-        modelCount: exposure.models.length,
-        aliasCount: exposure.aliases.length
-      })
-      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
-    }
-  )
-
-  // --- GET /v1/switchboard/usage ---
-  // Not OpenAI's: the stats file's usage over a window, for a proxy run without the console.
-  const answerUsage = createUsageAnswer(config.statsEnabled)
-  routes.get(
-    `${SWITCHBOARD_PREFIX}/usage`,
-    describeRoute(usageDescription),
-    validator('query', usageQuerySchema),
-    (context) => {
-      const answer = answerUsage(context.req.valid('query').window, Date.now())
-      return context.json(answer.body, answer.status)
-    }
-  )
+  addSwitchboardRoutes(routes, config, configReader)
 
   // --- GET /v1/models/:model ---
   // `{.+}` lets the ID span slashes (`/v1/models/org/model` as well as `org%2Fmodel`); Hono
