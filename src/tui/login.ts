@@ -145,16 +145,22 @@ export function loginOptions(runtime: ModelRuntime, labels: LoginLabels = {}): L
     if (apiKey) options.push({ ...base, authType: 'api_key', method: apiKey })
   }
   for (const provider of runtime.getProviders()) {
+    // A `models.json` entry under a slot's ID (a `baseUrl` override prepared for it) is a provider
+    // to pi before the slot is registered; the slot is offered once, as its base's next login.
+    const slot = parseAccountProviderId(provider.id)
+    const unregisteredSlot =
+      slot !== undefined &&
+      isBuiltinProvider(slot.base) &&
+      runtime.getRegisteredNativeProvider(provider.id) === undefined
+    if (unregisteredSlot) continue
     const status = configuredStatus(runtime, provider.id)
     push(provider, status)
     const offersSlot =
-      status.status !== undefined &&
-      isBuiltinProvider(provider.id) &&
-      parseAccountProviderId(provider.id) === undefined
+      status.status !== undefined && isBuiltinProvider(provider.id) && slot === undefined
     if (offersSlot) {
-      const slot = nextAccountSlot(runtime, provider.id)
+      const next = nextAccountSlot(runtime, provider.id)
       push(
-        { id: slot.providerId, name: accountName(provider.name, slot.number), auth: provider.auth },
+        { id: next.providerId, name: accountName(provider.name, next.number), auth: provider.auth },
         {}
       )
     }

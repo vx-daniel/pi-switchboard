@@ -19,6 +19,7 @@ import {
   type FinishReason,
   finishReasonSchema,
   mapFinishReason,
+  loginSchema,
   mapUsage,
   openAIUsageSchema,
   type ResponseRoute,
@@ -83,6 +84,7 @@ export const sseChunkSchema = z
           .trim()
           .optional()
           .meta({ description: 'The alias the request named (#66).' }),
+        login: loginSchema,
         attempts: attemptsSchema
       })
       .optional()
@@ -136,7 +138,7 @@ interface ChunkMeta {
  */
 function routeField(meta: ChunkMeta): Pick<SSEChunk, 'x_pi'> {
   const fields = routeFields(meta.route)
-  return fields.alias === undefined && fields.attempts === undefined ? {} : { x_pi: fields }
+  return Object.keys(fields).length === 0 ? {} : { x_pi: fields }
 }
 
 /** Mutable state of one stream while events are encoded. */

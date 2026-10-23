@@ -3,8 +3,9 @@
  * skips a provider that has less than its reserve left. The quota itself is `src/pi/quota.ts`.
  *
  * @remarks
- * - **Configured, per provider.** `routing.reserve` in the config file (`{ "anthropic": 0.2 }`);
- *   a provider left out, or one that reports no quota (Google, API keys), is never skipped.
+ * - **Configured, per login.** `routing.reserve` in the config file (`{ "anthropic": 0.2 }`),
+ *   keyed by the login (`anthropic-account-2` has its own entry, #227); a login left out, or one
+ *   that reports no quota (Google, API keys), is never skipped.
  * - **The worse window decides.** A subscription reports several windows (a 5-hour and a 7-day
  *   one); the provider is below its reserve when any of them has less than that share left.
  * - **Chains only.** A request that names a model, or a chain with one candidate, is sent as
@@ -15,12 +16,13 @@
  * @packageDocumentation
  */
 
-import type { FailureClass, Reserve } from '@proxy/config/schema'
+import type { Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import type { Attempt } from '@proxy/openai/responses'
 import { providerQuota } from '@proxy/pi/quota'
-import { coolingForChain } from '@proxy/server/route-cooldowns'
+import { attemptOf, coolingForChain } from '@proxy/server/route-cooldowns'
+import type { RouteHops } from '@proxy/server/route-hops'
 
 /** Logger for routing decisions, as for the chat route's other skips. */
 const chatLogger = proxyLogger('server', 'chat')
@@ -93,9 +95,7 @@ function belowReserve(
   reserve: Reserve,
   now: number
 ): ReserveSkip | undefined {
-  return candidate === undefined
-    ? undefined
-    : providerBelowReserve(candidate.provider, reserve, now)
+  return candidate === undefined ? undefined : providerBelowReserve(candidate.login, reserve, now)
 }
 
 /**
@@ -109,24 +109,26 @@ function belowReserve(
  *
  * @param candidates - the chain's candidates, in order
  * @param position - the candidate's position
- * @param rules - the reserve per provider, and the classes the alias names (for its cooldowns)
+ * @param rules - the reserve per provider, and the classes named for each kind of hop (for the
+ *   cooldowns the chain skips)
  * @param rules.reserve - the reserve per provider
- * @param rules.fallbackOn - the failure classes the alias names
  * @param now - the current time; `Date.now()` by default
  * @returns why it is skipped, or `undefined` to call it
  */
 export function reserveSkip(
   candidates: readonly ExposedModel[],
   position: number,
-  rules: { readonly reserve: Reserve; readonly fallbackOn: ReadonlySet<FailureClass> },
+  rules: RouteHops & { readonly reserve: Reserve },
   now: number = Date.now()
 ): ReserveSkip | undefined {
-  const { reserve, fallbackOn } = rules
+  const { reserve } = rules
   const own = belowReserve(candidates[position], reserve, now)
   if (own === undefined) return undefined
   const alternatives = candidates
+    .map((candidate, later) => ({ candidate, later }))
     .slice(position + 1)
-    .filter((later) => !coolingForChain(later, fallbackOn, now))
+    .filter(({ later }) => !coolingForChain(candidates, { from: position, to: later }, rules, now))
+    .map(({ candidate }) => candidate)
   if (alternatives.some((later) => belowReserve(later, reserve, now) === undefined)) return own
   // Every alternative is below its reserve too, or there is none: call the one with the most left.
   const mostLeft = alternatives.every(
@@ -139,20 +141,18 @@ export function reserveSkip(
  * Skips a candidate whose provider is below its reserve: logs the skip at `info` and lists it in
  * `attempts` (`reason: "quota"`, `skipped: true`), as a cooldown skip is.
  *
- * @param chain - the candidates, the classes the alias names, the reserve per provider, and the
- *   alias
+ * @param chain - the candidates, the classes named for each kind of hop, the reserve per login,
+ *   and the alias
  * @param chain.candidates - the chain's candidates
- * @param chain.fallbackOn - the failure classes the alias names, for the cooldowns it skips by
- * @param chain.reserve - the reserve per provider
+ * @param chain.reserve - the reserve per login
  * @param chain.alias - the alias whose chain it is
  * @param position - the candidate's index in `chain.candidates`
  * @param attempts - the attempts so far; a skip is added to them
  * @returns whether the candidate is skipped
  */
 export function skipBelowReserve(
-  chain: {
+  chain: RouteHops & {
     readonly candidates: readonly ExposedModel[]
-    readonly fallbackOn: ReadonlySet<FailureClass>
     readonly reserve: Reserve
     readonly alias: string | undefined
   },
@@ -173,6 +173,6 @@ export function skipBelowReserve(
       reserve: skip.reserve
     }
   )
-  attempts.push({ model: candidate.canonicalId, reason: 'quota', skipped: true })
+  attempts.push({ ...attemptOf(candidate), reason: 'quota', skipped: true })
   return true
 }

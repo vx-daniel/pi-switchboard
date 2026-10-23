@@ -172,7 +172,7 @@ function fakeRuntime(
   }
   return {
     runtime: {
-      getProvider: (id) => providers.get(id),
+      getRegisteredNativeProvider: (id) => providers.get(id),
       registerNativeProvider: (provider) => providers.set(provider.id, provider),
       unregisterProvider: (id) => providers.delete(id),
       listCredentials: () =>
@@ -209,7 +209,9 @@ describe('registerAccountProvider', () => {
     expect(registerAccountProvider(runtime, 'anthropic')).toBe(false)
 
     expect(ids()).toEqual(['anthropic', 'anthropic-account-2'])
-    expect(runtime.getProvider('anthropic-account-2')?.name).toBe('Anthropic (account 2)')
+    expect(runtime.getRegisteredNativeProvider('anthropic-account-2')?.name).toBe(
+      'Anthropic (account 2)'
+    )
   })
 
   // Catches a logout leaving the slot registered (it would stay in the model and login lists, and

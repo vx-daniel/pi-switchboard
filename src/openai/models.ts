@@ -14,6 +14,7 @@ import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
 import { activeCooldown, type Cooldown } from '@proxy/pi/cooldowns'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
+import { loginSubject } from '@proxy/server/route-cooldowns'
 import * as z from 'zod'
 
 /** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
@@ -84,6 +85,59 @@ const pricePerMillionSchema = z
   .nonnegative()
   .meta({ description: 'USD per million tokens.' })
 
+/** A login's cooldown on `/v1/switchboard/models`. Documents the response; never parsed. */
+const cooldownSchema = z
+  .object({
+    reason: z.enum(['rate_limit', 'unavailable']).meta({
+      description: 'The failure it is cooling down from: a 429, or a 503 or 529.'
+    }),
+    scope: z.enum(['provider', 'model']).meta({
+      description: 'A 429 cools the whole login; an overload, the model.'
+    }),
+    until: z.int().nonnegative().meta({ description: 'When it ends, in Unix seconds.' })
+  })
+  .nullable()
+  .meta({
+    description:
+      'The cooldown the model is under (#68), or null. A route that names the reason in its ' +
+      '`fallbackOn` skips it until then; one that names neither still calls it.'
+  })
+
+/** A login's quota on `/v1/switchboard/models`. Documents the response; never parsed. */
+const quotaSchema = z
+  .object({
+    observed_at: z
+      .int()
+      .nonnegative()
+      .meta({ description: 'When the response that reported it arrived, in Unix seconds.' }),
+    status: z.string().trim().nullable().meta({
+      description: "The provider's overall status, such as Anthropic's `allowed`."
+    }),
+    plan: z.string().trim().nullable().meta({ description: "The plan, such as Codex's `plus`." }),
+    windows: z.array(
+      z.object({
+        name: z.string().trim().meta({
+          description: "The provider's name for the window: `5h`, `7d`, `primary`, `secondary`."
+        }),
+        used: z.number().min(0).max(1).meta({ description: 'The share used, from 0 to 1.' }),
+        resets_at: z
+          .int()
+          .nonnegative()
+          .nullable()
+          .meta({ description: 'When it resets, in Unix seconds.' }),
+        window_minutes: z.number().nonnegative().nullable(),
+        status: z.string().trim().nullable()
+      })
+    )
+  })
+  .nullable()
+  .meta({
+    description:
+      "The login's latest subscription quota, from its response headers (#69), or null when it " +
+      'reports none (Google, API keys, or no call since the proxy started). A window that has ' +
+      'reset since is left out.'
+  })
+
 /**
  * What pi knows about an exposed model that the OpenAI model object has no field for: pi's
  * catalogue entry, as pi resolves it (a `models.json` override included). Documents the response;
@@ -118,58 +172,23 @@ const piModelCapabilitiesSchema = z
           "pi's prices, in USD per million tokens: uncached input, output, cache reads and " +
           'cache writes. 0 where pi has no price.'
       }),
-    cooldown: z
-      .object({
-        reason: z.enum(['rate_limit', 'unavailable']).meta({
-          description: 'The failure it is cooling down from: a 429, or a 503 or 529.'
-        }),
-        scope: z.enum(['provider', 'model']).meta({
-          description: 'A 429 cools the whole provider (its login); an overload, the model.'
-        }),
-        until: z.int().nonnegative().meta({ description: 'When it ends, in Unix seconds.' })
-      })
-      .nullable()
+    cooldown: cooldownSchema,
+    quota: quotaSchema,
+    logins: z
+      .array(
+        z.object({
+          id: z.string().trim().meta({
+            description:
+              'The login: the provider, or one of its extra logins (`anthropic-account-2`, #227).'
+          }),
+          cooldown: cooldownSchema,
+          quota: quotaSchema
+        })
+      )
       .meta({
         description:
-          'The cooldown the model is under (#68), or null. An alias chain that names the reason ' +
-          'in `fallbackOn` skips it until then; a request that names the model still calls it.'
-      }),
-    quota: z
-      .object({
-        observed_at: z
-          .int()
-          .nonnegative()
-          .meta({ description: 'When the response that reported it arrived, in Unix seconds.' }),
-        status: z.string().trim().nullable().meta({
-          description: "The provider's overall status, such as Anthropic's `allowed`."
-        }),
-        plan: z
-          .string()
-          .trim()
-          .nullable()
-          .meta({ description: "The plan, such as Codex's `plus`." }),
-        windows: z.array(
-          z.object({
-            name: z.string().trim().meta({
-              description: "The provider's name for the window: `5h`, `7d`, `primary`, `secondary`."
-            }),
-            used: z.number().min(0).max(1).meta({ description: 'The share used, from 0 to 1.' }),
-            resets_at: z
-              .int()
-              .nonnegative()
-              .nullable()
-              .meta({ description: 'When it resets, in Unix seconds.' }),
-            window_minutes: z.number().nonnegative().nullable(),
-            status: z.string().trim().nullable()
-          })
-        )
-      })
-      .nullable()
-      .meta({
-        description:
-          "The model's provider's latest subscription quota, from its response headers (#69), or " +
-          'null when the provider reports none (Google, API keys, or no call since the proxy ' +
-          'started). A window that has reset since is left out.'
+          'The logins that may serve the model, in the order routing tries them (#227). The ' +
+          "model's own `cooldown` and `quota` are the first login's."
       })
   })
   .meta({ id: 'ModelCapabilities', description: 'What pi knows about an exposed model.' })
@@ -223,8 +242,23 @@ function quotaField(quota: ProviderQuota | undefined): PiModelList['data'][numbe
 }
 
 /**
+ * Reports one login of a model: its cooldown (#68) and its quota (#69).
+ *
+ * @param login - the login's entry: its provider is the login
+ * @returns the login's ID, cooldown and quota
+ */
+function loginField(login: ExposedModel): PiModelList['data'][number]['logins'][number] {
+  return {
+    id: login.login,
+    cooldown: cooldownField(activeCooldown(loginSubject(login))),
+    quota: quotaField(providerQuota(login.login))
+  }
+}
+
+/**
  * Builds the `/v1/switchboard/models` response: every exposed model, with pi's catalogue entry,
- * its cooldown (#68) and its provider's quota (#69). An alias carries its target's (#66).
+ * its cooldown (#68) and its provider's quota (#69), and each of its logins (#227). An alias
+ * carries its target's (#66).
  *
  * @param models - the exposed models, in list order
  * @returns the list response
@@ -234,9 +268,11 @@ export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
     object: 'list',
     data: models.map((exposed) => {
       const { publicId, model } = exposed
+      const logins = (exposed.logins ?? [exposed]).map(loginField)
+      const [first] = logins
       return {
         id: publicId,
-        provider: model.provider,
+        provider: exposed.provider,
         reasoning: model.reasoning,
         reasoning_efforts: supportedReasoningEfforts(model),
         input: [...model.input],
@@ -248,8 +284,9 @@ export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
           cache_read: model.cost.cacheRead,
           cache_write: model.cost.cacheWrite
         },
-        cooldown: cooldownField(activeCooldown(exposed)),
-        quota: quotaField(providerQuota(model.provider))
+        cooldown: first?.cooldown ?? null,
+        quota: first?.quota ?? null,
+        logins
       }
     })
   }

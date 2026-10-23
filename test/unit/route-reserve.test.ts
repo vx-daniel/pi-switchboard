@@ -7,6 +7,7 @@ import type { FailureClass } from '@proxy/config/schema'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { clearAllCooldowns, startCooldown } from '@proxy/pi/cooldowns'
 import { clearAllQuotas, recordQuota } from '@proxy/pi/quota'
+import type { RouteHops } from '@proxy/server/route-hops'
 import { reserveSkip } from '@proxy/server/route-reserve'
 import { beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -34,7 +35,7 @@ function exposed(provider: string, id: string): ExposedModel {
     contextWindow: 128000,
     maxTokens: 4096
   }
-  return { publicId: id, canonicalId: `${provider}/${id}`, model, provider }
+  return { publicId: id, canonicalId: `${provider}/${id}`, model, provider, login: provider }
 }
 
 /**
@@ -71,11 +72,8 @@ const RATE_LIMITS: ReadonlySet<FailureClass> = new Set(['rate_limit'])
  * @param reserve - provider -> the share to keep free
  * @returns the rules
  */
-function keeping(reserve: Record<string, number>): {
-  reserve: Record<string, number>
-  fallbackOn: ReadonlySet<FailureClass>
-} {
-  return { reserve, fallbackOn: RATE_LIMITS }
+function keeping(reserve: Record<string, number>): RouteHops & { reserve: Record<string, number> } {
+  return { reserve, fallbackOn: RATE_LIMITS, loginFallbackOn: new Set() }
 }
 
 beforeEach(() => {

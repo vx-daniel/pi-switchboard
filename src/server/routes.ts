@@ -16,7 +16,7 @@
  */
 
 import type { ServerConfig } from '@proxy/config/env'
-import { loadConfigFromFile, type Reserve } from '@proxy/config/schema'
+import { type FailureClass, loadConfigFromFile, type Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { type ConversionSuccess, convertMessages } from '@proxy/openai/messages'
 import {
@@ -36,7 +36,7 @@ import { convertTools } from '@proxy/openai/tools'
 import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/validate'
 import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
 import { beginActiveRequest, requestOutcome } from '@proxy/server/active-requests'
-import { dispatchChat, findCredentialedStart, planRoute } from '@proxy/server/chat-dispatch'
+import { dispatchChat, findCredentialedStart } from '@proxy/server/chat-dispatch'
 import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
   HTTP_BAD_REQUEST,
@@ -57,17 +57,20 @@ import {
   usageDescription,
   usageQuerySchema
 } from '@proxy/server/openapi'
+import { planRoute } from '@proxy/server/route-plan'
 import type { ProxyEnv } from '@proxy/server/types'
 import { createUsageAnswer } from '@proxy/server/usage'
 import { type Context, Hono } from 'hono'
 import { describeRoute, validator } from 'hono-openapi'
 
 /**
- * What a request reads from the config: the model exposure config, and the quota reserve per
- * provider that fallback chains keep (`routing.reserve`, #69; none when left out).
+ * What a request reads from the config: the model exposure config, the quota reserve per login
+ * that fallback chains keep (`routing.reserve`, #69; none when left out), and the failures that
+ * move a request between a model's logins (`routing.logins.fallbackOn`, #227; none when left out).
  */
 export interface RequestConfig extends ModelExposureConfig {
   readonly reserve?: Reserve | undefined
+  readonly loginFallbackOn?: readonly FailureClass[] | undefined
 }
 
 /**
@@ -108,7 +111,8 @@ export async function fileConfigReader(): Promise<RequestConfig> {
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
     aliases: file.aliases,
-    reserve: file.routing.reserve
+    reserve: file.routing.reserve,
+    loginFallbackOn: file.routing.logins.fallbackOn
   }
 }
 
@@ -328,7 +332,7 @@ async function handleChatCompletion(
     return context.json(modelNotFound(request.model), HTTP_NOT_FOUND)
   }
 
-  const route = planRoute(resolved, request, upstreamApiKey)
+  const route = planRoute(resolved, request, upstreamApiKey, requestConfig.loginFallbackOn ?? [])
   const [first = resolved] = route.candidates
 
   // The request and response lines carry no model, so this one ties the call to the model that
@@ -338,10 +342,15 @@ async function handleChatCompletion(
     requestedModel: request.model,
     model: first.canonicalId,
     provider: first.provider,
+    login: first.login,
     stream: request.stream === true,
     ...(resolved.alias === undefined ? {} : { alias: resolved.alias }),
     ...(route.candidates.length > 1
-      ? { fallbackModels: route.candidates.slice(1).map((candidate) => candidate.canonicalId) }
+      ? {
+          fallbackModels: route.candidates
+            .slice(1)
+            .map((candidate) => `${candidate.canonicalId}@${candidate.login}`)
+        }
       : {})
   })
 
@@ -376,6 +385,7 @@ async function handleChatCompletion(
       alias: resolved.alias,
       candidates: start.candidates,
       fallbackOn: route.fallbackOn,
+      loginFallbackOn: route.loginFallbackOn,
       reserve: requestConfig.reserve ?? {},
       attempts: start.attempts,
       context: built.value,

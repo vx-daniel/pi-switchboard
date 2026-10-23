@@ -45,10 +45,17 @@ const FIRST_EXTRA_ACCOUNT = 2
 /** An account provider ID: the base, then `-account-N`. The base may itself contain `-`. */
 const ACCOUNT_ID = /^(?<base>.+)-account-(?<number>[1-9]\d*)$/
 
-/** What account registration needs of pi's runtime. */
+/**
+ * What account registration needs of pi's runtime. A slot is registered when it is a *native*
+ * registration: a `models.json` entry under the slot's ID makes `getProvider` answer before any
+ * registration, and composes above the copy once it is registered.
+ */
 export type AccountRuntime = Pick<
   ModelRuntime,
-  'getProvider' | 'listCredentials' | 'registerNativeProvider' | 'unregisterProvider'
+  | 'getRegisteredNativeProvider'
+  | 'listCredentials'
+  | 'registerNativeProvider'
+  | 'unregisterProvider'
 >
 
 /**
@@ -164,7 +171,9 @@ export function accountProvider(base: Provider, number: number): Provider {
  */
 export function registerAccountProvider(runtime: AccountRuntime, providerId: string): boolean {
   const slot = parseAccountProviderId(providerId)
-  if (slot === undefined || runtime.getProvider(providerId) !== undefined) return false
+  if (slot === undefined || runtime.getRegisteredNativeProvider(providerId) !== undefined) {
+    return false
+  }
   const fresh = builtinProviders().find((provider) => provider.id === slot.base)
   if (fresh === undefined) {
     accountsLogger.warn('{provider} is no login slot of a built-in pi provider; not registered', {
@@ -188,7 +197,7 @@ export function registerAccountProvider(runtime: AccountRuntime, providerId: str
  */
 export function unregisterAccountProvider(runtime: AccountRuntime, providerId: string): void {
   if (parseAccountProviderId(providerId) === undefined) return
-  if (runtime.getProvider(providerId) === undefined) return
+  if (runtime.getRegisteredNativeProvider(providerId) === undefined) return
   runtime.unregisterProvider(providerId)
   accountsLogger.info('Dropped {provider}: logged out', { provider: providerId })
 }
@@ -210,7 +219,9 @@ export interface AccountSlot {
  */
 export function nextAccountSlot(runtime: AccountRuntime, base: string): AccountSlot {
   let number = FIRST_EXTRA_ACCOUNT
-  while (runtime.getProvider(accountProviderId(base, number)) !== undefined) number += 1
+  while (runtime.getRegisteredNativeProvider(accountProviderId(base, number)) !== undefined) {
+    number += 1
+  }
   return { providerId: accountProviderId(base, number), number }
 }
 
