@@ -147,7 +147,7 @@ What the name promises, under constitution principle VI (explicit, visible, expo
 - [x] Aliases: virtual model names (#66)
 - [x] Fallback chains for aliases (#67)
 - [x] Cooldowns after rate limits (#68); pi already makes no hidden SDK retries
-- [ ] Quota awareness from provider rate-limit headers (#69): tracked, shown, and kept in reserve by fallback chains (`routing.reserve`); recorded fixtures to come
+- [x] Quota awareness from provider rate-limit headers (#69): tracked, shown, and kept in reserve by fallback chains (`routing.reserve`); Anthropic recorded, Codex and Copilot in #238
 - [ ] Usage and cost by route (#70): log tags and in-memory totals done; an HTTP view is undecided
 - [ ] Several logins per provider (#227): `{provider}-N` logins found in pi's store at startup and added from the console; one model, routing picks the login (constitution 3.6.0); a recording through a copy to come
 

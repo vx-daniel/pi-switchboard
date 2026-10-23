@@ -564,11 +564,14 @@ Copilot wasn't logged in, so it is unknown.
 - **Keyed by provider.** pi has one login per provider, so a provider's report is its login's.
   A second login to the same service is a second provider (`anthropic-2`, Accounts
   below), with a report and a reserve of its own.
-- **No recordings yet.** Tests use the probe's header names and formats, with fake identifying
-  values (`test/fixtures/quota-headers.ts`). The recorder keeps a response's quota headers, by
-  exact name and nothing else (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), and
-  records a `quota` call for Anthropic and for Codex (over SSE, as the proxy calls it); making
-  them needs a login made for recording (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
+- **Recorded for Anthropic only.** `test/fixtures/recordings/anthropic-messages/quota.json` is a
+  live call from a login made for recording, and `test/integration/quota-replay.test.ts` replays
+  it through pi's client to `/healthz/creds`. Codex is tested with the probe's header names and
+  fake identifying values (`test/fixtures/quota-headers.ts`); its recording and a Copilot probe
+  are #238. The recorder keeps a response's quota headers by exact name and nothing else
+  (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), and records a `quota` call for
+  Anthropic and for Codex (over SSE, as the proxy calls it); it needs a login made for recording
+  (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
 
 **The reserve** (`src/server/route-reserve.ts`, principle VI: configured, and reported). A
 fallback chain skips a provider that is close to its limit, before it refuses:
