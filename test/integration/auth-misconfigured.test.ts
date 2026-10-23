@@ -1,12 +1,13 @@
 /**
- * Proxy auth that cannot be applied: `authToken` in proxy-config.json is not a string (#82), or
- * `--auth-token` / `PI_SWITCHBOARD_AUTH_TOKEN` is set but empty (#99). Repairing either to "auth off"
- * would turn a requested token into an open proxy, and starting to refuse every request hides the
- * mistake behind a running process. So loading the config refuses, and the proxy does not start.
- * Only '' in the file (or no authToken) turns auth off.
+ * Proxy auth that cannot be applied: `authToken` in proxy-config.json is not a string (#82),
+ * `--auth-token` / `PI_SWITCHBOARD_AUTH_TOKEN` is set but empty (#99), or proxy-config.json exists
+ * but cannot be read or parsed while nothing else sets a token. Repairing any of these to "auth
+ * off" would turn a requested token into an open proxy, and starting to refuse every request hides
+ * the mistake behind a running process. So loading the config refuses, and the proxy does not
+ * start. Only '' in the file (or no authToken, or no file) turns auth off.
  */
 
-import { rmSync, readFileSync, writeFileSync } from 'node:fs'
+import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type CliOverrides, loadConfig, UnusableProxyAuthError } from '@proxy/config/env'
@@ -113,6 +114,46 @@ describe('a non-string authToken refuses to start', () => {
   // Catches a missing authToken (the default) being read as invalid.
   test('no authToken at all is auth off', async () => {
     writeProxyConfig({ port: 4141 })
+
+    expect((await ask('/v1/models')).status).toBe(HTTP_OK)
+  })
+})
+
+describe('a config file that cannot be used refuses to start', () => {
+  // Catches the fail-open path a corrupt or unreadable file opened: the defaults took its place,
+  // and the defaults' '' turned a token the file may hold into auth off, at `warn`.
+  test('a file that is not valid JSON refuses', () => {
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{"authToken": "notarealsecret-fi')
+
+    expect(refusal()).toEqual({ cause: 'file-unusable', file: { problem: 'not-json' } })
+  })
+
+  // Catches an unreadable file (here a directory in its place, which fails the same way as a
+  // permission error without needing one) being treated as "no file".
+  test('a file that cannot be read refuses, naming the error code', () => {
+    rmSync(join(agentDir.path, 'proxy-config.json'), { force: true })
+    mkdirSync(join(agentDir.path, 'proxy-config.json'))
+
+    expect(refusal()).toEqual({
+      cause: 'file-unusable',
+      file: { problem: 'unreadable', code: 'EISDIR' }
+    })
+  })
+
+  // Catches the refusal leaving an operator with a corrupt file no way to run the proxy short of
+  // fixing it: a flag or env token stands in for whatever the file holds.
+  test('a token from the environment wins, and works', async () => {
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{not json')
+    vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', ENV_TOKEN)
+
+    expect((await ask('/v1/models', ENV_TOKEN)).status).toBe(HTTP_OK)
+    expect((await ask('/v1/models')).status).toBe(HTTP_UNAUTHORIZED)
+  })
+
+  // Catches the refusal spreading to a missing file, which holds no token and is the fresh-install
+  // state.
+  test('no file at all is auth off', async () => {
+    rmSync(join(agentDir.path, 'proxy-config.json'), { force: true })
 
     expect((await ask('/v1/models')).status).toBe(HTTP_OK)
   })

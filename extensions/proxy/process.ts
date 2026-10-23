@@ -12,7 +12,9 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { type ExtensionContext, getAgentDir } from '@earendil-works/pi-coding-agent'
 import {
   configFileAuthTokenInvalid,
+  configFileProblem,
   configToEnv,
+  describeConfigFileProblem,
   loadConfigFromFile,
   type ProxyConfig
 } from '@vx-daniel/pi-switchboard/config'
@@ -505,6 +507,12 @@ function startRefusal(config: ProxyConfig): string | undefined {
   }
   if (token === undefined && process.env['PI_PROXY_AUTH_TOKEN'] !== undefined) {
     return "PI_PROXY_AUTH_TOKEN is set in pi's environment but no longer read, and the proxy refuses to start over it. Rename it PI_SWITCHBOARD_AUTH_TOKEN, or set a token in /proxy config."
+  }
+  // The config this extension holds came from the defaults when the file could not be used, so
+  // its '' says nothing about the token the file may hold; the child refuses over the file.
+  const fileProblem = token === undefined ? configFileProblem() : undefined
+  if (fileProblem !== undefined) {
+    return `proxy-config.json exists but ${describeConfigFileProblem(fileProblem)}, and the proxy refuses to start over it: the file may hold a token. Fix or remove the file, or set PI_SWITCHBOARD_AUTH_TOKEN in pi's environment.`
   }
   if (token === undefined && configFileAuthTokenInvalid()) {
     return 'authToken in proxy-config.json is not a string, and the proxy refuses to start with it. Set a new token in /proxy config.'

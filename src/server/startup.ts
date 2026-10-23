@@ -19,7 +19,7 @@ import {
   type ServerConfig,
   UnusableProxyAuthError
 } from '@proxy/config/env'
-import { getConfigPath } from '@proxy/config/schema'
+import { describeConfigFileProblem, getConfigPath } from '@proxy/config/schema'
 import {
   configureLogging,
   isLogFormat,
@@ -201,6 +201,14 @@ function logUnusableProxyAuth(invalid: InvalidAuthCause): void {
       lifecycleLogger.fatal(
         'Refusing to start: authToken in {configPath} is not a string. Fix it, or set a token with --auth-token or PI_SWITCHBOARD_AUTH_TOKEN',
         { configPath: getConfigPath() }
+      )
+      break
+    case 'file-unusable':
+      // The file may hold a token the proxy cannot see; starting on the defaults could turn it
+      // into auth off. Never the parser's message: it quotes the file.
+      lifecycleLogger.fatal(
+        'Refusing to start: {configPath} exists but {problem}, so a token in it cannot be applied. Fix or remove the file, or set a token with --auth-token or PI_SWITCHBOARD_AUTH_TOKEN',
+        { configPath: getConfigPath(), problem: describeConfigFileProblem(invalid.file) }
       )
       break
     case 'renamed-env-var':

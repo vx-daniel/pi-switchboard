@@ -8,7 +8,9 @@
  *
  * The env vars were `PI_PROXY_*` before the rename to pi-switchboard (#65). The old names are not
  * read; one that is still set is warned about, and an old auth token refuses to start
- * ({@link UnusableProxyAuthError}), since ignoring it would quietly turn auth off.
+ * ({@link UnusableProxyAuthError}), since ignoring it would quietly turn auth off. So does a
+ * config file that exists but cannot be read or parsed when no flag or env var sets the token: the
+ * file may hold one.
  *
  * The JSON config file (`proxy-config.json` in `$PI_CODING_AGENT_DIR`, default `~/.pi/agent`) is
  * the shared config written by the pi extension's /proxy config panel. Env vars and CLI args
@@ -18,10 +20,16 @@
  */
 
 import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
-import type { AliasTarget, ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
+import type {
+  AliasTarget,
+  ConfigFileProblem,
+  ModelExposureMode,
+  PublicModelIdMode
+} from '@proxy/config/schema'
 import {
   BYTES_PER_MB,
   configFileAuthTokenInvalid,
+  configFileProblem,
   loadConfigFromFile,
   MS_PER_SECOND
 } from '@proxy/config/schema'
@@ -42,6 +50,9 @@ interface TokenOverride {
 /**
  * Why proxy auth is set but cannot be applied:
  * - `file-token-not-string`: `authToken` in proxy-config.json is not a string (#82);
+ * - `file-unusable`: proxy-config.json exists but cannot be read or is not valid JSON, and neither
+ *   the flag nor `PI_SWITCHBOARD_AUTH_TOKEN` sets a token. The file may hold a token the proxy
+ *   cannot see, so starting on the defaults could turn it into auth off;
  * - `empty-override`: `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN` is set but empty, a token
  *   nothing can match (#99). The file's token is not used instead: that would ignore what was set;
  * - `renamed-env-var`: the old `PI_PROXY_AUTH_TOKEN` is set and neither the flag nor
@@ -49,6 +60,7 @@ interface TokenOverride {
  */
 export type InvalidAuthCause =
   | { readonly cause: 'file-token-not-string' }
+  | { readonly cause: 'file-unusable'; readonly file: ConfigFileProblem }
   | { readonly cause: 'empty-override'; readonly source: OverrideSource }
   | { readonly cause: 'renamed-env-var' }
 
@@ -104,8 +116,9 @@ function tokenOverride(
  * @param override - the flag or env token, or `undefined` when neither is set
  * @param fileToken - The config file's (normalized) `authToken`; '' means off.
  * @returns `token` for a non-empty override or file token; else `off`.
- * @throws UnusableProxyAuthError for an empty override (#99), or a file `authToken` that is set
- *   but not a string (#82)
+ * @throws UnusableProxyAuthError for an empty override (#99), a config file that exists but
+ *   cannot be read or parsed with no override to stand in for its token, or a file `authToken`
+ *   that is set but not a string (#82)
  */
 function resolveProxyAuth(override: TokenOverride | undefined, fileToken: string): ProxyAuth {
   if (override !== undefined) {
@@ -113,6 +126,12 @@ function resolveProxyAuth(override: TokenOverride | undefined, fileToken: string
       throw new UnusableProxyAuthError({ cause: 'empty-override', source: override.source })
     }
     return { kind: 'token', token: override.value }
+  }
+  // With no override, the file is the only place a token can be: a file the proxy cannot read
+  // may hold one, and `fileToken` is then the repaired '' (auth off), not what the operator set.
+  const fileProblem = configFileProblem()
+  if (fileProblem !== undefined) {
+    throw new UnusableProxyAuthError({ cause: 'file-unusable', file: fileProblem })
   }
   if (configFileAuthTokenInvalid()) {
     throw new UnusableProxyAuthError({ cause: 'file-token-not-string' })

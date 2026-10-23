@@ -1,21 +1,25 @@
 <!--
 Sync Impact Report
-Version change: 3.7.0 → 3.8.0 (MINOR)
-Rationale: #182 lets the operator end a cooldown early without a restart, for a limit the
-operator knows has lifted or a wrong time a provider sent. Principle I's list of today's
-non-standard routes names `DELETE /v1/switchboard/cooldowns`, the first route that writes state,
-and says what it may change.
-MINOR: materially expanded guidance (a route that writes state, and what it may change); no
-principle added or removed.
+Version change: 3.8.0 → 3.9.0 (MINOR)
+Rationale: a `proxy-config.json` that existed but could not be read or parsed was replaced by the
+defaults, whose `authToken` is `''`: a token the file held became auth off, logged at `warn`, and
+the next save wrote `''` over the file. Principle III's exception now names this case: with no
+flag or env var token, such a file refuses to start, as the other unusable-auth causes do. A
+missing file still starts with the defaults.
+MINOR: materially expanded guidance (a fourth cause that refuses to start); no principle added or
+removed.
 Modified sections:
-- I. OpenAI Compatibility: the non-standard routes list `DELETE /v1/switchboard/cooldowns`, which
-  changes only which candidates fallback chains skip, and calls no provider
+- II. Validate at Boundaries: the operator-configuration exception lists a config file that
+  exists but cannot be read or is not valid JSON, with no override token
 Templates requiring updates:
-- ✅ PLAN.md: the decision under "Cooldowns (#68)" and the route's section
-- ✅ README.md: the route table and the cooldowns section
-- ✅ AGENTS.md: "Core constraints" names the one route that writes state
+- ✅ PLAN.md: "Proxy authentication" names the cause and `configFileProblem`
+- ✅ README.md: the config file paragraph and "Proxy authentication"
+- ✅ AGENTS.md: no change needed; it does not list the causes
 Follow-up TODOs:
 - None.
+
+3.8.0 (2026-10-23): #182's `DELETE /v1/switchboard/cooldowns`, the first non-standard route that
+writes state, and what it may change.
 
 3.7.0 (2026-10-23): an alias target's `reasoningEffort` replaces the request's `reasoning_effort`
 on that model (#230), a listed replacement reported as `x_pi.reasoning_effort` and logged.
@@ -120,7 +124,7 @@ All untrusted input MUST be validated at the edge before use, with Zod schemas p
   - an invalid environment variable is ignored with a warning;
   - an invalid field in the config file is repaired (a number clamped to its schema's bounds, a list or map keeping its valid entries, anything else its default), and every repaired field is named in a warning, by path only.
 
-  Exception: proxy auth that is set but cannot be applied refuses to start, whatever its source: an empty `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN`, an `authToken` in the config file that is not a string, or the pre-rename `PI_PROXY_AUTH_TOKEN` still set with neither the flag nor `PI_SWITCHBOARD_AUTH_TOKEN` (#65). Ignoring or repairing it would turn a token the operator asked for into an open proxy (principle III), and starting to refuse every request hides the mistake behind a running process. The proxy logs why at `fatal`, and the pi extension refuses to spawn such a proxy and says why, since the proxy's own output is discarded. Every other pre-rename `PI_PROXY_*` variable is ignored with a warning naming its replacement.
+  Exception: proxy auth that is set but cannot be applied refuses to start, whatever its source: an empty `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN`, an `authToken` in the config file that is not a string, the pre-rename `PI_PROXY_AUTH_TOKEN` still set with neither the flag nor `PI_SWITCHBOARD_AUTH_TOKEN` (#65), or a config file that exists but cannot be read or is not valid JSON while neither the flag nor `PI_SWITCHBOARD_AUTH_TOKEN` sets a token (the file may hold one the proxy cannot see; a missing file holds nothing and starts with the defaults). Ignoring or repairing it would turn a token the operator asked for into an open proxy (principle III), and starting to refuse every request hides the mistake behind a running process. The proxy logs why at `fatal`, and the pi extension refuses to spawn such a proxy and says why, since the proxy's own output is discarded. Every other pre-rename `PI_PROXY_*` variable is ignored with a warning naming its replacement.
 
 Type safety is part of the contract: no `any`, no `@ts-ignore`, no unsafe `as` casts, and no inline directives (`oxlint-disable…`, `eslint-disable…`, fallow's `fallow-ignore…` and its `@expected-unused` tag), which `test/unit/lint-directives.test.ts` enforces. Narrow with repository type guards or schemas. When a lint rule's premise does not fit a line, express the code differently and say why in an ordinary comment; a deliberate fallow exception goes in `.fallowrc.jsonc` with its reason.
 
@@ -198,4 +202,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.8.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23
+**Version**: 3.9.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23

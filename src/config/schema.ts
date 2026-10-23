@@ -673,46 +673,81 @@ export function getConfigPath(): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Why a config file that exists cannot be used: it could not be read (`unreadable`, with the fs
+ * error code) or it is not valid JSON (`not-json`).
+ */
+export type ConfigFileProblem =
+  | { readonly problem: 'unreadable'; readonly code: string }
+  | { readonly problem: 'not-json' }
+
+/**
+ * The config file as it is on disk: absent, present but unusable, or parsed (not yet normalized).
+ */
+type ConfigFileContents =
+  | { readonly kind: 'absent' }
+  | ({ readonly kind: 'unusable' } & ConfigFileProblem)
+  | { readonly kind: 'parsed'; readonly value: unknown; readonly bytes: number }
+
+/**
+ * Reads and parses the config file without normalizing it. Never throws and never logs: the
+ * callers decide what each outcome means and what to say about it.
+ *
+ * @returns The file's contents, or why there are none.
+ */
+function readConfigFile(): ConfigFileContents {
+  const configPath = getConfigPath()
+  if (!existsSync(configPath)) return { kind: 'absent' }
+  let text: string
+  try {
+    text = readFileSync(configPath, 'utf-8')
+  } catch (error) {
+    return { kind: 'unusable', problem: 'unreadable', code: errorCode(error) }
+  }
+  try {
+    return { kind: 'parsed', value: JSON.parse(text), bytes: text.length }
+  } catch {
+    return { kind: 'unusable', problem: 'not-json' }
+  }
+}
+
+/**
  * Loads and normalizes the JSON config file.
  *
  * @remarks
  * Never throws: a missing, unreadable or non-JSON file gives a copy of {@link DEFAULT_CONFIG}, with
- * a warning for the last two.
+ * a warning for the last two. Whether the proxy may start on those defaults is decided by the
+ * caller: `loadConfig` refuses when the file exists but cannot be used and no flag or env var
+ * sets the token ({@link configFileProblem}), since the file may hold a token the proxy cannot see.
  *
  * @returns The config from the file, or the defaults.
  */
 export function loadConfigFromFile(): ProxyConfig {
   const configPath = getConfigPath()
-  if (!existsSync(configPath)) {
+  const contents = readConfigFile()
+  if (contents.kind === 'absent') {
     configLogger.debug('No config file at {path}; using defaults', { path: configPath })
     return { ...DEFAULT_CONFIG }
   }
-  let text: string
-  try {
-    text = readFileSync(configPath, 'utf-8')
-  } catch (error) {
-    configLogger.warn('Could not read config file {path} ({code}); using defaults', {
-      path: configPath,
-      code: errorCode(error)
-    })
-    return { ...DEFAULT_CONFIG }
-  }
-  let raw: unknown
-  try {
-    raw = JSON.parse(text)
-  } catch {
-    // Not the parser's message: it quotes the file, which can hold the auth token.
-    configLogger.warn('Config file {path} is not valid JSON; using defaults', {
-      path: configPath,
-      bytes: text.length
-    })
+  if (contents.kind === 'unusable') {
+    if (contents.problem === 'unreadable') {
+      configLogger.warn('Could not read config file {path} ({code}); using defaults', {
+        path: configPath,
+        code: contents.code
+      })
+    } else {
+      // Not the parser's message: it quotes the file, which can hold the auth token.
+      configLogger.warn('Config file {path} is not valid JSON; using defaults', {
+        path: configPath
+      })
+    }
     return { ...DEFAULT_CONFIG }
   }
   configLogger.debug('Read config file {path}', {
     path: configPath,
-    fields: isRecord(raw) ? Object.keys(raw) : []
+    bytes: contents.bytes,
+    fields: isRecord(contents.value) ? Object.keys(contents.value) : []
   })
-  return normalizeConfig(raw)
+  return normalizeConfig(contents.value)
 }
 
 /**
@@ -721,11 +756,40 @@ export function loadConfigFromFile(): ProxyConfig {
  * @returns The parsed JSON, or `undefined` when the file is missing, unreadable or not JSON.
  */
 function rawConfigFile(): unknown {
-  try {
-    return JSON.parse(readFileSync(getConfigPath(), 'utf-8'))
-  } catch {
-    return undefined
-  }
+  const contents = readConfigFile()
+  return contents.kind === 'parsed' ? contents.value : undefined
+}
+
+/**
+ * Checks whether the config file exists but cannot be used: it cannot be read, or it is not valid
+ * JSON.
+ *
+ * @remarks
+ * Such a file may hold an `authToken` the proxy cannot see. Starting on the defaults would turn
+ * that token into auth off, so `loadConfig` refuses to start instead when neither the flag nor
+ * `PI_SWITCHBOARD_AUTH_TOKEN` sets a token (CONSTITUTION principle II's exception). A missing file is not
+ * this case: it holds nothing. Reads the file on every call.
+ *
+ * @returns Why the file cannot be used, or `undefined` when it is absent or parsed.
+ */
+export function configFileProblem(): ConfigFileProblem | undefined {
+  const contents = readConfigFile()
+  if (contents.kind !== 'unusable') return undefined
+  return contents.problem === 'unreadable'
+    ? { problem: 'unreadable', code: contents.code }
+    : { problem: 'not-json' }
+}
+
+/**
+ * Words a {@link ConfigFileProblem} for a log line or notification: `cannot be read (EACCES)` or
+ * `is not valid JSON`. Never the parser's message, which quotes the file.
+ *
+ * @param file - why the config file cannot be used
+ * @returns the wording, to follow "the file …"
+ */
+export function describeConfigFileProblem(file: ConfigFileProblem): string {
+  if (file.problem === 'unreadable') return `cannot be read (${file.code})`
+  return 'is not valid JSON'
 }
 
 /**

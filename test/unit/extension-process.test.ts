@@ -534,4 +534,32 @@ describe('startProxy', () => {
       })
     }
   )
+
+  // Catches the extension spawning a proxy over a config file it could not parse: the extension
+  // holds the defaults (auth off), while the child refuses over the file, which may hold a token.
+  test('a config file that is not valid JSON: refused with the reason, nothing spawned', async () => {
+    const freePort = await closedPort()
+    writeFileSync(join(agentDir, 'proxy-config.json'), '{"authToken": "notarealsecret-fi')
+    // The file cannot name a port, so the probe would go to the default 4141, where the developer's
+    // own proxy may be listening: answer it with a refused connection instead.
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      Object.assign(new Error('fetch failed'), { code: 'ECONNREFUSED' })
+    )
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    const { context, notifications, statuses } = fakeCommandContext({})
+
+    await startProxy(stateOn(freePort), context)
+
+    expect({ notifications, statuses, pidFileKept: existsSync(pidPath()) }).toEqual({
+      notifications: [
+        {
+          message:
+            "Proxy not started: proxy-config.json exists but is not valid JSON, and the proxy refuses to start over it: the file may hold a token. Fix or remove the file, or set PI_SWITCHBOARD_AUTH_TOKEN in pi's environment.",
+          level: 'error'
+        }
+      ],
+      statuses: [],
+      pidFileKept: true
+    })
+  })
 })
