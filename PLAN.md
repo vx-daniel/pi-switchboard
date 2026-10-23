@@ -603,8 +603,11 @@ the credential.
   credential (`storedOnly`): pi's built-in resolvers fall back to ambient sources
   (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, AWS profiles), which are the base login's, so without
   that a copy would count as configured by them and a login whose credential went away would
-  serve on the base's account (`test/integration/accounts-env.test.ts`). OAuth resolves from the
-  stored credential only and is shared as is. The request itself goes to `base.stream` with
+  serve on the base's account (`test/integration/accounts-env.test.ts`). It follows that an extra
+  login of a provider configured only by ambient sources (Bedrock through an AWS profile, Vertex
+  through ADC) needs a stored credential of its own, such as Bedrock's bearer token from pi's
+  login: the ambient one stays the base's. OAuth resolves from the stored credential only and is
+  shared as is. The request itself goes to `base.stream` with
   `provider: base.id`, because pi's API code keys provider rules by name: `openai`'s ChatGPT
   sign-in (`isChatGPTSignIn`), `github-copilot`'s headers, `xai`'s reasoning items. Anthropic
   and Codex key nothing by name (OAuth shaping is by the token's `sk-ant-oat` prefix). pi's

@@ -4,7 +4,13 @@
  * translating a catalog refresh between the two.
  */
 
-import type { Api, AssistantMessageEventStream, Model, Provider } from '@earendil-works/pi-ai'
+import type {
+  Api,
+  AssistantMessageEventStream,
+  AuthContext,
+  Model,
+  Provider
+} from '@earendil-works/pi-ai'
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript'
 import {
@@ -151,6 +157,57 @@ describe('accountProvider', () => {
     expect(
       accountProvider(makeBase().provider, { providerId: 'acme-2', number: 2 }).refreshModels
     ).toBeUndefined()
+  })
+
+  // Catches an API-key resolver or check that answers for a login with no stored credential (it
+  // would fall back to the base's ambient key or profile), or one that no longer delegates when a
+  // credential is stored.
+  test("answers for an API-key login only from the login's own stored credential", async () => {
+    const base = makeBase().provider
+    const configured = { auth: { apiKey: 'ambient' }, source: 'environment' }
+    const copy = accountProvider(
+      {
+        ...base,
+        auth: {
+          apiKey: {
+            name: 'Acme key',
+            resolve: () => Promise.resolve(configured),
+            check: () => Promise.resolve({ type: 'api_key', source: 'environment' })
+          }
+        }
+      },
+      { providerId: 'acme-2', number: 2 }
+    )
+    const { apiKey } = copy.auth
+    if (apiKey?.check === undefined) throw new Error('the copy lost its check hook')
+    const context: AuthContext = {
+      env: () => Promise.resolve(undefined),
+      fileExists: () => Promise.resolve(false)
+    }
+    const signal = new AbortController().signal
+    const stored = { type: 'api_key' as const, key: 'notarealsecret-stored' }
+
+    expect(await apiKey.resolve({ ctx: context, signal })).toBeUndefined()
+    expect(await apiKey.check({ ctx: context, signal })).toBeUndefined()
+    expect(await apiKey.resolve({ ctx: context, credential: stored, signal })).toBe(configured)
+    expect(await apiKey.check({ ctx: context, credential: stored, signal })).toMatchObject({
+      type: 'api_key'
+    })
+  })
+
+  // Catches a provider with no API-key auth (Codex, OAuth only) gaining one, or losing its login.
+  test("keeps an OAuth-only provider's auth as it is", () => {
+    const oauth = {
+      name: 'Acme account',
+      login: () => Promise.reject(new Error('not run')),
+      refresh: () => Promise.reject(new Error('not run')),
+      toAuth: () => Promise.reject(new Error('not run'))
+    }
+    const base = makeBase().provider
+
+    const copy = accountProvider({ ...base, auth: { oauth } }, { providerId: 'acme-2', number: 2 })
+
+    expect(copy.auth).toEqual({ oauth })
   })
 })
 

@@ -49,7 +49,8 @@ export default defineConfig({
     settings: {
       // Names every naming/* rule accepts. `z`: zod's documented `import * as z` convention.
       // `auth`: pi-ai's `Provider.auth`, a required key of every provider a test builds.
-      naming: { allow: ['z', 'auth'] }
+      // `ctx`: pi-ai's `ApiKeyAuth.resolve({ ctx, … })`, the input a test calls a resolver with.
+      naming: { allow: ['z', 'auth', 'ctx'] }
     },
     rules: {
       // Viaanix base + type-aware
