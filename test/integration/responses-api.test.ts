@@ -268,6 +268,37 @@ describe('the Responses API', () => {
     ])
   })
 
+  // Catches items interleaved in the stream (pi ends thinking only once text has started), which
+  // OpenAI never sends: each item is done before the next is added.
+  test('streams reasoning, then text, one item at a time', async () => {
+    const stream = await client().responses.create({
+      model: 'mock/thinker',
+      input: 'Why?',
+      stream: true
+    })
+    const types: string[] = []
+    for await (const event of stream) types.push(event.type)
+
+    expect(types).toEqual([
+      'response.created',
+      'response.in_progress',
+      'response.output_item.added',
+      'response.reasoning_summary_part.added',
+      'response.reasoning_summary_text.delta',
+      'response.reasoning_summary_text.delta',
+      'response.reasoning_summary_text.done',
+      'response.reasoning_summary_part.done',
+      'response.output_item.done',
+      'response.output_item.added',
+      'response.content_part.added',
+      'response.output_text.delta',
+      'response.output_text.done',
+      'response.content_part.done',
+      'response.output_item.done',
+      'response.completed'
+    ])
+  })
+
   // Catches reasoning dropped from the answer, the token missing when asked for, or the model not
   // getting its reasoning back on the next turn: the stateless loop Codex CLI runs.
   test('returns reasoning, and replays it from encrypted_content', async () => {

@@ -58,6 +58,8 @@ interface StreamState {
   readonly model: string
   /** Whether the stream ended (completed, incomplete or failed). */
   ended: boolean
+  /** The items started and not yet done, by output index. */
+  readonly open: Set<number>
 }
 
 /**
@@ -128,6 +130,68 @@ function startFrames(
 ): string[] {
   const index = event.contentIndex
   const block = event.partial.content[index]
+  const closed = closeOpenItems(state, frameOf, event.partial)
+  state.open.add(index)
+  return [...closed, ...openFrames(state, frameOf, event, block)]
+}
+
+/**
+ * Ends the reasoning and text items still open when another starts, as OpenAI finishes one item
+ * before it starts the next. pi can end a block after the next has started (a completions
+ * adapter ends thinking once text arrives); its own `*_end` then sends nothing.
+ *
+ * @param state - the stream state
+ * @param frameOf - the response
+ * @param partial - pi's message so far, holding each open block's content
+ * @returns the frames that end them
+ */
+function closeOpenItems(
+  state: StreamState,
+  frameOf: ResponseFrame,
+  partial: AssistantMessage
+): string[] {
+  return [...state.open].flatMap((openIndex) => {
+    const block = partial.content[openIndex]
+    if (block?.type === 'thinking') {
+      return endFrames(state, frameOf, {
+        type: 'thinking_end',
+        contentIndex: openIndex,
+        content: block.thinking,
+        partial
+      })
+    }
+    if (block?.type === 'text') {
+      return endFrames(state, frameOf, {
+        type: 'text_end',
+        contentIndex: openIndex,
+        content: block.text,
+        partial
+      })
+    }
+    // A tool call is left to its own end, which carries its parsed arguments.
+    return []
+  })
+}
+
+/**
+ * Encodes the events of a block that starts: its item added, and its first part.
+ *
+ * @param state - the stream state
+ * @param frameOf - the response
+ * @param event - pi's `*_start` event
+ * @param block - the block, as pi's message holds it so far
+ * @returns the frames
+ */
+function openFrames(
+  state: StreamState,
+  frameOf: ResponseFrame,
+  event: Extract<
+    AssistantMessageEvent,
+    { type: 'text_start' | 'thinking_start' | 'toolcall_start' }
+  >,
+  block: AssistantMessage['content'][number] | undefined
+): string[] {
+  const index = event.contentIndex
   if (event.type === 'thinking_start') {
     const item: OutputItem = { type: 'reasoning', id: itemId(frameOf, 'rs', index), summary: [] }
     state.items[index] = item
@@ -227,6 +291,8 @@ function endFrames(
 ): string[] {
   const index = event.contentIndex
   const message = event.partial
+  // Already ended when a later item started: see `closeOpenItems`.
+  if (!state.open.delete(index)) return []
   if (event.type === 'thinking_end') {
     const block = message.content[index]
     const thinking =
@@ -357,7 +423,13 @@ export function streamResponses(
   frameOf: ResponseFrame,
   route: ResponseRoute
 ): ResponsesStream {
-  const state: StreamState = { sequence: 0, items: [], model: route.model, ended: false }
+  const state: StreamState = {
+    sequence: 0,
+    items: [],
+    model: route.model,
+    ended: false,
+    open: new Set()
+  }
   /**
    * Yields each event's frames until the stream ends.
    *
