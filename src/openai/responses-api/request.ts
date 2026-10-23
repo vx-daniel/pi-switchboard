@@ -13,8 +13,9 @@
  *
  * A `reasoning` item's `encrypted_content` is the proxy's token (`reasoning-token.ts`): it is put
  * back as a thinking block on the turn's assistant message, which pi replays to the model that
- * produced it. A `reasoning` item without one holds only the summary the client was shown, which
- * no model can take back: it is not sent, and counted at debug.
+ * produced it. A `reasoning` item without one is a 400, as OpenAI refuses an echoed reasoning item
+ * it has not stored: the proxy stores nothing, and the summary alone is nothing a model can take
+ * back. So is reasoning that no message or function call follows, which has nothing to go on.
  *
  * @packageDocumentation
  */
@@ -110,6 +111,8 @@ interface Turn {
   text: string[]
   toolCalls: { id: string; type: 'function'; function: { name: string; arguments: string } }[]
   reasoning: ReasoningToken[]
+  /** The index in `input` of the turn's last reasoning item, while nothing has followed it. */
+  danglingReasoning: number | undefined
   /** Whether it holds anything to send. */
   open: boolean
 }
@@ -120,15 +123,19 @@ interface Turn {
  * @returns the turn
  */
 function emptyTurn(): Turn {
-  return { text: [], toolCalls: [], reasoning: [], open: false }
+  return { text: [], toolCalls: [], reasoning: [], danglingReasoning: undefined, open: false }
 }
 
 /** The messages being built, with each assistant message's reasoning. */
 interface Built {
   readonly messages: OpenAIMessage[]
   readonly reasoning: ReasoningToken[][]
-  /** Reasoning items without a token: not sent. */
-  unreplayable: number
+}
+
+/** A request the translation refuses: why, and the field. */
+interface TranslationProblem {
+  readonly message: string
+  readonly param: string
 }
 
 /**
@@ -136,42 +143,51 @@ interface Built {
  *
  * @param built - the messages so far; appended to
  * @param turn - the turn
+ * @returns the 400 for reasoning nothing followed, else `undefined`
  */
-function flush(built: Built, turn: Turn): void {
-  if (!turn.open) return
-  if (turn.text.length === 0 && turn.toolCalls.length === 0) {
-    // Reasoning alone, with nothing the model answered after it, has no message to go on.
-    built.unreplayable += turn.reasoning.length
-  } else {
-    const text = turn.text.join('')
-    built.messages.push({
-      role: 'assistant',
-      content: text.length > 0 ? text : null,
-      ...(turn.toolCalls.length > 0 ? { tool_calls: turn.toolCalls } : {})
-    })
-    built.reasoning.push(turn.reasoning)
+function flush(built: Built, turn: Turn): TranslationProblem | undefined {
+  if (!turn.open) return undefined
+  if (turn.danglingReasoning !== undefined) {
+    return {
+      message:
+        'A reasoning item must be followed by the message or function call it led to, as in the response it came from',
+      param: `input.${String(turn.danglingReasoning)}`
+    }
   }
+  const text = turn.text.join('')
+  built.messages.push({
+    role: 'assistant',
+    content: text.length > 0 ? text : null,
+    ...(turn.toolCalls.length > 0 ? { tool_calls: turn.toolCalls } : {})
+  })
+  built.reasoning.push(turn.reasoning)
   Object.assign(turn, emptyTurn())
+  return undefined
 }
 
 /**
- * Converts one item that is not part of an assistant turn into a chat message.
+ * Converts a function call's output into a chat `tool` message.
  *
- * @param item - a user, system or developer message, or a function call's output
+ * @param item - the `function_call_output` item
  * @returns the chat message
  */
-function standaloneMessage(
-  item: Extract<
-    ResponsesInputItem,
-    { role: 'user' | 'system' | 'developer' } | { type: 'function_call_output' }
-  >
+function toolMessage(
+  item: Extract<ResponsesInputItem, { type: 'function_call_output' }>
 ): OpenAIMessage {
-  if ('type' in item && item.type === 'function_call_output') {
-    const output =
-      typeof item.output === 'string' ? item.output : item.output.map((part) => part.text).join('')
-    return { role: 'tool', tool_call_id: item.call_id, content: output }
-  }
-  if (!('role' in item)) throw new Error('A standalone item is a message or an output')
+  const output =
+    typeof item.output === 'string' ? item.output : item.output.map((part) => part.text).join('')
+  return { role: 'tool', tool_call_id: item.call_id, content: output }
+}
+
+/**
+ * Converts a user, system or developer message into a chat message.
+ *
+ * @param item - the message item
+ * @returns the chat message
+ */
+function inputMessage(
+  item: Extract<ResponsesInputItem, { role: 'user' | 'system' | 'developer' }>
+): OpenAIMessage {
   if (item.role !== 'user') {
     const content =
       typeof item.content === 'string'
@@ -198,55 +214,72 @@ function standaloneMessage(
 }
 
 /**
+ * Adds a `reasoning` item to the open assistant turn, as the thinking block its token carries.
+ *
+ * @param turn - the open assistant turn
+ * @param item - the item
+ * @param position - its index in `input`
+ * @returns the 400 for an item without a token, or with one the proxy did not write
+ */
+function addReasoning(
+  turn: Turn,
+  item: Extract<ResponsesInputItem, { type: 'reasoning' }>,
+  position: number
+): TranslationProblem | undefined {
+  const param = `input.${String(position)}.encrypted_content`
+  const encoded = item.encrypted_content
+  if (encoded === undefined || encoded === null) {
+    return {
+      message:
+        'A reasoning item needs its encrypted_content: the proxy stores nothing to look it up by id. Ask for it with include: ["reasoning.encrypted_content"]',
+      param
+    }
+  }
+  const token = decodeReasoningToken(encoded)
+  if (token === undefined) {
+    return { message: 'encrypted_content is not a reasoning token from this proxy', param }
+  }
+  turn.reasoning.push(token)
+  turn.danglingReasoning = position
+  turn.open = true
+  return undefined
+}
+
+/**
  * Adds one input item to the conversation: to the open assistant turn, or as its own message.
  *
  * @param built - the messages so far
  * @param turn - the open assistant turn
- * @param entry - the item and its index in `input`
- * @returns the 400 for a reasoning token the proxy did not write, else `undefined`
+ * @param indexedItem - the item and its index in `input`
+ * @returns the 400 for a reasoning item the proxy can't replay, else `undefined`
  */
 function addItem(
   built: Built,
   turn: Turn,
-  entry: readonly [number, ResponsesInputItem]
-): { message: string; param: string } | undefined {
-  const [position, item] = entry
-  if ('type' in item && item.type === 'reasoning') {
-    if (item.encrypted_content === undefined || item.encrypted_content === null) {
-      built.unreplayable += 1
-      return undefined
-    }
-    const token = decodeReasoningToken(item.encrypted_content)
-    if (token === undefined) {
-      return {
-        message: 'encrypted_content is not a reasoning token from this proxy',
-        param: `input.${String(position)}.encrypted_content`
-      }
-    }
-    turn.reasoning.push(token)
-    turn.open = true
-    return undefined
-  }
+  indexedItem: readonly [number, ResponsesInputItem]
+): TranslationProblem | undefined {
+  const [position, item] = indexedItem
+  if ('type' in item && item.type === 'reasoning') return addReasoning(turn, item, position)
   if ('type' in item && item.type === 'function_call') {
     turn.toolCalls.push({
       id: item.call_id,
       type: 'function',
       function: { name: item.name, arguments: item.arguments }
     })
-    turn.open = true
-    return undefined
-  }
-  if ('role' in item && item.role === 'assistant') {
+  } else if ('role' in item && item.role === 'assistant') {
     turn.text.push(
       typeof item.content === 'string'
         ? item.content
         : item.content.map((part) => part.text).join('')
     )
-    turn.open = true
+  } else {
+    const problem = flush(built, turn)
+    if (problem !== undefined) return problem
+    built.messages.push('role' in item ? inputMessage(item) : toolMessage(item))
     return undefined
   }
-  flush(built, turn)
-  built.messages.push(standaloneMessage(item))
+  turn.danglingReasoning = undefined
+  turn.open = true
   return undefined
 }
 
@@ -258,8 +291,8 @@ function addItem(
  */
 function messagesOf(
   request: CreateResponseRequest
-): { ok: true; built: Built } | { ok: false; message: string; param: string } {
-  const built: Built = { messages: [], reasoning: [], unreplayable: 0 }
+): { ok: true; built: Built } | ({ ok: false } & TranslationProblem) {
+  const built: Built = { messages: [], reasoning: [] }
   const { instructions, input } = request
   if (instructions !== undefined && instructions !== null) {
     built.messages.push({ role: 'system', content: instructions })
@@ -273,8 +306,8 @@ function messagesOf(
     const problem = addItem(built, turn, indexedItem)
     if (problem !== undefined) return { ok: false, ...problem }
   }
-  flush(built, turn)
-  return { ok: true, built }
+  const problem = flush(built, turn)
+  return problem === undefined ? { ok: true, built } : { ok: false, ...problem }
 }
 
 /**
@@ -320,18 +353,41 @@ function toolsOf(
 }
 
 /**
- * Copies a field into the chat request when it is set (neither absent nor `null`).
+ * Copies the sampling and length settings into chat's fields, leaving out the unset ones (absent
+ * or `null`).
  *
- * @typeParam Value - the field's value
- * @param key - the chat field
- * @param value - the value
- * @returns the field, or nothing
+ * @param request - the Responses request
+ * @returns the chat fields
  */
-function setField<Value>(
-  key: string,
-  value: Value | null | undefined
-): Record<string, NonNullable<Value>> {
-  return value === undefined || value === null ? {} : { [key]: value }
+function samplingOf(request: CreateResponseRequest): Partial<ChatCompletionRequest> {
+  const { stream, temperature, top_p: topP, max_output_tokens: maxOutputTokens } = request
+  const effort = request.reasoning?.effort
+  return {
+    ...(stream === undefined || stream === null ? {} : { stream }),
+    ...(temperature === undefined || temperature === null ? {} : { temperature }),
+    ...(topP === undefined || topP === null ? {} : { top_p: topP }),
+    ...(maxOutputTokens === undefined || maxOutputTokens === null
+      ? {}
+      : { max_completion_tokens: maxOutputTokens }),
+    ...(effort === undefined || effort === null ? {} : { reasoning_effort: effort })
+  }
+}
+
+/**
+ * Copies the tool-calling and request-labelling settings into chat's fields, leaving out the
+ * unset ones (absent or `null`).
+ *
+ * @param request - the Responses request
+ * @returns the chat fields
+ */
+function labelsOf(request: CreateResponseRequest): Partial<ChatCompletionRequest> {
+  const { parallel_tool_calls: parallel, metadata, user, prompt_cache_key: cacheKey } = request
+  return {
+    ...(parallel === undefined || parallel === null ? {} : { parallel_tool_calls: parallel }),
+    ...(metadata === undefined || metadata === null ? {} : { metadata }),
+    ...(user === undefined || user === null ? {} : { user }),
+    ...(cacheKey === undefined || cacheKey === null ? {} : { prompt_cache_key: cacheKey })
+  }
 }
 
 /**
@@ -346,24 +402,12 @@ export function toChatRequest(request: CreateResponseRequest): Translation {
   const messages = messagesOf(request)
   if (!messages.ok) return messages
   const { built } = messages
-  if (built.unreplayable > 0) {
-    requestLogger.debug('Not sending {itemCount} reasoning items without encrypted_content', {
-      itemCount: built.unreplayable
-    })
-  }
   const { tool_choice: toolChoice, tools, text } = request
   const chat: ChatCompletionRequest = {
+    ...samplingOf(request),
+    ...labelsOf(request),
     model: request.model,
     messages: built.messages,
-    ...setField('stream', request.stream),
-    ...setField('temperature', request.temperature),
-    ...setField('top_p', request.top_p),
-    ...setField('max_completion_tokens', request.max_output_tokens),
-    ...setField('reasoning_effort', request.reasoning?.effort),
-    ...setField('parallel_tool_calls', request.parallel_tool_calls),
-    ...setField('metadata', request.metadata),
-    ...setField('user', request.user),
-    ...setField('prompt_cache_key', request.prompt_cache_key),
     ...(tools === undefined ? {} : { tools: toolsOf(tools) }),
     ...(toolChoice === undefined
       ? {}
@@ -410,5 +454,12 @@ export function withReplayedReasoning(
       content: [...own.map((token) => token.thinking), ...message.content]
     }
   })
+  // One pi assistant message per chat one, in order (`convertMessages`): otherwise reasoning
+  // would land on another turn, so a mismatch fails the request instead.
+  if (assistantIndex !== reasoning.length) {
+    throw new Error(
+      `Reasoning for ${String(reasoning.length)} assistant turns, but ${String(assistantIndex)} assistant messages`
+    )
+  }
   return { ...context, messages }
 }

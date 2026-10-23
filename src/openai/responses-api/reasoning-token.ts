@@ -63,6 +63,11 @@ function stringField(payload: Record<string, unknown>, key: string): string | un
 /**
  * Decodes a reasoning item's `encrypted_content` back into the thinking block.
  *
+ * @remarks
+ * `provider`, `api` and `model` are taken as written: they only name the model the block came
+ * from. pi replays a thinking block only when all three match the model it is calling
+ * (`transformMessages`), so a value no model has means the block is dropped, never sent elsewhere.
+ *
  * @param encoded - the token, as the client sent it
  * @returns the block and its model, or `undefined` when it is not a token this proxy wrote
  */

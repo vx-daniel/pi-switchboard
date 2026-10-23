@@ -1017,9 +1017,11 @@ follow-up.
   `withReplayedReasoning` puts the blocks back on the turn's assistant message and gives that
   message the token's model, so pi's `transformMessages` replays them to that model and drops them
   for any other. The token is opaque, not encrypted by the proxy: it holds what the client already
-  received and OpenAI's ciphertext. One the proxy did not write is a 400. A `reasoning` item
-  without a token is not sent (its summary is not something a model can take back), counted at
-  debug.
+  received and OpenAI's ciphertext. One the proxy did not write is a 400. So is a `reasoning` item
+  without a token (as OpenAI refuses an echoed reasoning item it has not stored; the summary alone
+  is nothing a model can take back), and reasoning that no message or function call follows.
+  `withReplayedReasoning` checks that each assistant turn's reasoning lands on its own assistant
+  message, and fails the request rather than misplace it.
 - **The other operations** (`/v1/responses/*`: retrieve, delete, cancel, input items, input
   tokens, compact) need stored responses and are in `UNSUPPORTED_ENDPOINTS`.
 

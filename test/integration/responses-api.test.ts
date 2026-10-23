@@ -333,14 +333,14 @@ describe('the Responses API', () => {
     ])
   })
 
-  // Catches the token sent when nobody asked for it, or reasoning without one replayed as if it
-  // could be: only the summary text is left, which no model can take back.
-  test('without include, reasoning has no token and is not replayed', async () => {
-    const sdk = client()
-    const first = await sdk.responses.create({ model: 'mock/thinker', input: 'Why?' })
+  // Catches the token sent when nobody asked for it, or an echoed reasoning item without one
+  // silently left out: the proxy can't replay it, and says how to get one, as OpenAI refuses an
+  // echoed reasoning item it has not stored.
+  test('without include, reasoning has no token, and sending it back is refused', async () => {
+    const first = await client().responses.create({ model: 'mock/thinker', input: 'Why?' })
     const reasoning = first.output.find((outputItem) => outputItem.type === 'reasoning')
 
-    await sdk.responses.create({
+    const echoed = await post({
       model: 'mock/thinker',
       input: [
         { role: 'user', content: 'Why?' },
@@ -350,8 +350,101 @@ describe('the Responses API', () => {
     })
 
     expect(reasoning !== undefined && 'encrypted_content' in reasoning).toBe(false)
-    const assistant = (lastUpstream()['messages'] as unknown[])[1]
-    expect(isRecord(assistant) && 'reasoning_content' in assistant).toBe(false)
+    expect(echoed.status).toBe(HTTP_BAD_REQUEST)
+    expect(echoed.body).toMatchObject({ error: { param: 'input.1.encrypted_content' } })
+  })
+
+  // Catches reasoning put on the wrong assistant turn when there are several, one of them empty:
+  // each turn's token must reach that turn.
+  test('replays each turn its own reasoning, across several turns', async () => {
+    const sdk = client()
+    const include: ['reasoning.encrypted_content'] = ['reasoning.encrypted_content']
+    const first = await sdk.responses.create({ model: 'mock/thinker', input: 'One?', include })
+    const second = await sdk.responses.create({ model: 'mock/thinker', input: 'Two?', include })
+
+    await sdk.responses.create({
+      model: 'mock/thinker',
+      input: [
+        { role: 'user', content: 'One?' },
+        ...asInput(first.output),
+        { role: 'user', content: 'Quiet?' },
+        { role: 'assistant', content: '' },
+        { role: 'user', content: 'Two?' },
+        ...asInput(second.output),
+        { role: 'user', content: 'Three?' }
+      ]
+    })
+
+    const assistants = (lastUpstream()['messages'] as unknown[]).filter(
+      (message) => isRecord(message) && message['role'] === 'assistant'
+    )
+    // pi sends no empty assistant message upstream; the two around it keep their own reasoning.
+    expect(assistants).toEqual([
+      expect.objectContaining({ content: 'Done', reasoning_content: 'Thinking.' }),
+      expect.objectContaining({ content: 'Done', reasoning_content: 'Thinking.' })
+    ])
+  })
+
+  // Catches reasoning replayed to a model that did not produce it (its signature means nothing
+  // there), or a forged token with an API no model has reaching any model.
+  test('replays a token only to the model that produced it', async () => {
+    const first = await client().responses.create({
+      model: 'mock/thinker',
+      input: 'Why?',
+      include: ['reasoning.encrypted_content']
+    })
+    const forged = Buffer.from(
+      JSON.stringify({
+        version: 1,
+        provider: 'mock',
+        api: 'not-an-api',
+        model: 'thinker',
+        thinking: 'Forged.',
+        signature: 'reasoning_content'
+      })
+    ).toString('base64url')
+
+    const otherModel = await post({
+      model: 'mock/text',
+      input: [
+        { role: 'user', content: 'Why?' },
+        ...asInput(first.output),
+        { role: 'user', content: 'And?' }
+      ]
+    })
+    const otherAssistant = (lastUpstream()['messages'] as unknown[])[1]
+    const forgedApi = await post({
+      model: 'mock/thinker',
+      input: [
+        { role: 'user', content: 'Why?' },
+        { type: 'reasoning', id: 'rs_x', summary: [], encrypted_content: forged },
+        { role: 'assistant', content: 'Done' },
+        { role: 'user', content: 'And?' }
+      ]
+    })
+    const forgedAssistant = (lastUpstream()['messages'] as unknown[])[1]
+
+    expect([otherModel.status, forgedApi.status]).toEqual([200, 200])
+    expect(isRecord(otherAssistant) && 'reasoning_content' in otherAssistant).toBe(false)
+    expect(isRecord(forgedAssistant) && 'reasoning_content' in forgedAssistant).toBe(false)
+  })
+
+  // Catches reasoning that nothing followed being sent with no turn to go on, or dropped.
+  test('refuses reasoning that no message or call follows', async () => {
+    const first = await client().responses.create({
+      model: 'mock/thinker',
+      input: 'Why?',
+      include: ['reasoning.encrypted_content']
+    })
+    const reasoning = first.output.find((outputItem) => outputItem.type === 'reasoning')
+
+    const answer = await post({
+      model: 'mock/thinker',
+      input: [{ role: 'user', content: 'Why?' }, reasoning, { role: 'user', content: 'And?' }]
+    })
+
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
+    expect(answer.body).toMatchObject({ error: { param: 'input.1' } })
   })
 
   // Catches an image part dropped or misplaced on the way to the model.

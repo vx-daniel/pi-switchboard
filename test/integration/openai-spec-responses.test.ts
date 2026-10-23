@@ -81,7 +81,13 @@ beforeAll(async () => {
       finishChunk('stop', USAGE)
     ]),
     'long': sse([...textChunks('Cut'), finishChunk('length', USAGE)]),
-    'cut-off': cutOff('Hel', 'lo')
+    'cut-off': cutOff('Hel', 'lo'),
+    'cut-off-thinking': (response) => {
+      response.writeHead(200, { 'content-type': 'text/event-stream' })
+      const reasoning = chunk({ role: 'assistant', reasoning_content: 'Hm' })
+      // Destroyed once written: destroying right after `write` can drop the data unsent.
+      response.write(`data: ${JSON.stringify(reasoning)}\n\n`, () => response.destroy())
+    }
   })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
@@ -93,7 +99,8 @@ beforeAll(async () => {
             { id: 'tools' },
             { id: 'thinker', reasoning: true },
             { id: 'long' },
-            { id: 'cut-off' }
+            { id: 'cut-off' },
+            { id: 'cut-off-thinking', reasoning: true }
           ]
         }
       }
@@ -189,17 +196,21 @@ describe('Responses API answers validate against OpenAI schemas', () => {
     }
   )
 
-  // Catches a stream an upstream failure ends with a body OpenAI's schema rejects, or none.
-  test('a stream the provider cuts off ends with response.failed', async () => {
-    const response = await create({ model: 'mock/cut-off', input: 'Hi', stream: true })
-    const streamed = events(await response.text())
+  // Catches a stream an upstream failure ends with a body OpenAI's schema rejects, or none, whether
+  // it breaks off in text or in the middle of a reasoning item.
+  test.each(['mock/cut-off', 'mock/cut-off-thinking'])(
+    '%s: a stream the provider cuts off ends with response.failed',
+    async (model) => {
+      const response = await create({ model, input: 'Hi', stream: true })
+      const streamed = events(await response.text())
 
-    for (const event of streamed) expect(violations('ResponseStreamEvent', event)).toEqual([])
-    expect(streamed.at(-1)).toMatchObject({
-      type: 'response.failed',
-      response: { status: 'failed' }
-    })
-  })
+      for (const event of streamed) expect(violations('ResponseStreamEvent', event)).toEqual([])
+      expect(streamed.at(-1)).toMatchObject({
+        type: 'response.failed',
+        response: { status: 'failed' }
+      })
+    }
+  )
 })
 
 /** Requests the proxy accepts, which must be valid for OpenAI too. */
