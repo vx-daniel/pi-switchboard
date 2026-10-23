@@ -43,6 +43,14 @@ const RATE_LIMITED = httpError(429, {
 })
 /** A short answer. */
 const ANSWER = sse([...textChunks('ok'), finishChunk('stop')])
+/** A second built-in Groq model, whose first login refuses the credential. */
+const REFUSING_MODEL = 'llama-3.3-70b-versatile'
+/** A third built-in Groq model, overloaded under every login. */
+const OVERLOADED_MODEL = 'openai/gpt-oss-20b'
+/** Another provider's model, for an alias's next target. */
+const OTHER_MODEL = 'answer-mock'
+/** That provider's key. */
+const OTHER_KEY = 'notarealsecret-other-provider-key'
 
 /**
  * Answers by the key the request carries: the first login is rate limited, any other answers.
@@ -53,6 +61,21 @@ const ANSWER = sse([...textChunks('ok'), finishChunk('stop')])
 const byLogin: MockReply = (response, request) =>
   request.headers.authorization === `Bearer ${FIRST_KEY}`
     ? RATE_LIMITED(response, request)
+    : ANSWER(response, request)
+
+/**
+ * Answers by the key the request carries: the first login's credential is refused, any other
+ * answers.
+ *
+ * @param response - the response to write
+ * @param request - the request, whose `Authorization` names the login
+ */
+const refusingFirstLogin: MockReply = (response, request) =>
+  request.headers.authorization === `Bearer ${FIRST_KEY}`
+    ? httpError(401, { error: { message: 'Invalid API key', type: 'invalid_request_error' } })(
+        response,
+        request
+      )
     : ANSWER(response, request)
 
 let mock: MockProvider
@@ -68,7 +91,12 @@ function setConfig(config: Record<string, unknown>): void {
 }
 
 beforeAll(async () => {
-  mock = await startMockProvider({ [MODEL]: byLogin })
+  mock = await startMockProvider({
+    [MODEL]: byLogin,
+    [REFUSING_MODEL]: refusingFirstLogin,
+    [OVERLOADED_MODEL]: httpError(503, { error: { message: 'Overloaded', type: 'server_error' } }),
+    [OTHER_MODEL]: ANSWER
+  })
   // Each login keeps pi's built-in Groq catalog, pointed at the mock: the base's entry carries
   // its key, the slot's entry composes above the copy and never sees that key.
   agentDir = await loadFixtureAgentDir({
@@ -76,7 +104,13 @@ beforeAll(async () => {
       providers: {
         'groq': { baseUrl: `${mock.origin}/v1`, apiKey: FIRST_KEY },
         'groq-2': { baseUrl: `${mock.origin}/v1` },
-        'groq-3': { baseUrl: `${mock.origin}/v1` }
+        'groq-3': { baseUrl: `${mock.origin}/v1` },
+        'other': {
+          baseUrl: `${mock.origin}/v1`,
+          api: 'openai-completions',
+          apiKey: OTHER_KEY,
+          models: [{ id: OTHER_MODEL }]
+        }
       }
     },
     authJson: { 'groq-2': { type: 'api_key', key: SECOND_KEY } }
@@ -238,6 +272,46 @@ describe('a second login', () => {
     expect(answer.status).toBe(429)
     expect(answer.upstreamKeys).toEqual([FIRST_KEY])
     expect(activeCooldown({ provider: 'groq', canonicalId: `groq/${MODEL}` })).toBeUndefined()
+  })
+
+  // Catches a class the alias names but the logins do not (`auth`) being taken between logins,
+  // or ending the request although the alias's next model could answer: the model's other logins
+  // are skipped, and the next model is tried (#227).
+  test("an alias moves past all of a model's logins on a class only the alias names", async () => {
+    setConfig({
+      aliases: {
+        chain: { targets: [`groq/${REFUSING_MODEL}`, `other/${OTHER_MODEL}`], fallbackOn: ['auth'] }
+      }
+    })
+    try {
+      const answer = await ask('chain')
+
+      expect(answer.status).toBe(200)
+      expect(answer.upstreamKeys).toEqual([FIRST_KEY, OTHER_KEY])
+      expect(answer.body).toMatchObject({
+        model: `other/${OTHER_MODEL}`,
+        x_pi: {
+          alias: 'chain',
+          attempts: [{ model: `groq/${REFUSING_MODEL}`, login: 'groq', reason: 'auth' }]
+        }
+      })
+    } finally {
+      setConfig({})
+    }
+  })
+
+  // Catches a 503 cooling only the login that met it, or handed to the next login although
+  // `routing.logins.fallbackOn` leaves `unavailable` out: an overload is the model's, under every
+  // login, and the client gets it.
+  test('a 503 is answered and cools the model under every login', async () => {
+    const answer = await ask(OVERLOADED_MODEL)
+
+    expect(answer.status).toBe(503)
+    expect(answer.upstreamKeys).toEqual([FIRST_KEY])
+    const canonicalId = `groq/${OVERLOADED_MODEL}`
+    expect(activeCooldown({ provider: 'groq', canonicalId })).toMatchObject({ scope: 'model' })
+    expect(activeCooldown({ provider: 'groq-2', canonicalId })).toMatchObject({ scope: 'model' })
+    expect(activeCooldown({ provider: 'groq-2', canonicalId: `groq/${MODEL}` })).toBeUndefined()
   })
 
   // Catches a cooling login called again by the next request, or the skip hidden: the first login

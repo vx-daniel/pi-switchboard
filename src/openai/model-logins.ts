@@ -65,6 +65,8 @@ export function groupLogins(available: readonly Model<Api>[]): LoginGroup[] {
     const [first] = ordered
     if (first === undefined) throw new Error('A login group has at least one model')
     return {
+      // A model only a slot has stands in under the base's name. This object only feeds exposure
+      // (filtering and public IDs): every call goes through `logins`, the real models.
       primary: first.model.provider === base ? first.model : { ...first.model, provider: base },
       logins: ordered.map((login) => login.model)
     }

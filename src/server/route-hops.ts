@@ -23,8 +23,9 @@ export interface RouteHops {
  *
  * @remarks
  * A hop is between logins when both candidates are the same exposed model. An alias that lists
- * one model twice therefore reaches its second entry only on `routing.logins.fallbackOn`'s
- * classes: the stricter reading of the two.
+ * one model twice in a row (`[A, A, B]`) therefore reaches the second `A` only on
+ * `routing.logins.fallbackOn`'s classes, the stricter reading; with another model between them
+ * (`[A, B, A]`), both hops are between models and follow the alias's `fallbackOn`.
  *
  * @param hops - the classes named for each kind of hop
  * @param from - the candidate that failed
