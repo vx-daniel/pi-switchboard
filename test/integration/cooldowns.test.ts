@@ -464,6 +464,49 @@ describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
     expect(await listedCooldowns()).toHaveLength(1)
   })
 
+  // Catches a name checked against the exposure alone: a cooldown on a login or model the
+  // exposure config has hidden since would then be a 404, and only clearing everything would end it.
+  test('a login or model hidden since it cooled can still be named', async () => {
+    setAliases({
+      chain: CHAIN,
+      overload: {
+        targets: ['gamma/unavailable-mock', 'beta/answer-mock'],
+        fallbackOn: ['unavailable']
+      }
+    })
+    await ask('chain')
+    await ask('overload')
+    writeFileSync(
+      join(agentDir.path, 'proxy-config.json'),
+      JSON.stringify({ modelExposureMode: 'custom', customModels: ['beta/answer-mock'] })
+    )
+    const listed = await getJson('/v1/models')
+    expect(listed['data']).toEqual([expect.objectContaining({ id: 'answer-mock' })])
+
+    const cleared = await clearCooldowns('provider=alpha&model=gamma/unavailable-mock')
+
+    expect(cleared.status).toBe(200)
+    expect(cleared.body).toMatchObject({
+      data: [
+        { scope: 'provider', provider: 'alpha' },
+        { scope: 'model', model: 'gamma/unavailable-mock' }
+      ]
+    })
+    expect(await listedCooldowns()).toEqual([])
+  })
+
+  // Catches a repeated name failing the query validator into hono-openapi's own 400 shape, or its
+  // later value used: the first one counts, as with `window` on /v1/switchboard/usage.
+  test.each([
+    ['provider=alpha&provider=alhpa', 200],
+    ['provider=alhpa&provider=alpha', 404]
+  ])('?%s counts by the first value', async (query, status) => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+
+    expect((await clearCooldowns(query)).status).toBe(status)
+  })
+
   // Catches the one route that writes state reachable without the proxy token.
   test('needs the proxy token when auth is on', async () => {
     setAliases({ chain: CHAIN })
