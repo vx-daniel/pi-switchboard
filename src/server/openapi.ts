@@ -124,7 +124,8 @@ export const cooldownsQuerySchema = z.object({
   model: queryValueSchema.optional().meta({
     description:
       "A model's canonical or public ID: ends the model's own cooldown after a 503 or 529, not " +
-      "its logins'."
+      "its logins'. A 429 cools the login, not the model: end it with `provider`, as `model` " +
+      'alone then answers an empty list.'
   })
 })
 

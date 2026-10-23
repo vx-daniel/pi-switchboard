@@ -1445,7 +1445,11 @@ every `/v1/*` route. Decided on #182 (constitution 3.8.0): a route rather than a
 which would reverse #68's decision to honor a provider's time, and beside a console key, which
 alone would not reach a proxy run without the console (`/proxy start`, the Docker image). It is the
 one route that writes state, and it writes only the cooldowns fallback chains read: it calls no
-provider and changes no configuration.
+provider and changes no configuration. With proxy auth off (the default, for a proxy bound to
+`127.0.0.1`), any client that can reach the port can end cooldowns, as it can call every other
+route. The worst it does is one failed call per login still limited, whose 429 starts the
+cooldown again; a proxy others can reach should keep proxy auth on, as the startup warning for a
+bind off loopback says.
 
 - no query ends every cooldown. `?provider=` names a login's provider ID (`anthropic-2`) and ends
   its cooldown after a 429; `?model=` names a model by its canonical or public ID and ends the
