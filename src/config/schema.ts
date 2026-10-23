@@ -158,10 +158,24 @@ export type AliasTarget = z.infer<typeof AliasTargetSchema>
  */
 const ReserveShareSchema = z.number().min(0).max(1)
 
-/** How fallback chains route beyond their aliases (#69): the quota reserve per provider. */
+/**
+ * How a request moves between a provider's logins (#227): the failure classes that move it from
+ * one login of the same model to the next. A rate limit by default: the reason to log in twice.
+ */
+const LoginsConfigSchema = z.object({
+  fallbackOn: z.array(FailureClassSchema).readonly()
+})
+/** The `routing.logins` section: see {@link LoginsConfigSchema}. */
+export type LoginsConfig = z.infer<typeof LoginsConfigSchema>
+
+/**
+ * How fallback chains route beyond their aliases: the quota reserve per provider (#69), and how a
+ * request moves between a provider's logins (#227).
+ */
 const RoutingConfigSchema = z.object({
   /** Provider -> the share to keep free (`{ "anthropic": 0.2 }`). Providers left out have none. */
-  reserve: z.record(z.string().min(1), ReserveShareSchema).readonly()
+  reserve: z.record(z.string().min(1), ReserveShareSchema).readonly(),
+  logins: LoginsConfigSchema
 })
 /** The `routing` section: see {@link RoutingConfigSchema}. */
 export type RoutingConfig = z.infer<typeof RoutingConfigSchema>
@@ -209,7 +223,7 @@ const ProxyConfigSchema = z.object({
   aliases: z.record(z.string().min(1), AliasTargetSchema).readonly(),
   /**
    * Provider -> a label the console shows beside it (#227): which account a login is, in your
-   * words (`{ "anthropic-account-2": "work" }`). Never sent anywhere.
+   * words (`{ "anthropic-2": "work" }`). Never sent anywhere.
    */
   labels: LabelsSchema,
   /** Lowest log level the proxy writes (LogTape levels). */
@@ -263,7 +277,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   aliases: {},
   labels: {},
   logLevel: 'info',
-  routing: { reserve: {} },
+  routing: { reserve: {}, logins: { fallbackOn: ['rate_limit'] } },
   zed: {
     providerName: 'Pi Proxy',
     autoSync: false
@@ -428,6 +442,24 @@ function normalizeZedSyncConfig(raw: unknown, corrected: string[]): ZedSyncConfi
 }
 
 /**
+ * Reads the `routing.logins` section, repairing invalid fields.
+ *
+ * @param raw - The section's raw value.
+ * @param corrected - Collects the paths of repaired fields; appended to.
+ * @returns The valid section.
+ */
+function normalizeLoginsConfig(raw: unknown, corrected: string[]): LoginsConfig {
+  const field = fieldReader<keyof LoginsConfig>(raw, corrected, 'routing.logins')
+  return {
+    fallbackOn: field(
+      'fallbackOn',
+      LoginsConfigSchema.shape.fallbackOn,
+      () => DEFAULT_CONFIG.routing.logins.fallbackOn
+    )
+  }
+}
+
+/**
  * Reads the `routing` section, repairing invalid fields.
  *
  * @param raw - The section's raw value.
@@ -436,7 +468,10 @@ function normalizeZedSyncConfig(raw: unknown, corrected: string[]): ZedSyncConfi
  */
 function normalizeRoutingConfig(raw: unknown, corrected: string[]): RoutingConfig {
   const field = fieldReader<keyof RoutingConfig>(raw, corrected, 'routing')
-  return { reserve: field('reserve', RoutingConfigSchema.shape.reserve, validReserves) }
+  return {
+    reserve: field('reserve', RoutingConfigSchema.shape.reserve, validReserves),
+    logins: normalizeLoginsConfig(isRecord(raw) ? raw['logins'] : undefined, corrected)
+  }
 }
 
 /**

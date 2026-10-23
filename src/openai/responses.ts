@@ -33,6 +33,15 @@ const responsesLogger = proxyLogger('openai', 'responses')
  */
 const attemptSchema = z.object({
   model: z.string().trim().meta({ description: 'The canonical ID of the model.' }),
+  login: z
+    .string()
+    .trim()
+    .optional()
+    .meta({
+      description:
+        'The login tried (`anthropic`, `anthropic-2`), when the model has more than one ' +
+        '(#227). Absent otherwise.'
+    }),
   reason: z.enum([...FailureClassSchema.options, 'quota']).meta({
     description:
       'Why the chain moved on from it: its failure, the one it is cooling down from, or `quota` ' +
@@ -61,26 +70,47 @@ export const attemptsSchema = z
       '(#67); present only when one did.'
   })
 
-/** Which model answered a request, and how the request got to it (#66, #67). */
+/** `x_pi.login`: documents the response; never parsed. */
+export const loginSchema = z
+  .string()
+  .trim()
+  .optional()
+  .meta({
+    description:
+      'The login that answered (`anthropic`, `anthropic-2`), when the model has more ' +
+      'than one (#227); absent otherwise.'
+  })
+
+/** Which model answered a request, and how the request got to it (#66, #67, #227). */
 export interface ResponseRoute {
   /** The canonical ID of the model that answered, reported as `model`. */
   readonly model: string
+  /** The login that answered, reported as `x_pi.login` when the model has more than one. */
+  readonly login?: string
   /** The alias the request named, reported as `x_pi.alias`. */
   readonly alias?: string
   /** The alias's failed attempts before `model`, reported as `x_pi.attempts`. */
   readonly attempts?: readonly Attempt[]
 }
 
+/** The `x_pi` fields a route adds. */
+export interface RouteFields {
+  readonly alias?: string
+  readonly login?: string
+  readonly attempts?: Attempt[]
+}
+
 /**
- * Returns the `x_pi` fields a route adds: the alias, and the failed attempts, each only when there
- * is one, so a request without them is unchanged.
+ * Returns the `x_pi` fields a route adds: the alias, the login, and the failed attempts, each
+ * only when there is one, so a request without them is unchanged.
  *
  * @param route - how the request got to the model that answered
  * @returns the fields to spread into `x_pi`
  */
-export function routeFields(route: ResponseRoute): { alias?: string; attempts?: Attempt[] } {
+export function routeFields(route: ResponseRoute): RouteFields {
   return {
     ...(route.alias === undefined ? {} : { alias: route.alias }),
+    ...(route.login === undefined ? {} : { login: route.login }),
     ...(route.attempts === undefined || route.attempts.length === 0
       ? {}
       : { attempts: [...route.attempts] })
@@ -177,6 +207,7 @@ export const openAIChatCompletionSchema = z
         alias: z.string().trim().optional().meta({
           description: 'The alias the request named (#66); present only when it named one.'
         }),
+        login: loginSchema,
         attempts: attemptsSchema
       })
       .meta({

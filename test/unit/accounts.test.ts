@@ -1,6 +1,6 @@
 /**
  * Extra logins as providers (`src/pi/accounts.ts`, #227): a built-in provider copied under
- * `{provider}-account-N`, listing its catalog under the new ID, sending requests as the base, and
+ * `{provider}-N`, listing its catalog under the new ID, sending requests as the base, and
  * translating a catalog refresh between the two.
  */
 
@@ -74,9 +74,9 @@ function makeBase(): { provider: Provider; streamed: Model<Api>[] } {
 describe('accountProviderId', () => {
   // Catches a copy's ID drifting from the convention pi-rotator and pi-multi-account share, which
   // is what lets a login made through either appear here unchanged.
-  test('follows the {provider}-account-N convention', () => {
-    expect(accountProviderId('anthropic', 2)).toBe('anthropic-account-2')
-    expect(accountProviderId('openai-codex', 10)).toBe('openai-codex-account-10')
+  test('follows the {provider}-N convention', () => {
+    expect(accountProviderId('anthropic', 2)).toBe('anthropic-2')
+    expect(accountProviderId('openai-codex', 10)).toBe('openai-codex-10')
   })
 })
 
@@ -85,18 +85,15 @@ describe('accountProvider', () => {
   // quota and `x_pi` are all keyed by the model's provider, so the second login would be
   // indistinguishable from the first.
   test('lists the catalog under its own ID, in both model listings', () => {
-    const copy = accountProvider(makeBase().provider, 2)
+    const copy = accountProvider(makeBase().provider, { providerId: 'acme-2', number: 2 })
 
-    expect(copy.id).toBe('acme-account-2')
-    expect(copy.name).toBe('Acme (account 2)')
+    expect(copy.id).toBe('acme-2')
+    expect(copy.name).toBe('Acme 2')
     expect(copy.getModels().map((model) => `${model.provider}/${model.id}`)).toEqual([
-      'acme-account-2/fast',
-      'acme-account-2/smart'
+      'acme-2/fast',
+      'acme-2/smart'
     ])
-    expect(copy.getAllModels?.().map((model) => model.provider)).toEqual([
-      'acme-account-2',
-      'acme-account-2'
-    ])
+    expect(copy.getAllModels?.().map((model) => model.provider)).toEqual(['acme-2', 'acme-2'])
   })
 
   // Catches a request reaching pi's API code under the copy's ID: `openai`'s ChatGPT sign-in and
@@ -104,7 +101,7 @@ describe('accountProvider', () => {
   // request than the base.
   test('sends each request as the base provider', () => {
     const base = makeBase()
-    const copy = accountProvider(base.provider, 2)
+    const copy = accountProvider(base.provider, { providerId: 'acme-2', number: 2 })
     const [model] = copy.getModels()
     if (model === undefined) throw new Error('the copy lists no model')
 
@@ -131,10 +128,10 @@ describe('accountProvider', () => {
       await context.publish({ persist: { models: [makeModel('acme', 'new')] } })
       await context.publish({ persist: null })
     }
-    const copy = accountProvider(base.provider, 2)
+    const copy = accountProvider(base.provider, { providerId: 'acme-2', number: 2 })
 
     await copy.refreshModels?.({
-      stored: { models: [makeModel('acme-account-2', 'old')] },
+      stored: { models: [makeModel('acme-2', 'old')] },
       publish: (publication) => {
         seen.publishedUnder.push(
           ...(publication.persist?.models.map((model) => model.provider) ?? ['none'])
@@ -146,12 +143,14 @@ describe('accountProvider', () => {
     })
 
     expect(seen.restored).toEqual(['acme'])
-    expect(seen.publishedUnder).toEqual(['acme-account-2', 'none'])
+    expect(seen.publishedUnder).toEqual(['acme-2', 'none'])
   })
 
   // Catches a static provider gaining a refresh it never had, which pi would then call.
   test('has no catalog refresh when the base has none', () => {
-    expect(accountProvider(makeBase().provider, 2).refreshModels).toBeUndefined()
+    expect(
+      accountProvider(makeBase().provider, { providerId: 'acme-2', number: 2 }).refreshModels
+    ).toBeUndefined()
   })
 })
 
@@ -172,7 +171,7 @@ function fakeRuntime(
   }
   return {
     runtime: {
-      getProvider: (id) => providers.get(id),
+      getRegisteredNativeProvider: (id) => providers.get(id),
       registerNativeProvider: (provider) => providers.set(provider.id, provider),
       unregisterProvider: (id) => providers.delete(id),
       listCredentials: () =>
@@ -183,16 +182,20 @@ function fakeRuntime(
 }
 
 describe('parseAccountProviderId', () => {
-  // Catches a base with a dash split at the wrong dash, `-account-1` taken as a slot (slot 1 is
-  // the base itself), or a provider merely named like a slot taken for one.
-  test('splits a slot ID into base and number; nothing else is a slot', () => {
+  // Catches a base with a dash split at the wrong dash, `-1` taken as a slot (slot 1 is the base
+  // itself), pi-rotator's `-account-N` form no longer read (a login made through it would vanish),
+  // or a provider merely named like a slot taken for one.
+  test('splits a slot ID of either form into base and number; nothing else is a slot', () => {
+    expect(parseAccountProviderId('openai-codex-12')).toEqual({ base: 'openai-codex', number: 12 })
     expect(parseAccountProviderId('openai-codex-account-12')).toEqual({
       base: 'openai-codex',
       number: 12
     })
+    expect(parseAccountProviderId('anthropic-1')).toBeUndefined()
     expect(parseAccountProviderId('anthropic-account-1')).toBeUndefined()
-    expect(parseAccountProviderId('anthropic-account-02')).toBeUndefined()
+    expect(parseAccountProviderId('anthropic-02')).toBeUndefined()
     expect(parseAccountProviderId('anthropic')).toBeUndefined()
+    expect(parseAccountProviderId('-2')).toBeUndefined()
     expect(parseAccountProviderId('-account-2')).toBeUndefined()
   })
 })
@@ -203,41 +206,39 @@ describe('registerAccountProvider', () => {
   test('registers a slot of a built-in provider once, and refuses anything else', () => {
     const { runtime, ids } = fakeRuntime([], ['anthropic'])
 
-    expect(registerAccountProvider(runtime, 'anthropic-account-2')).toBe(true)
-    expect(registerAccountProvider(runtime, 'anthropic-account-2')).toBe(false)
-    expect(registerAccountProvider(runtime, 'no-such-provider-account-2')).toBe(false)
+    expect(registerAccountProvider(runtime, 'anthropic-2')).toBe(true)
+    expect(registerAccountProvider(runtime, 'anthropic-2')).toBe(false)
+    expect(registerAccountProvider(runtime, 'no-such-provider-2')).toBe(false)
     expect(registerAccountProvider(runtime, 'anthropic')).toBe(false)
 
-    expect(ids()).toEqual(['anthropic', 'anthropic-account-2'])
-    expect(runtime.getProvider('anthropic-account-2')?.name).toBe('Anthropic (account 2)')
+    expect(ids()).toEqual(['anthropic', 'anthropic-2'])
+    expect(runtime.getRegisteredNativeProvider('anthropic-2')?.name).toBe('Anthropic 2')
   })
 
   // Catches a logout leaving the slot registered (it would stay in the model and login lists, and
   // the next login would take slot 3), or a base dropped as if it were a slot.
   test('unregistering drops a registered slot and nothing else', () => {
     const { runtime, ids } = fakeRuntime([], ['anthropic'])
-    registerAccountProvider(runtime, 'anthropic-account-2')
+    registerAccountProvider(runtime, 'anthropic-2')
 
     unregisterAccountProvider(runtime, 'anthropic')
-    unregisterAccountProvider(runtime, 'anthropic-account-3')
-    expect(ids()).toEqual(['anthropic', 'anthropic-account-2'])
+    unregisterAccountProvider(runtime, 'anthropic-3')
+    expect(ids()).toEqual(['anthropic', 'anthropic-2'])
 
-    unregisterAccountProvider(runtime, 'anthropic-account-2')
+    unregisterAccountProvider(runtime, 'anthropic-2')
     expect(ids()).toEqual(['anthropic'])
   })
 })
 
 describe('nextAccountSlot', () => {
-  // Catches the next slot skipping a freed number, or colliding with a registered one.
-  test('is the lowest number from 2 that is not registered', () => {
-    const { runtime } = fakeRuntime([], ['anthropic', 'anthropic-account-3'])
-    expect(nextAccountSlot(runtime, 'anthropic')).toEqual({
-      providerId: 'anthropic-account-2',
-      number: 2
-    })
+  // Catches the next slot skipping a freed number, colliding with a registered one, or with a
+  // pi-rotator login (`anthropic-account-2`) whose number is taken under the other form.
+  test('is the lowest number from 2 that is not registered under either form', () => {
+    const { runtime } = fakeRuntime([], ['anthropic', 'anthropic-account-2', 'anthropic-4'])
+    expect(nextAccountSlot(runtime, 'anthropic')).toEqual({ providerId: 'anthropic-3', number: 3 })
 
-    registerAccountProvider(runtime, 'anthropic-account-2')
-    expect(nextAccountSlot(runtime, 'anthropic').providerId).toBe('anthropic-account-4')
+    registerAccountProvider(runtime, 'anthropic-3')
+    expect(nextAccountSlot(runtime, 'anthropic').providerId).toBe('anthropic-5')
   })
 })
 
@@ -246,19 +247,14 @@ describe('registerStoredAccounts', () => {
   // credential taken for a slot, or a slot of an unknown base registered.
   test('registers a provider for each stored slot credential of a built-in provider', async () => {
     const { runtime, ids } = fakeRuntime(
-      ['anthropic', 'anthropic-account-3', 'openai-codex-account-2', 'acme-account-2'],
+      ['anthropic', 'anthropic-3', 'openai-codex-account-2', 'acme-2'],
       ['anthropic', 'openai-codex']
     )
 
     const registered = await registerStoredAccounts(runtime, new AbortController().signal)
 
-    expect(registered).toEqual(['anthropic-account-3', 'openai-codex-account-2'])
-    expect(ids()).toEqual([
-      'anthropic',
-      'openai-codex',
-      'anthropic-account-3',
-      'openai-codex-account-2'
-    ])
+    expect(registered).toEqual(['anthropic-3', 'openai-codex-account-2'])
+    expect(ids()).toEqual(['anthropic', 'openai-codex', 'anthropic-3', 'openai-codex-account-2'])
   })
 
   // Catches a store that cannot be listed keeping the proxy from starting: before slots existed,

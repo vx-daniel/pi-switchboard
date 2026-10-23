@@ -29,9 +29,25 @@ export type CooldownReason = 'rate_limit' | 'unavailable'
 
 /** The model a cooldown is recorded or looked up for. */
 export interface CooldownSubject {
+  /** The login: a 429 cools it, not the provider's other logins (#227). */
   readonly provider: string
-  /** The canonical ID, `provider/model-id`. */
+  /** The canonical ID, `provider/model-id`: a 503 cools the model under every login. */
   readonly canonicalId: string
+}
+
+/**
+ * The cooldown subject a routed model is: the login serving it, and the exposed model (#227).
+ *
+ * @param candidate - the model and the login it is called under
+ * @param candidate.login - the login's provider ID
+ * @param candidate.canonicalId - the exposed model's canonical ID
+ * @returns the subject
+ */
+export function loginSubject(candidate: {
+  readonly login: string
+  readonly canonicalId: string
+}): CooldownSubject {
+  return { provider: candidate.login, canonicalId: candidate.canonicalId }
 }
 
 /** One provider's or model's cooldown. */

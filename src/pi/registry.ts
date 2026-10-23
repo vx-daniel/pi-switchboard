@@ -92,7 +92,7 @@ const CREDENTIAL_LIST_TIMEOUT_MS = 15_000
  * Initializes the runtime and settings. Call once at startup.
  *
  * @remarks
- * Every `{provider}-account-N` credential in pi's store gets its provider registered (#227) before
+ * Every `{provider}-N` credential in pi's store gets its provider registered (#227) before
  * the availability snapshot is taken.
  *
  * @returns the models.json error ({@link describeModelsJsonError}), or `undefined` on success

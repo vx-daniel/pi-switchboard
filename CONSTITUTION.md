@@ -1,19 +1,30 @@
 <!--
 Sync Impact Report
-Version change: 3.5.0 → 3.5.1 (PATCH)
-Rationale: #224 added `GET /v1/switchboard/usage`, the stats file's usage over a window, behind
-proxy auth. Principle I's list of today's non-standard routes named only the models list and the
-OpenAPI document. The rule it states (non-OpenAI data under `/v1/switchboard/`, behind auth unless
-it is the document) is unchanged; only the example list catches up.
-PATCH: a clarification; no principle added, removed or changed.
+Version change: 3.5.1 → 3.6.0 (MINOR)
+Rationale: #227 gave a provider several logins (`anthropic-2`). Under principle IV as
+written, a second login had to be an exposed model of its own to be routable, so every model of
+the provider was listed twice and collision-prefixed (`anthropic/claude-opus-5-5`,
+`anthropic-2/claude-opus-5-5`), which broke clients that filter on plain names (j5).
+The amendment makes a login a routing detail of one exposed model, as principle VI's "which
+model and login served it" already anticipated: the model is listed once under the base's name,
+routing picks the login, and the response and log say which.
+MINOR: principles IV and VI materially expanded; no principle added or removed.
 Modified sections:
-- I. OpenAI Compatibility: the non-standard routes listed today include
-  `GET /v1/switchboard/usage`
+- IV. Model and Header Discipline: a provider's extra login is not a model; its models are the
+  base provider's, exposed once; the login is a routing detail
+- VI. Routing Transparency: every login of an exposed model's provider may serve it; `x_pi.login`
+  names the serving login; a request that names a model never moves to another model but may move
+  to another login on the classes `routing.logins.fallbackOn` names, or past a login below its
+  `routing.reserve`; that setting's default, `["rate_limit"]`, is the one recorded default
+  routing has
 Templates requiring updates:
-- ✅ AGENTS.md: no change; it defers to PLAN's route lists
-- ✅ PLAN.md, README.md: the route is documented (#225)
+- ✅ AGENTS.md: "Core constraints" names login routing and the recorded default
+- ✅ PLAN.md, README.md: the Accounts section and the config table describe it
 Follow-up TODOs:
 - None.
+
+3.5.1 (2026-10-22): principle I's list of today's non-standard routes names
+`GET /v1/switchboard/usage` (#224, #225).
 
 3.5.0 (2026-10-21): #61's console and standalone binary. The Scope says what the proxy may do with
 logins: pi runs every flow and stores every credential, and the proxy may present pi's own login
@@ -121,7 +132,7 @@ Tests MUST never read the developer's pi login or provider credentials. Offline 
 Rationale: the project is designed for personal or workstation-local use. Safety defaults reduce the chance that a convenience feature becomes a security problem.
 
 ### IV. Model and Header Discipline
-Canonical model identifiers MUST remain `provider/model-id` internally. Public model IDs, exposure rules, and provider prefix labels MUST be explicit, configurable, and validated. Exposure MUST follow the configuration exactly as written: model IDs and prefix labels are never normalized, so a mistyped entry matches no model rather than exposing one. Hidden models MUST NOT become reachable through fallback resolution.
+Canonical model identifiers MUST remain `provider/model-id` internally. Public model IDs, exposure rules, and provider prefix labels MUST be explicit, configurable, and validated. Exposure MUST follow the configuration exactly as written: model IDs and prefix labels are never normalized, so a mistyped entry matches no model rather than exposing one. Hidden models MUST NOT become reachable through fallback resolution. A provider's extra login (`{provider}-N`, #227) is not a model: its models are the base provider's, exposed once under the base's name, and the login is a routing detail reported under principle VI.
 
 The proxy MUST reserve `Authorization` for proxy authentication compatibility, and upstream credential overrides MUST use proxy-specific headers.
 
@@ -135,11 +146,11 @@ Commits SHOULD stay small and reviewable and MUST follow Conventional Commits. T
 Rationale: the proxy's public contract is documentation-heavy. If behavior changes without synchronized docs and verification, downstream users and agents will diverge from the real system.
 
 ### VI. Routing Transparency
-Routing (aliases, fallback chains, cooldowns, quota awareness; #66–#70) MUST be configured explicitly and MUST be visible to the client and the operator:
-- A request is only ever routed to models the exposure config exposes; an alias or fallback never reaches a hidden model (principle IV).
-- A response says which model and login served it, under `x_pi`, and the log records every hop (the requested model, each one tried, and why it moved on), by name, never credential.
-- A request with no routing configured behaves exactly as without routing: the model it names, or an error.
-- Fallback only follows failures the configuration names (for example a rate limit or an outage), never a client error such as an invalid request.
+Routing (aliases, fallback chains, cooldowns, quota awareness, a provider's logins; #66–#70, #227) MUST be configured explicitly and MUST be visible to the client and the operator:
+- A request is only ever routed to models the exposure config exposes; an alias or fallback never reaches a hidden model (principle IV). Every login of an exposed model's provider may serve it.
+- A response says which model and login served it, under `x_pi` (`model`, and `x_pi.login` when the model has more than one login), and the log records every hop (the requested model, each model and login tried, and why it moved on), by name, never credential.
+- A request with no routing configured behaves exactly as without routing: the model it names, or an error. The one recorded default is `routing.logins.fallbackOn: ["rate_limit"]`: a second login to a provider serves a rate-limited model's request without further configuration, which is why a second login exists.
+- Fallback only follows failures the configuration names (for example a rate limit or an outage), never a client error such as an invalid request. A request that names a model never moves to another model; it moves to another login of the same provider only on the classes `routing.logins.fallbackOn` names, or past a login below the share its `routing.reserve` entry keeps free.
 
 Rationale: routing changes which model and account a client is billed on. Doing that silently would break the predictability principle I protects and the trust the operator places in the exposure config.
 
@@ -183,4 +194,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.5.1 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-22
+**Version**: 3.6.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23

@@ -4,20 +4,33 @@
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
+import type { FailureClass } from '@proxy/config/schema'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import {
   activeCooldown,
   backoffMs,
   clearAllCooldowns,
   clearCooldowns,
+  loginSubject,
   startCooldown
 } from '@proxy/pi/cooldowns'
 import { LATEST_DATE_MS } from '@proxy/pi/reset-time'
 import { cooldownSkip } from '@proxy/server/route-cooldowns'
+import type { RouteHops } from '@proxy/server/route-hops'
 import { beforeEach, describe, expect, test } from 'vite-plus/test'
 
 const NOW = 1_800_000_000_000
 const MINUTE = 60_000
+
+/**
+ * Builds a route's hop rules: the classes an alias names between models, and none between logins.
+ *
+ * @param classes - the alias's `fallbackOn`
+ * @returns the hop rules
+ */
+function hops(classes: readonly FailureClass[]): RouteHops {
+  return { fallbackOn: new Set(classes), loginFallbackOn: new Set() }
+}
 
 /**
  * Builds an exposed model.
@@ -39,12 +52,14 @@ function exposed(provider: string, id: string): ExposedModel {
     contextWindow: 128000,
     maxTokens: 4096
   }
-  return { publicId: id, canonicalId: `${provider}/${id}`, model, provider }
+  return { publicId: id, canonicalId: `${provider}/${id}`, model, provider, login: provider }
 }
 
 const OPUS = exposed('anthropic', 'opus')
 const SONNET = exposed('anthropic', 'sonnet')
 const SOL = exposed('openai-codex', 'sol')
+/** The same model as {@link OPUS} under a second login (#227). */
+const OPUS_2: ExposedModel = { ...OPUS, login: 'anthropic-2' }
 
 beforeEach(() => {
   clearAllCooldowns()
@@ -131,11 +146,32 @@ describe('cooldownSkip', () => {
     startCooldown(OPUS, 'rate_limit', 30_000, NOW)
     const chain = [OPUS, SOL]
 
-    expect(cooldownSkip(chain, 0, new Set(['rate_limit']), NOW)).toMatchObject({
+    expect(cooldownSkip(chain, 0, hops(['rate_limit']), NOW)).toMatchObject({
       reason: 'rate_limit'
     })
-    expect(cooldownSkip(chain, 0, new Set(['unavailable', 'timeout']), NOW)).toBeUndefined()
-    expect(cooldownSkip(chain, 1, new Set(['rate_limit']), NOW)).toBeUndefined()
+    expect(cooldownSkip(chain, 0, hops(['unavailable', 'timeout']), NOW)).toBeUndefined()
+    expect(cooldownSkip(chain, 1, hops(['rate_limit']), NOW)).toBeUndefined()
+  })
+
+  // Catches a 503 (the model is overloaded, under every login) answered by trying the same model
+  // under the next login when only the alias names `unavailable`: the remaining logins are skipped
+  // and the next model is tried; a 429 on one login cools only that login (#227).
+  test("a model's cooldown covers its logins; a login's cools only itself", () => {
+    const route = [OPUS, OPUS_2, SOL]
+    const aliasNamesUnavailable: RouteHops = {
+      fallbackOn: new Set(['unavailable']),
+      loginFallbackOn: new Set(['rate_limit'])
+    }
+
+    startCooldown(loginSubject(OPUS), 'unavailable', MINUTE, NOW)
+    expect(cooldownSkip(route, 0, aliasNamesUnavailable, NOW)).toMatchObject({ scope: 'model' })
+    expect(cooldownSkip(route, 1, aliasNamesUnavailable, NOW)).toMatchObject({ scope: 'model' })
+    expect(cooldownSkip(route, 2, aliasNamesUnavailable, NOW)).toBeUndefined()
+
+    clearAllCooldowns()
+    startCooldown(loginSubject(OPUS), 'rate_limit', MINUTE, NOW)
+    expect(cooldownSkip(route, 0, aliasNamesUnavailable, NOW)).toMatchObject({ scope: 'provider' })
+    expect(cooldownSkip(route, 1, aliasNamesUnavailable, NOW)).toBeUndefined()
   })
 
   // Catches a chain making no call at all when every candidate is cooling: the one whose cooldown
@@ -144,7 +180,7 @@ describe('cooldownSkip', () => {
     startCooldown(OPUS, 'rate_limit', 10 * MINUTE, NOW)
     startCooldown(SOL, 'rate_limit', MINUTE, NOW)
     const chain = [OPUS, SOL]
-    const named = new Set(['rate_limit'] as const)
+    const named = hops(['rate_limit'])
 
     expect(cooldownSkip(chain, 0, named, NOW)).toBeDefined()
     expect(cooldownSkip(chain, 1, named, NOW)).toBeUndefined()
@@ -156,6 +192,6 @@ describe('cooldownSkip', () => {
     startCooldown(OPUS, 'rate_limit', MINUTE, NOW)
     startCooldown(SOL, 'rate_limit', MINUTE, NOW)
 
-    expect(cooldownSkip([OPUS, SOL], 0, new Set(['rate_limit'] as const), NOW)).toBeUndefined()
+    expect(cooldownSkip([OPUS, SOL], 0, hops(['rate_limit']), NOW)).toBeUndefined()
   })
 })

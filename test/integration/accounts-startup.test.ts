@@ -24,17 +24,17 @@ describe('startup with a stored login slot', () => {
       this: ModelRuntime,
       ...args
     ) {
-      return this.getRegisteredNativeProvider('groq-account-2') === undefined
+      return this.getRegisteredNativeProvider('groq-2') === undefined
         ? original.apply(this, args)
         : Promise.reject(new Error('models store unreadable'))
     })
 
     const agentDir = await loadFixtureAgentDir({
-      authJson: { 'groq-account-2': { type: 'api_key', key: 'notarealsecret-slot-key' } }
+      authJson: { 'groq-2': { type: 'api_key', key: 'notarealsecret-slot-key' } }
     })
     try {
       expect(refresh).toHaveBeenCalled()
-      expect(getRuntime().getRegisteredNativeProvider('groq-account-2')).toBeDefined()
+      expect(getRuntime().getRegisteredNativeProvider('groq-2')).toBeDefined()
     } finally {
       agentDir.remove()
     }

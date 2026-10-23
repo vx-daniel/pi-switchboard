@@ -7,6 +7,7 @@ import type { FailureClass } from '@proxy/config/schema'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { clearAllCooldowns, startCooldown } from '@proxy/pi/cooldowns'
 import { clearAllQuotas, recordQuota } from '@proxy/pi/quota'
+import type { RouteHops } from '@proxy/server/route-hops'
 import { reserveSkip } from '@proxy/server/route-reserve'
 import { beforeEach, describe, expect, test } from 'vite-plus/test'
 
@@ -34,7 +35,7 @@ function exposed(provider: string, id: string): ExposedModel {
     contextWindow: 128000,
     maxTokens: 4096
   }
-  return { publicId: id, canonicalId: `${provider}/${id}`, model, provider }
+  return { publicId: id, canonicalId: `${provider}/${id}`, model, provider, login: provider }
 }
 
 /**
@@ -59,6 +60,8 @@ function reported(provider: string, used: { fiveHour: number; sevenDay: number }
 }
 
 const OPUS = exposed('anthropic', 'opus')
+/** The same model under a second login (#227). */
+const OPUS_2 = { ...OPUS, login: 'anthropic-2', model: { ...OPUS.model, provider: 'anthropic-2' } }
 const SOL = exposed('openai-codex', 'sol')
 const FLASH = exposed('google', 'flash')
 
@@ -71,11 +74,8 @@ const RATE_LIMITS: ReadonlySet<FailureClass> = new Set(['rate_limit'])
  * @param reserve - provider -> the share to keep free
  * @returns the rules
  */
-function keeping(reserve: Record<string, number>): {
-  reserve: Record<string, number>
-  fallbackOn: ReadonlySet<FailureClass>
-} {
-  return { reserve, fallbackOn: RATE_LIMITS }
+function keeping(reserve: Record<string, number>): RouteHops & { reserve: Record<string, number> } {
+  return { reserve, fallbackOn: RATE_LIMITS, loginFallbackOn: new Set() }
 }
 
 beforeEach(() => {
@@ -93,6 +93,18 @@ describe('reserveSkip', () => {
 
     expect(skip).toMatchObject({ provider: 'anthropic', window: '7d', reserve: 0.2 })
     expect(skip?.left).toBeCloseTo(0.15)
+  })
+
+  // Catches a model's second login not used while the first is below its reserve (#227): with no
+  // alias, the reserve still chooses between a model's logins, each keyed by its own login, and
+  // needs no class in `routing.logins.fallbackOn`.
+  test('skips a login below its reserve for the same model under another login', () => {
+    reported('anthropic', { fiveHour: 0.9, sevenDay: 0.1 })
+
+    expect(reserveSkip([OPUS, OPUS_2], 0, keeping({ anthropic: 0.2 }), NOW)).toMatchObject({
+      provider: 'anthropic'
+    })
+    expect(reserveSkip([OPUS, OPUS_2], 0, keeping({ 'anthropic-2': 0.2 }), NOW)).toBeUndefined()
   })
 
   // Catches a skip without cause: at or above the reserve, with no reserve set for the provider,

@@ -1,18 +1,18 @@
 /**
- * Several logins per provider (#227): `{provider}-account-N` providers, each a copy of one of pi's
+ * Several logins per provider (#227): `{provider}-N` providers, each a copy of one of pi's
  * built-in providers under its own ID.
  *
  * @remarks
  * pi stores one credential per provider ID. A second login to the same service therefore needs a
- * second provider: `anthropic-account-2`, which pi logs into and whose credential pi stores under
- * that ID. Nothing is configured: at startup, every `{provider}-account-N` credential in pi's
- * store gets its provider back ({@link registerStoredAccounts}); the console's login list offers
- * the next free slot of each provider that is logged in, and logging in to it registers it first
- * ({@link registerAccountProvider}); logging out of a slot drops it again
+ * second provider: `anthropic-2`, which pi logs into and whose credential pi stores under that
+ * ID. Nothing is configured: at startup, every `{provider}-N` (or `{provider}-account-N`)
+ * credential in pi's store gets its provider back ({@link registerStoredAccounts}); the console's
+ * login list offers the next free slot of each provider that is logged in, and logging in to it
+ * registers it first ({@link registerAccountProvider}); logging out of a slot drops it again
  * ({@link unregisterAccountProvider}), so the slot is reused. Cooldowns, quota, the reserve,
- * `x_pi` and the log are all keyed by provider, so each login gets them separately; a fallback
- * chain (#67) from `anthropic/X` to `anthropic-account-2/X` moves to the second login on a rate
- * limit.
+ * `x_pi` and the log are all keyed by provider, so each login gets them separately; routing
+ * moves a model's request from one login to the next on a rate limit
+ * (`src/server/route-plan.ts`).
  *
  * A copy is made from a fresh built-in provider (`builtinProviders()`), not from the composed one
  * the runtime holds: the composed provider carries the base's `models.json` overrides, including
@@ -25,8 +25,8 @@
  * and `github-copilot`'s headers. pi's assistant message therefore names the base provider; the
  * proxy reports the login from the route it chose, never from the message.
  *
- * The idea, and the `{provider}-account-N` convention, come from pi-rotator and pi-multi-account
- * (MIT), so a login made through either appears here unchanged. Neither extension is loaded.
+ * The idea comes from pi-rotator and pi-multi-account (MIT), whose `{provider}-account-N` logins
+ * are read and served too. Neither extension is loaded.
  *
  * @packageDocumentation
  */
@@ -42,13 +42,24 @@ const accountsLogger = proxyLogger('pi', 'registry')
 /** The first extra login's number; number 1 is the base provider itself. */
 const FIRST_EXTRA_ACCOUNT = 2
 
-/** An account provider ID: the base, then `-account-N`. The base may itself contain `-`. */
-const ACCOUNT_ID = /^(?<base>.+)-account-(?<number>[1-9]\d*)$/
+/**
+ * A login slot's provider ID: the base, then `-N` (the proxy's form), or `-account-N` (pi-rotator
+ * and pi-multi-account's, read so a login made through either is served). The base may itself
+ * contain `-`; no built-in provider ID ends in a number, so `-N` is never part of a base.
+ */
+const ACCOUNT_ID = /^(?<base>[^-].*?)-(?:account-)?(?<number>[1-9]\d*)$/
 
-/** What account registration needs of pi's runtime. */
+/**
+ * What account registration needs of pi's runtime. A slot is registered when it is a *native*
+ * registration: a `models.json` entry under the slot's ID makes `getProvider` answer before any
+ * registration, and composes above the copy once it is registered.
+ */
 export type AccountRuntime = Pick<
   ModelRuntime,
-  'getProvider' | 'listCredentials' | 'registerNativeProvider' | 'unregisterProvider'
+  | 'getRegisteredNativeProvider'
+  | 'listCredentials'
+  | 'registerNativeProvider'
+  | 'unregisterProvider'
 >
 
 /**
@@ -67,13 +78,24 @@ export function parseAccountProviderId(
 }
 
 /**
- * Returns the provider ID of a provider's Nth login.
+ * Returns the provider ID of a provider's Nth login, as the proxy names it.
+ *
+ * @param base - the base provider's ID
+ * @param number - the login's number, from 2
+ * @returns `{base}-{number}`
+ */
+export function accountProviderId(base: string, number: number): string {
+  return `${base}-${String(number)}`
+}
+
+/**
+ * Returns the provider ID of a provider's Nth login as pi-rotator and pi-multi-account name it.
  *
  * @param base - the base provider's ID
  * @param number - the login's number, from 2
  * @returns `{base}-account-{number}`
  */
-export function accountProviderId(base: string, number: number): string {
+function legacyAccountProviderId(base: string, number: number): string {
   return `${base}-account-${String(number)}`
 }
 
@@ -119,7 +141,7 @@ function refreshAs(base: Provider, id: string): NonNullable<Provider['refreshMod
 }
 
 /**
- * Copies a provider under the ID of its Nth login.
+ * Copies a provider under the ID of one of its logins.
  *
  * @remarks
  * `base` must be a fresh instance: a provider with a dynamic catalog keeps that catalog in a
@@ -128,18 +150,18 @@ function refreshAs(base: Provider, id: string): NonNullable<Provider['refreshMod
  * copy stores and restores is keyed by its own ID while `base`'s code sees its own.
  *
  * @param base - the built-in provider to copy, freshly constructed
- * @param number - the login's number, from 2
+ * @param slot - the login's ID, of either form, and its number
  * @returns the copy
  */
-export function accountProvider(base: Provider, number: number): Provider {
-  const id = accountProviderId(base.id, number)
+export function accountProvider(base: Provider, slot: AccountSlot): Provider {
+  const { providerId: id, number } = slot
   // A shallow copy: pi 1.3.0's built-in providers are plain objects of closures (`createProvider`),
   // so no method relies on `this` or a prototype. The unit tests stream and refresh through the
   // copy, so a pi change that broke this would fail them.
   const copy: Provider = {
     ...base,
     id,
-    name: `${base.name} (account ${String(number)})`,
+    name: `${base.name} ${String(number)}`,
     getModels: () => under(base.getModels(), id),
     stream: (model, context, options) =>
       base.stream({ ...model, provider: base.id }, context, options),
@@ -158,24 +180,30 @@ export function accountProvider(base: Provider, number: number): Provider {
  *
  * @remarks
  * A base that is not one of pi's built-in providers is refused: a `models.json` provider is
- * composed, not built in, and its key would be copied with it.
+ * composed, not built in, and its key would be copied with it. Only the explicit
+ * `{base}-account-N` form is warned about; a `{base}-N` ID of an unknown base is most likely a
+ * provider whose name ends in a number (`local-2`), and stays its own, silently.
  *
  * @param runtime - pi's model runtime
- * @param providerId - the slot, `{base}-account-N`
+ * @param providerId - the slot, `{base}-N` or `{base}-account-N`
  * @returns whether this call registered it; `false` when it already was, or it is no slot of a
  *   built-in provider
  */
 export function registerAccountProvider(runtime: AccountRuntime, providerId: string): boolean {
   const slot = parseAccountProviderId(providerId)
-  if (slot === undefined || runtime.getProvider(providerId) !== undefined) return false
-  const fresh = builtinProviders().find((provider) => provider.id === slot.base)
-  if (fresh === undefined) {
-    accountsLogger.warn('{provider} is no login slot of a built-in pi provider; not registered', {
-      provider: providerId
-    })
+  if (slot === undefined || runtime.getRegisteredNativeProvider(providerId) !== undefined) {
     return false
   }
-  runtime.registerNativeProvider(accountProvider(fresh, slot.number))
+  const fresh = builtinProviders().find((provider) => provider.id === slot.base)
+  if (fresh === undefined) {
+    if (providerId === legacyAccountProviderId(slot.base, slot.number)) {
+      accountsLogger.warn('{provider} is no login slot of a built-in pi provider; not registered', {
+        provider: providerId
+      })
+    }
+    return false
+  }
+  runtime.registerNativeProvider(accountProvider(fresh, { providerId, number: slot.number }))
   accountsLogger.info('Registered {provider} as a login of {base}', {
     provider: providerId,
     base: slot.base
@@ -187,33 +215,36 @@ export function registerAccountProvider(runtime: AccountRuntime, providerId: str
  * Drops an account slot's provider, if it is one and is registered.
  *
  * @param runtime - pi's model runtime
- * @param providerId - the slot, `{base}-account-N`
+ * @param providerId - the slot, `{base}-N`
  */
 export function unregisterAccountProvider(runtime: AccountRuntime, providerId: string): void {
   if (parseAccountProviderId(providerId) === undefined) return
-  if (runtime.getProvider(providerId) === undefined) return
+  if (runtime.getRegisteredNativeProvider(providerId) === undefined) return
   runtime.unregisterProvider(providerId)
   accountsLogger.info('Dropped {provider}: logged out', { provider: providerId })
 }
 
-/** A provider's next free login slot. */
+/** A provider's login slot. */
 export interface AccountSlot {
-  /** `{base}-account-N`. */
+  /** `{base}-N`, or `{base}-account-N` for a login pi-rotator or pi-multi-account made. */
   readonly providerId: string
   /** N, from 2. */
   readonly number: number
 }
 
 /**
- * Returns a provider's lowest account slot that is not registered.
+ * Returns a provider's lowest login number that is not registered under either ID form.
  *
  * @param runtime - pi's model runtime
  * @param base - the base provider
- * @returns the slot, for the lowest free N from 2
+ * @returns the slot, for the lowest free N from 2, under the proxy's own ID form
  */
 export function nextAccountSlot(runtime: AccountRuntime, base: string): AccountSlot {
   let number = FIRST_EXTRA_ACCOUNT
-  while (runtime.getProvider(accountProviderId(base, number)) !== undefined) number += 1
+  const taken = (id: string): boolean => runtime.getRegisteredNativeProvider(id) !== undefined
+  while (taken(accountProviderId(base, number)) || taken(legacyAccountProviderId(base, number))) {
+    number += 1
+  }
   return { providerId: accountProviderId(base, number), number }
 }
 

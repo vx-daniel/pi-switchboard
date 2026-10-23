@@ -1,9 +1,10 @@
 /**
- * Several logins per provider (#227), end to end: a stored `groq-account-2` credential gets its
+ * Several logins per provider (#227), end to end: a stored `groq-2` credential gets its
  * provider at startup, a copy of pi's built-in `groq` provider with its own credential in pi's
- * store, and the console adds and drops further slots. The proxy runs as deployed (its config
- * file read per request) against the mock provider, which tells the two logins apart by the key
- * each request carries.
+ * store. The model is listed once, under the base's name, and the proxy picks the login: the
+ * second when the first is rate limited. The console adds and drops further slots. The proxy runs
+ * as deployed (its config file read per request) against the mock provider, which tells the
+ * logins apart by the key each request carries.
  */
 
 import { writeFileSync } from 'node:fs'
@@ -34,49 +35,87 @@ import { jsonBody, testConfig } from '../helpers'
 const FIRST_KEY = 'notarealsecret-first-login-key'
 /** The second login's key, stored in pi's auth.json under the copy's ID, as a login would. */
 const SECOND_KEY = 'notarealsecret-second-login-key'
+/** One of pi's built-in Groq models: the logins share the built-in catalog. */
+const MODEL = 'llama-3.1-8b-instant'
 /** A 429 as OpenAI sends it. */
 const RATE_LIMITED = httpError(429, {
   error: { message: 'Rate limit reached', type: 'rate_limit_error' }
 })
 /** A short answer. */
 const ANSWER = sse([...textChunks('ok'), finishChunk('stop')])
+/** A second built-in Groq model, whose first login refuses the credential. */
+const REFUSING_MODEL = 'llama-3.3-70b-versatile'
+/** A third built-in Groq model, overloaded under every login. */
+const OVERLOADED_MODEL = 'openai/gpt-oss-20b'
+/** Another provider's model, for an alias's next target. */
+const OTHER_MODEL = 'answer-mock'
+/** That provider's key. */
+const OTHER_KEY = 'notarealsecret-other-provider-key'
 
 /**
- * Answers by the key the request carries: the first login is rate limited, the second answers.
+ * Answers by the key the request carries: the first login is rate limited, any other answers.
  *
  * @param response - the response to write
  * @param request - the request, whose `Authorization` names the login
  */
 const byLogin: MockReply = (response, request) =>
-  request.headers.authorization === `Bearer ${SECOND_KEY}`
-    ? ANSWER(response, request)
-    : RATE_LIMITED(response, request)
+  request.headers.authorization === `Bearer ${FIRST_KEY}`
+    ? RATE_LIMITED(response, request)
+    : ANSWER(response, request)
+
+/**
+ * Answers by the key the request carries: the first login's credential is refused, any other
+ * answers.
+ *
+ * @param response - the response to write
+ * @param request - the request, whose `Authorization` names the login
+ */
+const refusingFirstLogin: MockReply = (response, request) =>
+  request.headers.authorization === `Bearer ${FIRST_KEY}`
+    ? httpError(401, { error: { message: 'Invalid API key', type: 'invalid_request_error' } })(
+        response,
+        request
+      )
+    : ANSWER(response, request)
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
 
+/**
+ * Writes the proxy's config file.
+ *
+ * @param config - the config, as JSON
+ */
+function setConfig(config: Record<string, unknown>): void {
+  writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify(config))
+}
+
 beforeAll(async () => {
-  mock = await startMockProvider({ 'chat-mock': byLogin })
-  // Each login is its own models.json provider: the entry under the copy's ID composes above it,
-  // and the base's entry (its key included) does not reach the copy.
-  const atMock = { baseUrl: `${mock.origin}/v1`, models: [{ id: 'chat-mock' }] }
+  mock = await startMockProvider({
+    [MODEL]: byLogin,
+    [REFUSING_MODEL]: refusingFirstLogin,
+    [OVERLOADED_MODEL]: httpError(503, { error: { message: 'Overloaded', type: 'server_error' } }),
+    [OTHER_MODEL]: ANSWER
+  })
+  // Each login keeps pi's built-in Groq catalog, pointed at the mock: the base's entry carries
+  // its key, the slot's entry composes above the copy and never sees that key.
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
-      providers: { 'groq': { ...atMock, apiKey: FIRST_KEY }, 'groq-account-2': atMock }
-    },
-    authJson: { 'groq-account-2': { type: 'api_key', key: SECOND_KEY } }
-  })
-  writeFileSync(
-    join(agentDir.path, 'proxy-config.json'),
-    JSON.stringify({
-      aliases: {
-        chain: {
-          targets: ['groq/chat-mock', 'groq-account-2/chat-mock'],
-          fallbackOn: ['rate_limit']
+      providers: {
+        'groq': { baseUrl: `${mock.origin}/v1`, apiKey: FIRST_KEY },
+        'groq-2': { baseUrl: `${mock.origin}/v1` },
+        'groq-3': { baseUrl: `${mock.origin}/v1` },
+        'other': {
+          baseUrl: `${mock.origin}/v1`,
+          api: 'openai-completions',
+          apiKey: OTHER_KEY,
+          models: [{ id: OTHER_MODEL }]
         }
       }
-    })
-  )
+    },
+    authJson: { 'groq-2': { type: 'api_key', key: SECOND_KEY } }
+  })
+  setConfig({})
 })
 
 beforeEach(() => {
@@ -93,38 +132,86 @@ afterAll(async () => {
  * Sends one chat request and records the key each upstream request carried.
  *
  * @param model - the request's `model`
- * @returns the status, the parsed body, and the upstream keys in call order
+ * @param options - stream or not, and extra request headers
+ * @returns the status, the body (parsed when not streamed, else the raw SSE text), and the
+ *   upstream keys in call order
  */
 async function ask(
-  model: string
+  model: string,
+  options: { readonly stream?: boolean; readonly headers?: Record<string, string> } = {}
 ): Promise<{ status: number; body: unknown; upstreamKeys: (string | undefined)[] }> {
   const before = mock.requests.length
   const response = await createApp(testConfig(), fileConfigReader).request('/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Say ok' }] })
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+    body: JSON.stringify({
+      model,
+      stream: options.stream === true,
+      messages: [{ role: 'user', content: 'Say ok' }]
+    })
   })
-  const body: unknown = await response.json()
+  const text = await response.text()
+  const body: unknown = options.stream === true ? text : JSON.parse(text)
   const upstreamKeys = mock.requests
     .slice(before)
     .map((request) => request.headers.authorization?.replace('Bearer ', ''))
   return { status: response.status, body, upstreamKeys }
 }
 
-describe('an extra login', () => {
-  // Catches the copy missing from the model list, listed under the base's ID, or listed although
-  // its own credential is absent (it has the base's key, or none): both logins must be exposed
-  // models, since a chain reaches only exposed models (principle IV). The console's login list
-  // must offer it too, or there is no way to log in to it.
-  test('is an exposed model of its own, with its own credential, offered for login', async () => {
-    const models = await createApp(testConfig(), fileConfigReader).request('/v1/models')
-    const listed = await jsonBody(models)
-    const ids = isRecord(listed) && Array.isArray(listed['data']) ? listed['data'] : []
+/**
+ * Reads the `x_pi` of each chunk of a streamed response.
+ *
+ * @param stream - the response body
+ * @returns each data chunk's `x_pi`, in order
+ */
+function chunkXPi(stream: string): unknown[] {
+  return stream
+    .split('\n')
+    .filter((line) => line.startsWith('data: {'))
+    .map((line) => {
+      const chunk: unknown = JSON.parse(line.slice('data: '.length))
+      return isRecord(chunk) ? chunk['x_pi'] : undefined
+    })
+}
 
-    expect(models.status).toBe(200)
-    expect(ids.map((model: unknown) => (isRecord(model) ? model['id'] : undefined))).toEqual(
-      expect.arrayContaining(['groq/chat-mock', 'groq-account-2/chat-mock'])
+/**
+ * Reads a list response's entries.
+ *
+ * @param path - the route
+ * @returns the `data` array, or none
+ */
+async function listed(path: string): Promise<unknown[]> {
+  const body = await jsonBody(await createApp(testConfig(), fileConfigReader).request(path))
+  const data: unknown = isRecord(body) ? body['data'] : undefined
+  return Array.isArray(data) ? (data as unknown[]) : []
+}
+
+/**
+ * Reads the model's entry on `/v1/switchboard/models`.
+ *
+ * @returns the entry's `logins` IDs
+ */
+async function loginsOfModel(): Promise<unknown[]> {
+  const entry = (await listed('/v1/switchboard/models')).find(
+    (model) => isRecord(model) && model['id'] === MODEL
+  )
+  const logins = isRecord(entry) && Array.isArray(entry['logins']) ? entry['logins'] : []
+  return logins.map((login: unknown) => (isRecord(login) ? login['id'] : undefined))
+}
+
+describe('a second login', () => {
+  // Catches the second login listed as a model of its own (every Claude model twice, and plain
+  // names gone: j5's complaint), the model owned by the login rather than the provider, or the
+  // login missing from the model's logins and from `/healthz/creds`.
+  test('is a login of the base model, not a model of its own', async () => {
+    const ids = (await listed('/v1/models')).map((model: unknown) =>
+      isRecord(model) ? `${String(model['owned_by'])}:${String(model['id'])}` : ''
     )
+    expect(ids).toContain(`groq:${MODEL}`)
+    expect(ids.filter((ownedId) => ownedId.endsWith(`:${MODEL}`))).toHaveLength(1)
+    expect(ids.some((ownedId) => ownedId.includes('groq-2'))).toBe(false)
+
+    expect(await loginsOfModel()).toEqual(['groq', 'groq-2'])
 
     const creds = await jsonBody(
       await createApp(testConfig(), fileConfigReader).request('/healthz/creds')
@@ -132,39 +219,133 @@ describe('an extra login', () => {
     const providers = isRecord(creds) && Array.isArray(creds['providers']) ? creds['providers'] : []
     expect(
       providers.map((provider: unknown) => (isRecord(provider) ? provider['provider'] : undefined))
-    ).toEqual(expect.arrayContaining(['groq', 'groq-account-2']))
-
-    expect(loginOptions(getRuntime()).map((option) => `${option.id}: ${option.name}`)).toContain(
-      'groq-account-2: Groq (account 2)'
-    )
+    ).toEqual(expect.arrayContaining(['groq', 'groq-2']))
   })
 
-  // Catches the second login sending the first login's key, the chain not reaching it, or the
-  // rate limit cooling both logins: each is a provider of its own to routing, cooldowns and x_pi.
-  test('answers through a fallback chain when the first login is rate limited', async () => {
-    const answer = await ask('chain')
+  // Catches the second login sending the first login's key, the request not moving to it on the
+  // first's 429, the hop hidden from the client, or the rate limit cooling both logins: the
+  // response names the login (principle VI), and cooldowns are per login.
+  test('serves a plain model name when the first login is rate limited', async () => {
+    const answer = await ask(MODEL)
 
     expect(answer.status).toBe(200)
     expect(answer.upstreamKeys).toEqual([FIRST_KEY, SECOND_KEY])
     expect(answer.body).toMatchObject({
-      model: 'groq-account-2/chat-mock',
-      x_pi: { alias: 'chain', attempts: [{ model: 'groq/chat-mock', reason: 'rate_limit' }] }
+      model: `groq/${MODEL}`,
+      x_pi: {
+        login: 'groq-2',
+        attempts: [{ model: `groq/${MODEL}`, login: 'groq', reason: 'rate_limit' }]
+      }
     })
-    expect(activeCooldown({ provider: 'groq', canonicalId: 'groq/chat-mock' })?.provider).toBe(
+    expect(
+      isRecord(answer.body) && isRecord(answer.body['x_pi']) && 'alias' in answer.body['x_pi']
+    ).toBe(false)
+    expect(activeCooldown({ provider: 'groq', canonicalId: `groq/${MODEL}` })?.provider).toBe(
       'groq'
     )
-    expect(
-      activeCooldown({ provider: 'groq-account-2', canonicalId: 'groq-account-2/chat-mock' })
-    ).toBeUndefined()
+    expect(activeCooldown({ provider: 'groq-2', canonicalId: `groq/${MODEL}` })).toBeUndefined()
   })
 
-  // Catches a request that names the second login reaching the first: the model named is the
-  // login called, as with any other provider.
-  test('is called directly when a request names it', async () => {
-    const answer = await ask('groq-account-2/chat-mock')
+  // Catches a streamed answer that hides the login hop: every chunk carries `x_pi.login` and the
+  // attempt, as the non-streamed body does (principle VI).
+  test('a streamed answer names the login in every chunk', async () => {
+    const answer = await ask(MODEL, { stream: true })
 
     expect(answer.status).toBe(200)
+    const found = chunkXPi(typeof answer.body === 'string' ? answer.body : '')
+    expect(found.length).toBeGreaterThan(0)
+    for (const fields of found) {
+      expect(fields).toMatchObject({
+        login: 'groq-2',
+        attempts: [{ model: `groq/${MODEL}`, login: 'groq', reason: 'rate_limit' }]
+      })
+    }
+  })
+
+  // Catches a request with its own upstream key handed to another login (the key is the
+  // client's, so no login of the proxy's is chosen), or its 429 cooling the proxy's login.
+  test('a request with its own upstream key keeps the first login and cools nothing', async () => {
+    const answer = await ask(MODEL, {
+      headers: { 'X-Switchboard-Upstream-Api-Key': FIRST_KEY }
+    })
+
+    expect(answer.status).toBe(429)
+    expect(answer.upstreamKeys).toEqual([FIRST_KEY])
+    expect(activeCooldown({ provider: 'groq', canonicalId: `groq/${MODEL}` })).toBeUndefined()
+  })
+
+  // Catches a class the alias names but the logins do not (`auth`) being taken between logins,
+  // or ending the request although the alias's next model could answer: the model's other logins
+  // are skipped, and the next model is tried (#227).
+  test("an alias moves past all of a model's logins on a class only the alias names", async () => {
+    setConfig({
+      aliases: {
+        chain: { targets: [`groq/${REFUSING_MODEL}`, `other/${OTHER_MODEL}`], fallbackOn: ['auth'] }
+      }
+    })
+    try {
+      const answer = await ask('chain')
+
+      expect(answer.status).toBe(200)
+      expect(answer.upstreamKeys).toEqual([FIRST_KEY, OTHER_KEY])
+      expect(answer.body).toMatchObject({
+        model: `other/${OTHER_MODEL}`,
+        x_pi: {
+          alias: 'chain',
+          attempts: [{ model: `groq/${REFUSING_MODEL}`, login: 'groq', reason: 'auth' }]
+        }
+      })
+    } finally {
+      setConfig({})
+    }
+  })
+
+  // Catches a 503 cooling only the login that met it, or handed to the next login although
+  // `routing.logins.fallbackOn` leaves `unavailable` out: an overload is the model's, under every
+  // login, and the client gets it.
+  test('a 503 is answered and cools the model under every login', async () => {
+    const answer = await ask(OVERLOADED_MODEL)
+
+    expect(answer.status).toBe(503)
+    expect(answer.upstreamKeys).toEqual([FIRST_KEY])
+    const canonicalId = `groq/${OVERLOADED_MODEL}`
+    expect(activeCooldown({ provider: 'groq', canonicalId })).toMatchObject({ scope: 'model' })
+    expect(activeCooldown({ provider: 'groq-2', canonicalId })).toMatchObject({ scope: 'model' })
+    expect(activeCooldown({ provider: 'groq-2', canonicalId: `groq/${MODEL}` })).toBeUndefined()
+  })
+
+  // Catches a cooling login called again by the next request, or the skip hidden: the first login
+  // is skipped while its 429 cooldown lasts, and the skip is in `x_pi.attempts`.
+  test('is called first while the first login cools down', async () => {
+    await ask(MODEL)
+    const answer = await ask(MODEL)
+
     expect(answer.upstreamKeys).toEqual([SECOND_KEY])
+    expect(answer.body).toMatchObject({
+      x_pi: {
+        login: 'groq-2',
+        attempts: [{ model: `groq/${MODEL}`, login: 'groq', reason: 'rate_limit', skipped: true }]
+      }
+    })
+  })
+
+  // Catches a login hop the configuration does not name (principle VI): with
+  // `routing.logins.fallbackOn` empty, the first login's 429 is the answer.
+  test('is not tried when routing.logins.fallbackOn leaves rate limits out', async () => {
+    setConfig({ routing: { logins: { fallbackOn: [] } } })
+    try {
+      const answer = await ask(MODEL)
+
+      expect(answer.status).toBe(429)
+      expect(answer.upstreamKeys).toEqual([FIRST_KEY])
+    } finally {
+      setConfig({})
+    }
+  })
+
+  // Catches the slot's ID still resolving as a model: a client picks models, never logins.
+  test('is not a model a request can name', async () => {
+    expect((await ask(`groq-2/${MODEL}`)).status).toBe(404)
   })
 
   // Catches the console offering no way to add a login: a logged-in provider's next free slot
@@ -173,17 +354,16 @@ describe('an extra login', () => {
   test('the login list offers the next free slot of a logged-in provider only', () => {
     const options = loginOptions(getRuntime()).map((option) => `${option.id}: ${option.name}`)
 
-    expect(options).toContain('groq-account-2: Groq (account 2)')
-    expect(options).toContain('groq-account-3: Groq (account 3)')
-    expect(options.filter((option) => option.startsWith('groq-account-'))).toHaveLength(2)
-    expect(options.some((option) => option.includes('-account-2-account-'))).toBe(false)
+    expect(options).toContain('groq-2: Groq 2')
+    expect(options).toContain('groq-3: Groq 3')
+    expect(options.filter((option) => option.startsWith('groq-'))).toHaveLength(2)
+    expect(options.some((option) => option.includes('-2-'))).toBe(false)
     expect(options.some((option) => option.startsWith('anthropic-account-'))).toBe(false)
   })
 
   // Catches a login to a new slot that pi stores but the proxy never serves (the slot was not
-  // registered first), or that reaches another login's models. The slot's catalog is the built-in
-  // one, as its models.json has no entry of its own.
-  test('logging in to the next slot registers it and serves its models at once', async () => {
+  // registered first), or one that becomes a model of its own: it joins the model's logins.
+  test('logging in to the next slot registers it as another login at once', async () => {
     const { screens } = scriptedScreens({
       choose: 'unused',
       answer: 'notarealsecret-third-login-key',
@@ -192,23 +372,16 @@ describe('an extra login', () => {
 
     await runLogin(
       getRuntime(),
-      { providerId: 'groq-account-3', type: 'api_key', deviceId: () => 'device' },
+      { providerId: 'groq-3', type: 'api_key', deviceId: () => 'device' },
       screens
     )
 
-    const models = await jsonBody(
-      await createApp(testConfig(), fileConfigReader).request('/v1/models')
+    expect(await loginsOfModel()).toEqual(['groq', 'groq-2', 'groq-3'])
+    const ids = (await listed('/v1/models')).map((model: unknown) =>
+      isRecord(model) ? model['id'] : undefined
     )
-    const ids = isRecord(models) && Array.isArray(models['data']) ? models['data'] : []
-    expect(
-      ids.some(
-        (model: unknown) =>
-          isRecord(model) &&
-          typeof model['id'] === 'string' &&
-          model['id'].startsWith('groq-account-3/')
-      )
-    ).toBe(true)
-    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-account-4')
+    expect(ids.filter((modelId) => modelId === MODEL)).toHaveLength(1)
+    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-4')
   })
 
   // Catches a cancelled login leaving an empty slot behind, which would then be listed as a
@@ -222,28 +395,29 @@ describe('an extra login', () => {
     })
     const login = runLogin(
       getRuntime(),
-      { providerId: 'groq-account-4', type: 'api_key', deviceId: () => 'device' },
+      { providerId: 'groq-4', type: 'api_key', deviceId: () => 'device' },
       screens
     )
     cancel.abort()
 
     await expect(login).rejects.toThrow()
-    expect(getRuntime().getProvider('groq-account-4')).toBeUndefined()
-    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-account-4')
+    expect(getRuntime().getRegisteredNativeProvider('groq-4')).toBeUndefined()
+    expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-4')
   })
 
   // Catches a logout that removes the credential but keeps the slot as a provider (it would stay
   // in the login list unconfigured, and the next login would skip its number) or keeps its label
   // (the next login under the ID, maybe another account, would wear it).
   test('logging out of a slot drops it and its label, and offers its number again', async () => {
-    saveLoginLabel('groq-account-3', 'third')
+    saveLoginLabel('groq-3', 'third')
 
-    await runLogout(getRuntime(), 'groq-account-3', new AbortController().signal)
+    await runLogout(getRuntime(), 'groq-3', new AbortController().signal)
 
-    expect(getRuntime().getProvider('groq-account-3')).toBeUndefined()
-    expect(loginLabels()).not.toHaveProperty('groq-account-3')
+    expect(getRuntime().getRegisteredNativeProvider('groq-3')).toBeUndefined()
+    expect(loginLabels()).not.toHaveProperty('groq-3')
+    expect(await loginsOfModel()).toEqual(['groq', 'groq-2'])
     const options = loginOptions(getRuntime()).map((option) => option.id)
-    expect(options).toContain('groq-account-3')
-    expect(options).not.toContain('groq-account-4')
+    expect(options).toContain('groq-3')
+    expect(options).not.toContain('groq-4')
   })
 })

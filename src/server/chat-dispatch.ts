@@ -32,7 +32,7 @@ import { type Attempt, buildChatCompletion, type ResponseRoute } from '@proxy/op
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
-import { clearCooldowns } from '@proxy/pi/cooldowns'
+import { clearCooldowns, loginSubject } from '@proxy/pi/cooldowns'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
@@ -54,7 +54,9 @@ import {
   HTTP_TOO_MANY_REQUESTS,
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
-import { recordCooldown, skipCooling } from '@proxy/server/route-cooldowns'
+import { attemptOf, recordCooldown, skipCooling } from '@proxy/server/route-cooldowns'
+import { nextFor, type RouteHops } from '@proxy/server/route-hops'
+import type { ChatRoute } from '@proxy/server/route-plan'
 import { skipBelowReserve } from '@proxy/server/route-reserve'
 import {
   recordRouteAttempt,
@@ -220,68 +222,6 @@ async function checkCredential(
   return CREDENTIALS_MISSING
 }
 
-/** The models a request may run on, in order, and the failures that move between them. */
-export interface ChatRoute {
-  readonly candidates: readonly ExposedModel[]
-  readonly fallbackOn: ReadonlySet<FailureClass>
-}
-
-/**
- * Says whether a request carries an image.
- *
- * @param request - the validated request
- * @returns whether any message has an `image_url` part
- */
-function hasImage(request: ChatCompletionRequest): boolean {
-  return request.messages.some(
-    (message) =>
-      Array.isArray(message.content) && message.content.some((part) => part.type === 'image_url')
-  )
-}
-
-/**
- * Plans the models a request may run on: the resolved model alone, or an alias's chain.
- *
- * @remarks
- * An image request skips the chain's text-only models when another one takes images; with none,
- * the request goes to the first candidate as it always has. A per-request upstream key keeps the
- * first candidate only (see the module notes).
- *
- * @param resolved - the exposed model or alias the request named
- * @param request - the validated request
- * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined`
- * @returns the candidates, never empty, and the failures that move between them
- */
-export function planRoute(
-  resolved: ExposedModel,
-  request: ChatCompletionRequest,
-  upstreamApiKey: string | undefined
-): ChatRoute {
-  const chain = resolved.route
-  if (chain === undefined) return { candidates: [resolved], fallbackOn: new Set() }
-  const [first] = chain.candidates
-  if (upstreamApiKey !== undefined && first !== undefined) {
-    chatLogger.debug('No fallback for {alias}: the request carries its own upstream key', {
-      alias: resolved.alias
-    })
-    return { candidates: [first], fallbackOn: new Set() }
-  }
-  const imageCapable = chain.candidates.filter((candidate) =>
-    candidate.model.input.includes('image')
-  )
-  const skipTextOnly = hasImage(request) && imageCapable.length > 0
-  if (skipTextOnly && imageCapable.length < chain.candidates.length) {
-    chatLogger.debug('Skipping {skippedCount} text-only models of {alias} for an image request', {
-      alias: resolved.alias,
-      skippedCount: chain.candidates.length - imageCapable.length
-    })
-  }
-  return {
-    candidates: skipTextOnly ? imageCapable : chain.candidates,
-    fallbackOn: new Set(chain.fallbackOn)
-  }
-}
-
 /** One hop of a fallback chain: the model that failed, the next one, and why (#67). */
 interface FallbackHop {
   readonly failed: ExposedModel
@@ -293,19 +233,24 @@ interface FallbackHop {
 }
 
 /**
- * Logs one failed attempt the chain moves on from.
+ * Logs one failed attempt the route moves on from.
  *
- * @param alias - the alias whose chain it is
+ * @param alias - the alias whose chain it is, if any
  * @param hop - the model that failed, the next one, the class and the attempt number
  */
 function logFallback(alias: string | undefined, hop: FallbackHop): void {
-  chatLogger.warn('Alias {alias}: {model} failed ({failure}); trying {nextModel}', {
-    alias,
-    model: hop.failed.canonicalId,
-    failure: hop.failure,
-    nextModel: hop.next.canonicalId,
-    attempt: hop.attempt
-  })
+  chatLogger.warn(
+    'Alias {alias}: {model} on {login} failed ({failure}); trying {nextModel} on {nextLogin}',
+    {
+      alias,
+      model: hop.failed.canonicalId,
+      login: hop.failed.login,
+      failure: hop.failure,
+      nextModel: hop.next.canonicalId,
+      nextLogin: hop.next.login,
+      attempt: hop.attempt
+    }
+  )
 }
 
 /** Where the chain starts: the first candidate whose credential resolves, or the 502 answer. */
@@ -333,8 +278,14 @@ export async function findCredentialedStart(
   alias: string | undefined
 ): Promise<CredentialedStart> {
   const attempts: Attempt[] = []
-  for (const [position, candidate] of route.candidates.entries()) {
-    if (skipCooling({ ...route, alias }, position, attempts)) continue
+  let position = 0
+  while (position < route.candidates.length) {
+    const candidate = route.candidates[position]
+    if (candidate === undefined) break
+    if (skipCooling({ ...route, alias }, position, attempts)) {
+      position += 1
+      continue
+    }
     const refused = await checkCredential(candidate.model, upstreamApiKey)
     if (refused === undefined) {
       return { kind: 'ready', candidates: route.candidates.slice(position), attempts }
@@ -343,26 +294,27 @@ export async function findCredentialedStart(
     const key = routeKey(alias, candidate)
     recordRouteAttempt(key)
     recordRouteFailure(key, failureClass(refused))
-    const next = route.candidates[position + 1]
-    if (next === undefined || !route.fallbackOn.has('auth')) {
+    const nextPosition = nextFor(route.candidates, position, route, 'auth')
+    const next = nextPosition === undefined ? undefined : route.candidates[nextPosition]
+    if (nextPosition === undefined || next === undefined) {
       return { kind: 'refused', answer: refused }
     }
     recordRouteFallback(key)
     logFallback(alias, { failed: candidate, next, failure: 'auth', attempt: attempts.length + 1 })
-    attempts.push({ model: candidate.canonicalId, reason: 'auth' })
+    attempts.push({ ...attemptOf(candidate), reason: 'auth' })
+    position = nextPosition
   }
   throw new Error('A chat route has at least one candidate')
 }
 
 /** Everything a chat request needs to run on its candidates. */
-export interface DispatchJob {
+export interface DispatchJob extends RouteHops {
   readonly requestId: string
   /** The alias the request named (#66): reported as `x_pi.alias`. */
   readonly alias: string | undefined
   /** The candidates in order. The first one's credential was already checked. */
   readonly candidates: readonly ExposedModel[]
-  readonly fallbackOn: ReadonlySet<FailureClass>
-  /** The quota reserve per provider (`routing.reserve`, #69). */
+  /** The quota reserve per login (`routing.reserve`, #69). */
   readonly reserve: Reserve
   /** Attempts already failed, before the first candidate (credential checks). */
   readonly attempts: readonly Attempt[]
@@ -659,7 +611,7 @@ async function runAttempt(
       onResponseHeaders:
         job.options.upstreamApiKey === undefined
           ? (headers) => {
-              recordQuota(candidate.provider, headers)
+              recordQuota(candidate.login, headers)
             }
           : undefined
     }
@@ -686,38 +638,24 @@ function answerWith(
   attempts: readonly Attempt[]
 ): Response {
   if (attempts.length > 0) {
-    chatLogger.info('Alias {alias} answered by {model} after {failedCount} failed attempts', {
-      alias: job.alias,
-      model: candidate.canonicalId,
-      failedCount: attempts.length,
-      attempts
-    })
+    chatLogger.info(
+      'Alias {alias} answered by {model} on {login} after {failedCount} failed attempts',
+      {
+        alias: job.alias,
+        model: candidate.canonicalId,
+        login: candidate.login,
+        failedCount: attempts.length,
+        attempts
+      }
+    )
   }
+  const { login } = attemptOf(candidate)
   return respond({
     model: candidate.canonicalId,
+    ...(login === undefined ? {} : { login }),
     ...(job.alias === undefined ? {} : { alias: job.alias }),
     attempts
   })
-}
-
-/**
- * Decides whether a failed attempt moves to the next candidate: only when there is one and the
- * alias's `fallbackOn` names the failure's class.
- *
- * @param answer - what the client would get for the failure
- * @param next - the next candidate, or `undefined` after the last
- * @param fallbackOn - the classes the alias names
- * @returns the class to move on for, or `undefined` to answer with the failure
- */
-function fallbackFor(
-  answer: FailedAnswer,
-  next: ExposedModel | undefined,
-  fallbackOn: ReadonlySet<FailureClass>
-): FailureClass | undefined {
-  const failure = failureClass(answer)
-  return next !== undefined && failure !== undefined && fallbackOn.has(failure)
-    ? failure
-    : undefined
 }
 
 /**
@@ -733,6 +671,80 @@ function skipsCandidate(job: DispatchJob, position: number, attempts: Attempt[])
 }
 
 /**
+ * Moves a failed attempt on to the next candidate its failure is named for: records the
+ * fallback, logs the hop and lists the attempt.
+ *
+ * @param job - the route
+ * @param position - the failed candidate's index
+ * @param failure - the failure's class, or `undefined` for one that never moves on, and the raw
+ *   upstream message, logged at debug
+ * @param attempts - the attempts so far; the failed one is added when the request moves on
+ * @returns the next candidate's index, or `undefined` to answer with the failure
+ */
+function moveOn(
+  job: DispatchJob,
+  position: number,
+  failure: { readonly failed: FailureClass | undefined; readonly detail: string | undefined },
+  attempts: Attempt[]
+): number | undefined {
+  const { failed, detail } = failure
+  const candidate = job.candidates[position]
+  const nextPosition = nextFor(job.candidates, position, job, failed)
+  const next = nextPosition === undefined ? undefined : job.candidates[nextPosition]
+  if (candidate === undefined || next === undefined || failed === undefined) return undefined
+  recordRouteFallback(routeKey(job.alias, candidate))
+  logUpstreamDetail(detail)
+  logFallback(job.alias, { failed: candidate, next, failure: failed, attempt: attempts.length + 1 })
+  attempts.push({ ...attemptOf(candidate), reason: failed })
+  return nextPosition
+}
+
+/** How one tried candidate ended: the response to send, or the next candidate to try. */
+type TriedCandidate = { readonly response: Response } | { readonly next: number }
+
+/**
+ * Tries one candidate: calls it, records its cooldown and totals, and either answers or moves on.
+ *
+ * @param honoContext - the request's Hono context
+ * @param job - the route
+ * @param position - the candidate's index
+ * @param attempts - the attempts so far; a failure the request moves on from is added
+ * @returns the response, or the next candidate's index
+ */
+async function tryCandidate(
+  honoContext: ProxyContext,
+  job: DispatchJob,
+  position: number,
+  attempts: Attempt[]
+): Promise<TriedCandidate> {
+  const candidate = job.candidates[position]
+  if (candidate === undefined) throw new Error('A chat route has at least one candidate')
+  // A request with its own upstream key isn't using the proxy's login, so its 429s and successes
+  // say nothing about the login other clients share (#181 review).
+  const sharedLogin = job.options.upstreamApiKey === undefined
+  const sentAt = Date.now()
+  const key = routeKey(job.alias, candidate)
+  job.active.attempt(candidate.canonicalId, attempts.length + 1)
+  recordRouteAttempt(key)
+  const { outcome, captured } = await runAttempt(honoContext, candidate, job, {
+    checkFirst: position > 0,
+    attempt: attempts.length + 1
+  })
+  if (outcome.kind === 'final') return { response: outcome.response }
+  if (outcome.kind === 'answered') {
+    if (sharedLogin) clearCooldowns(loginSubject(candidate), sentAt)
+    return { response: answerWith(outcome.respond, candidate, job, attempts) }
+  }
+  const failed = failureClass(outcome.answer)
+  recordRouteFailure(key, failed)
+  if (sharedLogin) recordCooldown(candidate, failed, captured)
+  const next = moveOn(job, position, { failed, detail: outcome.detail }, attempts)
+  if (next !== undefined) return { next }
+  outcome.report()
+  return { response: honoContext.json(outcome.answer.body, outcome.answer.status) }
+}
+
+/**
  * Runs the request on its candidates in turn and answers with the first that accepts it.
  *
  * @param honoContext - the request's Hono context
@@ -741,37 +753,15 @@ function skipsCandidate(job: DispatchJob, position: number, attempts: Attempt[])
  */
 export async function dispatchChat(honoContext: ProxyContext, job: DispatchJob): Promise<Response> {
   const attempts = [...job.attempts]
-  // A request with its own upstream key isn't using the proxy's login, so its 429s and successes
-  // say nothing about the login other clients share (#181 review).
-  const sharedLogin = job.options.upstreamApiKey === undefined
-  for (const [position, candidate] of job.candidates.entries()) {
-    if (skipsCandidate(job, position, attempts)) continue
-    const sentAt = Date.now()
-    const key = routeKey(job.alias, candidate)
-    job.active.attempt(candidate.canonicalId, attempts.length + 1)
-    recordRouteAttempt(key)
-    const { outcome, captured } = await runAttempt(honoContext, candidate, job, {
-      checkFirst: position > 0,
-      attempt: attempts.length + 1
-    })
-    if (outcome.kind === 'final') return outcome.response
-    if (outcome.kind === 'answered') {
-      if (sharedLogin) clearCooldowns(candidate, sentAt)
-      return answerWith(outcome.respond, candidate, job, attempts)
+  let position = 0
+  while (position < job.candidates.length) {
+    if (skipsCandidate(job, position, attempts)) {
+      position += 1
+      continue
     }
-    const failed = failureClass(outcome.answer)
-    recordRouteFailure(key, failed)
-    if (sharedLogin) recordCooldown(candidate, failed, captured)
-    const next = job.candidates[position + 1]
-    const failure = fallbackFor(outcome.answer, next, job.fallbackOn)
-    if (failure === undefined || next === undefined) {
-      outcome.report()
-      return honoContext.json(outcome.answer.body, outcome.answer.status)
-    }
-    recordRouteFallback(key)
-    logUpstreamDetail(outcome.detail)
-    logFallback(job.alias, { failed: candidate, next, failure, attempt: attempts.length + 1 })
-    attempts.push({ model: candidate.canonicalId, reason: failure })
+    const tried = await tryCandidate(honoContext, job, position, attempts)
+    if ('response' in tried) return tried.response
+    position = tried.next
   }
   throw new Error('A chat route has at least one candidate')
 }
