@@ -204,6 +204,25 @@ describe('normalizeConfig', () => {
     expect(normalizeConfig({}).routing).toEqual({ reserve: {} })
   })
 
+  // Catches one bad label costing the others, an empty or padded label kept (the console shows it
+  // beside the login), or a label that is not text.
+  test('keeps the valid login labels, trimmed, and drops the invalid ones', () => {
+    const result = normalizeConfig({
+      labels: {
+        'anthropic-account-2': '  work  ',
+        'openai-codex': 'personal',
+        'google': '',
+        'xai': '   ',
+        'groq': 7,
+        'mistral': 'x'.repeat(41),
+        '': 'nobody'
+      }
+    })
+
+    expect(result.labels).toEqual({ 'anthropic-account-2': 'work', 'openai-codex': 'personal' })
+    expect(normalizeConfig({}).labels).toEqual({})
+  })
+
   // Catches a valid field being dropped or replaced by its default during normalization.
   test('preserves all fields from a complete valid config', () => {
     const full = {
@@ -221,6 +240,7 @@ describe('normalizeConfig', () => {
       customModels: ['openai/gpt-4o'],
       providerPrefixes: { openai: 'oai' },
       aliases: { coding: 'openai/gpt-4o' },
+      labels: { 'anthropic-account-2': 'work' },
       logLevel: 'debug',
       routing: { reserve: { anthropic: 0.2 } },
       zed: { providerName: 'My Proxy', autoSync: true }

@@ -11,12 +11,6 @@
  * @packageDocumentation
  */
 
-import type { AuthType } from '@earendil-works/pi-ai'
-import {
-  ExtensionSelectorComponent,
-  LoginDialogComponent,
-  OAuthSelectorComponent
-} from '@earendil-works/pi-coding-agent'
 import {
   type Component,
   Key,
@@ -31,20 +25,15 @@ import {
 } from '@earendil-works/pi-tui'
 import type { ServerType } from '@hono/node-server'
 import type { ServerConfig } from '@proxy/config/env'
-import type { Reserve } from '@proxy/config/schema'
-import { proxyLogger } from '@proxy/logging'
+import type { LoginLabels, Reserve } from '@proxy/config/schema'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
 import { providerQuota } from '@proxy/pi/quota'
 import {
   getAvailableModels,
   getCredentialStatuses,
-  getLoginDeviceId,
   getModelsJsonError,
-  getRuntime,
-  initRegistry,
-  type ProviderCredentialStatus,
-  summarizeAuthError
+  initRegistry
 } from '@proxy/pi/registry'
 import {
   activeRequests,
@@ -58,38 +47,24 @@ import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { accountRows } from '@proxy/tui/accounts-view'
+import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
 import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
-import { pickLabel, showDialog } from '@proxy/tui/dialogs'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
-import { loginOptions, logoutOptions, providerName, runLogin } from '@proxy/tui/login'
-import {
-  type AccountAction,
-  accountActions,
-  clampSelection,
-  footerLine,
-  moveSelection,
-  stepView,
-  tabsLine,
-  type View
-} from '@proxy/tui/navigation'
+import { loginLabels } from '@proxy/tui/login'
+import { footerLine, moveSelection, stepView, tabsLine, type View } from '@proxy/tui/navigation'
 import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
 import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
-import { createRefresh, credentialChanged, type RefreshState } from '@proxy/tui/status-refresh'
+import { createRefresh, type RefreshState } from '@proxy/tui/status-refresh'
 import { captureWrites } from '@proxy/tui/stderr-capture'
 import { chrome, installConsoleTheme, paint, strong } from '@proxy/tui/theme'
 
 import packageJson from '../../package.json' with { type: 'json' }
 
-/** Logger for the console's own actions. */
-const consoleLogger = proxyLogger('tui')
-
 /** How often the status line and the accounts list are read again. */
 const STATUS_REFRESH_MS = 5000
 /** How often the sidebar's clocks (uptime, elapsed, time left) and connection count move on. */
 const TICK_MS = 1000
-/** How long a logout may take. */
-const LOGOUT_TIMEOUT_MS = 15_000
 /** Lines a page key scrolls the log view by. */
 const PAGE_LINES = 10
 /** Rows the header, the tab bar and the footer take. */
@@ -104,6 +79,8 @@ interface Status {
   readonly modelsJsonError: string | undefined
   /** The quota reserve per provider (`routing.reserve`), to mark a provider below it. */
   readonly reserve: Reserve
+  /** Provider -> the label the operator gave the login (`labels`). */
+  readonly labels: LoginLabels
 }
 
 /** The console's state, which every render reads. */
@@ -122,7 +99,7 @@ interface ConsoleState extends RefreshState<Status> {
 }
 
 /** What the key handlers and the login flow need. */
-interface ConsoleContext {
+export interface ConsoleContext {
   readonly config: ServerConfig
   readonly logs: LogBuffer
   readonly tui: TuiAltScreen
@@ -144,29 +121,6 @@ interface ConsoleContext {
 }
 
 /**
- * Says why a login, a logout or a background task failed, in pi's first line only: pi's messages
- * can carry a provider's response after it.
- *
- * @param error - what was thrown
- * @returns the summary
- */
-function failureReason(error: unknown): string {
-  return summarizeAuthError(error instanceof Error ? error.message : String(error))
-}
-
-/**
- * Runs a task the console does not wait for, logging a failure instead of dropping it.
- *
- * @param task - the running task
- * @param what - what it does, for the log line
- */
-function inBackground(task: Promise<void>, what: string): void {
-  task.catch((error: unknown) => {
-    consoleLogger.error('{what} failed: {reason}', { what, reason: failureReason(error) })
-  })
-}
-
-/**
  * Reads the status line's data: available and exposed models, cooldowns, the models.json error.
  *
  * @returns the status
@@ -180,7 +134,8 @@ async function readStatus(): Promise<Status> {
     exposed: exposure.ok ? exposure.models.length : exposure.message,
     cooldowns: activeCooldowns().length,
     modelsJsonError: getModelsJsonError(),
-    reserve: config.reserve ?? {}
+    reserve: config.reserve ?? {},
+    labels: loginLabels()
   }
 }
 
@@ -218,21 +173,23 @@ function headerLine(context: ConsoleContext, withSidebar: boolean): string {
   return parts.join(' · ')
 }
 
+/** What the Accounts view takes from the status before the first read: no reserve, no labels. */
+const NO_STATUS_SETTINGS: Pick<Status, 'reserve' | 'labels'> = { reserve: {}, labels: {} }
+
 /**
  * Renders the Accounts view from the console's state.
  *
  * @param state - the console's state: the accounts, the selected row, and the status with the
- *   reserve per provider
+ *   reserve per provider and the labels
  * @param height - rows available
  * @returns the rows
  */
 function accountsViewRows(state: ConsoleState, height: number): string[] {
-  const view = {
-    accounts: state.accounts,
-    selected: state.selected,
-    reserve: state.status?.reserve ?? {}
-  }
-  return accountRows(view, height)
+  const { reserve, labels } = state.status ?? NO_STATUS_SETTINGS
+  return accountRows(
+    { accounts: state.accounts, selected: state.selected, reserve, labels },
+    height
+  )
 }
 
 /**
@@ -354,157 +311,6 @@ function createRootView(
       // Nothing is cached between renders.
     }
   }
-}
-
-/**
- * Shows pi's selector for a choice a login asks for, such as the login method.
- *
- * @param tui - the screen
- * @param prompt - the choice
- * @param prompt.message - the question
- * @param prompt.options - the options, each with its ID and label
- * @returns the chosen option's ID; rejects with `Login cancelled` when cancelled
- */
-async function selectOption(
-  tui: TuiAltScreen,
-  prompt: { readonly message: string; readonly options: readonly { id: string; label: string }[] }
-): Promise<string> {
-  const labels = prompt.options.map((option) => option.label)
-  const label = await pickLabel(tui, prompt.message, labels)
-  const option = prompt.options.find((candidate) => candidate.label === label)
-  if (option === undefined) throw new Error('Login cancelled')
-  return option.id
-}
-
-/**
- * Runs pi's login for one provider on pi's login dialog, and logs how it ended.
- *
- * @param context - the console
- * @param providerId - the provider to log in to
- * @param type - `oauth` (an account) or `api_key`
- */
-async function loginTo(context: ConsoleContext, providerId: string, type: AuthType): Promise<void> {
-  const runtime = getRuntime()
-  const name = providerName(runtime, providerId)
-  const dialog = new LoginDialogComponent(context.tui, providerId, () => undefined, name)
-  const handle = showDialog(context.tui, dialog)
-  try {
-    await runLogin(
-      runtime,
-      { providerId, type, deviceId: getLoginDeviceId },
-      { dialog, select: (prompt) => selectOption(context.tui, prompt) }
-    )
-  } catch (error) {
-    consoleLogger.warn('Login to {provider} ended: {reason}', {
-      provider: providerId,
-      reason: failureReason(error)
-    })
-  } finally {
-    handle.hide()
-    credentialChanged(context.state, providerId)
-    await context.refresh()
-  }
-}
-
-/**
- * Opens pi's provider selector and logs in to the chosen provider.
- *
- * @param context - the console
- */
-function openLogin(context: ConsoleContext): void {
-  const selector = new OAuthSelectorComponent(
-    'login',
-    loginOptions(getRuntime()),
-    (providerId, type) => {
-      handle.hide()
-      inBackground(loginTo(context, providerId, type), 'Login')
-    },
-    () => handle.hide()
-  )
-  const handle = showDialog(context.tui, selector)
-}
-
-/**
- * Logs out of one provider: pi removes its stored credential.
- *
- * @param context - the console
- * @param providerId - the provider to log out of
- */
-async function logoutOf(context: ConsoleContext, providerId: string): Promise<void> {
-  try {
-    await getRuntime().logout(providerId, { signal: AbortSignal.timeout(LOGOUT_TIMEOUT_MS) })
-    consoleLogger.info('Logged out of {provider}', { provider: providerId })
-  } catch (error) {
-    consoleLogger.warn('Logout of {provider} failed: {reason}', {
-      provider: providerId,
-      reason: failureReason(error)
-    })
-  }
-  credentialChanged(context.state, providerId)
-  await context.refresh()
-}
-
-/**
- * Opens pi's selector of stored credentials and logs out of the chosen provider.
- *
- * @param context - the console
- */
-async function openLogout(context: ConsoleContext): Promise<void> {
-  const options = await logoutOptions(getRuntime())
-  const selector = new OAuthSelectorComponent(
-    'logout',
-    options,
-    (providerId) => {
-      handle.hide()
-      inBackground(logoutOf(context, providerId), 'Logout')
-    },
-    () => handle.hide()
-  )
-  const handle = showDialog(context.tui, selector)
-}
-
-/**
- * Opens the action menu for the selected account, or pi's login selector on the login row.
- *
- * @param context - the console
- */
-function openSelected(context: ConsoleContext): void {
-  const { state } = context
-  const account = state.accounts[clampSelection(state.selected, state.accounts.length)]
-  if (account === undefined) {
-    openLogin(context)
-    return
-  }
-  const choices = accountActions(account)
-  const selector = new ExtensionSelectorComponent(
-    account.provider,
-    choices.map((choice) => choice.label),
-    (label) => {
-      handle.hide()
-      const chosen = choices.find((choice) => choice.label === label)
-      if (chosen !== undefined) runAccountAction(context, account, chosen.action)
-    },
-    () => handle.hide()
-  )
-  const handle = showDialog(context.tui, selector)
-}
-
-/**
- * Runs an action chosen from an account's menu.
- *
- * @param context - the console
- * @param account - the account it acts on
- * @param action - what to do
- */
-function runAccountAction(
-  context: ConsoleContext,
-  account: ProviderCredentialStatus,
-  action: AccountAction
-): void {
-  if (action === 'verify') inBackground(context.refresh(true), 'Verifying the logins')
-  else if (action === 'login') {
-    inBackground(loginTo(context, account.provider, account.type), 'Login')
-  } else inBackground(logoutOf(context, account.provider), 'Logout')
 }
 
 /**

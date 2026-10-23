@@ -6,15 +6,15 @@
  */
 
 import { truncateToWidth } from '@earendil-works/pi-tui'
-import type { Reserve } from '@proxy/config/schema'
+import type { LoginLabels, Reserve } from '@proxy/config/schema'
 import { providerQuota } from '@proxy/pi/quota'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { clampSelection, LOGIN_ROW } from '@proxy/tui/navigation'
 import { highlight, paint } from '@proxy/tui/theme'
 
-/** Widths of the view's columns: provider, auth type, source, model count. */
-const COLUMNS = { provider: 22, login: 8, source: 16, models: 4 } as const
+/** Widths of the view's columns: provider, label, auth type, source, model count. */
+const COLUMNS = { provider: 22, label: 12, login: 8, source: 16, models: 4 } as const
 /** Percent in a whole: a window's share used is shown as a percentage. */
 const PERCENT = 100
 
@@ -26,6 +26,8 @@ export interface AccountsView {
   readonly selected: number
   /** The reserve per provider, to mark a provider below it. */
   readonly reserve: Reserve
+  /** Provider -> the label the operator gave the login. */
+  readonly labels: LoginLabels
 }
 
 /**
@@ -58,23 +60,27 @@ function quotaCell(provider: string, reserve: Reserve): string {
 }
 
 /**
- * Renders one provider's credential status: provider, auth type, source, models, quota used,
- * verification.
+ * Renders one provider's credential status: provider, label, auth type, source, models, quota
+ * used, verification.
  *
  * @param account - the provider's status; never the credential itself
- * @param reserve - the reserve per provider, to mark a provider below it
+ * @param view - the reserve per provider, to mark a provider below it, and the labels
  * @returns the row's text, without its selection mark
  */
-function accountRow(account: ProviderCredentialStatus, reserve: Reserve): string {
+function accountRow(
+  account: ProviderCredentialStatus,
+  view: Pick<AccountsView, 'reserve' | 'labels'>
+): string {
   const login = account.type === 'oauth' ? 'account' : 'API key'
   const cells = [
     // A name longer than its column (`qwen-token-plan-individual`, a models.json provider) is cut
     // with `…`, so the columns after it stay aligned.
     truncateToWidth(account.provider, COLUMNS.provider, '…', true),
+    truncateToWidth(view.labels[account.provider] ?? '', COLUMNS.label, '…', true),
     login.padEnd(COLUMNS.login),
     truncateToWidth(account.source ?? '', COLUMNS.source, '…', true),
     `${String(account.availableModelCount).padStart(COLUMNS.models)} models`,
-    quotaCell(account.provider, reserve)
+    quotaCell(account.provider, view.reserve)
   ]
   return `${cells.join(' ')}${verification(account)}`
 }
@@ -98,9 +104,10 @@ function selectable(text: string, selected: boolean): string {
  * @returns the rows
  */
 export function accountRows(view: AccountsView, height: number): string[] {
-  const { accounts, reserve } = view
+  const { accounts } = view
   const titles = [
     'provider'.padEnd(COLUMNS.provider),
+    'label'.padEnd(COLUMNS.label),
     'login'.padEnd(COLUMNS.login),
     'source'.padEnd(COLUMNS.source),
     'models'.padEnd(COLUMNS.models + ' models'.length),
@@ -108,7 +115,7 @@ export function accountRows(view: AccountsView, height: number): string[] {
   ]
   const current = clampSelection(view.selected, accounts.length)
   const rows = accounts.map((account, index) =>
-    selectable(accountRow(account, reserve), index === current)
+    selectable(accountRow(account, view), index === current)
   )
   const login = selectable(LOGIN_ROW, current === accounts.length)
   return [paint('dim', `  ${titles.join(' ')}`), ...rows, login].slice(0, height)
