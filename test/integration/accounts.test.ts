@@ -246,6 +246,35 @@ describe('a second login', () => {
     expect(activeCooldown({ provider: 'groq-2', canonicalId: `groq/${MODEL}` })).toBeUndefined()
   })
 
+  // Catches an alias target's effort lost when the model expands into its logins (#230): the
+  // second login would run at the request's effort, and the attempt on the first wouldn't say
+  // what it ran at.
+  test("an alias target's effort carries over to every login", async () => {
+    setConfig({ aliases: { 'quiet-groq': { model: `groq/${MODEL}`, reasoningEffort: 'none' } } })
+    try {
+      const answer = await ask('quiet-groq')
+
+      expect(answer.upstreamKeys).toEqual([FIRST_KEY, SECOND_KEY])
+      expect(answer.body).toMatchObject({
+        x_pi: {
+          alias: 'quiet-groq',
+          login: 'groq-2',
+          reasoning_effort: { requested: null, applied: 'none' },
+          attempts: [
+            {
+              model: `groq/${MODEL}`,
+              login: 'groq',
+              reasoning_effort: 'none',
+              reason: 'rate_limit'
+            }
+          ]
+        }
+      })
+    } finally {
+      setConfig({})
+    }
+  })
+
   // Catches a streamed answer that hides the login hop: every chunk carries `x_pi.login` and the
   // attempt, as the non-streamed body does (principle VI).
   test('a streamed answer names the login in every chunk', async () => {
