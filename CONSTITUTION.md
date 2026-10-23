@@ -1,27 +1,28 @@
 <!--
 Sync Impact Report
-Version change: 3.5.1 → 3.6.0 (MINOR)
-Rationale: #227 gave a provider several logins (`anthropic-2`). Under principle IV as
-written, a second login had to be an exposed model of its own to be routable, so every model of
-the provider was listed twice and collision-prefixed (`anthropic/claude-opus-5-5`,
-`anthropic-2/claude-opus-5-5`), which broke clients that filter on plain names (j5).
-The amendment makes a login a routing detail of one exposed model, as principle VI's "which
-model and login served it" already anticipated: the model is listed once under the base's name,
-routing picks the login, and the response and log say which.
-MINOR: principles IV and VI materially expanded; no principle added or removed.
+Version change: 3.6.0 → 3.7.0 (MINOR)
+Rationale: #230 lets an alias set a reasoning effort per target (`reviewer` is Opus at `high`),
+because a team picks a model by job and the job settles the effort as well. That effort replaces
+the client's `reasoning_effort` on that target, which principle I allows only for a listed drop:
+the client's value does not reach the model. The amendment lists it, with its reason and how both
+values are reported.
+MINOR: principle I's exceptions materially expanded; no principle added or removed.
 Modified sections:
-- IV. Model and Header Discipline: a provider's extra login is not a model; its models are the
-  base provider's, exposed once; the login is a routing detail
-- VI. Routing Transparency: every login of an exposed model's provider may serve it; `x_pi.login`
-  names the serving login; a request that names a model never moves to another model but may move
-  to another login on the classes `routing.logins.fallbackOn` names, or past a login below its
-  `routing.reserve`; that setting's default, `["rate_limit"]`, is the one recorded default
-  routing has
+- I. OpenAI Compatibility: an alias target's `reasoningEffort` replaces the request's
+  `reasoning_effort`, reported as `x_pi.reasoning_effort: { requested, applied }` and logged (the
+  first different client value per alias at `info`, later ones at `debug`); an effort the target's
+  model doesn't support is a configuration error, never a clamp
 Templates requiring updates:
-- ✅ AGENTS.md: "Core constraints" names login routing and the recorded default
-- ✅ PLAN.md, README.md: the Accounts section and the config table describe it
+- ✅ AGENTS.md: "Core constraints" lists the new permitted replacement
+- ✅ PLAN.md, README.md: the Aliases sections describe it
 Follow-up TODOs:
 - None.
+
+3.6.0 (2026-10-23): #227 gave a provider several logins. Principle IV makes a provider's extra
+login a routing detail of one exposed model, not a model of its own: its models are the base's,
+listed once. Principle VI lets every login of an exposed model's provider serve it, names the
+serving login as `x_pi.login`, and records the one routing default,
+`routing.logins.fallbackOn: ["rate_limit"]`.
 
 3.5.1 (2026-10-22): principle I's list of today's non-standard routes names
 `GET /v1/switchboard/usage` (#224, #225).
@@ -98,6 +99,7 @@ Exceptions: a request field MAY be dropped instead of rejected only where it is 
 - Passthrough fields a provider has no equivalent for (#81): `stop`, `user`, `top_p`, `frequency_penalty`, `presence_penalty`, `seed`, `response_format`, `tool_choice`, `parallel_tool_calls`, `metadata` and `prediction` reach each API verbatim or translated where it has an equivalent, and are dropped where it has none. Clients commonly send one parameter set to every model, and rejecting per API would break them. The per-API tables in `PLAN.md` ("API-aware payload translation") list exactly what each API receives, and `README.md` says fields without an equivalent are skipped; a change to what an API receives updates those tables.
 - `prompt_cache_breakpoint` on content parts (#149): forwarded to OpenAI's own chat completions and Responses (`api.openai.com`), which use it, and dropped for every other API. pi rebuilds each provider's request: Codex's system prompt is a plain `instructions` string with no part to carry it, and an OpenAI-compatible server may refuse a field it does not know. It only affects caching, never the answer, and docker-agent sends it on every `gpt-*` request, so a `422` would break it. A model there that refuses it with a 400 naming the field (the ChatGPT-subscription models, #163) gets the request once more without it, and is remembered for the life of the process; the first refusal per model is logged at `info`. Each other drop is logged at `debug`, and `PLAN.md` ("Prompt cache breakpoints") and `README.md` document where it goes.
 - `name` on a message and `detail` on an `image_url` (#146): OpenAI fields pi has no equivalent for, a participant name and an image detail level. Clients send them routinely, so a `422` would break them. They are accepted and dropped, each drop logged at `debug` by count, and `README.md` and `PLAN.md` ("Unknown field policy") say so. Every other field inside a message is accepted only as declared, and any other key is refused with a named `422`.
+- `reasoning_effort` on a request that names an alias whose target sets `reasoningEffort` (#230): the target's effort replaces the request's on that model. The operator chose the effort for that name, as a team chooses a model by job ("reviewer" is Opus at `high`), and most clients send one effort to every model, or none. It is reported, never silent: the response carries `x_pi.reasoning_effort: { requested, applied }` (`requested` the client's value or `null`) in the body and every stream chunk, each `x_pi.attempts` entry carries the effort its target set, and the log records both values, the first different client value per alias at `info` and later ones at `debug`. An effort the target's model does not support is a configuration error, never clamped: the target is left out, `/healthz/models` reports it and answers `503`. `README.md` and `PLAN.md` ("Aliases") document it.
 
 Two kinds of route sit outside the stable surface, and only these:
 - Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs` (Swagger UI for the OpenAPI document). Only `/healthz` and `/docs` may skip proxy authentication; none may return a credential, and `/docs` MUST name no model or provider.
@@ -194,4 +196,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.6.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23
+**Version**: 3.7.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23

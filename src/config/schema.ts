@@ -15,6 +15,7 @@ import { dirname, resolve } from 'node:path'
 import { isLogLevel, type LogLevel } from '@logtape/logtape'
 import { piAgentDir } from '@proxy/config/agent-dir'
 import { proxyLogger } from '@proxy/logging'
+import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
 import { errorCode, isRecord } from '@proxy/utils/guards'
 import * as z from 'zod'
 
@@ -139,18 +140,75 @@ export const FailureClassSchema = z.enum([
 export type FailureClass = z.infer<typeof FailureClassSchema>
 
 /**
- * What an alias names (#66, #67): one canonical ID, or targets tried in order, moving to the next
- * only on the failures `fallbackOn` names (principle VI: the configuration names them).
+ * One model an alias runs at a reasoning effort it sets (#230): the request's `reasoning_effort`
+ * is replaced by `reasoningEffort` on this model, and the response reports both.
+ */
+const EffortTargetSchema = z.object({
+  model: VerbatimNameSchema,
+  reasoningEffort: z.enum(REASONING_EFFORTS)
+})
+
+/** One of an alias's models: a canonical ID, or one with the effort it runs at (#230). */
+const AliasModelSchema = z.union([VerbatimNameSchema, EffortTargetSchema])
+
+/**
+ * What an alias names (#66, #67): one model, or models tried in order, moving to the next only on
+ * the failures `fallbackOn` names (principle VI: the configuration names them). Each model is a
+ * canonical ID, or `{ model, reasoningEffort }` to run it at that effort (#230).
  */
 const AliasTargetSchema = z.union([
-  VerbatimNameSchema,
+  AliasModelSchema,
   z.object({
-    targets: z.array(VerbatimNameSchema).min(1).readonly(),
+    targets: z.array(AliasModelSchema).min(1).readonly(),
     fallbackOn: z.array(FailureClassSchema).readonly()
   })
 ])
 /** What an alias names: see {@link AliasTargetSchema}. */
 export type AliasTarget = z.infer<typeof AliasTargetSchema>
+
+/** An alias with a fallback chain: `{ targets, fallbackOn }`. */
+export type AliasChain = Extract<AliasTarget, { readonly targets: unknown }>
+
+/**
+ * Says whether an alias names a fallback chain rather than one model.
+ *
+ * @param target - what the alias names, as the config holds it
+ * @returns whether it is `{ targets, fallbackOn }`
+ */
+export function isAliasChain(target: AliasTarget): target is AliasChain {
+  return typeof target === 'object' && 'targets' in target
+}
+
+/** One of an alias's models, whichever way the config wrote it. */
+export interface AliasModel {
+  /** The canonical ID, as written. */
+  readonly model: string
+  /** The effort the alias runs it at, replacing the request's (#230); absent to keep the request's. */
+  readonly reasoningEffort?: ReasoningEffort
+}
+
+/**
+ * Lists an alias's models in order, each with the effort it sets, if any.
+ *
+ * @param target - what the alias names, as the config holds it
+ * @returns its models: one for a single target, the chain's otherwise
+ */
+export function aliasModels(target: AliasTarget): readonly AliasModel[] {
+  const models = isAliasChain(target) ? target.targets : [target]
+  return models.map((aliasModel) =>
+    typeof aliasModel === 'string' ? { model: aliasModel } : aliasModel
+  )
+}
+
+/**
+ * Reads the failures that move an alias on to its next model.
+ *
+ * @param target - what the alias names, as the config holds it
+ * @returns the chain's `fallbackOn`; none for a single target
+ */
+export function aliasFallbackOn(target: AliasTarget): readonly FailureClass[] {
+  return isAliasChain(target) ? target.fallbackOn : []
+}
 
 /**
  * A provider's reserve (#69): the share of a subscription's usage window, from 0 to 1, to keep

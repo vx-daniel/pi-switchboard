@@ -28,7 +28,6 @@ import type { FailureClass, Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ConversionSuccess } from '@proxy/openai/messages'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
-import { effortReport } from '@proxy/openai/reasoning-effort'
 import { type Attempt, buildChatCompletion, type ResponseRoute } from '@proxy/openai/responses'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
@@ -38,6 +37,7 @@ import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
 import { type ActiveRequestHandle, requestOutcome } from '@proxy/server/active-requests'
+import { answeredEffort, withAliasEffort } from '@proxy/server/alias-effort'
 import {
   CREDENTIALS_MISSING,
   forClientKey,
@@ -597,6 +597,7 @@ async function runAttempt(
   const key = routeKey(job.alias, candidate)
   const capturing: DispatchJob = {
     ...job,
+    request: withAliasEffort(job.request, job.alias, candidate),
     options: {
       ...job.options,
       // pi makes one call per attempt (its retries are off, PLAN "Cooldowns"); were it to retry,
@@ -651,14 +652,12 @@ function answerWith(
     )
   }
   const { login } = attemptOf(candidate)
-  const effort = job.request.reasoning_effort
   return respond({
     model: candidate.canonicalId,
     ...(login === undefined ? {} : { login }),
     ...(job.alias === undefined ? {} : { alias: job.alias }),
     attempts,
-    // The model that answered decides what the effort ran at (#175), not the one asked for.
-    ...(effort === undefined ? {} : { reasoningEffort: effortReport(candidate.model, effort) })
+    reasoningEffort: answeredEffort(job.request, candidate)
   })
 }
 

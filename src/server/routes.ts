@@ -15,6 +15,7 @@
  * @packageDocumentation
  */
 
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type { ServerConfig } from '@proxy/config/env'
 import { type FailureClass, loadConfigFromFile, type Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
@@ -142,7 +143,7 @@ type Step<T> = { ok: true; value: T } | { ok: false; response: Response }
  */
 function exposureFrom(config: ModelExposureConfig): ModelExposureResult {
   const available = getAvailableModels()
-  const outcome = computeModelExposure(available, config)
+  const outcome = computeModelExposure(available, config, getSupportedThinkingLevels)
   if (!outcome.ok) {
     // Thrown to Hono, which answers 500: the exposure config cannot serve any request.
     chatLogger.error('Model exposure configuration error: {message}', {
@@ -345,6 +346,10 @@ async function handleChatCompletion(
     login: first.login,
     stream: request.stream === true,
     ...(resolved.alias === undefined ? {} : { alias: resolved.alias }),
+    ...(request.reasoning_effort === undefined
+      ? {}
+      : { reasoningEffort: request.reasoning_effort }),
+    ...(first.reasoningEffort === undefined ? {} : { aliasEffort: first.reasoningEffort }),
     ...(route.candidates.length > 1
       ? {
           fallbackModels: route.candidates

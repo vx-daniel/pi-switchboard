@@ -26,6 +26,7 @@
  * @packageDocumentation
  */
 
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   ModelExposureModeSchema,
   MS_PER_SECOND,
@@ -88,8 +89,9 @@ const modelsHealthSchema = z
     }),
     aliasDiagnostics: z.array(aliasDiagnosticSchema).meta({
       description:
-        'Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the ' +
-        'check fail), or naming no exposed model (`target-not-exposed`).'
+        'Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), ' +
+        "set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), both " +
+        'of which make the check fail, or naming no exposed model (`target-not-exposed`).'
     }),
     cooldowns: z
       .array(
@@ -265,7 +267,8 @@ function failedCheck(context: HealthContext, check: string, error: unknown): Res
  * @param context - the request's Hono context
  * @param configReader - where the model exposure config comes from
  * @returns 200 with the model report, or 503 with the same report when no model is exposed, the
- *   exposure config is invalid, or an alias is named like an exposed model
+ *   exposure config is invalid, an alias is named like an exposed model, or an alias target is set
+ *   to an effort its model doesn't support
  */
 async function checkModels(
   context: HealthContext,
@@ -273,15 +276,16 @@ async function checkModels(
 ): Promise<Response> {
   const config = await configReader()
   const available = getAvailableModels()
-  const exposure = computeModelExposure(available, config)
+  const exposure = computeModelExposure(available, config, getSupportedThinkingLevels)
   const exposedModelCount = exposure.ok ? exposure.models.length : 0
   const aliasDiagnostics = exposure.ok ? [...exposure.aliasDiagnostics] : []
-  // An alias named like a model is ignored, and the model keeps its name: requests still work, but
-  // the config does not do what it says (#66).
-  const shadowingAliasCount = aliasDiagnostics.filter(
-    (diagnostic) => diagnostic.code === 'shadows-model'
+  // An alias named like a model is ignored, and the model keeps its name (#66); a target set to an
+  // effort its model doesn't support is left out (#230). Requests still work, but the config does
+  // not do what it says. A target that is not exposed may be on purpose, and is only listed.
+  const misconfiguredAliasCount = aliasDiagnostics.filter(
+    (diagnostic) => diagnostic.code !== 'target-not-exposed'
   ).length
-  const healthy = exposure.ok && exposedModelCount > 0 && shadowingAliasCount === 0
+  const healthy = exposure.ok && exposedModelCount > 0 && misconfiguredAliasCount === 0
   const body: ModelsHealth = {
     status: healthy ? 'ok' : 'unavailable',
     availableModelCount: available.length,
@@ -313,7 +317,7 @@ async function checkModels(
         exposedModelCount,
         availableModelCount: available.length,
         exposureValid: exposure.ok,
-        shadowingAliasCount
+        misconfiguredAliasCount
       }
     )
     return context.json(body, HTTP_SERVICE_UNAVAILABLE)

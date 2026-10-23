@@ -140,16 +140,21 @@ export function skipCooling(
 }
 
 /**
- * Names a candidate in `x_pi.attempts`: its model, and its login when the model has a choice of
- * them (#227).
+ * Names a candidate in `x_pi.attempts`: its model, its login when the model has a choice of them
+ * (#227), and the effort its alias target sets (#230).
  *
  * @param candidate - the candidate, as the route planned it
- * @returns the attempt's `model` and, with several logins, `login`
+ * @returns the attempt's `model` and, when they apply, `login` and `reasoning_effort`
  */
-export function attemptOf(candidate: ExposedModel): Pick<Attempt, 'model' | 'login'> {
+export function attemptOf(
+  candidate: ExposedModel
+): Pick<Attempt, 'model' | 'login' | 'reasoning_effort'> {
   return {
     model: candidate.canonicalId,
-    ...(candidate.logins === undefined ? {} : { login: candidate.login })
+    ...(candidate.logins === undefined ? {} : { login: candidate.login }),
+    ...(candidate.reasoningEffort === undefined
+      ? {}
+      : { reasoning_effort: candidate.reasoningEffort })
   }
 }
 

@@ -44,6 +44,14 @@ const attemptSchema = z.object({
         'The login tried (`anthropic`, `anthropic-2`), when the model has more than one ' +
         '(#227). Absent otherwise.'
     }),
+  reasoning_effort: z
+    .enum(REASONING_EFFORTS)
+    .optional()
+    .meta({
+      description:
+        "The effort the alias's target runs it at (#230), replacing the request's. Absent when " +
+        'the target sets none.'
+    }),
   reason: z.enum([...FailureClassSchema.options, 'quota']).meta({
     description:
       'Why the chain moved on from it: its failure, the one it is cooling down from, or `quota` ' +
@@ -92,15 +100,16 @@ export const reasoningEffortSchema = z
       .meta({ description: 'The `reasoning_effort` the request sent, or null when it sent none.' }),
     applied: z.enum(REASONING_EFFORTS).meta({
       description:
-        'The effort the proxy asked pi to run the model at: `requested` when the model supports ' +
-        "it, else the nearest level it does. pi's adapter may still translate it for the provider."
+        "The effort the proxy asked pi to run the model at: the alias target's when it sets one " +
+        '(#230), else `requested` when the model supports it, else the nearest level it does. ' +
+        "pi's adapter may still translate it for the provider."
     })
   })
   .optional()
   .meta({
     description:
       'What the request asked for and what the model that answered runs at (#175); present ' +
-      'only when the request set `reasoning_effort`.'
+      "only when the request set `reasoning_effort` or the alias's target sets an effort (#230)."
   })
 
 /** Which model answered a request, and how the request got to it (#66, #67, #227). */
@@ -114,7 +123,7 @@ export interface ResponseRoute {
   /** The alias's failed attempts before `model`, reported as `x_pi.attempts`. */
   readonly attempts?: readonly Attempt[]
   /** The effort asked for and applied on `model`, reported as `x_pi.reasoning_effort`. */
-  readonly reasoningEffort?: EffortReport
+  readonly reasoningEffort?: EffortReport | undefined
 }
 
 /** The `x_pi` fields a route adds. */

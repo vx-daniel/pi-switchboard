@@ -5,9 +5,10 @@
  * OpenAI: "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
  * Pi: "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max"
  *
- * "none" is pi's "off"; every other effort is the pi level of the same name. A model supports a
- * subset of the levels (`getSupportedThinkingLevels`): only "off" without reasoning, no "off" for
- * a model that always reasons, "xhigh" and "max" only when its definition maps them.
+ * "none" is pi's "off"; every other effort is the pi level of the same name
+ * (`src/openai/effort-levels.ts`). A model supports a subset of the levels
+ * (`getSupportedThinkingLevels`): only "off" without reasoning, no "off" for a model that always
+ * reasons, "xhigh" and "max" only when its definition maps them.
  *
  * @packageDocumentation
  */
@@ -19,18 +20,12 @@ import {
   type Model,
   type ModelThinkingLevel
 } from '@earendil-works/pi-ai'
-import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
-
-/** The pi thinking level each OpenAI effort asks for. */
-const THINKING_LEVEL_BY_EFFORT: Readonly<Record<ReasoningEffort, ModelThinkingLevel>> = {
-  none: 'off',
-  minimal: 'minimal',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'xhigh',
-  max: 'max'
-}
+import {
+  EFFORT_BY_THINKING_LEVEL,
+  effortsOfLevels,
+  THINKING_LEVEL_BY_EFFORT
+} from '@proxy/openai/effort-levels'
+import type { ReasoningEffort } from '@proxy/openai/schemas'
 
 /** The thinking level pi runs a model at for an effort, and whether it differs from the effort. */
 export interface EffortLevel {
@@ -58,17 +53,6 @@ export function thinkingLevelFor(model: Model<Api>, effort: ReasoningEffort): Ef
   return { level, clamped: level !== asked }
 }
 
-/** The OpenAI effort each pi thinking level is reported as: the inverse of the map above. */
-const EFFORT_BY_THINKING_LEVEL: Readonly<Record<ModelThinkingLevel, ReasoningEffort>> = {
-  off: 'none',
-  minimal: 'minimal',
-  low: 'low',
-  medium: 'medium',
-  high: 'high',
-  xhigh: 'xhigh',
-  max: 'max'
-}
-
 /**
  * What a request asked for and what it ran at, as `x_pi.reasoning_effort` reports it (#175).
  *
@@ -79,7 +63,10 @@ const EFFORT_BY_THINKING_LEVEL: Readonly<Record<ModelThinkingLevel, ReasoningEff
 export interface EffortReport {
   /** The request's `reasoning_effort`, or `null` when it set none. */
   readonly requested: ReasoningEffort | null
-  /** The effort the model runs at: `requested` when it supports it, else the clamped level. */
+  /**
+   * The effort the model runs at: the alias target's when it sets one (#230), else `requested`
+   * when the model supports it, else the clamped level.
+   */
   readonly applied: ReasoningEffort
 }
 
@@ -87,12 +74,20 @@ export interface EffortReport {
  * Reports the effort a request runs at on a model.
  *
  * @param model - the pi model the request runs on
- * @param effort - the request's `reasoning_effort`
- * @returns what was asked, and what the model runs at
+ * @param requested - the request's `reasoning_effort`, or `undefined` when it set none
+ * @param forced - the effort the alias's target sets, replacing the request's (#230), or
+ *   `undefined`; the model supports it, as exposure checked
+ * @returns what was asked and what the model runs at, or `undefined` when neither sets an effort
  */
-export function effortReport(model: Model<Api>, effort: ReasoningEffort): EffortReport {
+export function effortReport(
+  model: Model<Api>,
+  requested: ReasoningEffort | undefined,
+  forced: ReasoningEffort | undefined
+): EffortReport | undefined {
+  const effort = forced ?? requested
+  if (effort === undefined) return undefined
   return {
-    requested: effort,
+    requested: requested ?? null,
     applied: EFFORT_BY_THINKING_LEVEL[thinkingLevelFor(model, effort).level]
   }
 }
@@ -104,6 +99,5 @@ export function effortReport(model: Model<Api>, effort: ReasoningEffort): Effort
  * @returns the supported efforts, lowest first; `["none"]` for a model without reasoning
  */
 export function supportedReasoningEfforts(model: Model<Api>): ReasoningEffort[] {
-  const levels = new Set(getSupportedThinkingLevels(model))
-  return REASONING_EFFORTS.filter((effort) => levels.has(THINKING_LEVEL_BY_EFFORT[effort]))
+  return effortsOfLevels(getSupportedThinkingLevels(model))
 }

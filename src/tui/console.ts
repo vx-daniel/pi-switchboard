@@ -11,6 +11,7 @@
  * @packageDocumentation
  */
 
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   type Component,
   Key,
@@ -128,7 +129,7 @@ export interface ConsoleContext {
 async function readStatus(): Promise<Status> {
   const available = getAvailableModels()
   const config = await fileConfigReader()
-  const exposure = computeModelExposure(available, config)
+  const exposure = computeModelExposure(available, config, getSupportedThinkingLevels)
   return {
     available: available.length,
     exposed: exposure.ok ? exposure.models.length : exposure.message,
