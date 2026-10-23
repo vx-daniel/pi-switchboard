@@ -676,8 +676,9 @@ the credential.
   sign-in (`isChatGPTSignIn`), `github-copilot`'s headers, `xai`'s reasoning items. Anthropic
   and Codex key nothing by name (OAuth shaping is by the token's `sk-ant-oat` prefix). pi's
   assistant message therefore names the base; the proxy reports the login from its route, never
-  from the message. A catalog refresh (`refreshModels`, none of pi 1.3.0's built-ins has one) is
-  translated both ways, as pi's providers restore only models stored under their own ID.
+  from the message. A catalog refresh (`refreshModels`; of pi's built-ins, in 1.3.0 and 1.4.0,
+  only `radius` has one) is translated both ways, as pi's providers restore only models stored
+  under their own ID.
 - **Available before the first request.** A registered provider is only provisionally available
   until the next availability pass; `initRegistry` runs `refresh({ allowNetwork: false })` once
   after registering, so the snapshot the routes read includes a login with a stored credential.
