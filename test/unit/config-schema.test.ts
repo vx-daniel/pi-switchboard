@@ -201,7 +201,25 @@ describe('normalizeConfig', () => {
     })
 
     expect(result.routing.reserve).toEqual({ 'anthropic': 0.2, 'openai-codex': 0 })
-    expect(normalizeConfig({}).routing).toEqual({ reserve: {} })
+    expect(normalizeConfig({}).routing).toEqual({
+      reserve: {},
+      logins: { fallbackOn: ['rate_limit'] }
+    })
+  })
+
+  // Catches an invalid class list kept (a typo would turn login fallback off silently) or the
+  // default lost when the section is left out: the default is the reason to log in twice (#227).
+  test('repairs routing.logins.fallbackOn to its default and keeps a valid list', () => {
+    expect(
+      normalizeConfig({ routing: { logins: { fallbackOn: ['rate-limit'] } } }).routing.logins
+    ).toEqual({ fallbackOn: ['rate_limit'] })
+    expect(normalizeConfig({ routing: { logins: { fallbackOn: [] } } }).routing.logins).toEqual({
+      fallbackOn: []
+    })
+    expect(
+      normalizeConfig({ routing: { logins: { fallbackOn: ['auth', 'unavailable'] } } }).routing
+        .logins
+    ).toEqual({ fallbackOn: ['auth', 'unavailable'] })
   })
 
   // Catches one bad label costing the others, an empty or padded label kept (the console shows it
@@ -242,7 +260,7 @@ describe('normalizeConfig', () => {
       aliases: { coding: 'openai/gpt-4o' },
       labels: { 'anthropic-account-2': 'work' },
       logLevel: 'debug',
-      routing: { reserve: { anthropic: 0.2 } },
+      routing: { reserve: { anthropic: 0.2 }, logins: { fallbackOn: ['rate_limit', 'auth'] } },
       zed: { providerName: 'My Proxy', autoSync: true }
     }
     expect(normalizeConfig(full)).toEqual(full)
