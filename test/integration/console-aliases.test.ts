@@ -507,4 +507,33 @@ describe('the console alias editor', () => {
       'opus-latest': { family: 'anthropic/claude-opus' }
     })
   })
+
+  // Catches the effort menu doing nothing without a word on a family with no exposed model: the
+  // operator must learn why the effort didn't change.
+  test('a family with nothing exposed keeps its effort, and says why', async () => {
+    setAliases({
+      chain: {
+        targets: ['alpha/quick-mock', { family: 'openai-codex/sol', reasoningEffort: 'high' }],
+        fallbackOn: ['rate_limit']
+      }
+    })
+
+    const seen = await enterOn(aliasRow('chain'), [
+      'Targets and efforts',
+      '2. openai-codex/sol (newest) @high',
+      'Set the reasoning effort',
+      'OK',
+      'Done'
+    ])
+
+    expect(seen.titles).toContain(
+      "openai-codex/sol has no exposed model, so its effort can't be checked; it is unchanged."
+    )
+    expect(loadConfigFromFile().aliases).toEqual({
+      chain: {
+        targets: ['alpha/quick-mock', { family: 'openai-codex/sol', reasoningEffort: 'high' }],
+        fallbackOn: ['rate_limit']
+      }
+    })
+  })
 })

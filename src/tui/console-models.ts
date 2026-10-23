@@ -18,6 +18,7 @@ import {
   FailureClassSchema,
   type FamilyTarget,
   isFamilyTarget,
+  targetName,
   targetSummary
 } from '@proxy/config/schema'
 import type { ModelExposureResult } from '@proxy/openai/model-exposure'
@@ -343,7 +344,15 @@ const TARGET_ACTIONS: Readonly<
       current === undefined || !isFamilyTarget(current)
         ? current?.model
         : familyModel(editor, current)
-    if (current === undefined || model === undefined) return undefined
+    if (current === undefined) return undefined
+    if (model === undefined) {
+      // A family with no exposed member has no ladder; the effort set stays.
+      await notify(
+        editor,
+        `${targetName(current)} has no exposed model, so its effort can't be checked; it is unchanged.`
+      )
+      return undefined
+    }
     const effort = await pickEffort(editor, model)
     return effort === undefined ? undefined : models.with(index, withEffort(current, effort))
   },
@@ -514,9 +523,11 @@ export async function runModelsItem(editor: AliasEditor, item: ModelsItem): Prom
   // A single family target is pinned from the alias's own menu; a chain's from its targets.
   const family = draft.models.length === 1 && only !== undefined && isFamilyTarget(only)
   const options = Object.keys(ALIAS_ACTIONS)
+  // Pinning comes right after Rename, placed by name so a reordered menu keeps it there.
+  const pinning = family ? [PIN_TO, FOLLOW_NEWEST] : []
   const choice = await editor.screens.select(
     `Alias ${item.name}`,
-    family ? [...options.slice(0, 1), PIN_TO, FOLLOW_NEWEST, ...options.slice(1)] : options
+    options.flatMap((option) => (option === 'Rename' ? [option, ...pinning] : [option]))
   )
   if (choice === PIN_TO || choice === FOLLOW_NEWEST) {
     const next = await TARGET_ACTIONS[choice]?.(editor, draft.models, 0)

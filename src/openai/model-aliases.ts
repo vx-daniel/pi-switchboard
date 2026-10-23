@@ -147,6 +147,8 @@ function noteMove(resolution: FamilyResolution): void {
     return
   }
   const { resolved } = resolution
+  // While nothing is exposed the last served model stays the baseline: that is what clients were
+  // last billed on, so the next model served is compared with it (A, nothing, B logs A to B).
   if (resolved === null) return
   const previous = lastResolved.get(key)
   lastResolved.set(key, resolved)

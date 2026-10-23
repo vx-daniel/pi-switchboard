@@ -259,6 +259,25 @@ describe('family aliases follow the newest exposed model (#231)', () => {
     expect(moves[0]).toContain('"previousModel":"anthropic/claude-opus-5"')
   })
 
+  // Catches the baseline lost while the family has nothing exposed: the next model served must be
+  // compared with the last one clients were billed on, and the same model coming back is no move.
+  test('a move across a gap with nothing exposed is logged against the last model served', () => {
+    const alias = { 'opus-gap': { family: 'anthropic/claude-opus' } }
+    const sonnetOnly = [makeModel('anthropic', 'claude-sonnet-5')]
+    configureLogging({ level: 'warning', format: 'json', write: (line) => lines.push(line) })
+
+    exposeCatalogue(OPUS, alias)
+    exposeCatalogue(sonnetOnly, alias)
+    exposeCatalogue(OPUS, alias)
+    expect(lines.filter((line) => line.includes('now follows'))).toEqual([])
+
+    exposeCatalogue(sonnetOnly, alias)
+    exposeCatalogue([...OPUS, NEWER_OPUS], alias)
+    const moves = lines.filter((line) => line.includes('now follows'))
+    expect(moves).toHaveLength(1)
+    expect(moves[0]).toContain('"previousModel":"anthropic/claude-opus-5"')
+  })
+
   // Catches a hidden model reached through the family (principle IV), or the hiding going unseen.
   test('a hidden newer model is honoured and noted', () => {
     const exposure = exposeCatalogue(
