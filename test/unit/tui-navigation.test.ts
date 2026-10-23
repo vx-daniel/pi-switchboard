@@ -13,8 +13,8 @@ import { describe, expect, test } from 'vite-plus/test'
 describe('console navigation', () => {
   // Catches the view keys getting stuck at either end instead of wrapping around the tabs.
   test('moving between views wraps around', () => {
-    expect(VIEWS.map((view) => stepView(view, 1))).toEqual(['accounts', 'stats', 'logs'])
-    expect(VIEWS.map((view) => stepView(view, -1))).toEqual(['stats', 'logs', 'accounts'])
+    expect(VIEWS.map((view) => stepView(view, 1))).toEqual(['accounts', 'stats', 'models', 'logs'])
+    expect(VIEWS.map((view) => stepView(view, -1))).toEqual(['models', 'logs', 'accounts', 'stats'])
   })
 
   // Catches the selection leaving the list: past the login row after the last account, above the

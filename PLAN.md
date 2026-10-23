@@ -1882,7 +1882,8 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   logout. A verification still running when a provider's login changes drops its result for
   that provider, which was about the old credential (`status-refresh.ts`).
 - **Navigation.** `←` `→`, `Tab` and `Shift+Tab` move between the views, wrapping around; `1`
-  `2` `3` jump to one. `↑` `↓` act on the view shown: scrolling in Logs, selection in Accounts.
+  to `4` jump to one. `↑` `↓` act on the view shown: scrolling in Logs, selection in Accounts and
+  Models.
   The footer sits on the screen's last row and lists the current view's keys.
 - **Stats** (`dashboard.ts`, #216). A dashboard over the stats store, for one of three windows:
   today (from local midnight), the last 7 days, or all 30 days kept; `t` `w` `a` pick one. The
@@ -1903,6 +1904,21 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   is logged once and falls back the same way for the rest of the session, rather than trying
   again (and maybe waiting out the busy timeout) on every redraw. Panels, label-value lines and
   compact numbers are shared with the sidebar (`panel.ts`).
+- **Models** (`models-view.ts`, `console-models.ts`, `aliases.ts`; #230). The exposed models
+  (public ID, provider, the efforts each supports, any cooldown), then every configured alias with
+  its targets, each target's effort, `fallbackOn`, and its diagnostics in red, then **+ New
+  alias…**. The selection moves over every row, scrolling to keep it on screen: `Enter` on a model
+  starts an alias for it, on an alias opens its menu (rename; targets and efforts: add, set the
+  effort, move up or down, remove; fall back on, a checkbox list over the failure classes;
+  delete), and on the last row starts a new alias. A target is picked from the exposed models and
+  its effort from that model's ladder (or the request's), so the editor can't write an alias the
+  proxy would leave out. A name that is empty, has whitespace, is an exposed model's public or
+  canonical ID, or is another alias's is refused with the reason, and the question asked again.
+  Each change is saved at once through `saveConfigToFile`, written in the shortest form the schema
+  reads (a plain ID for one target without an effort or fallback classes), keeping the alias's
+  place in the file; the proxy reads the file per request, so the next request uses it. Each save
+  is logged at info with the alias name. pi's selector has no initial index, so after a checkbox
+  is ticked the cursor returns to the top.
 - **Logins** (constitution 3.5.0: Scope and principle III). pi runs every flow and stores every
   credential; the console only shows pi's own screens, in a local terminal, never over HTTP.
   `n` opens pi's provider selector (`OAuthSelectorComponent`, every account and API-key login pi
