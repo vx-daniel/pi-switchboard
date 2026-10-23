@@ -31,7 +31,7 @@
  * @packageDocumentation
  */
 
-import type { Provider } from '@earendil-works/pi-ai'
+import type { Provider, ProviderAuth } from '@earendil-works/pi-ai'
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
@@ -141,6 +141,40 @@ function refreshAs(base: Provider, id: string): NonNullable<Provider['refreshMod
 }
 
 /**
+ * Limits a provider's API-key auth to the login's own stored credential.
+ *
+ * @remarks
+ * A built-in provider's API-key auth falls back to ambient sources when no key is stored:
+ * `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, AWS profiles. Those belong to the base login. Shared
+ * with a copy, they would configure `anthropic-2` too, and a login whose credential went away
+ * would quietly serve on the base's account. Without a stored credential, the copy is not
+ * configured. OAuth resolves from the stored credential only, so it is kept as it is.
+ *
+ * @param auth - the base provider's auth
+ * @returns the copy's auth
+ */
+function storedOnly(auth: ProviderAuth): ProviderAuth {
+  const { apiKey } = auth
+  if (apiKey === undefined) return auth
+  return {
+    ...auth,
+    apiKey: {
+      ...apiKey,
+      resolve: (input) =>
+        input.credential === undefined ? Promise.resolve(undefined) : apiKey.resolve(input),
+      ...(apiKey.check === undefined
+        ? {}
+        : {
+            check: (input) =>
+              input.credential === undefined
+                ? Promise.resolve(undefined)
+                : (apiKey.check?.(input) ?? Promise.resolve(undefined))
+          })
+    }
+  }
+}
+
+/**
  * Copies a provider under the ID of one of its logins.
  *
  * @remarks
@@ -162,6 +196,7 @@ export function accountProvider(base: Provider, slot: AccountSlot): Provider {
     ...base,
     id,
     name: `${base.name} ${String(number)}`,
+    auth: storedOnly(base.auth),
     getModels: () => under(base.getModels(), id),
     stream: (model, context, options) =>
       base.stream({ ...model, provider: base.id }, context, options),
