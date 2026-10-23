@@ -599,8 +599,15 @@ the credential.
   `getProvider` answer before the slot is registered, so registration checks
   `getRegisteredNativeProvider`, and the console's login list offers the slot once.
 - **Listed under its ID, sent as the base.** `getModels`/`getAllModels` re-key the catalog to the
-  copy's ID, so pi resolves auth by that ID (the copy's stored credential; `ANTHROPIC_API_KEY`
-  in the environment configures `anthropic` only). The request itself goes to `base.stream` with
+  copy's ID, so pi resolves auth by that ID. The copy's API-key auth is limited to its own stored
+  credential (`storedOnly`): pi's built-in resolvers fall back to ambient sources
+  (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, AWS profiles), which are the base login's, so without
+  that a copy would count as configured by them and a login whose credential went away would
+  serve on the base's account (`test/integration/accounts-env.test.ts`). It follows that an extra
+  login of a provider configured only by ambient sources (Bedrock through an AWS profile, Vertex
+  through ADC) needs a stored credential of its own, such as Bedrock's bearer token from pi's
+  login: the ambient one stays the base's. OAuth resolves from the stored credential only and is
+  shared as is. The request itself goes to `base.stream` with
   `provider: base.id`, because pi's API code keys provider rules by name: `openai`'s ChatGPT
   sign-in (`isChatGPTSignIn`), `github-copilot`'s headers, `xai`'s reasoning items. Anthropic
   and Codex key nothing by name (OAuth shaping is by the token's `sk-ant-oat` prefix). pi's
