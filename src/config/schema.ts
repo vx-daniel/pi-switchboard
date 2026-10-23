@@ -143,27 +143,33 @@ export type FailureClass = z.infer<typeof FailureClassSchema>
  * One model an alias runs at a reasoning effort it sets (#230): the request's `reasoning_effort`
  * is replaced by `reasoningEffort` on this model, and the response reports both.
  */
-const EffortTargetSchema = z.object({
-  model: VerbatimNameSchema,
-  reasoningEffort: z.enum(REASONING_EFFORTS)
-})
+const EffortTargetSchema = z
+  .object({
+    model: VerbatimNameSchema,
+    reasoningEffort: z.enum(REASONING_EFFORTS)
+  })
+  .strict()
 
 /**
  * A model family an alias follows (#231): the newest exposed model of `family`, a provider and
  * tier keyword (`anthropic/claude-opus`, `openai-codex/sol`), or `pin` while one is set. Optionally
  * at an effort, as {@link EffortTargetSchema}.
  */
-const FamilyTargetSchema = z.object({
-  family: VerbatimNameSchema,
-  pin: VerbatimNameSchema.optional(),
-  reasoningEffort: z.enum(REASONING_EFFORTS).optional()
-})
+const FamilyTargetSchema = z
+  .object({
+    family: VerbatimNameSchema,
+    pin: VerbatimNameSchema.optional(),
+    reasoningEffort: z.enum(REASONING_EFFORTS).optional()
+  })
+  .strict()
 /** A family target: see {@link FamilyTargetSchema}. */
 export type FamilyTarget = z.infer<typeof FamilyTargetSchema>
 
 /**
  * One of an alias's models: a canonical ID, one with the effort it runs at (#230), or a family
- * that follows the newest model (#231).
+ * that follows the newest model (#231). Both object forms are strict, so an entry mixing their
+ * keys (`{ model, family }`) matches neither and is dropped with the config warning, rather than
+ * read as one of them with the other's key ignored.
  */
 const AliasModelSchema = z.union([VerbatimNameSchema, EffortTargetSchema, FamilyTargetSchema])
 

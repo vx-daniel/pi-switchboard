@@ -98,5 +98,21 @@ describe('model families', () => {
     expect(compareVersions([5], [5, 5])).toBeLessThan(0)
     expect(compareVersions([6, 1], [6])).toBeGreaterThan(0)
     expect(compareVersions([4, 8], [5])).toBeLessThan(0)
+    expect(compareVersions([6, 1], [6, 1, 0])).toBe(0)
+  })
+
+  // Catches a version cut at two numbers: `gpt-6.1.2-sol` would tie `gpt-6.1-sol`.
+  test('a version with more than two numbers ranks by all of them', () => {
+    const scan = scanFamily('openai-codex/sol', [
+      'openai-codex/gpt-6.1-sol',
+      'openai-codex/gpt-6.1.2-sol',
+      'openai-codex/gpt-6.10-sol'
+    ])
+
+    expect(scan?.members.map((member) => member.canonicalId)).toEqual([
+      'openai-codex/gpt-6.10-sol',
+      'openai-codex/gpt-6.1.2-sol',
+      'openai-codex/gpt-6.1-sol'
+    ])
   })
 })

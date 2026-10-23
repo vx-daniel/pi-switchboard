@@ -65,8 +65,8 @@ export const aliasDiagnosticSchema = z.object({
     .trim()
     .meta({
       description:
-        'The canonical ID or family it names, as written; for `family-unparsed`, the member whose ' +
-        'version the family rule cannot read.'
+        'The canonical ID or family it names, as written; for `family-unparsed`, a member pi has ' +
+        '(exposed or hidden) whose version the family rule cannot read.'
     }),
   message: z.string().trim()
 })
@@ -125,6 +125,11 @@ export interface ExposedAliases {
 /**
  * The model each family target last resolved to, by alias and place: a move is logged once.
  * Exposure is computed per request, and by `/healthz/models` and the console besides.
+ *
+ * @remarks
+ * Per process, and keyed by alias name: it assumes one proxy config per process, as the server and
+ * the console have. The pi extension computes exposure in pi's own process from the same file, so
+ * its record follows the same moves. Tests that move an alias use a name no other test uses.
  */
 const lastResolved = new Map<string, string>()
 
@@ -363,13 +368,18 @@ function resolveFamily(
     newerHidden: newerHidden(scans.exposed, scans.available)
   })
   if (resolved !== null) return resolved
+  // Exposed members that are only snapshots or unreadable IDs: say why none of them is picked.
+  const unpickable =
+    scans.exposed.all.length > 0
+      ? ' Dated snapshots and IDs without a readable version are never picked; pin one to use it.'
+      : ''
   reports.diagnostics.push({
     code: 'target-not-exposed',
     alias,
     target: pin ?? family,
     message:
       pin === null
-        ? `Alias "${alias}" follows ${family}, which has no exposed model.`
+        ? `Alias "${alias}" follows ${family}, which has no exposed model it can pick.${unpickable}`
         : `Alias "${alias}" is pinned to "${pin}", which is not exposed; it does not follow ${family} meanwhile.`
   })
   return undefined

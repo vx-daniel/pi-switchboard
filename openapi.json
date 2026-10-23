@@ -196,7 +196,7 @@
                 },
                 "target": {
                   "type": "string",
-                  "description": "The canonical ID or family it names, as written; for `family-unparsed`, the member whose version the family rule cannot read."
+                  "description": "The canonical ID or family it names, as written; for `family-unparsed`, a member pi has (exposed or hidden) whose version the family rule cannot read."
                 },
                 "message": {
                   "type": "string"
@@ -1356,7 +1356,7 @@
                           },
                           "target": {
                             "type": "string",
-                            "description": "The canonical ID or family it names, as written; for `family-unparsed`, the member whose version the family rule cannot read."
+                            "description": "The canonical ID or family it names, as written; for `family-unparsed`, a member pi has (exposed or hidden) whose version the family rule cannot read."
                           },
                           "message": {
                             "type": "string"
