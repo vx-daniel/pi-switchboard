@@ -12,9 +12,8 @@
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
-import { activeCooldown, type Cooldown } from '@proxy/pi/cooldowns'
+import { activeCooldown, type Cooldown, loginSubject } from '@proxy/pi/cooldowns'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
-import { loginSubject } from '@proxy/server/route-cooldowns'
 import * as z from 'zod'
 
 /** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */

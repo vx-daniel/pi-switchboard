@@ -1,15 +1,18 @@
 /**
- * How an alias's fallback chain keeps a provider's subscription quota in reserve (#69): a chain
- * skips a provider that has less than its reserve left. The quota itself is `src/pi/quota.ts`.
+ * How a route keeps a login's subscription quota in reserve (#69): it skips a login that has less
+ * than its reserve left, for a later candidate. The quota itself is `src/pi/quota.ts`.
  *
  * @remarks
  * - **Configured, per login.** `routing.reserve` in the config file (`{ "anthropic": 0.2 }`),
  *   keyed by the login (`anthropic-2` has its own entry, #227); a login left out, or one
  *   that reports no quota (Google, API keys), is never skipped.
  * - **The worse window decides.** A subscription reports several windows (a 5-hour and a 7-day
- *   one); the provider is below its reserve when any of them has less than that share left.
- * - **Chains only.** A request that names a model, or a chain with one candidate, is sent as
- *   before: the reserve only chooses between candidates.
+ *   one); the login is below its reserve when any of them has less than that share left.
+ * - **Between candidates only.** A request with one candidate is sent as before: the reserve only
+ *   chooses between candidates. Those are an alias chain's models and, since #227, a model's
+ *   logins, so a request that names a model served by two logins skips the first while it is
+ *   below its reserve. The reserve is its own configured control (principle VI): it does not
+ *   need `quota` in a `fallbackOn`, which names failures, and a reserve skip is not one.
  * - **Never skip them all.** When every remaining candidate is below its reserve, the one with the
  *   most left is tried, so a reserve never fails a request by itself.
  *

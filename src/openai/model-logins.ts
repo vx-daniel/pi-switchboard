@@ -56,7 +56,12 @@ export function groupLogins(available: readonly Model<Api>[]): LoginGroup[] {
     groups.set(key, group)
   }
   return [...groups.values()].map(({ base, logins }) => {
-    const ordered = logins.toSorted((first, second) => first.number - second.number)
+    // A number can exist in both ID forms (`anthropic-2` and `anthropic-account-2`): both serve,
+    // in ID order, so the order does not depend on pi's.
+    const ordered = logins.toSorted(
+      (first, second) =>
+        first.number - second.number || first.model.provider.localeCompare(second.model.provider)
+    )
     const [first] = ordered
     if (first === undefined) throw new Error('A login group has at least one model')
     return {

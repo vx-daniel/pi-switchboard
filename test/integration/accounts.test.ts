@@ -98,22 +98,46 @@ afterAll(async () => {
  * Sends one chat request and records the key each upstream request carried.
  *
  * @param model - the request's `model`
- * @returns the status, the parsed body, and the upstream keys in call order
+ * @param options - stream or not, and extra request headers
+ * @returns the status, the body (parsed when not streamed, else the raw SSE text), and the
+ *   upstream keys in call order
  */
 async function ask(
-  model: string
+  model: string,
+  options: { readonly stream?: boolean; readonly headers?: Record<string, string> } = {}
 ): Promise<{ status: number; body: unknown; upstreamKeys: (string | undefined)[] }> {
   const before = mock.requests.length
   const response = await createApp(testConfig(), fileConfigReader).request('/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'Say ok' }] })
+    headers: { 'Content-Type': 'application/json', ...options.headers },
+    body: JSON.stringify({
+      model,
+      stream: options.stream === true,
+      messages: [{ role: 'user', content: 'Say ok' }]
+    })
   })
-  const body: unknown = await response.json()
+  const text = await response.text()
+  const body: unknown = options.stream === true ? text : JSON.parse(text)
   const upstreamKeys = mock.requests
     .slice(before)
     .map((request) => request.headers.authorization?.replace('Bearer ', ''))
   return { status: response.status, body, upstreamKeys }
+}
+
+/**
+ * Reads the `x_pi` of each chunk of a streamed response.
+ *
+ * @param stream - the response body
+ * @returns each data chunk's `x_pi`, in order
+ */
+function chunkXPi(stream: string): unknown[] {
+  return stream
+    .split('\n')
+    .filter((line) => line.startsWith('data: {'))
+    .map((line) => {
+      const chunk: unknown = JSON.parse(line.slice('data: '.length))
+      return isRecord(chunk) ? chunk['x_pi'] : undefined
+    })
 }
 
 /**
@@ -186,6 +210,34 @@ describe('a second login', () => {
       'groq'
     )
     expect(activeCooldown({ provider: 'groq-2', canonicalId: `groq/${MODEL}` })).toBeUndefined()
+  })
+
+  // Catches a streamed answer that hides the login hop: every chunk carries `x_pi.login` and the
+  // attempt, as the non-streamed body does (principle VI).
+  test('a streamed answer names the login in every chunk', async () => {
+    const answer = await ask(MODEL, { stream: true })
+
+    expect(answer.status).toBe(200)
+    const found = chunkXPi(typeof answer.body === 'string' ? answer.body : '')
+    expect(found.length).toBeGreaterThan(0)
+    for (const fields of found) {
+      expect(fields).toMatchObject({
+        login: 'groq-2',
+        attempts: [{ model: `groq/${MODEL}`, login: 'groq', reason: 'rate_limit' }]
+      })
+    }
+  })
+
+  // Catches a request with its own upstream key handed to another login (the key is the
+  // client's, so no login of the proxy's is chosen), or its 429 cooling the proxy's login.
+  test('a request with its own upstream key keeps the first login and cools nothing', async () => {
+    const answer = await ask(MODEL, {
+      headers: { 'X-Switchboard-Upstream-Api-Key': FIRST_KEY }
+    })
+
+    expect(answer.status).toBe(429)
+    expect(answer.upstreamKeys).toEqual([FIRST_KEY])
+    expect(activeCooldown({ provider: 'groq', canonicalId: `groq/${MODEL}` })).toBeUndefined()
   })
 
   // Catches a cooling login called again by the next request, or the skip hidden: the first login

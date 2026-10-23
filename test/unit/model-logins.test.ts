@@ -54,6 +54,21 @@ describe('groupLogins', () => {
     expect(groups[1]?.logins).toEqual([other])
   })
 
+  // Catches the order of two logins with one number (`anthropic-2` from the console, and
+  // `anthropic-account-2` from pi-rotator) following pi's listing order: both serve, in ID order.
+  test('two logins with one number are both kept, in ID order', () => {
+    const legacy = makeModel('anthropic-account-2', 'opus')
+    const proxy = makeModel('anthropic-2', 'opus')
+
+    const [group] = groupLogins([makeModel('anthropic', 'opus'), legacy, proxy])
+
+    expect(group?.logins.map((login) => login.provider)).toEqual([
+      'anthropic',
+      'anthropic-2',
+      'anthropic-account-2'
+    ])
+  })
+
   // Catches a model only a slot has (logged out of the base, or a catalog difference) vanishing:
   // it stands in for the base, under the base's provider, and is served by that login.
   test('a model only a slot has is exposed under the base provider', () => {

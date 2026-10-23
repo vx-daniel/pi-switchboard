@@ -21,6 +21,11 @@ export interface RouteHops {
 /**
  * Says whether a failure moves the request from one candidate to another.
  *
+ * @remarks
+ * A hop is between logins when both candidates are the same exposed model. An alias that lists
+ * one model twice therefore reaches its second entry only on `routing.logins.fallbackOn`'s
+ * classes: the stricter reading of the two.
+ *
  * @param hops - the classes named for each kind of hop
  * @param from - the candidate that failed
  * @param to - a later candidate

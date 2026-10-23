@@ -11,6 +11,7 @@ import {
   backoffMs,
   clearAllCooldowns,
   clearCooldowns,
+  loginSubject,
   startCooldown
 } from '@proxy/pi/cooldowns'
 import { LATEST_DATE_MS } from '@proxy/pi/reset-time'
@@ -57,6 +58,8 @@ function exposed(provider: string, id: string): ExposedModel {
 const OPUS = exposed('anthropic', 'opus')
 const SONNET = exposed('anthropic', 'sonnet')
 const SOL = exposed('openai-codex', 'sol')
+/** The same model as {@link OPUS} under a second login (#227). */
+const OPUS_2: ExposedModel = { ...OPUS, login: 'anthropic-2' }
 
 beforeEach(() => {
   clearAllCooldowns()
@@ -148,6 +151,27 @@ describe('cooldownSkip', () => {
     })
     expect(cooldownSkip(chain, 0, hops(['unavailable', 'timeout']), NOW)).toBeUndefined()
     expect(cooldownSkip(chain, 1, hops(['rate_limit']), NOW)).toBeUndefined()
+  })
+
+  // Catches a 503 (the model is overloaded, under every login) answered by trying the same model
+  // under the next login when only the alias names `unavailable`: the remaining logins are skipped
+  // and the next model is tried; a 429 on one login cools only that login (#227).
+  test("a model's cooldown covers its logins; a login's cools only itself", () => {
+    const route = [OPUS, OPUS_2, SOL]
+    const aliasNamesUnavailable: RouteHops = {
+      fallbackOn: new Set(['unavailable']),
+      loginFallbackOn: new Set(['rate_limit'])
+    }
+
+    startCooldown(loginSubject(OPUS), 'unavailable', MINUTE, NOW)
+    expect(cooldownSkip(route, 0, aliasNamesUnavailable, NOW)).toMatchObject({ scope: 'model' })
+    expect(cooldownSkip(route, 1, aliasNamesUnavailable, NOW)).toMatchObject({ scope: 'model' })
+    expect(cooldownSkip(route, 2, aliasNamesUnavailable, NOW)).toBeUndefined()
+
+    clearAllCooldowns()
+    startCooldown(loginSubject(OPUS), 'rate_limit', MINUTE, NOW)
+    expect(cooldownSkip(route, 0, aliasNamesUnavailable, NOW)).toMatchObject({ scope: 'provider' })
+    expect(cooldownSkip(route, 1, aliasNamesUnavailable, NOW)).toBeUndefined()
   })
 
   // Catches a chain making no call at all when every candidate is cooling: the one whose cooldown

@@ -22,27 +22,12 @@ import type { FailureClass } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import type { Attempt } from '@proxy/openai/responses'
-import {
-  activeCooldown,
-  type Cooldown,
-  type CooldownSubject,
-  startCooldown
-} from '@proxy/pi/cooldowns'
+import { activeCooldown, type Cooldown, loginSubject, startCooldown } from '@proxy/pi/cooldowns'
 import { type FailedResponse, resetAfterMs } from '@proxy/pi/reset-time'
 import { movesOn, type RouteHops } from '@proxy/server/route-hops'
 
 /** Logger for routing decisions, as for the chat route's other skips. */
 const chatLogger = proxyLogger('server', 'chat')
-
-/**
- * The cooldown subject a candidate is: its login, and the exposed model.
- *
- * @param candidate - the candidate
- * @returns the subject
- */
-export function loginSubject(candidate: ExposedModel): CooldownSubject {
-  return { provider: candidate.login, canonicalId: candidate.canonicalId }
-}
 
 /**
  * A later candidate's cooldown, when the hop to it from `from` is named for the cooldown's class:

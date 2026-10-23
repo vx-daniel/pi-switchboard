@@ -180,10 +180,12 @@ export function accountProvider(base: Provider, slot: AccountSlot): Provider {
  *
  * @remarks
  * A base that is not one of pi's built-in providers is refused: a `models.json` provider is
- * composed, not built in, and its key would be copied with it.
+ * composed, not built in, and its key would be copied with it. Only the explicit
+ * `{base}-account-N` form is warned about; a `{base}-N` ID of an unknown base is most likely a
+ * provider whose name ends in a number (`local-2`), and stays its own, silently.
  *
  * @param runtime - pi's model runtime
- * @param providerId - the slot, `{base}-N`
+ * @param providerId - the slot, `{base}-N` or `{base}-account-N`
  * @returns whether this call registered it; `false` when it already was, or it is no slot of a
  *   built-in provider
  */
@@ -194,9 +196,11 @@ export function registerAccountProvider(runtime: AccountRuntime, providerId: str
   }
   const fresh = builtinProviders().find((provider) => provider.id === slot.base)
   if (fresh === undefined) {
-    accountsLogger.warn('{provider} is no login slot of a built-in pi provider; not registered', {
-      provider: providerId
-    })
+    if (providerId === legacyAccountProviderId(slot.base, slot.number)) {
+      accountsLogger.warn('{provider} is no login slot of a built-in pi provider; not registered', {
+        provider: providerId
+      })
+    }
     return false
   }
   runtime.registerNativeProvider(accountProvider(fresh, { providerId, number: slot.number }))

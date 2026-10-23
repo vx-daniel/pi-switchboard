@@ -519,8 +519,12 @@ fallback chain skips a provider that is close to its limit, before it refuses:
 - **The worse window decides.** A provider is below its reserve when any window it reports has
   less than that share left. The share left is rounded to six places, so `1 - 0.8` is `0.2` and
   a provider with exactly its reserve left is not below it.
-- **Chains only.** A request that names a model is always sent; a chain's last candidate is too.
-  Only candidates of an alias's chain are skipped, after the cooldown check (#68).
+- **Between candidates only.** A request with one candidate is always sent; a route's last
+  candidate is too. The candidates are an alias chain's models and, since #227, a model's logins,
+  so a request that names a model served by two logins skips the first while it is below its
+  reserve; reserves are keyed by login. Skips are checked after the cooldown check (#68). The
+  reserve is its own configured control under principle VI, not a failure class: it needs no
+  `quota` in a `fallbackOn`.
 - **Never skip them all.** A provider below its reserve is skipped only when a later candidate is
   a real alternative: one above its reserve and not cooling down for a class the alias names (a
   candidate the chain will skip for its cooldown is none). When every alternative is below its

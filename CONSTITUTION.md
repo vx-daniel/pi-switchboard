@@ -14,8 +14,9 @@ Modified sections:
   base provider's, exposed once; the login is a routing detail
 - VI. Routing Transparency: every login of an exposed model's provider may serve it; `x_pi.login`
   names the serving login; a request that names a model never moves to another model but may move
-  to another login on the classes `routing.logins.fallbackOn` names; that setting's default,
-  `["rate_limit"]`, is the one recorded default routing has
+  to another login on the classes `routing.logins.fallbackOn` names, or past a login below its
+  `routing.reserve`; that setting's default, `["rate_limit"]`, is the one recorded default
+  routing has
 Templates requiring updates:
 - ✅ AGENTS.md: "Core constraints" names login routing and the recorded default
 - ✅ PLAN.md, README.md: the Accounts section and the config table describe it
@@ -149,7 +150,7 @@ Routing (aliases, fallback chains, cooldowns, quota awareness, a provider's logi
 - A request is only ever routed to models the exposure config exposes; an alias or fallback never reaches a hidden model (principle IV). Every login of an exposed model's provider may serve it.
 - A response says which model and login served it, under `x_pi` (`model`, and `x_pi.login` when the model has more than one login), and the log records every hop (the requested model, each model and login tried, and why it moved on), by name, never credential.
 - A request with no routing configured behaves exactly as without routing: the model it names, or an error. The one recorded default is `routing.logins.fallbackOn: ["rate_limit"]`: a second login to a provider serves a rate-limited model's request without further configuration, which is why a second login exists.
-- Fallback only follows failures the configuration names (for example a rate limit or an outage), never a client error such as an invalid request. A request that names a model never moves to another model; it moves to another login of the same provider only on the classes `routing.logins.fallbackOn` names.
+- Fallback only follows failures the configuration names (for example a rate limit or an outage), never a client error such as an invalid request. A request that names a model never moves to another model; it moves to another login of the same provider only on the classes `routing.logins.fallbackOn` names, or past a login below the share its `routing.reserve` entry keeps free.
 
 Rationale: routing changes which model and account a client is billed on. Doing that silently would break the predictability principle I protects and the trust the operator places in the exposure config.
 

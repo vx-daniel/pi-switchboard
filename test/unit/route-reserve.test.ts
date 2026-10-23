@@ -60,6 +60,8 @@ function reported(provider: string, used: { fiveHour: number; sevenDay: number }
 }
 
 const OPUS = exposed('anthropic', 'opus')
+/** The same model under a second login (#227). */
+const OPUS_2 = { ...OPUS, login: 'anthropic-2', model: { ...OPUS.model, provider: 'anthropic-2' } }
 const SOL = exposed('openai-codex', 'sol')
 const FLASH = exposed('google', 'flash')
 
@@ -91,6 +93,18 @@ describe('reserveSkip', () => {
 
     expect(skip).toMatchObject({ provider: 'anthropic', window: '7d', reserve: 0.2 })
     expect(skip?.left).toBeCloseTo(0.15)
+  })
+
+  // Catches a model's second login not used while the first is below its reserve (#227): with no
+  // alias, the reserve still chooses between a model's logins, each keyed by its own login, and
+  // needs no class in `routing.logins.fallbackOn`.
+  test('skips a login below its reserve for the same model under another login', () => {
+    reported('anthropic', { fiveHour: 0.9, sevenDay: 0.1 })
+
+    expect(reserveSkip([OPUS, OPUS_2], 0, keeping({ anthropic: 0.2 }), NOW)).toMatchObject({
+      provider: 'anthropic'
+    })
+    expect(reserveSkip([OPUS, OPUS_2], 0, keeping({ 'anthropic-2': 0.2 }), NOW)).toBeUndefined()
   })
 
   // Catches a skip without cause: at or above the reserve, with no reserve set for the provider,

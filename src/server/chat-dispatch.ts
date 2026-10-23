@@ -32,7 +32,7 @@ import { type Attempt, buildChatCompletion, type ResponseRoute } from '@proxy/op
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { streamToSSE } from '@proxy/openai/sse'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
-import { clearCooldowns } from '@proxy/pi/cooldowns'
+import { clearCooldowns, loginSubject } from '@proxy/pi/cooldowns'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
@@ -54,7 +54,7 @@ import {
   HTTP_TOO_MANY_REQUESTS,
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
-import { attemptOf, loginSubject, recordCooldown, skipCooling } from '@proxy/server/route-cooldowns'
+import { attemptOf, recordCooldown, skipCooling } from '@proxy/server/route-cooldowns'
 import { nextFor, type RouteHops } from '@proxy/server/route-hops'
 import type { ChatRoute } from '@proxy/server/route-plan'
 import { skipBelowReserve } from '@proxy/server/route-reserve'
