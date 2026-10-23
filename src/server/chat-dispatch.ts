@@ -28,9 +28,8 @@ import type { FailureClass, Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ConversionSuccess } from '@proxy/openai/messages'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
-import { type Attempt, buildChatCompletion, type ResponseRoute } from '@proxy/openai/responses'
+import type { Attempt, ResponseRoute } from '@proxy/openai/responses'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
-import { streamToSSE } from '@proxy/openai/sse'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
 import { clearCooldowns, loginSubject } from '@proxy/pi/cooldowns'
 import { recordQuota } from '@proxy/pi/quota'
@@ -38,6 +37,7 @@ import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
 import { type ActiveRequestHandle, requestOutcome } from '@proxy/server/active-requests'
 import { answeredEffort, withAliasEffort } from '@proxy/server/alias-effort'
+import type { AnswerFormat } from '@proxy/server/answer-formats'
 import {
   CREDENTIALS_MISSING,
   forClientKey,
@@ -321,6 +321,8 @@ export interface DispatchJob extends RouteHops {
   readonly attempts: readonly Attempt[]
   readonly context: PiContext
   readonly request: ChatCompletionRequest
+  /** How the answer is written: as a chat completion, or a Responses API response (#140). */
+  readonly format: AnswerFormat
   readonly options: CompletionOptions
   /**
    * The request's entry among those in flight (the console's sidebar): told each attempt's model,
@@ -368,20 +370,6 @@ function upstreamFailure(
 }
 
 /**
- * Reads whether the request asked for a final usage chunk.
- *
- * @param request - the validated request
- * @returns whether `stream_options.include_usage` is true
- */
-function wantsUsage(request: ChatCompletionRequest): boolean {
-  return (
-    request.stream_options !== null &&
-    request.stream_options !== undefined &&
-    request.stream_options.include_usage === true
-  )
-}
-
-/**
  * Relays a started stream's events, counting a failure for an `error` event: the attempt was
  * answered, but the answer broke off.
  *
@@ -419,7 +407,7 @@ async function attemptStream(
   candidate: ExposedModel,
   job: DispatchJob
 ): Promise<AttemptOutcome> {
-  const { requestId, context, request, options, active } = job
+  const { context, request, options, active } = job
   const start = performance.now()
   // The client's own departure aborts the call, which then fails: not an upstream failure, and
   // nobody is waiting for the answer.
@@ -450,14 +438,10 @@ async function attemptStream(
 
   const key = routeKey(job.alias, candidate)
   const respond = (route: ResponseRoute): Response => {
-    const includeUsage = wantsUsage(request)
     honoContext.header('content-type', 'text/event-stream')
     honoContext.header('cache-control', 'no-cache')
     honoContext.header('connection', 'keep-alive')
-    chatLogger.debug('Streaming {model} with includeUsage={includeUsage}', {
-      model: route.model,
-      includeUsage
-    })
+    chatLogger.debug('Streaming {model}', { model: route.model })
     return honoStream(honoContext, async (stream) => {
       // Hono starts this before `honoStream` returns, so the dispatch's `settled` sees the stream
       // and leaves its end to the `finally` below; were it never to run, `settled` ends it.
@@ -465,15 +449,15 @@ async function attemptStream(
       let frameCount = 0
       let failed = false
       const countFailure = streamFailureCounter(key, options.signal)
+      const formatted = job.format.stream(
+        countingFailures(startingWith(first, events), (failure) => {
+          failed = true
+          countFailure(failure)
+        }),
+        route
+      )
       try {
-        for await (const frame of streamToSSE(
-          countingFailures(startingWith(first, events), (failure) => {
-            failed = true
-            countFailure(failure)
-          }),
-          { requestId, route },
-          includeUsage
-        )) {
+        for await (const frame of formatted.frames) {
           await stream.write(frame)
           frameCount += 1
         }
@@ -490,8 +474,7 @@ async function attemptStream(
           frameCount,
           durationMs: Math.round(performance.now() - start)
         })
-        await stream.write(`data: ${JSON.stringify(mapped.body)}\n\n`)
-        await stream.write('data: [DONE]\n\n')
+        for (const frame of formatted.fail(mapped.body)) await stream.write(frame)
       } finally {
         active.end(requestOutcome(failed, options.signal))
       }
@@ -514,7 +497,7 @@ async function attemptComplete(
   candidate: ExposedModel,
   job: DispatchJob
 ): Promise<AttemptOutcome> {
-  const { requestId, context, request, options } = job
+  const { context, request, options } = job
   const start = performance.now()
   // A client that left gets no fallback. pi ends the call `aborted` (or the SDK throws), which
   // maps to a failure; it is logged and answered as the single-model path always did, though
@@ -537,7 +520,7 @@ async function attemptComplete(
     }
     return {
       kind: 'answered',
-      respond: (route) => honoContext.json(buildChatCompletion(requestId, message, route))
+      respond: (route) => honoContext.json(job.format.complete(message, route))
     }
   } catch (err: unknown) {
     return final(

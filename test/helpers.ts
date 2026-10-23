@@ -139,6 +139,7 @@ export function testConfig(): ServerConfig {
     agenticEnabled: false,
     remoteImagesEnabled: false,
     docsUiEnabled: false,
+    responsesApiEnabled: false,
     statsEnabled: false,
     maxBodySize: 52428800,
     upstreamTimeoutMs: 120000,

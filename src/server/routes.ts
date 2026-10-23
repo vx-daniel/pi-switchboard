@@ -37,6 +37,7 @@ import { convertTools } from '@proxy/openai/tools'
 import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/validate'
 import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
 import { beginActiveRequest, requestOutcome } from '@proxy/server/active-requests'
+import { type AnswerFormat, chatFormat } from '@proxy/server/answer-formats'
 import { dispatchChat, findCredentialedStart } from '@proxy/server/chat-dispatch'
 import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
@@ -58,6 +59,8 @@ import {
   usageDescription,
   usageQuerySchema
 } from '@proxy/server/openapi'
+import { rejectionResponse } from '@proxy/server/request-rejection'
+import { registerResponsesRoute } from '@proxy/server/responses-route'
 import { planRoute } from '@proxy/server/route-plan'
 import type { ProxyEnv } from '@proxy/server/types'
 import { createUsageAnswer } from '@proxy/server/usage'
@@ -183,21 +186,10 @@ async function getExposure(configReader: ExposureConfigReader): Promise<ModelExp
  * @returns the error response
  */
 function rejectChatRequest(context: Context, body: unknown): Response {
-  const rejection = chatRequestRejection(body)
-  // The field name only: validation messages can echo request values.
-  chatLogger.warn('Rejected chat request: invalid field {param} ({status})', {
-    param: rejection.param ?? 'unknown',
-    status: rejection.status
-  })
-  if (rejection.status === HTTP_UNPROCESSABLE_ENTITY) {
-    return context.json(
-      unsupportedParameter(rejection.param ?? 'unknown', rejection.message),
-      HTTP_UNPROCESSABLE_ENTITY
-    )
-  }
-  return context.json(
-    invalidRequest(rejection.message, rejection.param ?? undefined),
-    HTTP_BAD_REQUEST
+  return rejectionResponse(
+    context,
+    chatRequestRejection(body),
+    'Rejected chat request: invalid field {param} ({status})'
   )
 }
 
@@ -290,7 +282,7 @@ function buildPiContext(honoContext: ProxyContext, request: ChatRequest): Step<P
 }
 
 /** What the chat handler needs from the app beyond the request: set once when routes are built. */
-interface ChatRouteSettings {
+export interface ChatRouteSettings {
   /** The server config; `upstreamTimeoutMs` and `remoteImagesEnabled` are read. */
   readonly config: ServerConfig
   /** Where the exposure config comes from. */
@@ -300,20 +292,65 @@ interface ChatRouteSettings {
 }
 
 /**
- * Handles `POST /v1/chat/completions` for a validated request: resolves the model or alias, checks
- * upstream auth, inlines remote images, builds the pi context, then runs it on the model or the
- * alias's fallback chain (`chat-dispatch.ts`, #67).
- *
- * @param context - the request's Hono context
- * @param request - the request body, as the route's `validator('json')` parsed it
- * @param settings - the server config, exposure config reader and remote image policy
- * @returns the completion, or the first error response a step produces
- * @throws Error when the exposure config is invalid (from {@link getExposure})
+ * How a validated request is answered, beyond the chat request it runs as: the answer's format,
+ * and a change to the pi context once it is built (the Responses API's replayed reasoning, #140).
  */
-async function handleChatCompletion(
+export interface RunShape {
+  /**
+   * Builds the answer's format, once the request ID is known.
+   *
+   * @param requestId - the proxy's request ID
+   * @returns the format
+   */
+  format(requestId: string): AnswerFormat
+  /**
+   * Changes the pi context before it is sent.
+   *
+   * @param piContext - the context built from the chat messages
+   * @returns the context to send
+   */
+  adjust(piContext: PiContext): PiContext
+}
+
+/**
+ * The chat route's shape: chat completions, the pi context as built.
+ *
+ * @param request - the validated chat request
+ * @returns the shape
+ */
+function chatShape(request: ChatRequest): RunShape {
+  return {
+    format: (requestId) => chatFormat(requestId, request),
+    adjust: (piContext) => piContext
+  }
+}
+
+/** Runs a validated chat request in a given shape: {@link runChat}, as the Responses route gets it. */
+export type ChatRunner = (
   context: ProxyContext,
   request: ChatRequest,
-  settings: ChatRouteSettings
+  settings: ChatRouteSettings,
+  shape: RunShape
+) => Promise<Response>
+
+/**
+ * Runs a validated chat request: resolves the model or alias, checks upstream auth, inlines remote
+ * images, builds the pi context, then runs it on the model or the alias's fallback chain
+ * (`chat-dispatch.ts`, #67), answering in the shape's format.
+ *
+ * @param context - the request's Hono context
+ * @param request - the chat request: the body as the chat route validated it, or a Responses
+ *   request translated into one
+ * @param settings - the server config, exposure config reader and remote image policy
+ * @param shape - the answer's format, and any change to the pi context
+ * @returns the answer, or the first error response a step produces
+ * @throws Error when the exposure config is invalid (from {@link getExposure})
+ */
+async function runChat(
+  context: ProxyContext,
+  request: ChatRequest,
+  settings: ChatRouteSettings,
+  shape: RunShape
 ): Promise<Response> {
   const { config, configReader, remoteImageFetch } = settings
   const requestId = context.get('requestId')
@@ -393,8 +430,9 @@ async function handleChatCompletion(
       loginFallbackOn: route.loginFallbackOn,
       reserve: requestConfig.reserve ?? {},
       attempts: start.attempts,
-      context: built.value,
+      context: shape.adjust(built.value),
       request,
+      format: shape.format(requestId),
       options: { upstreamApiKey, signal, upstreamTimeoutMs: config.upstreamTimeoutMs },
       active
     })
@@ -421,6 +459,7 @@ export function createRoutes(
   remoteImageFetch: RemoteImageFetchOptions = STRICT_REMOTE_IMAGE_FETCH
 ): Hono<ProxyEnv> {
   const routes = new Hono<ProxyEnv>()
+  const settings: ChatRouteSettings = { config, configReader, remoteImageFetch }
 
   // --- GET /v1/models ---
   routes.get('/v1/models', describeRoute(listModelsDescription), async (context) => {
@@ -502,13 +541,14 @@ export function createRoutes(
     validator('json', chatRequestBodySchema, (result, context) =>
       result.success ? undefined : rejectChatRequest(context, result.data)
     ),
-    (context) =>
-      handleChatCompletion(context, context.req.valid('json'), {
-        config,
-        configReader,
-        remoteImageFetch
-      })
+    (context) => {
+      const request = context.req.valid('json')
+      return runChat(context, request, settings, chatShape(request))
+    }
   )
+
+  // --- POST /v1/responses (experimental, opt-in: #140) ---
+  registerResponsesRoute(routes, settings, runChat)
 
   // --- Unsupported endpoints: clear errors (documented by hand in `@proxy/server/openapi`) ---
   for (const path of UNSUPPORTED_ENDPOINTS) {

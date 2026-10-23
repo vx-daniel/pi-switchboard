@@ -90,10 +90,19 @@ export function logValidatedChatRequest(data: ChatCompletionRequest): void {
  *   dotted path as `param`, or `null` at the root)
  */
 export function chatRequestRejection(body: unknown): ValidationError {
-  const rejected = rejectedFieldRejection(body)
-  if (rejected !== undefined) return rejected
+  return rejectedFieldRejection(body) ?? schemaRejection(chatCompletionRequestSchema, body)
+}
 
-  const result = chatCompletionRequestSchema.safeParse(body)
+/**
+ * Says why a body fails a request schema: its first issue, made specific.
+ *
+ * @param schema - the route's request schema
+ * @param body - the parsed JSON request body, which does not match the schema
+ * @returns a 422 for unknown fields, or a 400 for any other invalid value (with the dotted path
+ *   as `param`, or `null` at the root)
+ */
+export function schemaRejection(schema: z.ZodType, body: unknown): ValidationError {
+  const result = schema.safeParse(body)
   // Report only the first Zod issue, for a clean message
   const issues = result.success ? [] : result.error.issues
   const firstIssue = issues[0]

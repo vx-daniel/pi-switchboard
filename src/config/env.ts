@@ -139,6 +139,8 @@ export interface ServerConfig {
   readonly remoteImagesEnabled: boolean
   /** Whether the Swagger UI docs page is served. */
   readonly docsUiEnabled: boolean
+  /** Whether the experimental Responses API (`POST /v1/responses`, #140) answers. */
+  readonly responsesApiEnabled: boolean
   /** Whether per-minute traffic stats are kept in the stats file (#216). */
   readonly statsEnabled: boolean
   /** Maximum request body size in bytes. */
@@ -177,6 +179,7 @@ const RUNTIME_ENV_SUFFIXES = [
   'AUTH_TOKEN',
   'REMOTE_IMAGES',
   'DOCS_UI',
+  'RESPONSES_API',
   'STATS',
   'MAX_BODY_SIZE',
   'UPSTREAM_TIMEOUT_MS',
@@ -277,6 +280,7 @@ export interface CliOverrides {
   authToken?: string | undefined
   remoteImages?: boolean | undefined
   docsUi?: boolean | undefined
+  responsesApi?: boolean | undefined
   stats?: boolean | undefined
   maxBodySizeMb?: number | undefined
   upstreamTimeoutSec?: number | undefined
@@ -329,6 +333,14 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     cli.docsUi ??
     parseBoolean('PI_SWITCHBOARD_DOCS_UI', process.env.PI_SWITCHBOARD_DOCS_UI, file.docsUi)
 
+  const responsesApiEnabled =
+    cli.responsesApi ??
+    parseBoolean(
+      'PI_SWITCHBOARD_RESPONSES_API',
+      process.env.PI_SWITCHBOARD_RESPONSES_API,
+      file.responsesApi
+    )
+
   const statsEnabled =
     cli.stats ?? parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats)
 
@@ -360,6 +372,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     agenticEnabled,
     remoteImagesEnabled,
     docsUiEnabled,
+    responsesApiEnabled,
     statsEnabled,
     maxBodySize,
     upstreamTimeoutMs,

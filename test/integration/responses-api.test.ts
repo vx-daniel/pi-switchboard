@@ -1,0 +1,408 @@
+/**
+ * The experimental Responses API (`POST /v1/responses`, #140), end to end through the official
+ * `openai` SDK's `client.responses.create()`: text, streamed and not; a client-side tool round trip;
+ * reasoning, replayed through `encrypted_content`; images; the effort report; and the fields it
+ * refuses. The app runs in process (the SDK's `fetch` is the app's), with pi's real OpenAI chat
+ * completions client in front of the mock provider.
+ */
+
+import type { ProxyEnv } from '@proxy/server/types'
+import { isRecord } from '@proxy/utils/guards'
+import type { Hono } from 'hono'
+import OpenAI from 'openai'
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
+
+import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import {
+  chunk,
+  finishChunk,
+  type MockProvider,
+  type MockReply,
+  sse,
+  startMockProvider,
+  textChunks,
+  toolCallChunks
+} from '../fixtures/mock-provider'
+import { jsonBody, testApp, testConfig } from '../helpers'
+
+const HTTP_BAD_REQUEST = 400
+const HTTP_NOT_FOUND = 404
+const HTTP_UNPROCESSABLE_ENTITY = 422
+const USAGE = { prompt_tokens: 3, completion_tokens: 2 }
+/** A one-pixel PNG, for the image request. */
+const PNG_DATA_URI =
+  'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+
+/**
+ * Answers with a weather tool call, or, once the conversation has its result, with text.
+ *
+ * @param response - the response to write
+ * @param request - the request, whose messages say whether the tool has answered
+ */
+const toolLoop: MockReply = async (response, request) => {
+  const body = isRecord(request.body) ? request.body : {}
+  const messages = Array.isArray(body['messages']) ? body['messages'] : []
+  const answered = messages.some((message) => isRecord(message) && message['role'] === 'tool')
+  const reply = answered
+    ? sse([...textChunks('Sunny'), finishChunk('stop', USAGE)])
+    : sse([
+        ...toolCallChunks(0, {
+          id: 'call_weather',
+          name: 'get_weather',
+          argumentParts: ['{"city":', '"Oslo"}']
+        }),
+        finishChunk('tool_calls', USAGE)
+      ])
+  await reply(response, request)
+}
+
+let mock: MockProvider
+let agentDir: FixtureAgentDir
+
+beforeAll(async () => {
+  mock = await startMockProvider({
+    text: sse([...textChunks('Hel', 'lo'), finishChunk('stop', USAGE)]),
+    tools: toolLoop,
+    thinker: sse([
+      chunk({ role: 'assistant', reasoning_content: 'Think' }),
+      chunk({ reasoning_content: 'ing.' }),
+      ...textChunks('Done'),
+      finishChunk('stop', USAGE)
+    ]),
+    long: sse([...textChunks('Cut'), finishChunk('length', USAGE)])
+  })
+  agentDir = await loadFixtureAgentDir({
+    modelsJson: {
+      providers: {
+        mock: {
+          ...mock.provider(),
+          models: [
+            { id: 'text', input: ['text', 'image'] },
+            { id: 'tools' },
+            { id: 'thinker', reasoning: true },
+            { id: 'long' }
+          ]
+        }
+      }
+    }
+  })
+})
+
+afterAll(async () => {
+  vi.unstubAllEnvs()
+  await mock.close()
+  agentDir.remove()
+})
+
+/**
+ * Builds the app with the Responses API on.
+ *
+ * @returns the app
+ */
+function app(): Hono<ProxyEnv> {
+  return testApp({ ...testConfig(), responsesApiEnabled: true })
+}
+
+/**
+ * Builds an SDK client whose requests go to the app in process.
+ *
+ * @returns the client
+ */
+function client(): OpenAI {
+  const served = app()
+  return new OpenAI({
+    apiKey: 'notarealsecret-sdk-key',
+    baseURL: 'http://proxy.test/v1',
+    maxRetries: 0,
+    fetch: async (input, init) => served.request(input, init)
+  })
+}
+
+/**
+ * Keeps the output items a client sends back as input: messages, function calls and reasoning.
+ *
+ * @param output - a response's output
+ * @returns the items, typed as input
+ */
+function asInput(
+  output: readonly OpenAI.Responses.ResponseOutputItem[]
+): OpenAI.Responses.ResponseInputItem[] {
+  return output.filter(
+    (
+      outputItem
+    ): outputItem is
+      | OpenAI.Responses.ResponseOutputMessage
+      | OpenAI.Responses.ResponseFunctionToolCall
+      | OpenAI.Responses.ResponseReasoningItem =>
+      outputItem.type === 'message' ||
+      outputItem.type === 'function_call' ||
+      outputItem.type === 'reasoning'
+  )
+}
+
+/**
+ * Reads what the last upstream request sent.
+ *
+ * @returns its body
+ */
+function lastUpstream(): Record<string, unknown> {
+  const body = mock.requests.at(-1)?.body
+  return isRecord(body) ? body : {}
+}
+
+/**
+ * Posts a raw body to `/v1/responses`.
+ *
+ * @param body - the request body
+ * @param on - whether the Responses API is on
+ * @returns the status and parsed body
+ */
+async function post(body: unknown, on = true): Promise<{ status: number; body: unknown }> {
+  const served = on ? app() : testApp()
+  const response = await served.request('/v1/responses', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  return { status: response.status, body: await jsonBody(response) }
+}
+
+describe('the Responses API', () => {
+  // Catches the route answering while the operator has not turned it on, or the 404 not saying how.
+  test('is off by default, and says how to turn it on', async () => {
+    const answer = await post({ model: 'mock/text', input: 'Hi' }, false)
+
+    expect(answer.status).toBe(HTTP_NOT_FOUND)
+    expect(JSON.stringify(answer.body)).toContain('--responses-api')
+  })
+
+  // Catches a response the SDK can't read: `output_text` is the SDK's own join of the message
+  // items, so it is empty unless the items are shaped as OpenAI's.
+  test('answers text, non-streamed', async () => {
+    const response = await client().responses.create({ model: 'mock/text', input: 'Hi' })
+
+    expect(response.output_text).toBe('Hello')
+    expect(response).toMatchObject({
+      object: 'response',
+      status: 'completed',
+      model: 'mock/text',
+      store: false,
+      usage: { input_tokens: 3, output_tokens: 2, total_tokens: 5 }
+    })
+    expect(lastUpstream()['messages']).toEqual([{ role: 'user', content: 'Hi' }])
+  })
+
+  // Catches events out of OpenAI's order, a missing terminal event, or deltas that don't add up to
+  // the text: SDK helpers rebuild the text from the deltas.
+  test('streams text as response events', async () => {
+    const stream = await client().responses.create({
+      model: 'mock/text',
+      input: 'Hi',
+      instructions: 'Be brief.',
+      stream: true
+    })
+    const types: string[] = []
+    let text = ''
+    let sequence = -1
+    for await (const event of stream) {
+      types.push(event.type)
+      expect(event.sequence_number).toBe(sequence + 1)
+      sequence = event.sequence_number
+      if (event.type === 'response.output_text.delta') text += event.delta
+    }
+
+    expect(text).toBe('Hello')
+    expect(types).toEqual([
+      'response.created',
+      'response.in_progress',
+      'response.output_item.added',
+      'response.content_part.added',
+      'response.output_text.delta',
+      'response.output_text.delta',
+      'response.output_text.done',
+      'response.content_part.done',
+      'response.output_item.done',
+      'response.completed'
+    ])
+    expect(lastUpstream()['messages']).toEqual([
+      { role: 'system', content: 'Be brief.' },
+      { role: 'user', content: 'Hi' }
+    ])
+  })
+
+  // Catches a tool call the client can't answer (no `call_id`, arguments not JSON), or its output
+  // not reaching the model as the result of that call.
+  test('runs a client-side tool round trip', async () => {
+    const sdk = client()
+    const tools = [
+      {
+        type: 'function' as const,
+        name: 'get_weather',
+        parameters: { type: 'object', properties: { city: { type: 'string' } } },
+        strict: false
+      }
+    ]
+    const first = await sdk.responses.create({ model: 'mock/tools', input: 'Weather?', tools })
+    const call = first.output.find((outputItem) => outputItem.type === 'function_call')
+    if (call?.type !== 'function_call') throw new Error('no function call')
+
+    const second = await sdk.responses.create({
+      model: 'mock/tools',
+      tools,
+      input: [
+        { role: 'user', content: 'Weather?' },
+        ...asInput(first.output),
+        { type: 'function_call_output', call_id: call.call_id, output: '12 C, clear' }
+      ]
+    })
+
+    expect(JSON.parse(call.arguments)).toEqual({ city: 'Oslo' })
+    expect(second.output_text).toBe('Sunny')
+    expect(lastUpstream()['messages']).toMatchObject([
+      { role: 'user', content: 'Weather?' },
+      {
+        role: 'assistant',
+        tool_calls: [{ id: call.call_id, function: { name: 'get_weather' } }]
+      },
+      { role: 'tool', tool_call_id: call.call_id, content: '12 C, clear' }
+    ])
+  })
+
+  // Catches reasoning dropped from the answer, the token missing when asked for, or the model not
+  // getting its reasoning back on the next turn: the stateless loop Codex CLI runs.
+  test('returns reasoning, and replays it from encrypted_content', async () => {
+    const sdk = client()
+    const first = await sdk.responses.create({
+      model: 'mock/thinker',
+      input: 'Why?',
+      include: ['reasoning.encrypted_content'],
+      store: false
+    })
+    const reasoning = first.output.find((outputItem) => outputItem.type === 'reasoning')
+
+    await sdk.responses.create({
+      model: 'mock/thinker',
+      input: [
+        { role: 'user', content: 'Why?' },
+        ...asInput(first.output),
+        { role: 'user', content: 'And?' }
+      ]
+    })
+
+    expect(reasoning).toMatchObject({
+      type: 'reasoning',
+      summary: [{ type: 'summary_text', text: 'Thinking.' }],
+      encrypted_content: expect.any(String) as unknown
+    })
+    expect(first.output_text).toBe('Done')
+    expect(lastUpstream()['messages']).toMatchObject([
+      { role: 'user', content: 'Why?' },
+      { role: 'assistant', content: 'Done', reasoning_content: 'Thinking.' },
+      { role: 'user', content: 'And?' }
+    ])
+  })
+
+  // Catches the token sent when nobody asked for it, or reasoning without one replayed as if it
+  // could be: only the summary text is left, which no model can take back.
+  test('without include, reasoning has no token and is not replayed', async () => {
+    const sdk = client()
+    const first = await sdk.responses.create({ model: 'mock/thinker', input: 'Why?' })
+    const reasoning = first.output.find((outputItem) => outputItem.type === 'reasoning')
+
+    await sdk.responses.create({
+      model: 'mock/thinker',
+      input: [
+        { role: 'user', content: 'Why?' },
+        ...asInput(first.output),
+        { role: 'user', content: 'And?' }
+      ]
+    })
+
+    expect(reasoning !== undefined && 'encrypted_content' in reasoning).toBe(false)
+    const assistant = (lastUpstream()['messages'] as unknown[])[1]
+    expect(isRecord(assistant) && 'reasoning_content' in assistant).toBe(false)
+  })
+
+  // Catches an image part dropped or misplaced on the way to the model.
+  test('sends an input image', async () => {
+    await client().responses.create({
+      model: 'mock/text',
+      input: [
+        {
+          role: 'user',
+          content: [
+            { type: 'input_text', text: 'What is this?' },
+            { type: 'input_image', image_url: PNG_DATA_URI, detail: 'auto' }
+          ]
+        }
+      ]
+    })
+
+    expect(lastUpstream()['messages']).toMatchObject([
+      {
+        role: 'user',
+        content: [
+          { type: 'text', text: 'What is this?' },
+          { type: 'image_url', image_url: { url: PNG_DATA_URI } }
+        ]
+      }
+    ])
+  })
+
+  // Catches the effort report and a length stop lost in translation: they come from the chat
+  // route's code, which this one runs through.
+  test('reports the effort it ran at, and a length stop as incomplete', async () => {
+    const answer = await post({ model: 'mock/long', input: 'Hi', reasoning: { effort: 'high' } })
+
+    expect(answer.body).toMatchObject({
+      status: 'incomplete',
+      incomplete_details: { reason: 'max_output_tokens' },
+      x_pi: { reasoning_effort: { requested: 'high', applied: 'none' } }
+    })
+  })
+
+  // Catches a field that needs state, or a hosted tool, accepted and ignored instead of refused by
+  // name (constitution principle I).
+  test.each([
+    [{ previous_response_id: 'resp_1' }, 'previous_response_id'],
+    [{ conversation: 'conv_1' }, 'conversation'],
+    [{ store: true }, 'store'],
+    [{ tools: [{ type: 'web_search' }] }, 'tools.0.type'],
+    [{ include: ['message.output_text.logprobs'] }, 'include.0'],
+    [{ top_logprobs: 2 }, 'top_logprobs'],
+    [{ verbosity: 'low' }, 'verbosity']
+  ])('refuses %j by name', async (extra, param) => {
+    const answer = await post({ model: 'mock/text', input: 'Hi', ...extra })
+
+    expect(answer.status).toBe(HTTP_UNPROCESSABLE_ENTITY)
+    expect(answer.body).toMatchObject({ error: { param } })
+  })
+
+  // Catches a forged or corrupted token replayed as if the proxy had written it.
+  test('refuses an encrypted_content it did not write', async () => {
+    const answer = await post({
+      model: 'mock/text',
+      input: [
+        { type: 'reasoning', id: 'rs_1', summary: [], encrypted_content: 'not-a-token' },
+        { role: 'user', content: 'Hi' }
+      ]
+    })
+
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
+    expect(answer.body).toMatchObject({ error: { param: 'input.0.encrypted_content' } })
+  })
+
+  // Catches the stored-response operations answering the generic unknown-route 404, or worse,
+  // falling through to another route.
+  test.each([
+    ['GET', '/v1/responses/resp_1'],
+    ['DELETE', '/v1/responses/resp_1'],
+    ['POST', '/v1/responses/resp_1/cancel'],
+    ['POST', '/v1/responses/compact']
+  ])('%s %s is not supported', async (method, path) => {
+    const response = await app().request(path, { method })
+
+    expect(response.status).toBe(HTTP_NOT_FOUND)
+    expect(JSON.stringify(await jsonBody(response))).toContain('is not supported by this proxy')
+  })
+})
