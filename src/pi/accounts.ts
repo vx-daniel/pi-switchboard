@@ -133,6 +133,9 @@ function refreshAs(base: Provider, id: string): NonNullable<Provider['refreshMod
  */
 export function accountProvider(base: Provider, number: number): Provider {
   const id = accountProviderId(base.id, number)
+  // A shallow copy: pi 1.3.0's built-in providers are plain objects of closures (`createProvider`),
+  // so no method relies on `this` or a prototype. The unit tests stream and refresh through the
+  // copy, so a pi change that broke this would fail them.
   const copy: Provider = {
     ...base,
     id,
