@@ -302,6 +302,7 @@ describe('normalizeConfig', () => {
       authToken: 'tok',
       remoteImages: true,
       docsUi: true,
+      responsesApi: true,
       stats: false,
       maxBodySizeMb: 100,
       upstreamTimeoutSec: 300,

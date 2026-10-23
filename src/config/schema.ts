@@ -321,6 +321,8 @@ const ProxyConfigSchema = z.object({
   remoteImages: z.boolean(),
   /** Serve the Swagger UI docs page at `/docs` (#129). */
   docsUi: z.boolean(),
+  /** Answer the experimental Responses API, `POST /v1/responses` (#140); off by default. */
+  responsesApi: z.boolean(),
   /** Keep per-minute traffic stats in a SQLite file in pi's agent dir, for the console (#216). */
   stats: z.boolean(),
   /** Max request body in MB. */
@@ -384,6 +386,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   authToken: '',
   remoteImages: false,
   docsUi: false,
+  responsesApi: false,
   stats: true,
   maxBodySizeMb: 50,
   upstreamTimeoutSec: 120,
@@ -611,6 +614,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     authToken: field('authToken', fields.authToken, () => DEFAULT_CONFIG.authToken),
     remoteImages: field('remoteImages', fields.remoteImages, () => DEFAULT_CONFIG.remoteImages),
     docsUi: field('docsUi', fields.docsUi, () => DEFAULT_CONFIG.docsUi),
+    responsesApi: field('responsesApi', fields.responsesApi, () => DEFAULT_CONFIG.responsesApi),
     stats: field('stats', fields.stats, () => DEFAULT_CONFIG.stats),
     maxBodySizeMb: field(
       'maxBodySizeMb',
@@ -825,6 +829,7 @@ export function configToEnv(config: ProxyConfig): Record<string, string> {
   }
   env['PI_SWITCHBOARD_REMOTE_IMAGES'] = String(config.remoteImages)
   env['PI_SWITCHBOARD_DOCS_UI'] = String(config.docsUi)
+  env['PI_SWITCHBOARD_RESPONSES_API'] = String(config.responsesApi)
   env['PI_SWITCHBOARD_STATS'] = String(config.stats)
   env['PI_SWITCHBOARD_MAX_BODY_SIZE'] = String(config.maxBodySizeMb * BYTES_PER_MB)
   env['PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS'] = String(config.upstreamTimeoutSec * MS_PER_SECOND)

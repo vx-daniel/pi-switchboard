@@ -59,6 +59,11 @@ export const SERVER_ARGS = {
     description:
       'Serve the Swagger UI docs page at /docs (off by default; its scripts load from a CDN)'
   },
+  'responses-api': {
+    type: 'boolean',
+    description:
+      'Answer the experimental Responses API, POST /v1/responses (off by default; stateless, function tools only)'
+  },
   'stats': {
     type: 'boolean',
     description:
@@ -86,6 +91,7 @@ export interface CliArgs {
   'auth-token'?: string | undefined
   'remote-images'?: boolean | undefined
   'docs-ui'?: boolean | undefined
+  'responses-api'?: boolean | undefined
   'stats'?: boolean | undefined
   'max-body-size'?: string | undefined
   'upstream-timeout'?: string | undefined
@@ -157,6 +163,9 @@ function buildCliOverrides(args: CliArgs): CliOverrides {
   }
   if (args['docs-ui'] !== undefined) {
     cli.docsUi = args['docs-ui']
+  }
+  if (args['responses-api'] !== undefined) {
+    cli.responsesApi = args['responses-api']
   }
   if (args.stats !== undefined) {
     cli.stats = args.stats
@@ -270,6 +279,7 @@ export function logEffectiveConfig(config: ServerConfig): void {
     agenticEnabled: config.agenticEnabled,
     remoteImagesEnabled: config.remoteImagesEnabled,
     docsUiEnabled: config.docsUiEnabled,
+    responsesApiEnabled: config.responsesApiEnabled,
     statsEnabled: config.statsEnabled,
     maxBodySize: config.maxBodySize,
     upstreamTimeoutMs: config.upstreamTimeoutMs,

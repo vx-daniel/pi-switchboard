@@ -439,7 +439,8 @@ serving model and login reported under `x_pi` and in the log.
 
 ## Phase 6 — More of OpenAI's API
 
-- [ ] Responses API, stateless (#140): experimental first, then added to PLAN's "Stable surface"
+- [x] Responses API, stateless (#140), experimental: `POST /v1/responses` behind `responsesApi`; text, function tools, images, reasoning items with `encrypted_content` replay for every model; spec-checked against `CreateResponse`, `Response` and `ResponseStreamEvent`; the stored-response operations answer "not supported"
+- [ ] Responses API: Codex CLI end to end (it may send non-function `custom` tools), then promote to PLAN's "Stable surface"
 - [x] `prompt_cache_key` → pi's `sessionId`, 64-character limit, Zed capability on (#39)
 
 ## Open decisions

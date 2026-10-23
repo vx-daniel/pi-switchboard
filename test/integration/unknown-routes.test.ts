@@ -20,8 +20,8 @@ describe('a request no route matches', () => {
   // Catches the plain-text fallback: a client parsing the body as JSON fails on it, and an
   // OpenAI SDK reports a parse error instead of the 404.
   test.each([
-    ['GET', '/v1/responses'],
-    ['POST', '/v1/responses'],
+    ['GET', '/v1/vector_stores'],
+    ['POST', '/v1/moderations'],
     ['GET', '/v1/pi/models'],
     ['GET', '/v1/chat/completion'],
     ['GET', '/v1/chat/completions'],

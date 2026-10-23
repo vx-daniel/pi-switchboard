@@ -8,6 +8,7 @@
 
 import { readFileSync } from 'node:fs'
 
+import { createResponseRequestSchema } from '@proxy/openai/responses-api/request-schema'
 import { chatCompletionRequestSchema } from '@proxy/openai/schemas'
 import { isRecord } from '@proxy/utils/guards'
 import * as z from 'zod'
@@ -31,6 +32,14 @@ export const openaiRequestSchema = openaiSchemas['CreateChatCompletionRequest']
 
 /** The proxy's request schema, as JSON Schema, in the shape a client sends it. */
 export const proxyRequestSchema: unknown = z.toJSONSchema(chatCompletionRequestSchema, {
+  io: 'input'
+})
+
+/** OpenAI's Responses API request schema (#140). */
+export const openaiResponsesRequestSchema = openaiSchemas['CreateResponse']
+
+/** The proxy's Responses API request schema, as JSON Schema, in the shape a client sends it. */
+export const proxyResponsesRequestSchema: unknown = z.toJSONSchema(createResponseRequestSchema, {
   io: 'input'
 })
 

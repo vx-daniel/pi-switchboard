@@ -75,6 +75,7 @@ export function createApp(
   app.use('*', disconnectMiddleware())
   // Ahead of the body size limit and proxy auth, so a chat request they turn away is recorded too.
   app.use('/v1/chat/completions', rejectedChatMiddleware())
+  app.use('/v1/responses', rejectedChatMiddleware())
   app.use('*', bodySizeLimitMiddleware(config))
 
   // The OpenAPI document and the docs page, open like `/healthz`: registered before proxy auth.
@@ -105,6 +106,7 @@ export function createApp(
   // The old upstream key header (#65), on the one route that reads the key, after proxy auth: an
   // unauthenticated caller gets the 401 first, and probes of the open paths are not affected.
   app.use('/v1/chat/completions', renamedHeaderMiddleware())
+  app.use('/v1/responses', renamedHeaderMiddleware())
   // `/healthz` itself stays open for liveness probes; its detail endpoints name providers and
   // models. Not `/healthz/*`: Hono's wildcard also matches the bare `/healthz`.
   app.use('/healthz/:check{.+}', authMiddleware)

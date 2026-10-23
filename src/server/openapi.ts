@@ -143,7 +143,7 @@ export const DOCS_PATH = '/docs'
 export const SWAGGER_UI_VERSION = '5.34.0'
 
 /** Tag of the OpenAI-compatible routes. */
-const OPENAI_TAG = 'OpenAI-compatible'
+export const OPENAI_TAG = 'OpenAI-compatible'
 /** Tag of the `/v1/switchboard/` routes. */
 const SWITCHBOARD_TAG = 'Switchboard'
 /** Tag of the health endpoints. */
@@ -174,7 +174,9 @@ export const UNSUPPORTED_ENDPOINTS = [
   '/v1/files/*',
   '/v1/batches',
   '/v1/batches/*',
-  '/v1/fine_tuning/*'
+  '/v1/fine_tuning/*',
+  // The Responses API's stored-response operations: the proxy keeps nothing (#140).
+  '/v1/responses/*'
 ] as const
 
 /** A documented response: a description and a JSON body. */
@@ -197,7 +199,7 @@ export function jsonResponse(description: string, schema: z.ZodType): Documented
  * @param description - when the error is sent
  * @returns the response object
  */
-function errorResponse(description: string): DocumentedResponse {
+export function errorResponse(description: string): DocumentedResponse {
   return jsonResponse(description, openAIErrorSchema)
 }
 

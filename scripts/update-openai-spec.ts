@@ -25,14 +25,21 @@ import { fileURLToPath } from 'node:url'
 
 import * as z from 'zod'
 
-/** The schemas the stable surface is checked against; each brings every schema it references. */
+/**
+ * The schemas the stable surface and the experimental Responses API are checked against; each brings
+ * every schema it references.
+ */
 export const ROOT_SCHEMAS = [
   'CreateChatCompletionRequest',
   'CreateChatCompletionResponse',
   'CreateChatCompletionStreamResponse',
   'ListModelsResponse',
   'Model',
-  'ErrorResponse'
+  'ErrorResponse',
+  // The Responses API (#140): its request, its response, and its stream's events.
+  'CreateResponse',
+  'Response',
+  'ResponseStreamEvent'
 ] as const
 
 /** The repository OpenAI publishes the spec in. */

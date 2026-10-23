@@ -83,8 +83,10 @@ spec, described in `openapi.json`, documented in README and here.
 | `GET /v1/models/{model}` | Phase 1 | original contract |
 | `POST /v1/chat/completions` | Phase 1 | original contract |
 
-Planned: `POST /v1/responses` (#140), experimental first, then promoted here once it meets the
-criteria. Adding or removing a row is a decision recorded in this table, with its issue, and a
+Experimental, outside this table: `POST /v1/responses` (#140), opt-in (`responsesApi`, off by
+default), described in `openapi.json` and checked against the pinned spec
+(`test/integration/openai-spec-responses.test.ts`); see "Experimental: the Responses API" below.
+It is promoted here once it has had real use (Codex CLI is the follow-up client). Adding or removing a row is a decision recorded in this table, with its issue, and a
 `feat` (or breaking) change; it is not a constitution amendment.
 
 ### Reference spec
@@ -987,6 +989,62 @@ later drops at `debug`. A 400 for any other `param`, and any other status, are a
 are. `test/integration/breakpoint-refusal.test.ts` runs the chain through pi's OpenAI adapter and
 SDK, concurrent first requests included; `test/unit/cache-breakpoints.test.ts` pins the Responses
 wording.
+
+## Experimental: the Responses API (`POST /v1/responses`, #140)
+
+Constitution principle I lets a route start experimental, opt-in and outside the stable surface.
+This one is off unless `responsesApi` is on (`--responses-api`, `PI_SWITCHBOARD_RESPONSES_API`);
+off, it answers 404 naming the switch, and stays in the OpenAPI document so the document does not
+depend on the config. Decisions recorded on #140: stateless; `store: false` or absent only;
+`include: ["reasoning.encrypted_content"]` supported for every model; reasoning emitted as
+`reasoning` items; the acceptance client is the `openai` SDK's `responses.create()`, Codex CLI a
+follow-up.
+
+- **One path for both APIs.** `src/server/responses-route.ts` validates the body
+  (`createResponseRequestSchema`, strict at every level), translates it into a chat request
+  (`src/openai/responses-api/request.ts`, `toChatRequest`) and runs it through the chat route's
+  `runChat`: exposure, aliases, routing, credentials, images, timeouts, disconnects, stats and
+  error mapping are shared. A `RunShape` gives each route its answer format
+  (`src/server/answer-formats.ts`: `chatFormat`, `responsesFormat`) and a change to the pi context
+  (the replayed reasoning below); the dispatch writes answers through the format.
+- **Translation.** `instructions` becomes the system message, `input` items become messages, and
+  an assistant turn (a run of `reasoning`, assistant `message` and `function_call` items) becomes
+  one assistant message with its text and tool calls. `max_output_tokens` is
+  `max_completion_tokens`, `reasoning.effort` is `reasoning_effort`, `text.format` is
+  `response_format`, function tools move `name` under `function`. `input_image.detail` is accepted
+  and dropped, the Responses form of chat's `image_url.detail` (principle I's listed drop).
+- **Refused by name (422).** `RESPONSES_REJECTED_FIELDS` lists every `CreateResponse` field the
+  proxy does not accept, with its reason; the spec check compares it with the pinned spec, so a
+  spec bump that adds a field fails until it is decided. Also `store: true`, a tool that is not a
+  function, and an `include` other than reasoning.
+- **Output** (`src/openai/responses-api/output.ts`). pi's content blocks become output items at the
+  same index: thinking a `reasoning` item (the thinking as its summary), text a `message` with one
+  `output_text`, a tool call a `function_call` whose `call_id` is pi's call ID. The request's
+  settings are echoed, `store` is `false`, usage maps as on chat, and `x_pi` is chat's. A length
+  stop is `incomplete` with `incomplete_details.reason: max_output_tokens`.
+- **Stream** (`src/openai/responses-api/stream.ts`). `response.created` and
+  `response.in_progress` on pi's first event, then per item `output_item.added`, its part
+  (`content_part` or `reasoning_summary_part`) added, deltas, `.done` events, `output_item.done`,
+  and `response.completed` or `response.incomplete` with the whole response. Every event has a
+  `sequence_number` from 0. A failure ends with `response.failed`, whose `error.code` is
+  `rate_limit_exceeded` or `server_error` (OpenAI's codes are a closed list) and whose
+  `x_pi.error_code` is the code chat completions would give.
+- **Reasoning tokens** (`src/openai/responses-api/reasoning-token.ts`). `encrypted_content` is
+  pi's thinking block (text, signature, redaction flag) with the provider, API and model that
+  produced it, as base64url JSON with a version. pi keeps OpenAI's own reasoning item, encrypted
+  content included, as an OpenAI thinking block's signature and replays it
+  (`openai-responses-shared.js`), and keeps Anthropic's signature likewise. On input,
+  `withReplayedReasoning` puts the blocks back on the turn's assistant message and gives that
+  message the token's model, so pi's `transformMessages` replays them to that model and drops them
+  for any other. The token is not encrypted by the proxy: the thinking text is in it in the clear
+  (base64url), next to OpenAI's ciphertext for OpenAI models, so the docs tell clients to treat it
+  as response text, not as a blob safe to log. One the proxy did not write is a 400. So is a `reasoning` item
+  without a token (as OpenAI refuses an echoed reasoning item it has not stored; the summary alone
+  is nothing a model can take back), and reasoning that no message or function call follows.
+  `withReplayedReasoning` checks that each assistant turn's reasoning lands on its own assistant
+  message, and fails the request rather than misplace it.
+- **The other operations** (`/v1/responses/*`: retrieve, delete, cancel, input items, input
+  tokens, compact) need stored responses and are in `UNSUPPORTED_ENDPOINTS`.
 
 ## Message mapping policy
 
