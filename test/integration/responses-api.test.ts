@@ -176,6 +176,25 @@ describe('the Responses API', () => {
     expect(JSON.stringify(answer.body)).toContain('--responses-api')
   })
 
+  // Catches the off switch answering before proxy auth, which would tell an unauthenticated
+  // caller how this proxy is configured.
+  test('needs the proxy token before saying whether it is on', async () => {
+    const token = 'notarealsecret-responses-token'
+    const served = testApp({ ...testConfig(), proxyAuth: { kind: 'token', token } })
+    const request = (headers: Record<string, string>): Promise<Response> | Response =>
+      served.request('/v1/responses', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...headers },
+        body: JSON.stringify({ model: 'mock/text', input: 'Hi' })
+      })
+
+    const without = await request({})
+    const withToken = await request({ Authorization: `Bearer ${token}` })
+
+    expect([without.status, withToken.status]).toEqual([401, HTTP_NOT_FOUND])
+    expect(JSON.stringify(await jsonBody(without))).not.toContain('responses-api')
+  })
+
   // Catches a response the SDK can't read: `output_text` is the SDK's own join of the message
   // items, so it is empty unless the items are shaped as OpenAI's.
   test('answers text, non-streamed', async () => {

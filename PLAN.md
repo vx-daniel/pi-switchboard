@@ -1016,8 +1016,9 @@ follow-up.
   (`openai-responses-shared.js`), and keeps Anthropic's signature likewise. On input,
   `withReplayedReasoning` puts the blocks back on the turn's assistant message and gives that
   message the token's model, so pi's `transformMessages` replays them to that model and drops them
-  for any other. The token is opaque, not encrypted by the proxy: it holds what the client already
-  received and OpenAI's ciphertext. One the proxy did not write is a 400. So is a `reasoning` item
+  for any other. The token is not encrypted by the proxy: the thinking text is in it in the clear
+  (base64url), next to OpenAI's ciphertext for OpenAI models, so the docs tell clients to treat it
+  as response text, not as a blob safe to log. One the proxy did not write is a 400. So is a `reasoning` item
   without a token (as OpenAI refuses an echoed reasoning item it has not stored; the summary alone
   is nothing a model can take back), and reasoning that no message or function call follows.
   `withReplayedReasoning` checks that each assistant turn's reasoning lands on its own assistant

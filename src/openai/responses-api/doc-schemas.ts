@@ -44,8 +44,8 @@ const outputItemSchema = z.discriminatedUnion('type', [
       .meta({
         description:
           'With `include: ["reasoning.encrypted_content"]`: the token that replays this reasoning ' +
-          'to the model that produced it, when sent back in `input`. Opaque, not encrypted by the ' +
-          'proxy.'
+          'to the model that produced it, when sent back in `input`. base64url JSON, not ' +
+          'encrypted by the proxy: the thinking text is readable in it.'
       })
   })
 ])
