@@ -365,6 +365,14 @@ describe('x_pi.reasoning_effort reports what the model ran at (#175)', () => {
     ])
   })
 
+  // Catches `none` reported as applied on a model that can't turn reasoning off (#41): it runs at
+  // its lowest level, and the client must see which.
+  test('`none` on a model that always reasons reports its lowest level', async () => {
+    expect(await answerXPi('completions/chat-always-reasoning', 'none', false)).toEqual([
+      expect.objectContaining({ reasoning_effort: { requested: 'none', applied: 'minimal' } })
+    ])
+  })
+
   // Catches the report taken from the model the request asked for rather than the one that
   // answered: `chat-limited` would clamp `xhigh` to `high`, `chat-xhigh` runs it as asked.
   test.each([
