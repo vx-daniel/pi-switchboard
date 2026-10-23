@@ -22,6 +22,7 @@ import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { generateRequestId } from '@proxy/server/request-id'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { MiddlewareHandler } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 
 /** Logger for request and response lines. */
 const httpLogger = proxyLogger('server', 'http')
@@ -310,38 +311,37 @@ export function jsonBodyMiddleware(): MiddlewareHandler<ProxyEnv> {
  * Creates the middleware that rejects an oversized request body with 413.
  *
  * @remarks
- * Only POST, PUT and PATCH requests are checked, and only by their `Content-Length` header: a
- * request without one is let through.
+ * Only POST, PUT and PATCH requests are checked. Hono's `bodyLimit` does the counting: a declared
+ * `Content-Length` over the limit is refused before any of the body is read, and a body without
+ * one (`Transfer-Encoding: chunked`) is counted as it arrives and refused once the count passes
+ * the limit, without reading the rest (#187). A streamed body within the limit is held in memory
+ * and handed on to the route, which would buffer it anyway to parse it.
  *
  * @param config - the server config; `maxBodySize` is the limit in bytes
  * @returns the middleware
  */
 export function bodySizeLimitMiddleware(config: ServerConfig): MiddlewareHandler<ProxyEnv> {
+  const { maxBodySize } = config
+  const limit = bodyLimit({
+    maxSize: maxBodySize,
+    onError: (context) => {
+      const { method, path } = context.req
+      httpLogger.warn(
+        'Rejected {method} {path}: body exceeds limit of {maxBodySize} bytes (Content-Length {contentLength})',
+        { method, path, maxBodySize, contentLength: context.req.header('content-length') ?? 'none' }
+      )
+      return context.json(
+        invalidRequest(`Request body too large. Maximum size: ${String(maxBodySize)} bytes`),
+        HTTP_PAYLOAD_TOO_LARGE
+      )
+    }
+  })
   return async (context, next) => {
     const method = context.req.method
     if (method !== 'POST' && method !== 'PUT' && method !== 'PATCH') {
       await next()
       return undefined
     }
-
-    const contentLength = context.req.header('content-length')
-    if (contentLength !== undefined) {
-      const length = Number.parseInt(contentLength, 10)
-      if (Number.isFinite(length) && length > config.maxBodySize) {
-        httpLogger.warn(
-          'Rejected {method} {path}: body of {contentLength} bytes exceeds limit of {maxBodySize}',
-          { method, path: context.req.path, contentLength: length, maxBodySize: config.maxBodySize }
-        )
-        return context.json(
-          invalidRequest(
-            `Request body too large. Maximum size: ${String(config.maxBodySize)} bytes`
-          ),
-          HTTP_PAYLOAD_TOO_LARGE
-        )
-      }
-    }
-
-    await next()
-    return undefined
+    return limit(context, next)
   }
 }

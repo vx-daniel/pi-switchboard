@@ -743,7 +743,7 @@ Requires Pi 1.x (`^1.3.0`). Pi 1.0 is the first release whose Anthropic client i
   Images are fetched only after the provider credential is checked, so a request that would get `502` `upstream_credentials_missing` fetches nothing.
 
   A refused image fails the request with `400` at that part's `param`, with a fixed message that never quotes the remote server.
-- Request body size limited to 50 MB by default
+- Request body size limited to 50 MB by default, chunked uploads included
 - Upstream calls aborted after 120 seconds without any data from the provider
 - Secrets are never included in error responses
 - Client disconnects abort upstream work immediately

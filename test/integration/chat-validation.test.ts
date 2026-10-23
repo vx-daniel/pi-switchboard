@@ -79,6 +79,32 @@ function okCompletion(response: Response): Record<string, unknown> {
   }
 }
 
+/**
+ * Builds a request body sent as a stream, so it has no `Content-Length`, as a chunked upload.
+ *
+ * @param chunks - the body's chunks, sent in order, one per read
+ * @returns the body, and how many chunks the reader has asked for so far
+ */
+function streamedBody(chunks: readonly string[]): {
+  body: ReadableStream<Uint8Array>
+  pulled: () => number
+} {
+  const encoder = new TextEncoder()
+  let next = 0
+  const body = new ReadableStream<Uint8Array>(
+    {
+      pull(controller) {
+        const chunk = chunks[next]
+        next += 1
+        if (chunk === undefined) controller.close()
+        else controller.enqueue(encoder.encode(chunk))
+      }
+    },
+    { highWaterMark: 0 }
+  )
+  return { body, pulled: () => next }
+}
+
 describe('POST /v1/chat/completions - validation', () => {
   // Catches the validator's thrown 400 escaping as Hono's plain text, or the error quoting the
   // body (parser messages in newer engines do).
@@ -380,6 +406,58 @@ describe('POST /v1/chat/completions - body size limit', () => {
       }
     })
     expect(response.status).toBe(200)
+  })
+
+  // Catches a body without `Content-Length` (chunked) skipping the limit (#187), or the limit
+  // reading the whole body before refusing it.
+  test('rejects a streamed body over the limit without reading the rest', async () => {
+    const chunkCount = 100
+    const { body, pulled } = streamedBody(Array.from({ length: chunkCount }, () => 'a'.repeat(64)))
+    const limit = 100
+
+    const response = await testApp({ ...testConfig(), maxBodySize: limit }).request(
+      '/v1/chat/completions',
+      { method: 'POST', headers: { 'Content-Type': 'application/json' }, body, duplex: 'half' }
+    )
+
+    expect({ status: response.status, body: await jsonBody(response) }).toEqual({
+      status: 413,
+      body: {
+        error: {
+          message: `Request body too large. Maximum size: ${String(limit)} bytes`,
+          type: 'invalid_request_error',
+          param: null,
+          code: null
+        }
+      }
+    })
+    expect(pulled()).toBeLessThan(chunkCount)
+  })
+
+  // Catches the streamed count refusing a body exactly at the limit, or the limit consuming a
+  // streamed body so the route no longer reads it.
+  test('allows a streamed body exactly at the limit', async () => {
+    const requestBody = JSON.stringify({
+      model: MOCK_MODEL,
+      messages: [{ role: 'user', content: 'Hello' }]
+    })
+    const half = Math.floor(requestBody.length / 2)
+    const { body } = streamedBody([requestBody.slice(0, half), requestBody.slice(half)])
+
+    const response = await testApp({
+      ...testConfig(),
+      maxBodySize: Buffer.byteLength(requestBody)
+    }).request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body,
+      duplex: 'half'
+    })
+
+    expect({ status: response.status, body: await jsonBody(response) }).toEqual({
+      status: HTTP_OK,
+      body: okCompletion(response)
+    })
   })
 })
 

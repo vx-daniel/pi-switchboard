@@ -1454,7 +1454,9 @@ Use an OpenAI-style shape:
 - `404` model not found (`model_not_found`): no exposed model has the ID, or the provider refused
   the model for the login the proxy uses (#156); an unsupported endpoint, or any other route
   (`Invalid URL (<METHOD> <path>)`)
-- `413` request body larger than `maxBodySize`
+- `413` request body larger than `maxBodySize` (POST, PUT and PATCH): a declared `Content-Length`
+  over it is refused before reading, and a chunked body is counted as it arrives and refused once
+  it passes, without reading the rest (#187)
 - `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
 - `429` upstream rate limit or usage limit (`rate_limit`)
 - `500` internal proxy failure, including an invalid model exposure config
