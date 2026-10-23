@@ -13,7 +13,7 @@ import { activeCooldown, clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { getRuntime } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
-import { loginOptions, runLogin, runLogout } from '@proxy/tui/login'
+import { loginLabels, loginOptions, runLogin, runLogout, saveLoginLabel } from '@proxy/tui/login'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -232,12 +232,16 @@ describe('an extra login', () => {
     expect(loginOptions(getRuntime()).map((option) => option.id)).toContain('groq-account-4')
   })
 
-  // Catches a logout that removes the credential but keeps the slot as a provider: it would stay
-  // in the login list unconfigured, and the next login would skip its number.
-  test('logging out of a slot drops it, and its number is offered again', async () => {
+  // Catches a logout that removes the credential but keeps the slot as a provider (it would stay
+  // in the login list unconfigured, and the next login would skip its number) or keeps its label
+  // (the next login under the ID, maybe another account, would wear it).
+  test('logging out of a slot drops it and its label, and offers its number again', async () => {
+    saveLoginLabel('groq-account-3', 'third')
+
     await runLogout(getRuntime(), 'groq-account-3', new AbortController().signal)
 
     expect(getRuntime().getProvider('groq-account-3')).toBeUndefined()
+    expect(loginLabels()).not.toHaveProperty('groq-account-3')
     const options = loginOptions(getRuntime()).map((option) => option.id)
     expect(options).toContain('groq-account-3')
     expect(options).not.toContain('groq-account-4')

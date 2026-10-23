@@ -326,7 +326,8 @@ export async function runLogin(
 
 /**
  * Logs out of one provider: pi removes its stored credential. A login slot (#227) is dropped as a
- * provider too, so its number is free for the next login.
+ * provider too, so its number is free for the next login, and the login's label goes with the
+ * credential: the next login under the same ID may be another account.
  *
  * @param runtime - the proxy's model runtime
  * @param providerId - the provider
@@ -341,4 +342,5 @@ export async function runLogout(
   await runtime.logout(providerId, { signal })
   loginLogger.info('Logged out of {provider}', { provider: providerId })
   unregisterAccountProvider(runtime, providerId)
+  if (loginLabels()[providerId] !== undefined) saveLoginLabel(providerId, '')
 }

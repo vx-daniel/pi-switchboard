@@ -234,7 +234,9 @@ export function isBuiltinProvider(providerId: string): boolean {
  * @remarks
  * Runs at startup, so a login made in an earlier run, or through pi-rotator or pi-multi-account,
  * is served again. A credential whose base is no built-in provider is left as it is, with a
- * warning.
+ * warning. A store that cannot be listed (unreadable, or not within `signal`) registers nothing
+ * and is logged as a warning: the proxy starts with pi's base providers, as it did before slots
+ * existed, rather than not at all.
  *
  * @param runtime - pi's model runtime
  * @param signal - bounds the credential listing
@@ -244,7 +246,16 @@ export async function registerStoredAccounts(
   runtime: AccountRuntime,
   signal: AbortSignal
 ): Promise<string[]> {
-  const stored = await runtime.listCredentials({ signal })
+  let stored: readonly { readonly providerId: string }[]
+  try {
+    stored = await runtime.listCredentials({ signal })
+  } catch (error) {
+    accountsLogger.warn(
+      'Could not list the stored credentials; extra logins are not registered: {reason}',
+      { reason: error instanceof Error ? error.message : String(error) }
+    )
+    return []
+  }
   return stored
     .map(({ providerId }) => providerId)
     .filter((providerId) => registerAccountProvider(runtime, providerId))

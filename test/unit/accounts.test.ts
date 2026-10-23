@@ -260,4 +260,14 @@ describe('registerStoredAccounts', () => {
       'openai-codex-account-2'
     ])
   })
+
+  // Catches a store that cannot be listed keeping the proxy from starting: before slots existed,
+  // startup never read the store here, so a failure registers nothing and the proxy runs on.
+  test('registers nothing when the store cannot be listed', async () => {
+    const { runtime, ids } = fakeRuntime([], ['anthropic'])
+    runtime.listCredentials = () => Promise.reject(new Error('auth.json: EACCES'))
+
+    await expect(registerStoredAccounts(runtime, new AbortController().signal)).resolves.toEqual([])
+    expect(ids()).toEqual(['anthropic'])
+  })
 })
