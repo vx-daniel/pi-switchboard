@@ -351,6 +351,7 @@ unsupported parameters clearly instead of silently ignoring them.
 - [x] Map the `pending` and `deferred` stop reasons to `stop`
 - [x] Report cache reads and writes in `usage.prompt_tokens`, with `prompt_tokens_details`
 - [x] Refresh the extension's model registry on each entry point (`ctx.modelRegistry`)
+- [x] Upgrade to pi 1.4.0 (#198): a provider 413 is a context overflow (400 `context_length_exceeded`); the conformance matrix's Codex rows are on 1.4.0's catalog (`gpt-6-luna`, `gpt-6-sol`, `gpt-6.1-sol`)
 - [ ] Run the conformance suite against live models on Pi 1.x
 
 ## Phase 3D — Compatibility analysis and resilience [DONE]
