@@ -13,7 +13,7 @@ Most clients only let you pick a model name, so an alias is the routing control 
 - **Only while its target is exposed.** An alias never reaches a model the exposure config hides: leave the target out of `enabledModels` (or `customModels`) and the alias disappears too. `/healthz/models` then lists it as `target-not-exposed`.
 - **Never shadows a model.** An alias named like an exposed model's public or canonical ID is ignored, and the model keeps its name. `/healthz/models` answers `503` and lists it as `shadows-model`, and the proxy logs a warning. Rename the alias.
 - **Used as written.** Names and targets are not trimmed or normalized; a mistyped target matches no model. An entry with an empty name or target is dropped with the config warning.
-- **Edited in the console.** `pi-switchboard tui`'s Models view (`4`) creates, edits and deletes aliases ([above](console.md#the-console-logs-logins-and-status-at-a-terminal)). **In pi,** `/proxy show` lists the aliases and any left out; editing them in pi's settings panel can come later.
+- **Edited in the console.** `pi-switchboard tui`'s Models view (`4`) creates, edits and deletes aliases ([The console](console.md#the-console-logs-logins-and-status-at-a-terminal)). **In pi,** `/proxy show` lists the aliases and any left out; editing them in pi's settings panel can come later.
 
 ## Fallback chains
 

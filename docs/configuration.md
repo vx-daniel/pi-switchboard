@@ -1,5 +1,110 @@
 # Configuration
 
+This page starts with the reference: where settings come from, where the files are, and every setting in one table. The sections after it explain the settings in detail.
+
+## Where settings come from
+
+A setting can come from four places. The first one that sets it wins: **flag > environment variable > `proxy-config.json` > default**.
+
+| Source | An invalid value |
+|---|---|
+| **Flag** (`--port 8080`) | Stops the proxy from starting, naming the valid values or range |
+| **Environment variable** (`PI_SWITCHBOARD_PORT=8080`) | A number or a log level it doesn't take is ignored with a warning, and the next source applies. A switch (`PI_SWITCHBOARD_STATS` and the others) takes `true` or `false`: anything else is a warning, and counts as `false` |
+| **`proxy-config.json`** | Repaired, never refused: a number is clamped to its range, a list or map keeps its valid entries, anything else takes its default, and one warning names the fields. Two exceptions stop the proxy from starting, both about the auth token: an `authToken` that is not a string, and a file that can't be read or parsed while no flag or variable sets the token ([Proxy authentication](#proxy-authentication)) |
+| **Default** | The value in the table below |
+
+The file is also written for you: the pi extension's settings panel (`/proxy config`) saves every setting there, and the console (`pi-switchboard tui`) saves the auth token (`p`), aliases (Models view) and login labels. `pi-switchboard --config` prints the file's contents; flags and variables are not applied to what it shows.
+
+## Where the files are
+
+Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFILE%\.pi\agent`), or the directory `PI_CODING_AGENT_DIR` names. The proxy reads the same directory as pi, so a login made with pi is the proxy's too.
+
+| Install | Agent directory |
+|---|---|
+| npm CLI, pi package, standalone binary | `~/.pi/agent`, or `PI_CODING_AGENT_DIR` |
+| Docker | `/home/node/.pi/agent`, in the `pi-agent` volume ([Docker](install.md#docker)) |
+
+| File | Whose | What it holds |
+|---|---|---|
+| `auth.json` | pi | Logins: API keys and subscription tokens (`pi /login`, or `n` and `x` in the console) |
+| `models.json` | pi | Providers and models of your own, and overrides of pi's |
+| `settings.json` | pi | pi's settings; the proxy reads only `enabledModels`, for `scoped` exposure |
+| `proxy-config.json` | pi-switchboard | The settings below. A missing file means every default |
+| `pi-switchboard-stats.sqlite` | pi-switchboard | Per-minute traffic stats for the console and the usage route, kept 30 days (`stats`) |
+
+## Every setting
+
+| Setting | Flag | Environment variable | `proxy-config.json` | Default | Takes |
+|---|---|---|---|---|---|
+| Bind address | `--host` | `PI_SWITCHBOARD_HOST` | `host` | `127.0.0.1` | An address; `0.0.0.0` for every interface |
+| Port | `--port` | `PI_SWITCHBOARD_PORT` | `port` | `4141` | 1–65535 |
+| [Proxy auth token](#proxy-authentication) | `--auth-token` | `PI_SWITCHBOARD_AUTH_TOKEN` | `authToken` | `""`, off | Any string, matched exactly |
+| [Remote images](security.md#security-defaults) | `--remote-images` | `PI_SWITCHBOARD_REMOTE_IMAGES` | `remoteImages` | `false` | `true`, `false` |
+| [Responses API](api.md#responses-api-experimental) | `--responses-api` | `PI_SWITCHBOARD_RESPONSES_API` | `responsesApi` | `false` | `true`, `false` |
+| [Docs page](api.md#api-documentation) | `--docs-ui` | `PI_SWITCHBOARD_DOCS_UI` | `docsUi` | `false` | `true`, `false` |
+| [Stats](#what-the-proxy-adds) | `--stats`, `--no-stats` | `PI_SWITCHBOARD_STATS` | `stats` | `true` | `true`, `false` |
+| Max request body | `--max-body-size` (MB) | `PI_SWITCHBOARD_MAX_BODY_SIZE` (bytes) | `maxBodySizeMb` (MB) | 50 MB | 1–500 MB |
+| [Upstream idle timeout](#what-the-proxy-adds) | `--upstream-timeout` (s) | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` (ms) | `upstreamTimeoutSec` (s) | 120 s | 5–600 s |
+| [Log level](#logging) | `--log-level` | `PI_SWITCHBOARD_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warning`, `error`, `fatal` |
+| [Log format](#logging) | `--log-format` | `PI_SWITCHBOARD_LOG_FORMAT` | — | `pretty` on a terminal, `json` otherwise | `pretty`, `json` |
+| [Public model IDs](api.md#public-model-ids) | — | — | `publicModelIdMode` | `collision-prefixed` | `collision-prefixed`, `universal`, `always-prefixed` |
+| [Exposed models](api.md#exposure-modes) | — | — | `modelExposureMode` | `scoped` | `all`, `scoped`, `custom` |
+| [Custom model list](api.md#exposure-modes) | — | — | `customModels` | `[]` | Canonical IDs (`provider/model-id`), for `custom` |
+| [Provider prefixes](api.md#public-model-ids) | — | — | `providerPrefixes` | `{}` | Provider → the prefix its public IDs take |
+| [Aliases](routing.md#aliases) | — | — | `aliases` | `{}` | Name → a model, a chain (`targets`, `fallbackOn`), a target with its `reasoningEffort`, or a `family` |
+| [Quota reserve](routing.md#quota) | — | — | `routing.reserve` | `{}` | Login → the share of each quota window to keep free, 0–1 |
+| [Moving between logins](logins.md#several-logins-per-provider) | — | — | `routing.logins.fallbackOn` | `["rate_limit"]` | Failure classes: `rate_limit`, `unavailable`, `timeout`, `auth`, `refused`, `upstream_error` |
+| [Login labels](logins.md#several-logins-per-provider) | — | — | `labels` | `{}` | Login → the label the console shows |
+| [Lifetime](pi-extension.md#settings-panel) (pi package) | — | — | `lifetime` | `detached` | `detached` (outlives the pi session), `session` |
+| [Zed sync](pi-extension.md#command-family) (pi package) | — | — | `zed.providerName`, `zed.autoSync` | `"Pi Proxy"`, `false` | A name; `true`, `false` |
+
+Environment variables with no flag or file key:
+
+| Variable | What it does |
+|---|---|
+| `PI_CODING_AGENT_DIR` | pi's agent directory, where every file above is ([Where the files are](#where-the-files-are)) |
+| `PI_SWITCHBOARD_EXTENSION_LOG_FILE` | Where the pi extension writes its log, which it otherwise keeps quiet ([Logging](#logging)) |
+| `NO_COLOR` | `NO_COLOR=1` turns off the console's colors |
+
+## A complete `proxy-config.json`
+
+Every key is optional; one left out takes its default. JSON has no comments, so the table above says what each key does. This file sets every key, most to their defaults, with an alias of each kind:
+
+```json
+{
+  "host": "127.0.0.1",
+  "port": 4141,
+  "authToken": "",
+  "remoteImages": false,
+  "responsesApi": false,
+  "docsUi": false,
+  "stats": true,
+  "maxBodySizeMb": 50,
+  "upstreamTimeoutSec": 120,
+  "logLevel": "info",
+  "publicModelIdMode": "collision-prefixed",
+  "modelExposureMode": "scoped",
+  "customModels": [],
+  "providerPrefixes": {},
+  "aliases": {
+    "quick": "anthropic/claude-haiku-5-5",
+    "reviewer": { "model": "anthropic/claude-opus-5-5", "reasoningEffort": "high" },
+    "opus-latest": { "family": "anthropic/claude-opus" },
+    "coding": {
+      "targets": ["anthropic/claude-opus-5-5", "openai-codex/gpt-6-sol"],
+      "fallbackOn": ["rate_limit", "unavailable", "timeout"]
+    }
+  },
+  "routing": {
+    "reserve": { "anthropic": 0.2 },
+    "logins": { "fallbackOn": ["rate_limit"] }
+  },
+  "labels": { "anthropic": "work", "anthropic-2": "personal" },
+  "lifetime": "detached",
+  "zed": { "providerName": "Pi Proxy", "autoSync": false }
+}
+```
+
 ## What comes from pi
 
 The proxy reads two files from pi's configuration directory (`~/.pi/agent/`):

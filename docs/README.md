@@ -14,8 +14,8 @@ pi-switchboard is a local HTTP API over pi's models, logins and providers that s
 
 | Page | What it covers |
 |---|---|
-| [Installing](install.md) | Prerequisites per install method; the npm package and the pi package; Docker; the standalone binary; running in the background |
-| [Configuration](configuration.md) | What comes from pi, the proxy's settings (flags, environment, `proxy-config.json`), logging, proxy authentication |
+| [Installing](install.md) | Which install to choose, compared; prerequisites; the npm package and the pi package; Docker; the standalone binary; running in the background |
+| [Configuration](configuration.md) | Where settings come from and where the files are, every setting in one table, a complete `proxy-config.json`; then what comes from pi, logging and proxy authentication |
 | [The HTTP API](api.md) | Endpoints, the API document, usage and health checks, chat completion features, the Responses API, model IDs and exposure, errors |
 | [Routing](routing.md) | Aliases, fallback chains, reasoning effort per alias, family aliases, cooldowns, quota |
 | [Several logins per provider](logins.md) | A second subscription to the same provider, and how the proxy picks the login |

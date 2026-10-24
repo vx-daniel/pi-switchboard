@@ -93,7 +93,7 @@ Operational endpoints, outside the OpenAI-compatible `/v1` surface:
 | Endpoint | Auth | Answers |
 |---|---|---|
 | `GET /healthz` | Never | `200 {"status":"ok"}` once the proxy listens and pi's model runtime is loaded. No upstream calls: use it for container healthchecks and liveness probes. |
-| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`), aliases left out (`aliasDiagnostics`), and active cooldowns (`cooldowns`, [below](routing.md#cooldowns)). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model; a cooldown does not fail it. |
+| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`), aliases left out (`aliasDiagnostics`), and active cooldowns (`cooldowns`, [Cooldowns](routing.md#cooldowns)). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model; a cooldown does not fail it. |
 | `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …), `availableModelCount`, and `quota`, the subscription's latest usage windows ([Quota](routing.md#quota)). `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
 
 None of them returns a credential. `/healthz` proves the process is up, not that a provider will accept a request: `GET /healthz/creds?verify=true` is the closest check to that without spending a completion.
@@ -209,7 +209,7 @@ The proxy resolves model references in this order:
 
 1. **Exact public ID match** — the ID from `GET /v1/models`
 2. **Canonical ID fallback** — `provider/model-id` format (only for exposed models)
-3. **Alias** — a name from `aliases` in the config file ([below](routing.md#aliases))
+3. **Alias** — a name from `aliases` in the config file ([Aliases](routing.md#aliases))
 
 With the default `collision-prefixed` mode and no collisions, model IDs are exposed without prefixes:
 
