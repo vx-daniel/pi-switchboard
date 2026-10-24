@@ -70,7 +70,7 @@ describe('framedView', () => {
     const rows = plain(frame({ columns: 100, rows: 40 }, { view: 'accounts' }))
 
     expect(rows[0]).toMatch(/^ {2}╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ *$/)
-    expect(rows[1]).toMatch(/^ {2}│ 1 Logs │ │ 2 Accounts │ │ 3 Stats │ │ 4 Models │ +idle *$/)
+    expect(rows[1]).toMatch(/^ {2}│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 4 Models │ +idle *$/)
     expect(rows[2]).toMatch(/^╭─┴─+┴─┘ {12}└─┴─+┴─┴─+┴─+╮$/)
   })
 
@@ -79,7 +79,7 @@ describe('framedView', () => {
   test('compact tabs sit in the top border with the context at its right end', () => {
     const rows = plain(frame({ columns: 80, rows: 24 }, { view: 'stats', context: 'today' }))
 
-    expect(rows[0]).toMatch(/^╭─ 1 Logs ─ 2 Accounts ─ 3 Stats ─ 4 Models ─+ today ─╮$/)
+    expect(rows[0]).toMatch(/^╭─ 1 Requests ─ 2 Accounts ─ 3 Stats ─ 4 Models ─+ today ─╮$/)
   })
 
   // Catches the view's rows unpadded or uncut inside the borders, or a short body leaving the
@@ -108,7 +108,7 @@ describe('framedView', () => {
       )
     )
 
-    expect(rows[0]).toMatch(/^╭─ 1 Logs ─ 2 Accounts ─ 3 Stats ─ 4 Models ─+╮$/)
+    expect(rows[0]).toMatch(/^╭─ 1 Requests ─ 2 Accounts ─ 3 Stats ─ 4 Models ─+╮$/)
     expect(rows.at(-1)).toBe(`╰${'─'.repeat(58)}╯`)
   })
 
@@ -116,7 +116,7 @@ describe('framedView', () => {
   test('leaves out the tabs a narrow frame has no room for', () => {
     const rows = plain(frame({ columns: 30, rows: 20 }, { context: '' }))
 
-    expect(rows[0]).toMatch(/^╭─ 1 Logs ─ 2 Accounts ─+╮$/)
+    expect(rows[0]).toMatch(/^╭─ 1 Requests ─ 2 Accounts ─+╮$/)
     expect(rows[0]).not.toContain('Stats')
   })
 })

@@ -18,7 +18,7 @@ import { activeTab, paint, strong, tabAccent } from '@proxy/tui/theme'
 
 /** What each tab says. */
 const VIEW_LABELS: Readonly<Record<View, string>> = {
-  logs: 'Logs',
+  logs: 'Requests',
   accounts: 'Accounts',
   stats: 'Stats',
   models: 'Models'
