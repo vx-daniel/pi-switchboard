@@ -19,6 +19,8 @@
  * @packageDocumentation
  */
 
+import { MS_PER_SECOND } from '@proxy/utils/time'
+
 /** One usage window: how much of it is used, and when it resets. */
 export interface QuotaWindow {
   /** The provider's name for it: `5h`, `7d`, `primary`, `secondary`. */
@@ -66,8 +68,6 @@ const MINUTES_PER: ReadonlyMap<string, number> = new Map([
   ['h', MINUTES_PER_HOUR],
   ['d', MINUTES_PER_DAY]
 ])
-/** Milliseconds per second. */
-const MS_PER_SECOND = 1000
 /** A Codex percentage's whole. */
 const PERCENT = 100
 

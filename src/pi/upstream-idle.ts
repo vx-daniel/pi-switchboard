@@ -28,9 +28,7 @@ import {
   type Model
 } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
-
-/** Milliseconds in a second. */
-const MS_PER_SECOND = 1000
+import { MS_PER_SECOND } from '@proxy/utils/time'
 
 /** Logger for relay failures; shares the upstream call's category. */
 const relayLogger = proxyLogger('pi', 'complete')

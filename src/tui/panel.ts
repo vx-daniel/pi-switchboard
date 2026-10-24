@@ -6,8 +6,8 @@
  */
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
-import { MS_PER_SECOND } from '@proxy/config/schema'
 import { paint, strong } from '@proxy/tui/theme'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 
 /** Columns a panel's frame takes: `│ ` before the content and ` │` after. */
 export const FRAME_COLUMNS = 4

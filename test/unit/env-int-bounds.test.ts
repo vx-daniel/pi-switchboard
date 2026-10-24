@@ -11,8 +11,9 @@ import { join } from 'node:path'
 
 import { resetSync } from '@logtape/logtape'
 import { loadConfig } from '@proxy/config/env'
-import { BYTES_PER_MB, MS_PER_SECOND } from '@proxy/config/schema'
+import { BYTES_PER_MB } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 const FILE_PORT = 4242

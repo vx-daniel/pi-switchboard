@@ -17,13 +17,13 @@
  * @packageDocumentation
  */
 
-import { MS_PER_SECOND } from '@proxy/config/schema'
 import {
   HTTP_OVERLOADED,
   HTTP_SERVICE_UNAVAILABLE,
   HTTP_TOO_MANY_REQUESTS
 } from '@proxy/server/http-status'
 import { isRecord } from '@proxy/utils/guards'
+import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND } from '@proxy/utils/time'
 
 /** A failed upstream response, as {@link capturingFetch} kept it. */
 export interface FailedResponse {
@@ -51,13 +51,6 @@ const BODY_READ_MS = 2000
  * could not be shown: `toISOString()` throws on it.
  */
 export const LATEST_DATE_MS = 8_640_000_000_000_000
-
-/** Milliseconds in a minute. */
-const MS_PER_MINUTE = 60_000
-/** Milliseconds in an hour. */
-const MS_PER_HOUR = 3_600_000
-/** Milliseconds in a day. */
-const MS_PER_DAY = 86_400_000
 
 /** Milliseconds in each unit a duration can be written in, by the unit's lower-case name. */
 const UNIT_MS: ReadonlyMap<string, number> = new Map([

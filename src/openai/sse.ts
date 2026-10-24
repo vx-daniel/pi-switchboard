@@ -27,6 +27,7 @@ import {
   routeFields
 } from '@proxy/openai/responses'
 import { mapFailedCall, type OpenAIError } from '@proxy/server/errors'
+import { unixSecondsNow } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** Logger for SSE encoding. */
@@ -119,9 +120,6 @@ export function encodeSSE(chunk: SSEChunk): string {
 export function encodeDone(): string {
   return 'data: [DONE]\n\n'
 }
-
-/** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
-const MS_PER_SECOND = 1000
 
 /** The fields every chunk of one response shares. */
 interface ChunkMeta {
@@ -462,7 +460,7 @@ export async function* streamToSSE(
   const model = route.model
   const meta: ChunkMeta = {
     id: requestId,
-    created: Math.floor(Date.now() / MS_PER_SECOND),
+    created: unixSecondsNow(),
     model,
     route
   }

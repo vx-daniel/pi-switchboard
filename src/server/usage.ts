@@ -26,7 +26,8 @@ import {
   type TimelineBucket,
   type UsageStats
 } from '@proxy/stats/store'
-import { isStatsWindow, MS_PER_MINUTE, type StatsWindow, windowMinutes } from '@proxy/stats/windows'
+import { isStatsWindow, type StatsWindow, windowMinutes } from '@proxy/stats/windows'
+import { MS_PER_MINUTE } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** Logger for the usage route. */

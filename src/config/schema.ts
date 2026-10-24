@@ -17,6 +17,7 @@ import { piAgentDir } from '@proxy/config/agent-dir'
 import { proxyLogger } from '@proxy/logging'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
 import { errorCode, isRecord } from '@proxy/utils/guards'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** Logger for config file reading and repair (`config` category). */
@@ -28,8 +29,6 @@ const configLogger = proxyLogger('config')
 
 /** Bytes in one mebibyte: converts `maxBodySizeMb` to bytes. */
 export const BYTES_PER_MB = 1_048_576
-/** Milliseconds in one second: converts `upstreamTimeoutSec` to milliseconds. */
-export const MS_PER_SECOND = 1000
 
 /** Highest TCP port. */
 export const MAX_PORT = 65_535

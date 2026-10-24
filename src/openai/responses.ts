@@ -23,6 +23,7 @@ import { FailureClassSchema } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { EffortReport } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
+import { unixSecondsNow } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** Logger for non-streaming response building. */
@@ -151,9 +152,6 @@ export function routeFields(route: ResponseRoute): RouteFields {
     ...(route.reasoningEffort === undefined ? {} : { reasoning_effort: route.reasoningEffort })
   }
 }
-
-/** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
-const MS_PER_SECOND = 1000
 
 /** The finish reasons the proxy sends; pi cannot tell apart any other OpenAI one. */
 export const finishReasonSchema = z.enum(['stop', 'length', 'tool_calls'])
@@ -373,7 +371,7 @@ export function buildChatCompletion(
   return {
     id: requestId,
     object: 'chat.completion',
-    created: Math.floor(Date.now() / MS_PER_SECOND),
+    created: unixSecondsNow(),
     model: canonicalModelId,
     choices: [
       {

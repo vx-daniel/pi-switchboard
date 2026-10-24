@@ -26,12 +26,11 @@ import type {
   StatsBatch,
   StatsStore
 } from '@proxy/stats/store'
+import { MS_PER_MINUTE } from '@proxy/utils/time'
 
 /** Logger for the stats. */
 const statsLogger = proxyLogger('stats')
 
-/** Milliseconds in a minute: rows are kept per minute. */
-const MS_PER_MINUTE = 60_000
 /** The stats file's name, in pi's agent dir. */
 const STATS_FILE = 'pi-switchboard-stats.sqlite'
 /** Minutes in a day, for the retention. */

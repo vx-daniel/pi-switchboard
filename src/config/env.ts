@@ -33,12 +33,12 @@ import {
   intBounds,
   loadConfigFromFile,
   MaxBodySizeBytesSchema,
-  MS_PER_SECOND,
   parseIntText,
   ProxyConfigSchema,
   UpstreamTimeoutMsSchema
 } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 import type * as z from 'zod'
 
 /** Logger for config resolution (`config` category). */

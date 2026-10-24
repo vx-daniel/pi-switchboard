@@ -26,7 +26,7 @@ import {
   type TimelineBucket,
   type UsageStats
 } from '@proxy/stats/store'
-import { MS_PER_MINUTE, STATS_WINDOWS, type StatsWindow, windowMinutes } from '@proxy/stats/windows'
+import { STATS_WINDOWS, type StatsWindow, windowMinutes } from '@proxy/stats/windows'
 import {
   compactCount,
   compactDuration,
@@ -37,6 +37,7 @@ import {
 } from '@proxy/tui/panel'
 import { fitLabel, statsRows } from '@proxy/tui/stats-view'
 import { type ConsoleColor, highlight, paint } from '@proxy/tui/theme'
+import { MS_PER_MINUTE } from '@proxy/utils/time'
 
 /** Logger for the console's own actions. */
 const consoleLogger = proxyLogger('tui')
