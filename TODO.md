@@ -40,7 +40,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Security policy
 
 - [x] Decide whether remote image URLs are enabled in the stable proxy (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-switchboard/issues/109))
-- [x] If enabled, document SSRF protections and size limits (PLAN.md, "Image URL fetching"; README, "Security defaults")
+- [x] If enabled, document SSRF protections and size limits (PLAN.md, "Image URL fetching"; docs/security.md, "Security defaults")
 - [x] Document bind-host defaults
 - [x] Document any future remote exposure guidance
 - [x] Mark agentic mode experimental and disabled by default

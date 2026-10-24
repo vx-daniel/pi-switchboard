@@ -2,8 +2,8 @@ name: Package
 
 # Publishes the pi package (@vx-daniel/pi-switchboard) for a release tag to GitHub Packages'
 # npm registry (#59), so `pi install npm:@vx-daniel/pi-switchboard` works for anyone with
-# registry access. Installing from it needs a GitHub token even for a public package (README,
-# "Installation"). The release workflow calls it for each new release; run it by hand to publish
+# registry access. Installing from it needs a GitHub token even for a public package
+# (docs/install.md, "Installation"). The release workflow calls it for each new release; run it by hand to publish
 # a release whose package is missing. The registry refuses to publish a version twice.
 on:
   workflow_call:
