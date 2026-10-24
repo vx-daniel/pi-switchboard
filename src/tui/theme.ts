@@ -126,6 +126,41 @@ export function activeTab(text: string): string {
 }
 
 /**
+ * Colors the chrome's accent: the current tab's outline and each tab's key digit, and the
+ * headline numbers of the status strip. The instrument panel's amber is the theme's yellow, named
+ * here once so no chrome module paints a tab with `warning`.
+ *
+ * @param text - the text
+ * @returns the text, amber when a theme is installed
+ */
+export function tabAccent(text: string): string {
+  return paint('warning', text)
+}
+
+/**
+ * Marks a badge in the status strip (`● SERVING`): bold success text on the success background.
+ *
+ * @param text - the badge's text, with its own padding
+ * @returns the badge, marked when a theme is installed
+ */
+export function badge(text: string): string {
+  if (active === undefined) return text
+  return active.bg('toolSuccessBg', strong(active.fg('success', text)))
+}
+
+/**
+ * Draws a key as a raised chip in the footer: bold on the selection background, as
+ * {@link highlight} does, in the plain text color so it reads as a key, not a selected item.
+ *
+ * @param text - the key's text, with its own padding
+ * @returns the chip, marked when a theme is installed
+ */
+export function keycap(text: string): string {
+  if (active === undefined) return text
+  return active.bg('selectedBg', strong(text))
+}
+
+/**
  * Puts a row of the console's chrome (its header, its tab bar, a row of its sidebar) on the
  * chrome's background, padded to the row's width.
  *
