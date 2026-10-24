@@ -61,6 +61,11 @@ describe('decodeReasoningToken', () => {
       rawToken({ version: 1, provider: 'p', api: 'a', model: 'm', thinking: 't', signature: 5 })
     ],
     ['a missing model', rawToken({ version: 1, provider: 'p', api: 'a', thinking: 't' })],
+    // The proxy writes `redacted: true` or leaves it out; any other value is not its token.
+    [
+      'redacted set to false',
+      rawToken({ version: 1, provider: 'p', api: 'a', model: 'm', thinking: 't', redacted: false })
+    ],
     ['a JSON array', rawToken([1, 2, 3])]
   ])('%s is refused', (_label, encoded) => {
     expect(decodeReasoningToken(encoded)).toBeUndefined()

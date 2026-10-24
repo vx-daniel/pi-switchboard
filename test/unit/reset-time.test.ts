@@ -37,6 +37,17 @@ describe('resetAfterMs', () => {
       failed({}, `{"error":{"resets_at":${String(NOW / 1000 + 600)}}}`),
       600_000
     ],
+    // A field of the wrong type reads as absent, not as a refusal of the body: the sibling counts.
+    [
+      'a wrong-typed field beside a valid one',
+      failed({}, '{"error":{"resets_in_seconds":"soon","retry_after":30}}'),
+      30_000
+    ],
+    [
+      'retry_after at the top level, with `error` not an object',
+      failed({}, '{"error":"rate limited","retry_after":90}'),
+      90_000
+    ],
     [
       "OpenAI's reset headers, the later one",
       failed({ 'x-ratelimit-reset-requests': '6m0s', 'x-ratelimit-reset-tokens': '1s' }),
