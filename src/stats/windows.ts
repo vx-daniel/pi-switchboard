@@ -16,8 +16,10 @@ export type StatsWindow = (typeof STATS_WINDOWS)[number]
 
 /** Minutes in a day. */
 const MINUTES_PER_DAY = 1440
+/** How many days of history the stats file keeps: the recorder prunes older rows. */
+export const STATS_KEPT_DAYS = 30
 /** Days in each window that isn't today; `all` is the stats file's retention. */
-const WINDOW_DAYS = { week: 7, all: 30 } as const
+const WINDOW_DAYS = { week: 7, all: STATS_KEPT_DAYS } as const
 
 /**
  * Checks whether a text names a window.

@@ -46,7 +46,7 @@ import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
-import type { StatsWindow } from '@proxy/stats/windows'
+import { STATS_KEPT_DAYS, type StatsWindow } from '@proxy/stats/windows'
 import { accountRows, accountsSnapshot, type AccountsView } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
 import { openSelectedModelsItem } from '@proxy/tui/console-models'
@@ -57,7 +57,7 @@ import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
 import { loginLabels } from '@proxy/tui/login'
 import { modelsItems, modelsRows, modelsViewData } from '@proxy/tui/models-view'
-import { moveSelection, stepView, type View } from '@proxy/tui/navigation'
+import { moveSelection, STATS_WINDOW_KEYS, stepView, type View } from '@proxy/tui/navigation'
 import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
 import { consoleScreen } from '@proxy/tui/screen'
 import { type SidebarInput, sidebarRows } from '@proxy/tui/sidebar'
@@ -74,13 +74,6 @@ const STATUS_REFRESH_MS = 5000
 const TICK_MS = 1000
 /** Lines a page key scrolls the log view by. */
 const PAGE_LINES = 10
-/** What the Stats tab's context calls each window. */
-const WINDOW_LABELS: Readonly<Record<StatsWindow, string>> = {
-  today: 'today',
-  week: 'week',
-  all: 'all 30 days'
-}
-
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
   readonly available: number
@@ -187,7 +180,8 @@ function stripInput(context: ConsoleContext, now: number): StatusStripInput {
     uptimeMs: now - context.startedAt,
     connections: state.connections,
     perMinute: traffic.perMinute,
-    saturated: traffic.saturated
+    saturated: traffic.saturated,
+    todayCostUsd: context.statsView.todayCostUsd()
   }
 }
 
@@ -202,19 +196,20 @@ const TAB_CONTEXT: Readonly<Record<View, (state: ConsoleState) => string>> = {
   },
   accounts: (state) =>
     `${String(state.accounts.length)} logins · ${String(state.status?.cooldowns ?? 0)} cooldowns`,
-  stats: (state) => WINDOW_LABELS[state.statsWindow],
+  stats: (state) => STATS_WINDOW_KEYS[state.statsWindow][1],
   models: (state) =>
     exposedModelsLabel(state.status?.exposed, Object.keys(state.status?.aliases ?? {}).length)
 }
 
 /**
  * What the right end of the frame's bottom border notes about each view: how many log lines,
- * logins or exposed models it holds. Stats notes nothing.
+ * logins or exposed models it holds, and on Stats how long the stats file keeps its history (with
+ * stats off, nothing).
  */
 const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
   logs: ({ logs }) => `${String(logs.dropped() + logs.lines().length)} lines`,
   accounts: ({ state }) => `${String(state.accounts.length)} logins`,
-  stats: () => '',
+  stats: ({ config }) => (config.statsEnabled ? `stats kept ${String(STATS_KEPT_DAYS)} days` : ''),
   models: ({ state }) => exposedModelsLabel(state.status?.exposed)
 }
 

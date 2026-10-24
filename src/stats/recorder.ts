@@ -26,6 +26,7 @@ import type {
   StatsBatch,
   StatsStore
 } from '@proxy/stats/store'
+import { STATS_KEPT_DAYS } from '@proxy/stats/windows'
 import { errorMessage } from '@proxy/utils/guards'
 import { MS_PER_MINUTE } from '@proxy/utils/time'
 
@@ -38,8 +39,8 @@ const STATS_FILE = 'pi-switchboard-stats.sqlite'
 const MINUTES_PER_DAY = 1440
 /** How often the counts are written. */
 const DEFAULT_FLUSH_MS = 5000
-/** How many days of rows are kept. */
-const DEFAULT_RETENTION_DAYS = 30
+/** How many days of rows are kept: the windows' `all` covers the same days. */
+const DEFAULT_RETENTION_DAYS = STATS_KEPT_DAYS
 /** How many flushes between prunes: about an hour at the default flush interval. */
 const FLUSHES_PER_PRUNE = 720
 /** The longest rejected model name kept; a canonical `provider/model-id` is far shorter. */

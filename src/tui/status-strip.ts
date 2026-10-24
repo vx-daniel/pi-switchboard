@@ -1,7 +1,8 @@
 /**
  * The console's status strip (#61): the screen's first row, what the proxy is doing at a glance.
  * The name and version, a `● SERVING` badge, where it listens and how; then the details that fit,
- * and on the right the last half hour of chat requests as a sparkline with the current rate.
+ * and on the right the last half hour of chat requests as a sparkline with the current rate, and
+ * what today's requests cost while the stats file is read.
  *
  * @remarks
  * Rendering only: the console gathers a {@link StatusStripInput} snapshot and redraws. When the
@@ -34,6 +35,8 @@ const MARK = '◆'
 const SEPARATOR = paint('border', ' · ')
 /** Decimal places of the rate. */
 const RATE_DECIMALS = 1
+/** Decimal places of today's cost. */
+const COST_DECIMALS = 2
 /** The left details kept whatever the width: the address and the auth. */
 const LEFT_DETAILS_KEPT = 2
 
@@ -60,6 +63,8 @@ export interface StatusStripInput {
   readonly perMinute: readonly number[]
   /** Whether the kept finished requests may miss some of the oldest minutes. */
   readonly saturated: boolean
+  /** What today's requests cost in US dollars, or `undefined` when the stats aren't read. */
+  readonly todayCostUsd: number | undefined
 }
 
 /**
@@ -123,6 +128,21 @@ function rateText(input: StatusStripInput): string {
 }
 
 /**
+ * Lists the right group, in the order it drops from: the sparkline, the rate, then today's cost.
+ *
+ * @param input - the snapshot
+ * @returns the parts, left to right
+ */
+function rightParts(input: StatusStripInput): string[] {
+  const parts = [`${paint('dim', 'last 30 min ')}${sparkline(input.perMinute)}`, rateText(input)]
+  if (input.todayCostUsd !== undefined) {
+    const cost = strong(tabAccent(`$${input.todayCostUsd.toFixed(COST_DECIMALS)}`))
+    parts.push(`${cost}${paint('dim', ' today')}`)
+  }
+  return parts
+}
+
+/**
  * Lists the left details: the address and the auth first (never dropped), then the errors (never
  * dropped either), then what the row's width allows.
  *
@@ -170,7 +190,7 @@ export function statusStrip(input: StatusStripInput, width: number): string {
   const serving = `  ${badge(' ● SERVING ')}  `
   let fixed = `${name} ${paint('dim', input.version)}${serving}`
   const left = leftDetails(input)
-  const right = [`${paint('dim', 'last 30 min ')}${sparkline(input.perMinute)}`, rateText(input)]
+  const right = rightParts(input)
   const kept = leftDetailsKept(input)
   // One space before the right group, and one after it at the row's edge.
   const overflow = (): number =>

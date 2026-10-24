@@ -2,12 +2,13 @@ import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import type { ErrorStats, ModelStats, StatsStore, TimelineBucket } from '@proxy/stats/store'
 import {
   createDashboardSource,
+  createTodayCostSource,
   type DashboardData,
   dashboardRows,
   openStatsView,
   windowRange
 } from '@proxy/tui/dashboard'
-import { installConsoleTheme, paint } from '@proxy/tui/theme'
+import { activeTab, installConsoleTheme, paint } from '@proxy/tui/theme'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
 /** Milliseconds in a minute. */
@@ -84,6 +85,31 @@ function snapshot(parts: Partial<DashboardData>): DashboardData {
  */
 function plainRows(data: DashboardData, size: { height: number; width: number }): string[] {
   return dashboardRows(data, size).map((row) => stripTerminalSequences(row))
+}
+
+/**
+ * Reads the tiles off the plain rows: each row's cells between the rules, trimmed.
+ *
+ * @param rows - the plain rows
+ * @returns the labels, the numbers and the captions, or `undefined` when no tile shows
+ */
+function tilesOf(rows: readonly string[]): string[][] | undefined {
+  const labels = rows.findIndex((row) => row.includes('REQUESTS'))
+  if (labels === -1) return undefined
+  return rows.slice(labels, labels + 3).map((row) => row.split('│').map((cell) => cell.trim()))
+}
+
+/**
+ * Counts the rows of timeline bars: the TIMELINE panel's rows besides its borders, its peak line
+ * and its axis.
+ *
+ * @param rows - the plain rows
+ * @returns the bar rows
+ */
+function chartHeight(rows: readonly string[]): number {
+  const top = rows.findIndex((row) => row.startsWith('╭─ TIMELINE'))
+  const bottom = rows.findIndex((row, rowIndex) => rowIndex > top && row.startsWith('╰'))
+  return bottom - top - 3
 }
 
 describe('windowRange', () => {
@@ -170,12 +196,47 @@ describe('createDashboardSource', () => {
   })
 })
 
+describe('createTodayCostSource', () => {
+  // Catches the strip's cost read over the wrong minutes (not from local midnight), summed over
+  // the wrong field, or read from the file on every redraw.
+  test('sums the cost since local midnight, read again after 5 seconds', () => {
+    let now = new Date(2026, 4, 10, 15, 30).getTime()
+    const ranges: { fromMinute: number; toMinute: number }[] = []
+    const read = createTodayCostSource(
+      {
+        models: (range) => {
+          ranges.push(range)
+          return [
+            modelStats({ model: 'a/one', costUsd: 1.25 }),
+            modelStats({ model: 'b/two', costUsd: 0.5 })
+          ]
+        }
+      },
+      () => now
+    )
+
+    expect(read()).toBe(1.75)
+    now += 4999
+    read()
+    expect(ranges).toHaveLength(1)
+    expect((ranges[0]?.fromMinute ?? 0) * MINUTE).toBe(new Date(2026, 4, 10).getTime())
+    now += 1
+    read()
+    expect(ranges).toHaveLength(2)
+  })
+})
+
 describe('dashboardRows', () => {
-  // Catches the layout running past the screen: rows below the footer or past the sidebar.
+  // Catches the layout running past the screen (rows below the footer or past the sidebar), or a
+  // row narrower than the view: the alt screen cuts a wide row without a word, so this is the only
+  // check. 109 and 110 are each side of the six tiles.
   test.each([
     [12, 40],
     [24, 80],
-    [45, 140]
+    [30, 109],
+    [30, 110],
+    [45, 140],
+    [45, 161]
   ])('fits %i rows by %i columns', (height, width) => {
     const data = snapshot({
       timeline: timelineOf(Array.from({ length: width }, (_, index) => index % 7)),
@@ -194,22 +255,110 @@ describe('dashboardRows', () => {
     })
     const rows = dashboardRows(data, { height, width })
     expect(rows.length).toBeLessThanOrEqual(height)
-    for (const row of rows) expect(visibleWidth(row)).toBeLessThanOrEqual(width)
+    for (const row of rows) expect(visibleWidth(row)).toBe(width)
   })
 
-  // Catches the overview summing the wrong fields or averaging per model instead of per request.
-  test('the overview sums the models and weights the average by requests', () => {
+  // Catches the tiles summing the wrong fields, averaging per model instead of per request, or a
+  // rate per hour taken over the wrong minutes.
+  test('the tiles sum the models and weight the averages by requests', () => {
     const data = snapshot({
       models: [
-        modelStats({ model: 'a/one', requests: 8, failed: 2, averageMs: 1000, costUsd: 1.5 }),
+        modelStats({
+          model: 'a/one',
+          requests: 8,
+          failed: 2,
+          averageMs: 1000,
+          slowestMs: 4000,
+          averageFirstEventMs: 500,
+          inputTokens: 1500,
+          outputTokens: 300,
+          costUsd: 1.5
+        }),
         modelStats({ model: 'b/two', requests: 2, averageMs: 2000, costUsd: 0.25 })
       ],
       errors: { failures: [], rejected: [{ status: 404, count: 3 }] }
     })
-    const text = plainRows(data, { height: 40, width: 120 }).join('\n')
-    expect(text).toContain('10 requests · 2 failed (20.0%) · 3 rejected')
-    expect(text).toContain('avg 1.2s')
-    expect(text).toContain('cost $1.75')
+
+    expect(tilesOf(plainRows(data, { height: 40, width: 120 }))).toStrictEqual([
+      ['REQUESTS', 'FAILED', 'AVG TIME', '1ST EVENT', 'TOKENS OUT', 'COST'],
+      ['10', '2', '1.2s', '500ms', '300', '$1.75'],
+      ['10.0 per hour', '3 rejected', 'slowest 4.0s', 'average wait', '1.5K in', '$0.175 each']
+    ])
+  })
+
+  // Catches the six tiles kept on a view too narrow for them, or the wrong four kept.
+  test('under 110 columns, four tiles: requests, failures, average time and cost', () => {
+    const data = snapshot({ models: [modelStats({ model: 'a/one', requests: 4, costUsd: 2 })] })
+
+    expect(tilesOf(plainRows(data, { height: 40, width: 109 }))?.[0]).toStrictEqual([
+      'REQUESTS',
+      'FAILED',
+      'AVG TIME',
+      'COST'
+    ])
+  })
+
+  // Catches the tiles kept on a short screen at the timeline's cost (the mock's own bug: below 27
+  // rows its tiles took the chart's rows), or dropped while there is room for them.
+  test.each([
+    ['without', 0, 17],
+    ['with', 2, 21]
+  ] as const)(
+    '%s the ALIASES panel, the tiles go before the timeline drops under 3 rows',
+    (_panel, aliasCount, height) => {
+      const data = snapshot({
+        timeline: timelineOf([1, 2, 3]),
+        models: [modelStats({ model: 'a/one', requests: 6 })],
+        aliases: Array.from({ length: aliasCount }, (_, aliasIndex) => ({
+          ...modelStats({ model: '', requests: 3 }),
+          alias: `route-${String(aliasIndex)}`
+        }))
+      })
+
+      const fits = plainRows(data, { height, width: 80 })
+      const short = plainRows(data, { height: height - 1, width: 80 })
+
+      expect(tilesOf(fits)).toBeDefined()
+      expect(chartHeight(fits)).toBe(3)
+      expect(fits).toHaveLength(height)
+      expect(fits.at(-1)).toContain('no failed or rejected requests')
+      expect(tilesOf(short)).toBeUndefined()
+      expect(chartHeight(short)).toBeGreaterThanOrEqual(3)
+      expect(short.at(-1)).toContain('no failed or rejected requests')
+    }
+  )
+
+  // Catches the bar size lost when it moved off the window line.
+  test('the timeline names the minutes per bar in its border', () => {
+    const rows = plainRows(snapshot({ bucketMinutes: 22 }), { height: 30, width: 80 })
+
+    expect(rows.some((row) => row.startsWith('╭─ TIMELINE 22 min per bar ─'))).toBe(true)
+  })
+
+  // Catches a failed attempt that fell back (served in the end) hidden behind the check, or the
+  // rejections by status lost from the line.
+  test('the errors line counts the failed and rejected requests, then says what they were', () => {
+    const fellBack = snapshot({
+      errors: { failures: [{ failureClass: 'rate_limit', count: 4 }], rejected: [] }
+    })
+    const rejected = snapshot({
+      models: [modelStats({ model: 'a/one', requests: 3, failed: 1 })],
+      errors: {
+        failures: [
+          { failureClass: 'rate_limit', count: 2 },
+          { failureClass: 'timeout', count: 1 }
+        ],
+        rejected: [{ status: 404, count: 3 }]
+      }
+    })
+    const size = { height: 30, width: 120 }
+
+    expect(plainRows(fellBack, size).at(-1)?.trimEnd()).toBe(
+      ' ✗ 0 failed · 0 rejected — failed attempts rate_limit 4'
+    )
+    expect(plainRows(rejected, size).at(-1)?.trimEnd()).toBe(
+      ' ✗ 1 failed · 3 rejected — failed attempts rate_limit 2, timeout 1 · rejected 404 ×3'
+    )
   })
 
   // Catches bars scaled to the screen instead of the busiest bucket, a quiet bucket with a single
@@ -258,6 +407,17 @@ describe('dashboardRows', () => {
       Reflect.set(globalThis, piThemeKey, before)
     })
 
+    // Catches the current window unmarked among the pills, or another one marked with it.
+    test('the current window is the amber pill', () => {
+      vi.stubEnv('NO_COLOR', '')
+      installConsoleTheme()
+      const [pills] = dashboardRows(snapshot({ window: 'week' }), { height: 30, width: 80 })
+
+      expect(pills).toContain(activeTab(' w  week '))
+      expect(pills).not.toContain(activeTab(' t  today '))
+      expect(stripTerminalSequences(pills ?? '')).toContain('a  all 30 days')
+    })
+
     // Catches one failure turning a whole bar red: at a normal failure rate nearly every busy bar
     // has one, and the chart would read as all failing.
     test('a failure marks the foot of its bar, not the whole bar', () => {
@@ -285,8 +445,8 @@ describe('dashboardRows', () => {
     })
     const rows = plainRows(data, { height: 24, width: 100 })
     expect(rows).toHaveLength(24)
-    expect(rows.some((row) => row.includes('+6 more'))).toBe(true)
-    expect(rows.some((row) => row.includes('timeout 1'))).toBe(true)
+    expect(rows.some((row) => row.includes('more'))).toBe(true)
+    expect(rows.at(-1)).toContain('failed attempts timeout 1')
   })
 
   // Catches the ALIASES panel hidden when routes were used (the per-alias cost is the point), or
@@ -305,11 +465,19 @@ describe('dashboardRows', () => {
     expect(directOnly.some((row) => row.includes('ALIASES'))).toBe(false)
   })
 
-  // Catches an empty window rendering a blank table the operator can't tell from a broken one.
-  test('a window without requests says so', () => {
-    const text = plainRows(snapshot({}), { height: 30, width: 80 }).join('\n')
+  // Catches an empty window rendering a blank table the operator can't tell from a broken one, or
+  // a tile dividing by its zero requests.
+  test('a window without requests says so, with no NaN in the tiles', () => {
+    const rows = plainRows(snapshot({ range: { fromMinute: 60, toMinute: 60 } }), {
+      height: 30,
+      width: 120
+    })
+    const text = rows.join('\n')
+
     expect(text).toContain('No requests in this window.')
-    expect(text).toContain('0 requests · 0 failed')
+    expect(text).not.toMatch(/NaN|Infinity/)
+    expect(tilesOf(rows)?.[1]).toStrictEqual(['0', '0', '-', '-', '0', '$0.00'])
+    expect(rows.at(-1)).toContain('✓ no failed or rejected requests in this window')
   })
 })
 
@@ -320,6 +488,7 @@ describe('openStatsView', () => {
     const [note] = view.rows('today', { height: 10, width: 100 })
     view.close()
     expect(stripTerminalSequences(note ?? '')).toContain('Stats are off (--no-stats)')
+    expect(view.todayCostUsd()).toBeUndefined()
   })
 
   // Catches a stats file that can't be opened (a newer proxy's schema, a read-only directory)
@@ -331,6 +500,48 @@ describe('openStatsView', () => {
     const [note] = view.rows('today', { height: 10, width: 120 })
     view.close()
     expect(stripTerminalSequences(note ?? '')).toContain('The stats file could not be opened')
+    expect(view.todayCostUsd()).toBeUndefined()
+  })
+
+  // Catches the strip's cost missing while the stats file reads fine.
+  test('an open file gives the strip today’s cost', () => {
+    const view = openStatsView(true, () => ({
+      timeline: () => [],
+      models: () => [modelStats({ model: 'a/one', costUsd: 0.42 })],
+      aliases: () => [],
+      errors: () => NO_ERRORS,
+      close: () => undefined
+    }))
+    const cost = view.todayCostUsd()
+    view.close()
+    expect(cost).toBe(0.42)
+  })
+
+  // Catches the strip's cost read on every redraw after the file failed (each try can wait out
+  // the busy timeout on the thread that serves requests), or the dashboard trying the file again
+  // once the strip's read failed.
+  test('a failed cost read gives no cost and stops the dashboard reading too', () => {
+    let reads = 0
+    const view = openStatsView(true, () => ({
+      timeline: () => {
+        reads += 1
+        return []
+      },
+      models: () => {
+        reads += 1
+        throw new Error('database is locked')
+      },
+      aliases: () => [],
+      errors: () => NO_ERRORS,
+      close: () => undefined
+    }))
+
+    expect(view.todayCostUsd()).toBeUndefined()
+    expect(view.todayCostUsd()).toBeUndefined()
+    const [note] = view.rows('today', { height: 10, width: 100 })
+    view.close()
+    expect(stripTerminalSequences(note ?? '')).toContain('The stats file could not be read')
+    expect(reads).toBe(1)
   })
 
   // Catches a read that fails after the file opened (a locked or damaged file) escaping the
@@ -352,6 +563,7 @@ describe('openStatsView', () => {
       const [note] = view.rows(window, size)
       expect(stripTerminalSequences(note ?? '')).toContain('The stats file could not be read')
     }
+    expect(view.todayCostUsd()).toBeUndefined()
     view.close()
     expect(reads).toBe(1)
   })
