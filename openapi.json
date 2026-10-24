@@ -5387,7 +5387,7 @@
             }
           },
           "422": {
-            "description": "A field the proxy does not accept (`unsupported_parameter`): stored state (`previous_response_id`, `conversation`, `background`, `prompt`, `store: true`), a tool that is not a function, and the others listed in the README.",
+            "description": "A field the proxy does not accept (`unsupported_parameter`): stored state (`previous_response_id`, `conversation`, `background`, `prompt`, `store: true`), a tool that is not a function, and the others listed in docs/api.md.",
             "content": {
               "application/json": {
                 "schema": {

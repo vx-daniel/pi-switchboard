@@ -12,7 +12,13 @@ A local OpenAI-compatible HTTP API built on [pi](https://github.com/earendil-wor
 
 On top of that it routes across your pi logins: aliases, fallback chains, cooldowns, quota awareness and several logins per provider (#66–#70, #227), with a terminal console to watch and manage it. More of OpenAI's API comes next: the Responses API is in, experimental and off by default (#140). See [`ROADMAP.md`](ROADMAP.md). It stays OpenAI-compatible on the client side; it doesn't run logins of its own, keep conversation state, or speak other vendors' client protocols.
 
+## Documentation
+
+Installing, configuration, the HTTP API, routing, the console and the pi extension are in [`docs/`](docs/README.md).
+
 ## Quickstart
+
+Install it first ([Installing](docs/install.md)), then:
 
 ```bash
 # Start the proxy (defaults to http://127.0.0.1:4141)

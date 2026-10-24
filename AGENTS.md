@@ -12,7 +12,7 @@ Before changing code:
 
 1. Read [`CONSTITUTION.md`](CONSTITUTION.md) for the principles every change is checked against.
 2. Read [`PLAN.md`](PLAN.md) for architecture, API compatibility policy, and security boundaries.
-3. Skim [`README.md`](README.md) for public contract and operator-facing behavior.
+3. Skim [`README.md`](README.md) and the user docs it links ([`docs/README.md`](docs/README.md)) for public contract and operator-facing behavior.
 4. Check `package.json`, `vite.config.ts` (fmt, lint, test, pack, staged), `lint/repo-rules.ts`, `.vite-hooks/`, and `tsconfig.json` before changing tooling.
 5. Use recent git history when behavior or workflow intent is unclear: `git log --oneline -20`.
 
@@ -25,7 +25,7 @@ Before changing code:
 - `src/sync/` — external/editor sync integrations
 - `extensions/` — Pi extension surface for the package
 - `test/unit/`, `test/integration/`, `test/conformance/` — behavior checks
-- `docs/` — supporting analysis and client research, not the main source of truth; `docs/reference/` compares the proxy with other implementations; `docs/archive/` holds the March 2026 plans that were not carried out
+- `docs/` — the user documentation, from [`docs/README.md`](docs/README.md): install, configuration, the HTTP API, routing, the console, the pi extension; under it, supporting analysis and research that is not the main source of truth: `docs/reference/` compares the proxy with other implementations, `docs/engineering/` and `docs/discovery/` hold past analysis and client research, and `docs/archive/` holds the March 2026 plans that were not carried out
 
 ## Core constraints
 
@@ -133,7 +133,7 @@ Keep durable docs aligned with implementation:
 - Update [`PLAN.md`](PLAN.md) when architecture, constraints, compatibility policy, or security boundaries change.
 - Update [`TODO.md`](TODO.md) when execution status or next tasks change.
 - Update [`ROADMAP.md`](ROADMAP.md) when the current phase summary changes.
-- Update [`README.md`](README.md) when user-facing behavior, installation, configuration, or public API examples change.
+- Update [`README.md`](README.md) and the user docs in [`docs/`](docs/README.md) when user-facing behavior, installation, configuration, or public API examples change.
 - Prefer linking to those docs from here instead of copying large sections into `AGENTS.md`.
 
 ## When to stop and ask
