@@ -5,8 +5,9 @@
  * @packageDocumentation
  */
 
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
-import { activeTab, paint } from '@proxy/tui/theme'
+import { keycap, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */
 export const VIEWS = ['logs', 'accounts', 'stats', 'models'] as const
@@ -77,78 +78,87 @@ export function accountActions(account: ProviderCredentialStatus): readonly Acco
   ]
 }
 
-/**
- * Renders the tab bar, marking the current view.
- *
- * @param view - the current view
- * @returns the tab bar line
- */
-export function tabsLine(view: View): string {
-  const tabs: readonly (readonly [View, string])[] = [
-    ['logs', ' 1 Logs '],
-    ['accounts', ' 2 Accounts '],
-    ['stats', ' 3 Stats '],
-    ['models', ' 4 Models ']
-  ]
-  const shown = tabs.map(([tab, label]) => (tab === view ? activeTab(label) : label))
-  return ` ${shown.join(' ')}`
-}
+/** A key and what it does, for the footer. */
+type KeyHint = readonly [key: string, action: string]
 
-/**
- * The footer's key hints for each view, quitting first: a narrow terminal cuts the end of the line.
- */
-const FOOTER: Readonly<Record<View, readonly string[]>> = {
+/** Each view's keys, the ones worth learning first at the front: a narrow footer cuts the end. */
+const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
   logs: [
-    'q quit (stops the proxy)',
-    '←→ views',
-    '↑↓ PgUp PgDn scroll',
-    'End follow',
-    'n login',
-    'p proxy auth'
+    ['↑↓', 'scroll'],
+    ['PgUp PgDn', 'page'],
+    ['End', 'follow'],
+    ['n', 'login']
   ],
   accounts: [
-    'q quit (stops the proxy)',
-    '←→ views',
-    '↑↓ select',
-    'Enter actions',
-    'v verify all',
-    'n login',
-    'x logout',
-    'p proxy auth',
-    'c clear cooldowns'
+    ['↑↓', 'select'],
+    ['↵', 'actions'],
+    ['v', 'verify all'],
+    ['n', 'login'],
+    ['x', 'log out'],
+    ['c', 'clear cooldowns']
   ],
   stats: [
-    'q quit (stops the proxy)',
-    '←→ views',
-    't today',
-    'w week',
-    'a all 30 days',
-    'p proxy auth'
+    ['t', 'today'],
+    ['w', 'week'],
+    ['a', 'all 30 days']
   ],
   models: [
-    'q quit (stops the proxy)',
-    '←→ views',
-    '↑↓ select',
-    'Enter edit or add an alias',
-    'p proxy auth',
-    'c clear cooldowns'
+    ['↑↓', 'select'],
+    ['↵', 'edit or add an alias'],
+    ['c', 'clear cooldowns']
   ]
 }
-/** The hints before the sidebar's: quitting and moving between views. */
-const HINTS_BEFORE_SIDEBAR = 2
+/** The keys that work on every view, besides quitting; a narrow footer drops them from the front. */
+const GLOBAL_KEYS: readonly KeyHint[] = [
+  ['1-4 ←→', 'views'],
+  ['p', 'proxy auth']
+]
+/** Quitting stops the proxy: the one key the footer always shows, at its right end. */
+const QUIT_KEY: KeyHint = ['q', 'quit (stops the proxy)']
+/** The sidebar's key, offered only where the sidebar fits; after the view keys, before the rest. */
+const SIDEBAR_KEY: KeyHint = ['s', 'sidebar']
+/** Columns between two key hints. */
+const HINT_GAP = '  '
+/** Columns kept clear at the footer's edges and between its two groups. */
+const FOOTER_MARGIN = 3
 
 /**
- * Renders the footer: the view's key hints, with the sidebar's key after quitting and moving
- * between views on a terminal wide enough to show the sidebar.
+ * Renders key hints as keycaps: each key on a chip, then what it does.
+ *
+ * @param hints - the keys
+ * @param emphasised - whether the actions are the view's own (brighter) or the global ones
+ * @returns the hints, joined
+ */
+function keycaps(hints: readonly KeyHint[], emphasised: boolean): string {
+  return hints
+    .map(([key, action]) => `${keycap(` ${key} `)} ${paint(emphasised ? 'muted' : 'dim', action)}`)
+    .join(HINT_GAP)
+}
+
+/**
+ * Renders the footer: the view's keys on the left, the keys that work everywhere on the right,
+ * quitting last. When the row is too narrow the other global keys give way from their start,
+ * then the view's keys from their end; quitting stays, since it stops the proxy.
  *
  * @param view - the current view
- * @param sidebarFits - whether the terminal is wide enough for the sidebar, shown or hidden
- * @returns the footer line
+ * @param size - the footer's columns, and whether the sidebar fits the terminal (shown or hidden)
+ * @param size.width - the columns
+ * @param size.sidebarFits - whether the terminal is wide enough for the sidebar
+ * @returns the footer row, `size.width` columns
  */
-export function footerLine(view: View, sidebarFits: boolean): string {
-  const hints = FOOTER[view]
-  const shown = sidebarFits
-    ? [...hints.slice(0, HINTS_BEFORE_SIDEBAR), 's sidebar', ...hints.slice(HINTS_BEFORE_SIDEBAR)]
-    : hints
-  return paint('dim', ` ${shown.join(' · ')}`)
+export function footerLine(
+  view: View,
+  size: { readonly width: number; readonly sidebarFits: boolean }
+): string {
+  const left = [...VIEW_KEYS[view]]
+  const others = size.sidebarFits ? [SIDEBAR_KEY, ...GLOBAL_KEYS] : [...GLOBAL_KEYS]
+  const rightText = (): string => `${keycaps([...others, QUIT_KEY], false)} `
+  const overflow = (): number =>
+    visibleWidth(keycaps(left, true)) + visibleWidth(rightText()) + FOOTER_MARGIN - size.width
+  while (overflow() > 0 && others.length > 0) others.shift()
+  while (overflow() > 0 && left.length > 0) left.pop()
+  const leftText = ` ${keycaps(left, true)}`
+  const right = rightText()
+  const gap = Math.max(1, size.width - visibleWidth(leftText) - visibleWidth(right))
+  return truncateToWidth(`${leftText}${' '.repeat(gap)}${right}`, size.width, '', true)
 }

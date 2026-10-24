@@ -113,16 +113,16 @@ export function highlight(text: string): string {
 }
 
 /**
- * Marks the current tab: bold accent, inverted, so it reads as a pill on the header's background.
- * pi-tui's `styleText` for the inversion, as in {@link strong}: the theme's `inverse` goes through
- * chalk, which emits nothing in the console.
+ * Marks the current tab where the tabs sit in the frame's border: bold in the chrome's amber,
+ * inverted, so it reads as a pill. pi-tui's `styleText` for the inversion, as in {@link strong}:
+ * the theme's `inverse` goes through chalk, which emits nothing in the console.
  *
  * @param text - the tab's label
  * @returns the label, marked when a theme is installed
  */
 export function activeTab(text: string): string {
   if (active === undefined) return text
-  return styleText(strong(active.fg('accent', text)), { inverse: true }, active.getColorMode())
+  return styleText(strong(tabAccent(text)), { inverse: true }, active.getColorMode())
 }
 
 /**

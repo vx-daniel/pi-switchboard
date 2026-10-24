@@ -1,4 +1,4 @@
-import { stripTerminalSequences } from '@earendil-works/pi-tui'
+import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import {
   accountActions,
@@ -52,15 +52,32 @@ describe('console navigation', () => {
   })
 
   // Catches the footer offering the sidebar key on a terminal too narrow for the sidebar, where it
-  // does nothing, or hiding it where it works; and quitting pushed off the front, where a narrow
-  // terminal keeps it.
-  test('offers the sidebar key only where the sidebar fits, after quitting and views', () => {
+  // does nothing, or hiding it where it works; and a footer row wider or narrower than the
+  // terminal.
+  test('offers the sidebar key only where the sidebar fits, and fills the width exactly', () => {
     for (const view of VIEWS) {
-      const narrow = stripTerminalSequences(footerLine(view, false))
-      const wide = stripTerminalSequences(footerLine(view, true))
+      const narrow = footerLine(view, { width: 99, sidebarFits: false })
+      const wide = footerLine(view, { width: 160, sidebarFits: true })
 
-      expect(narrow).not.toContain('s sidebar')
-      expect(wide.startsWith(' q quit (stops the proxy) · ←→ views · s sidebar')).toBe(true)
+      expect(stripTerminalSequences(narrow)).not.toContain(' s  sidebar')
+      expect(stripTerminalSequences(wide)).toContain(' s  sidebar')
+      expect(visibleWidth(narrow)).toBe(99)
+      expect(visibleWidth(wide)).toBe(160)
     }
+  })
+
+  // Catches the view's keys on the left and the global keys on the right swapping, or quitting
+  // (which stops the proxy) being the first key to go on a narrow terminal instead of the last.
+  test('keeps the view’s keys left, the global keys right, and quitting last of all', () => {
+    const wide = stripTerminalSequences(footerLine('logs', { width: 160, sidebarFits: true }))
+    expect(wide).toMatch(/^ {2}↑↓ {2}scroll .* {2}q {2}quit \(stops the proxy\) $/)
+
+    const at80 = stripTerminalSequences(footerLine('accounts', { width: 80, sidebarFits: false }))
+    expect(at80).toMatch(/ q {2}quit \(stops the proxy\) $/)
+    expect(at80).not.toContain('views')
+
+    const at48 = stripTerminalSequences(footerLine('accounts', { width: 48, sidebarFits: false }))
+    expect(at48).toMatch(/^ {2}↑↓ {2}select +q {2}quit \(stops the proxy\) $/)
+    expect(visibleWidth(at48)).toBe(48)
   })
 })
