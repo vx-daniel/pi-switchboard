@@ -105,6 +105,9 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
 }
 ```
 
+- **`lifetime` and `zed` matter only to the pi package**, which starts the proxy from pi and syncs Zed. A standalone proxy (the binary, Docker or the npm CLI) ignores them; leave them out there.
+- **The model IDs are from pi 1.4.0's catalogue.** Catalogues change: use the IDs `GET /v1/models` lists for your logins ([Discovering available models](api.md#discovering-available-models)).
+
 ## What comes from pi
 
 The proxy reads two files from pi's configuration directory (`~/.pi/agent/`):
