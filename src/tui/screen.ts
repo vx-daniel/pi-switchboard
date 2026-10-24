@@ -52,6 +52,18 @@ export interface ScreenInput {
 }
 
 /**
+ * Formats a time of day: `19:02:29`, in local time.
+ *
+ * @param time - the time, in milliseconds since the epoch
+ * @returns the text
+ */
+export function timeOfDay(time: number): string {
+  const date = new Date(time)
+  const pad = (value: number): string => String(value).padStart(CLOCK_DIGITS, '0')
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+/**
  * Formats the clock over the sidebar: `Fri 23 Oct  19:02:29`, in local time.
  *
  * @param now - the time, in milliseconds since the epoch
@@ -59,10 +71,8 @@ export interface ScreenInput {
  */
 export function clockLabel(now: number): string {
   const date = new Date(now)
-  const pad = (value: number): string => String(value).padStart(CLOCK_DIGITS, '0')
   const day = `${WEEKDAYS[date.getDay()] ?? ''} ${String(date.getDate())} ${MONTHS[date.getMonth()] ?? ''}`
-  const time = `${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-  return `${paint('dim', day)}  ${strong(time)}`
+  return `${paint('dim', day)}  ${strong(timeOfDay(now))}`
 }
 
 /**

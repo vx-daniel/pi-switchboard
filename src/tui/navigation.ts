@@ -98,6 +98,7 @@ const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
     ['↑↓', 'scroll'],
     ['PgUp PgDn', 'page'],
     ['End', 'follow'],
+    ['r', 'requests / raw log'],
     ['n', 'login']
   ],
   accounts: [

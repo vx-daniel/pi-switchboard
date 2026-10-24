@@ -10,6 +10,7 @@ import { proxyLogger } from '@proxy/logging'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
 import { internalError, invalidRequest } from '@proxy/server/errors'
 import { createHealthRoutes } from '@proxy/server/health'
+import { requestLogMiddleware } from '@proxy/server/http-requests'
 import { HTTP_INTERNAL_SERVER_ERROR, HTTP_NOT_FOUND } from '@proxy/server/http-status'
 import {
   bodySizeLimitMiddleware,
@@ -72,6 +73,8 @@ export function createApp(
 
   // Global middleware
   app.use('*', requestIdMiddleware())
+  // After the request ID, which it reads; ahead of proxy auth, so a request it turns away is listed.
+  app.use('*', requestLogMiddleware())
   app.use('*', disconnectMiddleware())
   // Ahead of the body size limit and proxy auth, so a chat request they turn away is recorded too.
   app.use('/v1/chat/completions', rejectedChatMiddleware())

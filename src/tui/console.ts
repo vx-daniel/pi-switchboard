@@ -6,7 +6,7 @@
  * @remarks
  * Quitting the console stops the proxy. Logins go through `src/tui/login.ts`, so a new login is
  * served at once, by the same runtime. While the console runs, a stray write to stderr (one that
- * bypasses LogTape) goes to the log view instead of corrupting the screen.
+ * bypasses LogTape) goes to the raw log instead of corrupting the screen.
  *
  * @packageDocumentation
  */
@@ -41,6 +41,7 @@ import {
   finishedRequests,
   onActiveRequestsChange
 } from '@proxy/server/active-requests'
+import { httpRequests, onHttpRequestsChange } from '@proxy/server/http-requests'
 import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
@@ -54,11 +55,17 @@ import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
 import { exposedModelsLabel } from '@proxy/tui/frame'
 import { consoleLayout, type ConsoleLayout } from '@proxy/tui/layout'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
-import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
+import { type LogViewport, logViewRows, scrollLogView, wheelLines } from '@proxy/tui/log-view'
 import { loginLabels } from '@proxy/tui/login'
 import { modelsItems, modelsRows, modelsViewData } from '@proxy/tui/models-view'
 import { moveSelection, STATS_WINDOW_KEYS, stepView, type View } from '@proxy/tui/navigation'
 import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
+import {
+  chatsById,
+  requestsRows,
+  type RequestsViewport,
+  scrollRequestsView
+} from '@proxy/tui/requests-view'
 import { consoleScreen } from '@proxy/tui/screen'
 import { type SidebarInput, sidebarRows } from '@proxy/tui/sidebar'
 import { createRefresh, type RefreshState } from '@proxy/tui/status-refresh'
@@ -72,7 +79,7 @@ import packageJson from '../../package.json' with { type: 'json' }
 const STATUS_REFRESH_MS = 5000
 /** How often the sidebar's clocks (uptime, elapsed, time left) and connection count move on. */
 const TICK_MS = 1000
-/** Lines a page key scrolls the log view by. */
+/** Lines a page key scrolls the raw log or the Requests table by. */
 const PAGE_LINES = 10
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
@@ -94,8 +101,12 @@ interface Status {
 /** The console's state, which every render reads. */
 interface ConsoleState extends RefreshState<Status> {
   view: View
-  /** Where the log view is: following new lines, or pinned to the lines on screen. */
+  /** Whether the first view shows the raw log rather than the Requests table (`r`). */
+  logRaw: boolean
+  /** Where the raw log is: following new lines, or pinned to the lines on screen. */
   logView: LogViewport
+  /** Where the Requests table is: following new requests, or pinned to the ones on screen. */
+  requestsView: RequestsViewport
   /** The selected row of the accounts view; the row after the accounts opens the login. */
   selected: number
   /** The selected row of the Models view: a model, an alias, or the new-alias row (#230). */
@@ -186,7 +197,7 @@ function stripInput(context: ConsoleContext, now: number): StatusStripInput {
 }
 
 /**
- * What the right end of the tab row says about each view: what is in flight on Logs, the logins
+ * What the right end of the tab row says about each view: what is in flight on Requests, the logins
  * and cooldowns on Accounts, the window on Stats, the models and aliases on Models.
  */
 const TAB_CONTEXT: Readonly<Record<View, (state: ConsoleState) => string>> = {
@@ -207,7 +218,10 @@ const TAB_CONTEXT: Readonly<Record<View, (state: ConsoleState) => string>> = {
  * while the view shows the totals instead).
  */
 const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
-  logs: ({ logs }) => `${String(logs.dropped() + logs.lines().length)} lines`,
+  logs: ({ logs, state }) =>
+    state.logRaw
+      ? `raw log · ${String(logs.dropped() + logs.lines().length)} lines`
+      : `${String(httpRequests().length)} requests`,
   accounts: ({ state }) => `${String(state.accounts.length)} logins`,
   stats: ({ statsView }) => statsView.frameNote(),
   models: ({ state }) => exposedModelsLabel(state.status?.exposed)
@@ -259,6 +273,42 @@ function modelsViewRows(
 }
 
 /**
+ * Renders the first view: the Requests table, or the raw log after `r`.
+ *
+ * @param state - the console's state: which of the two, and where each is
+ * @param logs - the log buffer
+ * @param size - the space available
+ * @param size.height - rows
+ * @param size.width - columns
+ * @returns the rows
+ */
+function logsRows(
+  state: ConsoleState,
+  logs: LogBuffer,
+  size: { readonly height: number; readonly width: number }
+): string[] {
+  if (state.logRaw) return logViewRows(state.logView, logs, size)
+  const data = {
+    requests: httpRequests(),
+    chats: chatsById(activeRequests(), finishedRequests()),
+    now: Date.now()
+  }
+  return requestsRows(state.requestsView, data, size)
+}
+
+/**
+ * Scrolls the first view, the raw log or the Requests table, whichever is shown.
+ *
+ * @param context - the console
+ * @param lines - lines or requests to scroll up (positive) or down (negative)
+ */
+function scrollLogs(context: ConsoleContext, lines: number): void {
+  const { state } = context
+  if (state.logRaw) state.logView = scrollLogView(state.logView, context.logs, lines)
+  else state.requestsView = scrollRequestsView(state.requestsView, httpRequests(), lines)
+}
+
+/**
  * Renders the current view's body.
  *
  * @param context - the console
@@ -272,7 +322,7 @@ function viewRows(
   size: { readonly height: number; readonly width: number }
 ): string[] {
   const { state, logs } = context
-  if (state.view === 'logs') return logViewRows(state.logView, logs, size)
+  if (state.view === 'logs') return logsRows(state, logs, size)
   if (state.view === 'accounts') return accountRows(accountsView(state, Date.now()), size)
   if (state.view === 'models') return modelsViewRows(state, size)
   return context.statsView.rows(state.statsWindow, size)
@@ -357,10 +407,10 @@ function createRootView(
     },
     handleInput,
     handleMouse(event) {
-      // The wheel scrolls the log view; elsewhere it does nothing.
-      const { state } = context
-      if (event.type !== 'wheel' || state.view !== 'logs') return undefined
-      state.logView = wheelLogView(state.logView, context.logs, event)
+      // The wheel scrolls the first view, the table or the raw log; elsewhere it does nothing.
+      const lines = wheelLines(event)
+      if (lines === undefined || context.state.view !== 'logs') return undefined
+      scrollLogs(context, lines)
       return { handled: true }
     },
     invalidate() {
@@ -389,7 +439,7 @@ function moveModelsSelection(state: ConsoleState, step: number): number {
  */
 function moveWithin(context: ConsoleContext, step: number): void {
   const { state } = context
-  if (state.view === 'logs') state.logView = scrollLogView(state.logView, context.logs, -step)
+  if (state.view === 'logs') scrollLogs(context, -step)
   else if (state.view === 'accounts') {
     state.selected = moveSelection(state.selected, state.accounts.length, step)
   } else if (state.view === 'models') state.modelsSelected = moveModelsSelection(state, step)
@@ -444,7 +494,20 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     [Key.down, () => moveWithin(context, 1)],
     [Key.pageUp, () => moveWithin(context, -PAGE_LINES)],
     [Key.pageDown, () => moveWithin(context, PAGE_LINES)],
-    [Key.end, () => (state.logView = undefined)]
+    [
+      Key.end,
+      () => {
+        state.logView = undefined
+        state.requestsView = undefined
+      }
+    ],
+    // The Requests table or the raw log, on the first view, where the footer lists the key.
+    [
+      'r',
+      () => {
+        if (state.view === 'logs') state.logRaw = !state.logRaw
+      }
+    ]
   ]
 }
 
@@ -464,8 +527,9 @@ function settleable(): { promise: Promise<void>; settle: () => void } {
 
 /**
  * Starts what keeps the screen current: a redraw on every log line and every change to the route
- * totals or the requests in flight, the open connections counted and the sidebar's clocks moved on
- * every second, the status read every few seconds, and stray stderr writes sent to the log view.
+ * totals, the chat requests in flight or the HTTP requests, the open connections counted and the
+ * sidebar's clocks moved on every second, the status read every few seconds, and stray stderr
+ * writes sent to the raw log.
  *
  * @param context - the console
  * @param server - the proxy's server, whose open connections the sidebar shows
@@ -476,6 +540,7 @@ function startUpdates(context: ConsoleContext, server: ServerType): () => void {
   const unsubscribeLogs = context.logs.onChange(redraw)
   const unsubscribeTotals = onRouteTotalsChange(redraw)
   const unsubscribeActive = onActiveRequestsChange(redraw)
+  const unsubscribeHttp = onHttpRequestsChange(redraw)
   const timer = setInterval(
     () => inBackground(context.refresh(), 'Reading the status'),
     STATUS_REFRESH_MS
@@ -493,6 +558,7 @@ function startUpdates(context: ConsoleContext, server: ServerType): () => void {
     unsubscribeLogs()
     unsubscribeTotals()
     unsubscribeActive()
+    unsubscribeHttp()
     restoreStderr()
   }
 }
@@ -535,7 +601,7 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
   // pi's login dialog copies its sign-in URL on pi's own `app.message.copy` key, Ctrl+X in pi;
   // without a binding its hint names no key. The console has no other pi app keys. The screen's
   // own viewport scrolling takes PgUp and PgDn before any component; the console's view always
-  // fits the screen, so they go to the log view instead.
+  // fits the screen, so they go to the raw log instead.
   setKeybindings(
     new KeybindingsManager({
       ...TUI_KEYBINDINGS,
@@ -558,7 +624,9 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
   }
   const state: ConsoleState = {
     view: 'logs',
+    logRaw: false,
     logView: undefined,
+    requestsView: undefined,
     status: undefined,
     accounts: [],
     verification: new Map(),

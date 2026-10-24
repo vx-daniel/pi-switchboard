@@ -1976,7 +1976,26 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   error, an uncaught exception) stops the screen, restores stderr and closes the server; on a
   failure the command prints the reason after the last 20 log lines and exits 1. The headless
   CLI reports a port in use as a fatal log line and exit 1.
-- **Logs.** LogTape writes into a bounded buffer (`log-buffer.ts`, 5000 lines) instead of stderr,
+- **Requests** (`requests-view.ts`; `http-requests.ts`). The first view is a table of every HTTP
+  request: `requestLogMiddleware`, registered right after the request ID middleware and so ahead
+  of proxy auth and the body size limit, adds each request as it arrives and ends it with its
+  status when its answer is ready (a stream's headers). It keeps the method, the path without the
+  query (where a caller could put a secret) and cut at 256 characters, the status and the
+  timings, never a header, a body or a credential: the last 500 answered requests and, apart from
+  them, the last 100 client errors (4xx), so anyone who can reach the port can't flood out the
+  rest. A health check shows only once it has failed, as the request log puts passing ones at
+  debug: one in flight isn't listed or redrawn for, and one answered with a 2xx isn't kept. The
+  console's redraws are coalesced by pi-tui (at most one per 16 ms), so a flood can't storm the
+  screen. In memory only, and no HTTP
+  route serves it. A chat request's row joins its chat request (`active-requests.ts`) by the
+  request ID, which the proxy generates: the model or alias it named, the model that served it,
+  the time to its first event, and for a stream the true end, when the stream closed. The right
+  columns drop on a narrow view (the ID under 120, the first event under 104, the duration under
+  84). The table follows new requests, or stays pinned to a request by its place in the order
+  (not by its distance from the bottom) while new ones arrive. `r` switches between it and the raw
+  log, each keeping its own position; the mouse wheel scrolls whichever is shown
+  (`wheelLines`).
+- **Raw log.** LogTape writes into a bounded buffer (`log-buffer.ts`, 5000 lines) instead of stderr,
   with the same redaction, in the `console` layout of the pretty format: the time only, and the
   category without the `pi-switchboard` root, 16 columns wide, so the message starts at column 42.
   While the console runs, a stray stderr write (one that bypasses LogTape) goes into the buffer a
@@ -1986,8 +2005,8 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   back with the mouse wheel, the arrow keys or the page keys (`log-view.ts`), it stays on the same
   lines while new ones arrive, and follows again at the newest line or on `End`. The wheel reaches
   the console's root component as a `TuiMouseEvent` (pi-tui's alternate screen captures the mouse
-  by default), moving further on a fast spin (`wheelScrollLines: 'auto'`); it scrolls the log view
-  only. The screen's own viewport scrolling would take PgUp and PgDn first, so the console unbinds
+  by default), moving further on a fast spin (`wheelScrollLines: 'auto'`); it scrolls the raw log
+  or the Requests table only. The screen's own viewport scrolling would take PgUp and PgDn first, so the console unbinds
   them there.
 - **Screen** (`layout.ts`, `screen.ts`, `frame.ts`, `status-strip.ts`). The screen is rendered
   as rows from one input per frame (`consoleScreen`), so a test holds every row to the terminal's
@@ -2063,7 +2082,7 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   logout. A verification still running when a provider's login changes drops its result for
   that provider, which was about the old credential (`status-refresh.ts`).
 - **Navigation.** `←` `→`, `Tab` and `Shift+Tab` move between the views, wrapping around; `1`
-  to `4` jump to one. `↑` `↓` act on the view shown: scrolling in Logs, selection in Accounts and
+  to `4` jump to one. `↑` `↓` act on the view shown: scrolling in Requests, selection in Accounts and
   Models. The footer sits on the screen's last row and lists the current view's keys as chips,
   with the global keys at the right end (see **Screen**).
 - **Stats** (`dashboard.ts`, #216). A dashboard over the stats store, for one of three windows:

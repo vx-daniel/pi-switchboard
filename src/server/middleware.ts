@@ -43,6 +43,16 @@ const UPSTREAM_API_KEY_HEADER = 'X-Switchboard-Upstream-Api-Key'
 const OLD_UPSTREAM_API_KEY_HEADER = 'X-Pi-Upstream-Api-Key'
 
 /**
+ * Checks whether a path is a health check's, which container healthchecks and monitors poll.
+ *
+ * @param path - the request's path
+ * @returns whether it is `/healthz` or below it
+ */
+export function isHealthPath(path: string): boolean {
+  return path === HEALTH_PATH || path.startsWith(`${HEALTH_PATH}/`)
+}
+
+/**
  * Creates the middleware that sets the request's IDs and upstream API key, and logs the request
  * and its response.
  *
@@ -77,7 +87,7 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
     // their lines go to debug, except an answer that is not 2xx, which stays at info. At info, a
     // failed check therefore shows only its "answered" line: the request line was decided before
     // the status was known, and the answer line carries the same method, path and request id.
-    const polling = path === HEALTH_PATH || path.startsWith(`${HEALTH_PATH}/`)
+    const polling = isHealthPath(path)
     await withContext({ requestId, clientRequestId }, async () => {
       const received = {
         method,

@@ -32,22 +32,16 @@ export function scrollLogView(view: LogViewport, buffer: LogBuffer, lines: numbe
 }
 
 /**
- * Scrolls the log view by a mouse event: the wheel moves it as the arrow keys do, up (a negative
- * `wheelDelta` in pi-tui) back in the log and down toward the newest line. Any other event leaves
- * it where it is.
+ * Reads how far a mouse event scrolls the log or the Requests table: the wheel moves them as the
+ * arrow keys do, up (a negative `wheelDelta` in pi-tui) back to older lines and down toward the
+ * newest. Any other event doesn't scroll.
  *
- * @param view - where the view is
- * @param buffer - the log buffer
  * @param event - the mouse event
- * @returns where the view is now
+ * @returns lines to scroll up (positive) or down (negative), or `undefined` for no scroll
  */
-export function wheelLogView(
-  view: LogViewport,
-  buffer: LogBuffer,
-  event: Pick<TuiMouseEvent, 'type' | 'wheelDelta'>
-): LogViewport {
-  if (event.type !== 'wheel' || event.wheelDelta === undefined) return view
-  return scrollLogView(view, buffer, -event.wheelDelta)
+export function wheelLines(event: Pick<TuiMouseEvent, 'type' | 'wheelDelta'>): number | undefined {
+  if (event.type !== 'wheel' || event.wheelDelta === undefined) return undefined
+  return -event.wheelDelta
 }
 
 /** What a wrapped line's later rows start with, so they do not read as new lines. */
