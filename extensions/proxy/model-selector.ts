@@ -12,6 +12,7 @@ import {
   loadConfigFromFile,
   saveConfigToFile
 } from '@vx-daniel/pi-switchboard/config'
+import { canonicalModelId } from '@vx-daniel/pi-switchboard/exposure'
 import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 
 import { getSessionAvailableModels, type ProxyState } from './state'
@@ -179,7 +180,7 @@ export function buildModelSelectorSubmenu(
   }
 
   const items: SettingItem[] = models.map((model) => {
-    const canonical = `${model.provider}/${model.id}`
+    const canonical = canonicalModelId(model)
     return {
       id: canonical,
       label: canonical,

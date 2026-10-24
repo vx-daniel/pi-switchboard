@@ -23,6 +23,7 @@ import { proxyLogger } from '@proxy/logging'
 import { supportedReasoningEfforts, thinkingLevelFor } from '@proxy/openai/reasoning-effort'
 import type { ChatCompletionRequest, ReasoningEffort } from '@proxy/openai/schemas'
 import { breakpointPatch, retryWithoutBreakpoints } from '@proxy/pi/cache-breakpoints'
+import { canonicalModelId } from '@proxy/pi/model-id'
 import {
   ANTHROPIC_APIS,
   collectPayloadFields,
@@ -125,7 +126,7 @@ function reasoningLevel(
 ): SimpleStreamOptions['reasoning'] {
   const { level, clamped } = thinkingLevelFor(model, effort)
   if (clamped) {
-    const key = `${model.provider}/${model.id}`
+    const key = canonicalModelId(model)
     const firstForModel = !modelsWithClampedEffort.has(key)
     modelsWithClampedEffort.add(key)
     const message =

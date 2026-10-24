@@ -45,7 +45,12 @@ import {
 } from '@proxy/openai/model-aliases'
 import { groupLogins } from '@proxy/openai/model-logins'
 import type { ReasoningEffort } from '@proxy/openai/schemas'
+import { canonicalModelId } from '@proxy/pi/model-id'
 import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
+
+// Re-exported so the pi extension, which reaches only the package's entry points, can name a
+// model the way the proxy does.
+export { canonicalModelId }
 
 /** Logger for model exposure. */
 const exposureLogger = proxyLogger('openai', 'exposure')
@@ -200,10 +205,10 @@ function filterExposedModels(
 
   // "custom": the proxy's own list of exact canonical IDs.
   const allowed = new Set(filter)
-  const filtered = available.filter((model) => allowed.has(`${model.provider}/${model.id}`))
+  const filtered = available.filter((model) => allowed.has(canonicalModelId(model)))
   if (filtered.length < allowed.size) {
     exposureLogger.debug('{unmatchedCount} custom model IDs match no available model', () => {
-      const availableIds = new Set(available.map((model) => `${model.provider}/${model.id}`))
+      const availableIds = new Set(available.map((model) => canonicalModelId(model)))
       const unmatched = [...allowed].filter((canonicalId) => !availableIds.has(canonicalId))
       return { unmatchedCount: unmatched.length, unmatched }
     })
@@ -486,7 +491,7 @@ function exposedEntry(
   model: Model<Api>,
   logins: readonly Model<Api>[]
 ): ExposedModel {
-  const canonicalId = `${model.provider}/${model.id}`
+  const canonicalId = canonicalModelId(model)
   const entries = logins.map((login): ExposedModel => ({
     publicId,
     canonicalId,
@@ -596,7 +601,7 @@ export function computeModelExposure(
   const aliased = exposeAliases(config.aliases, {
     byPublicId,
     byCanonicalId,
-    availableIds: groups.map(({ primary }) => `${primary.provider}/${primary.id}`),
+    availableIds: groups.map(({ primary }) => canonicalModelId(primary)),
     thinkingLevels
   })
   return {

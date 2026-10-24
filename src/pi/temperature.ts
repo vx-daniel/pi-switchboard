@@ -17,6 +17,7 @@
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
+import { canonicalModelId } from '@proxy/pi/model-id'
 
 /** Logger for upstream calls. */
 const completeLogger = proxyLogger('pi', 'complete')
@@ -71,7 +72,7 @@ function anthropicTemperatureDropReason(model: Model<Api>, thinking: boolean): s
  * @param reason - why it does not reach the provider
  */
 function logDroppedTemperature(model: Model<Api>, temperature: number, reason: string): void {
-  const key = `${model.provider}/${model.id}`
+  const key = canonicalModelId(model)
   const firstForModel = !modelsWithDroppedTemperature.has(key)
   modelsWithDroppedTemperature.add(key)
   const dropped = 'Dropped temperature {temperature} for {modelId}: {reason}'
