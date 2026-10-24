@@ -25,6 +25,20 @@
  */
 
 import { type AssistantMessage, isContextOverflow } from '@earendil-works/pi-ai'
+import {
+  HTTP_BAD_GATEWAY,
+  HTTP_BAD_REQUEST,
+  HTTP_FORBIDDEN,
+  HTTP_GATEWAY_TIMEOUT,
+  HTTP_NOT_FOUND,
+  HTTP_OVERLOADED,
+  HTTP_PAYLOAD_TOO_LARGE,
+  HTTP_REQUEST_TIMEOUT,
+  HTTP_SERVICE_UNAVAILABLE,
+  HTTP_TOO_MANY_REQUESTS,
+  HTTP_UNAUTHORIZED,
+  HTTP_UNPROCESSABLE_ENTITY
+} from '@proxy/server/http-status'
 import { isRecord } from '@proxy/utils/guards'
 import * as z from 'zod'
 
@@ -180,17 +194,17 @@ export interface MappedUpstreamError {
 
 /** Upstream rate limit: 429 `rate_limit`. */
 const RATE_LIMITED: MappedUpstreamError = {
-  status: 429,
+  status: HTTP_TOO_MANY_REQUESTS,
   body: upstreamError('Upstream rate limit exceeded', 'rate_limit')
 }
 /** Upstream timeout: 504 `timeout`. */
 const TIMED_OUT: MappedUpstreamError = {
-  status: 504,
+  status: HTTP_GATEWAY_TIMEOUT,
   body: upstreamError('Upstream request timed out', 'timeout')
 }
 /** Upstream refused pi's stored credential: 502 `upstream_auth_error`. */
 const AUTH_FAILED: MappedUpstreamError = {
-  status: 502,
+  status: HTTP_BAD_GATEWAY,
   body: upstreamError('Upstream authentication failed', 'upstream_auth_error')
 }
 /**
@@ -199,7 +213,7 @@ const AUTH_FAILED: MappedUpstreamError = {
  * quote the key.
  */
 const CLIENT_KEY_REJECTED: MappedUpstreamError = {
-  status: 401,
+  status: HTTP_UNAUTHORIZED,
   body: makeError(
     'The provider rejected the API key in X-Switchboard-Upstream-Api-Key.',
     'authentication_error',
@@ -213,7 +227,7 @@ const CLIENT_KEY_REJECTED: MappedUpstreamError = {
  * proxy token gets. Fixed text: pi's reason can quote a key command or an install path.
  */
 export const CREDENTIALS_MISSING: MappedUpstreamError = {
-  status: 502,
+  status: HTTP_BAD_GATEWAY,
   body: upstreamError(
     "pi has no usable credential for the model's provider. Log in with pi on the proxy's host.",
     'upstream_credentials_missing'
@@ -221,17 +235,17 @@ export const CREDENTIALS_MISSING: MappedUpstreamError = {
 }
 /** Upstream unavailable: 503 `provider_unavailable`. */
 const UNAVAILABLE: MappedUpstreamError = {
-  status: 503,
+  status: HTTP_SERVICE_UNAVAILABLE,
   body: upstreamError('Upstream provider is unavailable', 'provider_unavailable')
 }
 /** Upstream overloaded: 503 `provider_overloaded`. */
 const OVERLOADED: MappedUpstreamError = {
-  status: 503,
+  status: HTTP_SERVICE_UNAVAILABLE,
   body: upstreamError('Upstream provider is overloaded', 'provider_overloaded')
 }
 /** Any other upstream failure: 502 `upstream_error`. */
 const PROVIDER_FAILED: MappedUpstreamError = {
-  status: 502,
+  status: HTTP_BAD_GATEWAY,
   body: upstreamError('Upstream provider error')
 }
 /**
@@ -240,7 +254,7 @@ const PROVIDER_FAILED: MappedUpstreamError = {
  * counts and sometimes the request.
  */
 const CONTEXT_OVERFLOW: MappedUpstreamError = {
-  status: 400,
+  status: HTTP_BAD_REQUEST,
   body: makeError(
     "The messages exceed the model's context window. Shorten or summarize them and try again.",
     'invalid_request_error',
@@ -255,7 +269,7 @@ const CONTEXT_OVERFLOW: MappedUpstreamError = {
  * text: the provider's message can quote the request.
  */
 const REJECTED_AS_INVALID: MappedUpstreamError = {
-  status: 400,
+  status: HTTP_BAD_REQUEST,
   body: makeError(
     'The provider rejected the request as invalid. Check the fields this model accepts.',
     'invalid_request_error',
@@ -271,7 +285,7 @@ const REJECTED_AS_INVALID: MappedUpstreamError = {
  * and be retried. Fixed text: the request has one model, so `param` names it.
  */
 const MODEL_UNAVAILABLE: MappedUpstreamError = {
-  status: 404,
+  status: HTTP_NOT_FOUND,
   body: makeError(
     'The model is not available with the provider login the proxy uses. Choose another model.',
     'invalid_request_error',
@@ -280,26 +294,6 @@ const MODEL_UNAVAILABLE: MappedUpstreamError = {
   )
 }
 
-/** HTTP 400 Bad Request. */
-const HTTP_BAD_REQUEST = 400
-/** HTTP 401 Unauthorized. */
-const HTTP_UNAUTHORIZED = 401
-/** HTTP 403 Forbidden. */
-const HTTP_FORBIDDEN = 403
-/** HTTP 408 Request Timeout. */
-const HTTP_REQUEST_TIMEOUT = 408
-/** HTTP 413 Payload Too Large. */
-const HTTP_PAYLOAD_TOO_LARGE = 413
-/** HTTP 422 Unprocessable Entity. */
-const HTTP_UNPROCESSABLE_ENTITY = 422
-/** HTTP 429 Too Many Requests. */
-const HTTP_TOO_MANY_REQUESTS = 429
-/** HTTP 503 Service Unavailable. */
-const HTTP_SERVICE_UNAVAILABLE = 503
-/** HTTP 504 Gateway Timeout. */
-const HTTP_GATEWAY_TIMEOUT = 504
-/** Anthropic's "overloaded". */
-const HTTP_OVERLOADED = 529
 /** The first error status: error statuses span 400–599. */
 const FIRST_ERROR_STATUS = 400
 /** The first status past the error range. */
