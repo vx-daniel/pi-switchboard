@@ -39,7 +39,7 @@ import {
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE_ENTITY
 } from '@proxy/server/http-status'
-import { isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
+import { parseJsonOrUndefined } from '@proxy/utils/guards'
 import * as z from 'zod'
 
 /** OpenAI's error response body. Documents the response; never parsed. */
@@ -299,6 +299,11 @@ const FIRST_ERROR_STATUS = 400
 /** The first status past the error range. */
 const PAST_LAST_ERROR_STATUS = 600
 
+/** Google's error body, as its SDK puts it in a message: `{"error":{"code":429,…}}`, an error code. */
+const GoogleErrorBodySchema = z.object({
+  error: z.object({ code: z.number().min(FIRST_ERROR_STATUS).lt(PAST_LAST_ERROR_STATUS) })
+})
+
 /** Upstream HTTP statuses with their own answer; any other 4xx or 5xx is PROVIDER_FAILED. */
 const BY_STATUS: ReadonlyMap<number, MappedUpstreamError> = new Map([
   [HTTP_BAD_REQUEST, REJECTED_AS_INVALID],
@@ -335,12 +340,8 @@ const STATUS_POSITIONS: readonly RegExp[] = [
  */
 function googleBodyStatus(message: string): number | undefined {
   if (!message.startsWith('{')) return undefined
-  const parsed = parseJsonOrUndefined(message)
-  const errorBody = isRecord(parsed) ? parsed['error'] : undefined
-  const code = isRecord(errorBody) ? errorBody['code'] : undefined
-  return typeof code === 'number' && code >= FIRST_ERROR_STATUS && code < PAST_LAST_ERROR_STATUS
-    ? code
-    : undefined
+  const parsed = GoogleErrorBodySchema.safeParse(parseJsonOrUndefined(message))
+  return parsed.success ? parsed.data.error.code : undefined
 }
 
 /**
