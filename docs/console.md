@@ -32,3 +32,5 @@ pi-switchboard tui            # takes the same flags as pi-switchboard
 - **Colors.** The console is in [Tokyo Night Storm](https://github.com/folke/tokyonight.nvim), and so are pi's login screens inside it. The header, the tab bar and the sidebar sit on a background of their own, and the current tab is a pill in the accent color. A terminal without true color gets the nearest of 256 colors; `NO_COLOR=1` turns colors off.
 
 Logins are only ever offered in this local console, never over HTTP.
+
+Where the requests, the stats and the quota the console shows come from: [Architecture](architecture.md#where-the-numbers-come-from).

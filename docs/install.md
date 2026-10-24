@@ -1,5 +1,19 @@
 # Installing pi-switchboard
 
+## Which install
+
+| | [Standalone binary](#standalone-binary) | [Docker](#docker) | [npm CLI](#installation) | [pi package](pi-extension.md#pi-integration) |
+|---|---|---|---|---|
+| **Needs** | Nothing else | Docker | Node.js >= 24, a GitHub token for GitHub Packages | Node.js >= 24, pi, a GitHub token |
+| **Logging in** | `./pi-switchboard-<os>-<arch> tui`, then `n`; or `pi /login` | pi, inside the container | `pi-switchboard tui`, then `n`; or `pi /login` | `pi /login` |
+| **Config and logins** | `~/.pi/agent` | The `pi-agent` volume | `~/.pi/agent` | `~/.pi/agent` |
+| **Updating** | Download the new release's file | Pull the new version's tag; there is no `latest` | `pnpm add -g @vx-daniel/pi-switchboard@latest` | `pi update npm:@vx-daniel/pi-switchboard` |
+| **Console** (`tui`) | Yes | No: it runs headless; [usage over HTTP](api.md#usage-over-http) and the health checks instead | Yes | With the npm CLI installed as well |
+| **`/proxy` commands in pi** | No | No | No | Yes |
+| **Good for** | A machine without Node | A server, or a shared proxy | A developer machine with Node | Starting and stopping it from pi |
+
+Every install reads the same settings: flags, `PI_SWITCHBOARD_*` variables and `proxy-config.json` ([Configuration](configuration.md#every-setting)).
+
 ## Prerequisites
 
 What else you need depends on how you install it:
@@ -11,7 +25,7 @@ What else you need depends on how you install it:
 | [npm CLI](#installation) | [Node.js](https://nodejs.org) >= 24, the runtime pi uses; pi's packages come with it |
 | [pi package](pi-extension.md#pi-integration) | Node.js >= 24 and [pi](https://github.com/earendil-works/pi) |
 
-Every way needs at least one provider login, stored where pi keeps them: `pi /login`, or `n` in the proxy's own console (`pi-switchboard tui`, [below](console.md#the-console-logs-logins-and-status-at-a-terminal)). With Docker, you log in through pi inside the container ([Docker](#docker)).
+Every way needs at least one provider login, stored where pi keeps them: `pi /login`, or `n` in the proxy's own console (`pi-switchboard tui`, [The console](console.md#the-console-logs-logins-and-status-at-a-terminal)). With Docker, you log in through pi inside the container ([Docker](#docker)).
 
 ## Installation
 

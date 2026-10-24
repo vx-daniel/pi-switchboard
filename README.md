@@ -15,6 +15,15 @@ Point any OpenAI client at `http://localhost:4141/v1` (Aider, Continue, Open Web
 - **See what's happening.** `pi-switchboard tui` shows every request, your logins and their quota, usage and cost over 30 days, and your aliases, and edits them ([The console](docs/console.md)).
 - **Local and safe by default.** It listens on `127.0.0.1`. Listening wider without a token logs a warning, and the Docker image won't start without one ([Security](docs/security.md)).
 
+## How it works
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.svg">
+  <img alt="pi-switchboard's architecture: clients, the HTTP layer, routing, pi's SDK and the providers, with pi's agent directory, the console and the pi extension" src="docs/diagrams/architecture.svg">
+</picture>
+
+A request comes in through the HTTP layer; routing picks the model and the login; pi's SDK calls the provider. More, with a chat request end to end and where the numbers come from: [Architecture](docs/architecture.md).
+
 ## Get it
 
 | | |
