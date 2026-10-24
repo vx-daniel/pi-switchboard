@@ -4,7 +4,7 @@
 # every dependency, so the login and the server always run the same pi.
 #
 # Build: docker build -t pi-switchboard .
-# Run:   see compose.yaml and README.md ("Docker").
+# Run:   see compose.yaml and docs/docker.md.
 
 # Digest-pinned: a rebuild must not change the runtime silently. The digest is the multi-platform
 # index (linux/amd64 and linux/arm64, among others). Bump the tag and the digest together.

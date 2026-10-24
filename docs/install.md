@@ -57,28 +57,17 @@ pi's own packages (`@earendil-works/pi-ai`, `pi-coding-agent`) are optional depe
 
 ## Docker
 
-The image runs the proxy headless, with its own pi login in a volume. Each release publishes it for `linux/amd64` and `linux/arm64` as [`vxdaniel/pi-switchboard:<version>`](https://hub.docker.com/r/vxdaniel/pi-switchboard) on Docker Hub. The same image is also published as `ghcr.io/vx-daniel/pi-switchboard:<version>` on GHCR, which is not subject to Docker Hub's pull limit of 100 anonymous pulls per 6 hours per IP address. A published tag is never overwritten, and there is no `latest`, so a version always means the same image. The `Dockerfile` builds it from this repository's source, with one lockfile for the proxy and pi.
-
-From a checkout, with [`compose.yaml`](../compose.yaml):
+The image runs the proxy headless, with its own pi login in a volume: [`vxdaniel/pi-switchboard:<version>`](https://hub.docker.com/r/vxdaniel/pi-switchboard) on Docker Hub, or `ghcr.io/vx-daniel/pi-switchboard:<version>` on GHCR, for `linux/amd64` and `linux/arm64`. It needs Docker and nothing else.
 
 ```bash
-export PI_SWITCHBOARD_AUTH_TOKEN="$(openssl rand -hex 32)"
-docker compose build      # or: export PI_SWITCHBOARD_VERSION=<version> && docker compose pull
-
-# Log in through pi, in the container; enter /login inside pi, then exit pi.
-docker compose run --rm --no-deps --entrypoint pi proxy --no-session --no-tools --no-extensions --offline
-
+export PI_SWITCHBOARD_VERSION=<version> PI_SWITCHBOARD_AUTH_TOKEN="$(openssl rand -hex 32)"
+curl -LO "https://raw.githubusercontent.com/vx-daniel/pi-switchboard/pi-switchboard-v$PI_SWITCHBOARD_VERSION/compose.yaml"
+docker compose pull
+docker compose run --rm --no-deps --entrypoint pi proxy --no-session --no-tools --no-extensions --offline   # /login, then exit
 docker compose up --wait
-curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141/v1/models
 ```
 
-- **The token is required.** The image listens on every interface inside the container, so it refuses to start without `PI_SWITCHBOARD_AUTH_TOKEN` and exits with status `64`. It takes the token from the environment only, not from `proxy-config.json`. The token is a local secret that protects the proxy, not a provider key. Compose publishes the port on `127.0.0.1` only (`PI_SWITCHBOARD_PUBLISH_PORT` changes it, default `4141`). The one exception is `--version` or `--help` alone, which starts no server: `docker run --rm vxdaniel/pi-switchboard:<version> --version` needs no token (from the first release after 0.1.0).
-- **Logging in.** In pi, `/login` lists the providers. The container publishes no OAuth callback port, so when the browser redirects to a `localhost` URL that does not load, paste that whole URL, or the code, into pi. `fd` and `ripgrep` warnings are expected: pi is there to log in, not to run tools. Stop the proxy before logging in again.
-- **The volume holds the login.** pi's login and its token refreshes live in the `pi-agent` volume at `/home/node/.pi/agent`, and survive `docker compose down` and `up` (`down -v` deletes them). Never seed the volume by copying a host `auth.json`: refreshing a login rotates its refresh token, and the other copy stops working.
-- **Settings.** `proxy-config.json` in the volume works as on the host. Compose passes `PI_SWITCHBOARD_LOG_LEVEL`, `PI_SWITCHBOARD_LOG_FORMAT`, `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` and `TZ` to the container only when they are set, so the file's values apply otherwise.
-- **Hardening, in `compose.yaml`:** the proxy runs as UID 1000, with a read-only root filesystem, `/tmp` as tmpfs, all capabilities dropped and `no-new-privileges`. The volume is the only place it writes.
-- **Health.** The image's healthcheck asks `GET /healthz`, which needs no token, so the container is healthy before you log in. `GET /v1/models` with the token lists what the login can use.
-- **An existing login volume** from an earlier deployment works unchanged when it was mounted at the same path for the same UID: declare it in `compose.yaml` as an `external` volume under its name.
+Everything else, from `docker run` without Compose to logging in, configuration, exposing it beyond localhost, upgrading and troubleshooting: [Running pi-switchboard in Docker](docker.md).
 
 ## Standalone binary
 

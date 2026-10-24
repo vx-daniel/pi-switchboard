@@ -64,11 +64,7 @@ The stable routes are the first three rows. [`PLAN.md`](../PLAN.md) "Stable surf
 
 ### API documentation
 
-`GET /v1/switchboard/openapi.json` describes every route the proxy serves: each request and response schema, every error status, and the bearer token. It includes the health checks below and the OpenAI endpoints the proxy answers with 404 ("Not supported"). Point any OpenAPI tool at it, such as a client generator, Postman or an API diff. The same document is committed as [`openapi.json`](../openapi.json), so a change to the API shows up in a pull request.
-
-Turn on `docsUi` (`--docs-ui`, `PI_SWITCHBOARD_DOCS_UI=true`, or the settings panel) and open `http://localhost:4141/docs` in a browser to browse the API and send requests with "Try it out". With proxy auth on, click **Authorize** and enter the token first. The page loads Swagger UI 5.34.0 from the jsDelivr CDN, so it needs internet access; that is why it is off by default. While it is off, `/docs` answers 404.
-
-Neither route needs the proxy token, even with proxy auth on: a browser cannot send one to open a page. Both name routes and schemas only, never a model, provider or credential, and every route they describe still needs the token.
+`GET /v1/switchboard/openapi.json` describes every route the proxy serves as an OpenAPI 3.1 document, committed as [`openapi.json`](../openapi.json). Turn on `docsUi` (`--docs-ui`, `PI_SWITCHBOARD_DOCS_UI=true`) and `http://localhost:4141/docs` serves it as a Swagger UI page where you can send requests. Neither route needs the proxy token. What the document holds, using it in other tools, and the docs page in full: [API reference](api-reference.md).
 
 ### Usage over HTTP
 

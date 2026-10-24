@@ -29,7 +29,7 @@ A request comes in through the HTTP layer; routing picks the model and the login
 | | |
 |---|---|
 | **Standalone binary** | One file for Linux, macOS or Windows from the [releases](https://github.com/vx-daniel/pi-switchboard/releases): no Node, no pi install |
-| **Docker** | `ghcr.io/vx-daniel/pi-switchboard:<version>` or `vxdaniel/pi-switchboard:<version>`, for amd64 and arm64 |
+| **Docker** | [`vxdaniel/pi-switchboard:<version>`](https://hub.docker.com/r/vxdaniel/pi-switchboard) or `ghcr.io/vx-daniel/pi-switchboard:<version>`, for amd64 and arm64 ([Docker](docs/docker.md)) |
 | **npm** | `pnpm add -g @vx-daniel/pi-switchboard`, from GitHub Packages |
 | **pi package** | `pi install npm:@vx-daniel/pi-switchboard`, for the `/proxy` commands inside pi |
 
