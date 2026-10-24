@@ -8,7 +8,8 @@ name: Image
 # overwritten, on either registry.
 #
 # Needs the DOCKERHUB_TOKEN secret: a Docker Hub personal access token of vxdaniel with read and
-# write access.
+# write access to push the image, and delete as well to update the repository's overview from
+# docker/README.md (Docker Hub asks for all three for that).
 on:
   workflow_call:
     inputs:
@@ -139,3 +140,18 @@ jobs:
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
             org.opencontainers.image.licenses=MIT
+
+      # The repository's overview page on Docker Hub, from docker/README.md at the released tag, so
+      # it always describes the image just published. Docker Hub takes it only from a token with
+      # read, write and delete scope. After the push, and allowed to fail: the image is the
+      # release, and a token without that scope must not mark the release failed. The step still
+      # shows as failed, so the overview is not left stale unnoticed.
+      - name: Update the Docker Hub overview
+        continue-on-error: true
+        uses: peter-evans/dockerhub-description@v5
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: vxdaniel/pi-switchboard
+          short-description: An OpenAI-compatible HTTP API over pi's models, logins and providers
+          readme-filepath: ./docker/README.md
