@@ -489,6 +489,7 @@ describe('openStatsView', () => {
     view.close()
     expect(stripTerminalSequences(note ?? '')).toContain('Stats are off (--no-stats)')
     expect(view.todayCostUsd()).toBeUndefined()
+    expect(view.frameNote()).toBe('')
   })
 
   // Catches a stats file that can't be opened (a newer proxy's schema, a read-only directory)
@@ -501,10 +502,11 @@ describe('openStatsView', () => {
     view.close()
     expect(stripTerminalSequences(note ?? '')).toContain('The stats file could not be opened')
     expect(view.todayCostUsd()).toBeUndefined()
+    expect(view.frameNote()).toBe('')
   })
 
-  // Catches the strip's cost missing while the stats file reads fine.
-  test('an open file gives the strip today’s cost', () => {
+  // Catches the strip's cost or the frame's note missing while the stats file reads fine.
+  test('an open file gives the strip today’s cost and the frame its note', () => {
     const view = openStatsView(true, () => ({
       timeline: () => [],
       models: () => [modelStats({ model: 'a/one', costUsd: 0.42 })],
@@ -513,8 +515,10 @@ describe('openStatsView', () => {
       close: () => undefined
     }))
     const cost = view.todayCostUsd()
+    const note = view.frameNote()
     view.close()
     expect(cost).toBe(0.42)
+    expect(note).toBe('stats kept 30 days')
   })
 
   // Catches the strip's cost read on every redraw after the file failed (each try can wait out
@@ -564,6 +568,9 @@ describe('openStatsView', () => {
       expect(stripTerminalSequences(note ?? '')).toContain('The stats file could not be read')
     }
     expect(view.todayCostUsd()).toBeUndefined()
+    // The frame no longer says how long the file keeps its history: the view shows totals (#261
+    // review).
+    expect(view.frameNote()).toBe('')
     view.close()
     expect(reads).toBe(1)
   })

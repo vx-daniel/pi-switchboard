@@ -30,7 +30,8 @@ import {
   panel,
   quotaColor,
   spread,
-  USED_LEVELS
+  USED_LEVELS,
+  usd
 } from '@proxy/tui/panel'
 import { fitLabel, sum } from '@proxy/tui/stats-view'
 import { paint, strong, tabAccent } from '@proxy/tui/theme'
@@ -391,7 +392,7 @@ function sessionLines(input: SidebarInput, width: number): string[] {
       width
     ),
     spread('cache', compactCount(counts.cacheReadTokens + counts.cacheWriteTokens), width),
-    spread('cost', tabAccent(`$${counts.costUsd.toFixed(COST_DECIMALS)}`), width)
+    spread('cost', tabAccent(usd(counts.costUsd, COST_DECIMALS)), width)
   ]
 }
 

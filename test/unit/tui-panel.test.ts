@@ -3,7 +3,7 @@
  */
 
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
-import { gauge, panel, quotaColor } from '@proxy/tui/panel'
+import { gauge, panel, quotaColor, usd } from '@proxy/tui/panel'
 import { describe, expect, test } from 'vite-plus/test'
 
 describe('gauge', () => {
@@ -37,6 +37,16 @@ describe('quotaColor', () => {
     [0.1, true, 'error']
   ] as const)('%d used, below reserve %s, is %s', (used, belowReserve, color) => {
     expect(quotaColor(used, belowReserve)).toBe(color)
+  })
+})
+
+describe('usd', () => {
+  // Catches the views' costs drifting apart in format (#261 review: two copies of the decimals),
+  // or the places asked for ignored.
+  test('shows dollars and cents, or the places asked for', () => {
+    expect(usd(1.234)).toBe('$1.23')
+    expect(usd(0)).toBe('$0.00')
+    expect(usd(0.00425, 4)).toBe('$0.0043')
   })
 })
 

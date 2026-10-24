@@ -15,7 +15,7 @@
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import { FINISHED_KEPT, type FinishedRequest } from '@proxy/server/active-requests'
-import { compactDuration } from '@proxy/tui/panel'
+import { compactDuration, usd } from '@proxy/tui/panel'
 import { badge, paint, strong, tabAccent } from '@proxy/tui/theme'
 import { MS_PER_MINUTE } from '@proxy/utils/time'
 
@@ -35,8 +35,6 @@ const MARK = '◆'
 const SEPARATOR = paint('border', ' · ')
 /** Decimal places of the rate. */
 const RATE_DECIMALS = 1
-/** Decimal places of today's cost. */
-const COST_DECIMALS = 2
 /** The left details kept whatever the width: the address and the auth. */
 const LEFT_DETAILS_KEPT = 2
 
@@ -136,7 +134,7 @@ function rateText(input: StatusStripInput): string {
 function rightParts(input: StatusStripInput): string[] {
   const parts = [`${paint('dim', 'last 30 min ')}${sparkline(input.perMinute)}`, rateText(input)]
   if (input.todayCostUsd !== undefined) {
-    const cost = strong(tabAccent(`$${input.todayCostUsd.toFixed(COST_DECIMALS)}`))
+    const cost = strong(tabAccent(usd(input.todayCostUsd)))
     parts.push(`${cost}${paint('dim', ' today')}`)
   }
   return parts

@@ -29,7 +29,12 @@ import {
   type TimelineBucket,
   type UsageStats
 } from '@proxy/stats/store'
-import { STATS_WINDOWS, type StatsWindow, windowMinutes } from '@proxy/stats/windows'
+import {
+  STATS_KEPT_DAYS,
+  STATS_WINDOWS,
+  type StatsWindow,
+  windowMinutes
+} from '@proxy/stats/windows'
 import { STATS_WINDOW_KEYS } from '@proxy/tui/navigation'
 import {
   compactCount,
@@ -37,7 +42,8 @@ import {
   FRAME_COLUMNS,
   latency,
   panel,
-  spread
+  spread,
+  usd
 } from '@proxy/tui/panel'
 import { fitLabel, statsRows } from '@proxy/tui/stats-view'
 import { activeTab, type ConsoleColor, keycap, paint, strong, tabAccent } from '@proxy/tui/theme'
@@ -61,8 +67,6 @@ const ALIAS_ROWS_WANTED = 4
 const EIGHTHS = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'] as const
 /** Eighths in a full cell. */
 const FULL_CELL = 8
-/** Decimal places a cost is shown with. */
-const COST_DECIMALS = 2
 /** Decimal places the COST tile's cost per request is shown with: most requests cost under a cent. */
 const PER_REQUEST_COST_DECIMALS = 3
 /** Decimal places the REQUESTS tile's rate per hour is shown with. */
@@ -90,6 +94,8 @@ const ALIAS_PANEL_ROWS = BORDER_ROWS + 1
 const LABEL_LEAST = 12
 /** Which of the usage table's number columns is the failures. */
 const FAILED_COLUMN = 1
+/** What the frame's bottom border notes while the dashboard is shown. */
+const KEPT_NOTE = `stats kept ${String(STATS_KEPT_DAYS)} days`
 /** What the ALIASES panel calls requests that named a model directly. */
 const DIRECT_LABEL = 'direct'
 
@@ -110,7 +116,7 @@ const USAGE_COLUMNS: readonly {
     width: 13,
     cell: (usage) => `${compactCount(usage.inputTokens)}/${compactCount(usage.outputTokens)}`
   },
-  { title: 'cost', width: 8, cell: (usage) => `$${usage.costUsd.toFixed(COST_DECIMALS)}` }
+  { title: 'cost', width: 8, cell: (usage) => usd(usage.costUsd) }
 ]
 
 /** What one render of the dashboard shows. */
@@ -365,8 +371,8 @@ function overviewTiles(data: DashboardData, totals: WindowTotals, width: number)
     },
     cost: {
       label: 'COST',
-      value: strong(tabAccent(`$${totals.costUsd.toFixed(COST_DECIMALS)}`)),
-      caption: `$${perRequest.toFixed(PER_REQUEST_COST_DECIMALS)} each`
+      value: strong(tabAccent(usd(totals.costUsd))),
+      caption: `${usd(perRequest, PER_REQUEST_COST_DECIMALS)} each`
     }
   }
   if (width >= ALL_TILES_LEAST_WIDTH) return Object.values(tiles)
@@ -677,6 +683,13 @@ export interface StatsView {
    *   off, or the file can't be opened or read)
    */
   todayCostUsd(): number | undefined
+  /**
+   * Says what the frame's bottom border notes about the view.
+   *
+   * @returns how long the stats file keeps its history while the dashboard is shown; `''` when
+   *   the view shows the totals instead
+   */
+  frameNote(): string
   /** Closes the stats file, if it is open. */
   close(): void
 }
@@ -715,6 +728,7 @@ function totalsView(note: string): StatsView {
   return {
     rows: (_window, size) => totalsRows(note, size),
     todayCostUsd: () => undefined,
+    frameNote: () => '',
     close: () => undefined
   }
 }
@@ -795,6 +809,12 @@ export function openStatsView(
         () => totalsRows(unreadable, size)
       ),
     todayCostUsd: () => guarded(readTodayCost, () => undefined),
+    // Reads nothing: the guard gives the fallback once a read has failed and the view shows totals.
+    frameNote: () =>
+      guarded(
+        () => KEPT_NOTE,
+        () => ''
+      ),
     close: () => store.close()
   }
 }

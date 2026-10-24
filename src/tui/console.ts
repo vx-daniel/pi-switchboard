@@ -46,7 +46,7 @@ import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
-import { STATS_KEPT_DAYS, type StatsWindow } from '@proxy/stats/windows'
+import type { StatsWindow } from '@proxy/stats/windows'
 import { accountRows, accountsSnapshot, type AccountsView } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
 import { openSelectedModelsItem } from '@proxy/tui/console-models'
@@ -203,13 +203,13 @@ const TAB_CONTEXT: Readonly<Record<View, (state: ConsoleState) => string>> = {
 
 /**
  * What the right end of the frame's bottom border notes about each view: how many log lines,
- * logins or exposed models it holds, and on Stats how long the stats file keeps its history (with
- * stats off, nothing).
+ * logins or exposed models it holds, and on Stats how long the stats file keeps its history (nothing
+ * while the view shows the totals instead).
  */
 const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
   logs: ({ logs }) => `${String(logs.dropped() + logs.lines().length)} lines`,
   accounts: ({ state }) => `${String(state.accounts.length)} logins`,
-  stats: ({ config }) => (config.statsEnabled ? `stats kept ${String(STATS_KEPT_DAYS)} days` : ''),
+  stats: ({ statsView }) => statsView.frameNote(),
   models: ({ state }) => exposedModelsLabel(state.status?.exposed)
 }
 
