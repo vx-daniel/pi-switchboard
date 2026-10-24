@@ -1,5 +1,51 @@
 # The HTTP API
 
+## Examples
+
+### List available models
+
+```bash
+curl http://localhost:4141/v1/models | jq '.data[].id'
+```
+
+### Chat completion (non-streaming)
+
+```bash
+curl http://localhost:4141/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic/claude-sonnet-5-5",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### Chat completion (streaming)
+
+```bash
+curl http://localhost:4141/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-4o",
+    "messages": [{"role": "user", "content": "Tell me a joke"}],
+    "stream": true
+  }'
+```
+
+### Use with any OpenAI-compatible client
+
+Point any client that supports `OPENAI_API_BASE` (or equivalent) at `http://localhost:4141/v1`:
+
+```bash
+# Example: Aider
+OPENAI_API_BASE=http://localhost:4141/v1 aider --model anthropic/claude-sonnet-5-5
+
+# Example: Continue (in settings.json)
+# "apiBase": "http://localhost:4141/v1"
+
+# Example: Open WebUI
+# Set "OpenAI API Base URL" to http://localhost:4141/v1
+```
+
 ## Supported Endpoints
 
 The stable routes are the first three rows. [`PLAN.md`](../PLAN.md) "Stable surface" is the authoritative list, and says what a route must meet to join it.
@@ -47,7 +93,7 @@ Operational endpoints, outside the OpenAI-compatible `/v1` surface:
 | Endpoint | Auth | Answers |
 |---|---|---|
 | `GET /healthz` | Never | `200 {"status":"ok"}` once the proxy listens and pi's model runtime is loaded. No upstream calls: use it for container healthchecks and liveness probes. |
-| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`), aliases left out (`aliasDiagnostics`), and active cooldowns (`cooldowns`, [below](routing.md#cooldowns)). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model; a cooldown does not fail it. |
+| `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`), aliases left out (`aliasDiagnostics`), and active cooldowns (`cooldowns`, [Cooldowns](routing.md#cooldowns)). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model; a cooldown does not fail it. |
 | `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …), `availableModelCount`, and `quota`, the subscription's latest usage windows ([Quota](routing.md#quota)). `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
 
 None of them returns a credential. `/healthz` proves the process is up, not that a provider will accept a request: `GET /healthz/creds?verify=true` is the closest check to that without spending a completion.
@@ -126,8 +172,8 @@ The proxy generates public model IDs based on a configurable ID mode:
 | Mode | Behavior | Example |
 |---|---|---|
 | `collision-prefixed` (default) | Raw model IDs; prefix only providers that share a model name | `gpt-4o` or `openai/gpt-4o` if `codex` also has `gpt-4o` |
-| `universal` | Raw model IDs only; rejects config if duplicates exist | `gpt-4o`, `claude-sonnet-4-20250514` |
-| `always-prefixed` | Always `<prefix>/<model-id>` | `openai/gpt-4o`, `anthropic/claude-sonnet-4-20250514` |
+| `universal` | Raw model IDs only; rejects config if duplicates exist | `gpt-4o`, `claude-sonnet-5-5` |
+| `always-prefixed` | Always `<prefix>/<model-id>` | `openai/gpt-4o`, `anthropic/claude-sonnet-5-5` |
 
 The `collision-prefixed` mode prefixes **all** models from providers that form a connected conflict group (not just the colliding model names).
 
@@ -148,11 +194,11 @@ pi can list a model the login's plan cannot run: with a ChatGPT login, Codex ref
 Internal canonical IDs use the `provider/model-id` format matching pi's registry:
 
 ```
-anthropic/claude-sonnet-4-20250514
+anthropic/claude-sonnet-5-5
 openai/gpt-4o
 google/gemini-2.5-pro
-xai/grok-3
-openrouter/anthropic/claude-sonnet-4-20250514
+xai/grok-4.7
+openrouter/anthropic/claude-sonnet-5.5
 ```
 
 Canonical IDs are accepted as backward-compatible fallback in requests, but only for models that are currently exposed. Hidden models cannot be reached by canonical ID.
@@ -163,7 +209,7 @@ The proxy resolves model references in this order:
 
 1. **Exact public ID match** — the ID from `GET /v1/models`
 2. **Canonical ID fallback** — `provider/model-id` format (only for exposed models)
-3. **Alias** — a name from `aliases` in the config file ([below](routing.md#aliases))
+3. **Alias** — a name from `aliases` in the config file ([Aliases](routing.md#aliases))
 
 With the default `collision-prefixed` mode and no collisions, model IDs are exposed without prefixes:
 

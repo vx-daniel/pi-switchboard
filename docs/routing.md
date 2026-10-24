@@ -1,5 +1,12 @@
 # Routing
 
+A request that names a model runs on that model; one that names an alias runs on the alias's targets in turn. Either way each model runs under every login that serves it ([Several logins per provider](logins.md#several-logins-per-provider)), so the candidates are the targets, each under each login, in order. The proxy walks them: it skips one that is [cooling down](#cooldowns) or below its [quota reserve](#quota) while a later one can serve, calls the next, and moves on after a failure only when the alias's `fallbackOn` names its class ([Fallback chains](#fallback-chains)), or between two logins of one model, `routing.logins.fallbackOn`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/routing-dark.svg">
+  <img alt="How routing walks the candidates: skip one cooling down or below its reserve while another can serve, call it, and move on after a failure whose class the alias or the logins fall back on" src="diagrams/routing.svg">
+</picture>
+
 ## Aliases
 
 Most clients only let you pick a model name, so an alias is the routing control every client has. Define names in `proxy-config.json`, each pointing at an exposed model's canonical ID:
@@ -13,7 +20,7 @@ Most clients only let you pick a model name, so an alias is the routing control 
 - **Only while its target is exposed.** An alias never reaches a model the exposure config hides: leave the target out of `enabledModels` (or `customModels`) and the alias disappears too. `/healthz/models` then lists it as `target-not-exposed`.
 - **Never shadows a model.** An alias named like an exposed model's public or canonical ID is ignored, and the model keeps its name. `/healthz/models` answers `503` and lists it as `shadows-model`, and the proxy logs a warning. Rename the alias.
 - **Used as written.** Names and targets are not trimmed or normalized; a mistyped target matches no model. An entry with an empty name or target is dropped with the config warning.
-- **Edited in the console.** `pi-switchboard tui`'s Models view (`4`) creates, edits and deletes aliases ([above](console.md#the-console-logs-logins-and-status-at-a-terminal)). **In pi,** `/proxy show` lists the aliases and any left out; editing them in pi's settings panel can come later.
+- **Edited in the console.** `pi-switchboard tui`'s Models view (`4`) creates, edits and deletes aliases ([The console](console.md#the-console-logs-logins-and-status-at-a-terminal)). **In pi,** `/proxy show` lists the aliases and any left out; editing them in pi's settings panel can come later.
 
 ## Fallback chains
 

@@ -1,76 +1,74 @@
 # pi-switchboard
 
-A local OpenAI-compatible HTTP API built on [pi](https://github.com/earendil-works/pi)'s SDK. Routes requests through pi's multi-provider model registry and credential management, exposing a single `http://localhost:4141/v1/...` endpoint that any OpenAI-compatible client can connect to. It started as [`pi-openai-proxy`](#attribution).
+**One OpenAI-compatible endpoint for every model your [pi](https://github.com/earendil-works/pi) logins can reach, with routing that falls back, cools down and keeps your quota in view.**
 
-## Why
+Point any OpenAI client at `http://localhost:4141/v1` (Aider, Continue, Open WebUI, the OpenAI SDKs, agent frameworks), and pi-switchboard sends each request through pi to Anthropic, OpenAI, Google, Bedrock, Mistral, xAI, OpenRouter and the rest, with the logins you already have, subscriptions included.
 
-- **Single gateway** to 20+ LLM providers (Anthropic, OpenAI, Google, Bedrock, Mistral, xAI, Groq, OpenRouter, Vertex, etc.) via one OpenAI-compatible API
-- **No duplicate config** — reuses pi's `~/.pi/agent/auth.json` and `models.json` for credentials and model definitions
-- **Self-hosted** — runs locally, no third-party proxy services
-- **Streaming** — full SSE streaming with token usage and cost tracking
-- **Strict validation** — unsupported parameters are rejected clearly, not silently ignored, and every response is checked against OpenAI's published spec
+## Why pi-switchboard
 
-On top of that it routes across your pi logins: aliases, fallback chains, cooldowns, quota awareness and several logins per provider (#66–#70, #227), with a terminal console to watch and manage it. More of OpenAI's API comes next: the Responses API is in, experimental and off by default (#140). See [`ROADMAP.md`](ROADMAP.md). It stays OpenAI-compatible on the client side; it doesn't run logins of its own, keep conversation state, or speak other vendors' client protocols.
+- **20+ providers behind one API.** Every model pi knows, under one OpenAI-compatible base URL, streaming included.
+- **Your logins, not new API keys.** It uses pi's logins: API keys, and subscriptions such as Claude Pro/Max, ChatGPT and GitHub Copilot. Log in once, with pi or in the proxy's own console.
+- **Routing you control.** Aliases give models the names your team uses, set the reasoning effort they run at, follow a family's newest model, and fall back along a chain on the failures you choose ([Routing](docs/routing.md)).
+- **Several logins per provider.** A second subscription to the same service is a second login; the proxy moves to it when the first hits its limit ([Logins](docs/logins.md)).
+- **Quota and cooldowns.** It reads each subscription's usage windows, keeps a reserve you set, and cools a provider that answered 429 for as long as it said.
+- **Honest about what it does.** Responses are checked against OpenAI's published spec, a field it doesn't support is refused with a clear error rather than dropped, and every response says which model and login answered (`x_pi`).
+- **See what's happening.** `pi-switchboard tui` shows every request, your logins and their quota, usage and cost over 30 days, and your aliases, and edits them ([The console](docs/console.md)).
+- **Local and safe by default.** It listens on `127.0.0.1`. Listening wider without a token logs a warning, and the Docker image won't start without one ([Security](docs/security.md)).
 
-## Documentation
+## How it works
 
-Installing, configuration, the HTTP API, routing, the console and the pi extension are in [`docs/`](docs/README.md).
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/architecture-dark.svg">
+  <img alt="pi-switchboard's architecture: clients, the HTTP layer, routing, pi's SDK and the providers, with pi's agent directory, the console and the pi extension" src="docs/diagrams/architecture.svg">
+</picture>
 
-## Quickstart
+A request comes in through the HTTP layer; routing picks the model and the login; pi's SDK calls the provider. More, with a chat request end to end and where the numbers come from: [Architecture](docs/architecture.md).
 
-Install it first ([Installing](docs/install.md)), then:
+## Get it
+
+| | |
+|---|---|
+| **Standalone binary** | One file for Linux, macOS or Windows from the [releases](https://github.com/vx-daniel/pi-switchboard/releases): no Node, no pi install |
+| **Docker** | `ghcr.io/vx-daniel/pi-switchboard:<version>` or `vxdaniel/pi-switchboard:<version>`, for amd64 and arm64 |
+| **npm** | `pnpm add -g @vx-daniel/pi-switchboard`, from GitHub Packages |
+| **pi package** | `pi install npm:@vx-daniel/pi-switchboard`, for the `/proxy` commands inside pi |
+
+Requirements, the GitHub Packages token, logging in under Docker and checking a download: [Installing](docs/install.md).
+
+## Try it
 
 ```bash
-# Start the proxy (defaults to http://127.0.0.1:4141)
-pi-switchboard
-
-# Which version is installed
-pi-switchboard --version
+pi-switchboard tui    # the proxy with its console: press n to log in to a provider
 ```
 
-### List available models
+Then, from another terminal:
 
 ```bash
 curl http://localhost:4141/v1/models | jq '.data[].id'
-```
 
-### Chat completion (non-streaming)
-
-```bash
 curl http://localhost:4141/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{
-    "model": "anthropic/claude-sonnet-4-20250514",
-    "messages": [{"role": "user", "content": "Hello!"}]
-  }'
+  -d '{"model": "anthropic/claude-sonnet-5-5", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-### Chat completion (streaming)
+Use an ID from the list, or an exposed model's canonical `provider/model-id`. Without the console, `pi-switchboard` runs the proxy on its own.
 
-```bash
-curl http://localhost:4141/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "openai/gpt-4o",
-    "messages": [{"role": "user", "content": "Tell me a joke"}],
-    "stream": true
-  }'
+A fallback chain is a few lines of `proxy-config.json` in pi's agent directory:
+
+```json
+{ "aliases": { "coding": {
+  "targets": ["anthropic/claude-opus-5-5", "openai-codex/gpt-6-sol"],
+  "fallbackOn": ["rate_limit", "unavailable"]
+} } }
 ```
 
-### Use with any OpenAI-compatible client
+A request for `"model": "coding"` goes to Claude Opus, and to Codex when Opus is rate-limited or overloaded.
 
-Point any client that supports `OPENAI_API_BASE` (or equivalent) at `http://localhost:4141/v1`:
+## Documentation
 
-```bash
-# Example: Aider
-OPENAI_API_BASE=http://localhost:4141/v1 aider --model anthropic/claude-sonnet-4-20250514
+Everything else is in [`docs/`](docs/README.md): installing, configuration, the HTTP API, routing, logins, the console, the pi extension and security.
 
-# Example: Continue (in settings.json)
-# "apiBase": "http://localhost:4141/v1"
-
-# Example: Open WebUI
-# Set "OpenAI API Base URL" to http://localhost:4141/v1
-```
+Working on pi-switchboard: [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), [ROADMAP.md](ROADMAP.md), and the principles in [CONSTITUTION.md](CONSTITUTION.md).
 
 ## Attribution
 
