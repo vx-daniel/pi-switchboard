@@ -37,6 +37,7 @@ import {
 } from '@proxy/tui/panel'
 import { fitLabel, statsRows } from '@proxy/tui/stats-view'
 import { type ConsoleColor, highlight, paint } from '@proxy/tui/theme'
+import { errorMessage } from '@proxy/utils/guards'
 import { MS_PER_MINUTE } from '@proxy/utils/time'
 
 /** Logger for the console's own actions. */
@@ -502,7 +503,7 @@ export function openStatsView(
   } catch (error) {
     consoleLogger.warn('The Stats view shows totals only: could not open {path}: {reason}', {
       path,
-      reason: error instanceof Error ? error.message : String(error)
+      reason: errorMessage(error)
     })
     const unopened =
       'The stats file could not be opened (see the log): totals since the proxy started.'
@@ -521,7 +522,7 @@ export function openStatsView(
         readFailed = true
         consoleLogger.warn('The Stats view shows totals only: could not read {path}: {reason}', {
           path,
-          reason: error instanceof Error ? error.message : String(error)
+          reason: errorMessage(error)
         })
         return totalsRows(unreadable, size)
       }

@@ -16,7 +16,7 @@ import { isLogLevel, type LogLevel } from '@logtape/logtape'
 import { piAgentDir } from '@proxy/config/agent-dir'
 import { proxyLogger } from '@proxy/logging'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
-import { errorCode, isRecord } from '@proxy/utils/guards'
+import { errorCode, isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
 import { MS_PER_SECOND } from '@proxy/utils/time'
 import * as z from 'zod'
 
@@ -771,11 +771,9 @@ function readConfigFile(): ConfigFileContents {
   } catch (error) {
     return { kind: 'unusable', problem: 'unreadable', code: errorCode(error) }
   }
-  try {
-    return { kind: 'parsed', value: JSON.parse(text), bytes: text.length }
-  } catch {
-    return { kind: 'unusable', problem: 'not-json' }
-  }
+  const value = parseJsonOrUndefined(text)
+  if (value === undefined) return { kind: 'unusable', problem: 'not-json' }
+  return { kind: 'parsed', value, bytes: text.length }
 }
 
 /**

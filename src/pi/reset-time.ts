@@ -22,7 +22,8 @@ import {
   HTTP_SERVICE_UNAVAILABLE,
   HTTP_TOO_MANY_REQUESTS
 } from '@proxy/server/http-status'
-import { isRecord } from '@proxy/utils/guards'
+import { isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
+import { parsePlainNumber } from '@proxy/utils/numbers'
 import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND } from '@proxy/utils/time'
 
 /** A failed upstream response, as {@link capturingFetch} kept it. */
@@ -145,12 +146,10 @@ function parseResetValue(value: unknown, now: number): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return parseResetNumber(value, now)
   if (typeof value !== 'string' || value.trim() === '') return undefined
   const trimmed = value.trim()
-  if (/^\d+(?:\.\d+)?$/.test(trimmed)) return parseResetNumber(Number.parseFloat(trimmed), now)
+  const plain = parsePlainNumber(trimmed)
+  if (plain !== undefined) return parseResetNumber(plain, now)
   return parseDuration(trimmed) ?? parseDate(trimmed, now)
 }
-
-/** A plain non-negative number, as `retry-after` and `retry-after-ms` write one. */
-const PLAIN_NUMBER = /^\s*\d+(?:\.\d+)?\s*$/
 
 /**
  * Reads the wait from the `retry-after-ms` header (OpenAI's SDKs send and read it).
@@ -160,9 +159,7 @@ const PLAIN_NUMBER = /^\s*\d+(?:\.\d+)?\s*$/
  */
 function fromRetryAfterMs(headers: Headers): number | undefined {
   const retryAfterMs = headers.get('retry-after-ms')
-  return retryAfterMs !== null && PLAIN_NUMBER.test(retryAfterMs)
-    ? Number.parseFloat(retryAfterMs)
-    : undefined
+  return retryAfterMs === null ? undefined : parsePlainNumber(retryAfterMs)
 }
 
 /**
@@ -175,9 +172,8 @@ function fromRetryAfterMs(headers: Headers): number | undefined {
 function fromRetryAfter(headers: Headers, now: number): number | undefined {
   const retryAfter = headers.get('retry-after')
   if (retryAfter === null) return undefined
-  return PLAIN_NUMBER.test(retryAfter)
-    ? Number.parseFloat(retryAfter) * MS_PER_SECOND
-    : parseDate(retryAfter, now)
+  const seconds = parsePlainNumber(retryAfter)
+  return seconds === undefined ? parseDate(retryAfter, now) : seconds * MS_PER_SECOND
 }
 
 /**
@@ -210,7 +206,8 @@ function fromBodyFields(body: unknown, now: number): number | undefined {
  */
 function bucketHasRoom(headers: Headers, resetHeader: string): boolean {
   const remaining = headers.get(resetHeader.replace(/reset/i, 'remaining'))
-  return remaining !== null && PLAIN_NUMBER.test(remaining) && Number.parseFloat(remaining) > 0
+  const left = remaining === null ? undefined : parsePlainNumber(remaining)
+  return left !== undefined && left > 0
 }
 
 /**
@@ -247,20 +244,6 @@ function fromMessage(body: string): number | undefined {
 }
 
 /**
- * Parses a body as JSON, or not at all.
- *
- * @param body - the body text
- * @returns the parsed value, or `undefined` when it is not JSON
- */
-function parseJson(body: string): unknown {
-  try {
-    return JSON.parse(body)
-  } catch {
-    return undefined
-  }
-}
-
-/**
  * Reads how long a failed response says to wait before trying the provider again.
  *
  * @remarks
@@ -279,7 +262,7 @@ export function resetAfterMs(
   const sources: readonly (() => number | undefined)[] = [
     () => fromRetryAfterMs(response.headers),
     () => fromRetryAfter(response.headers, now),
-    () => fromBodyFields(parseJson(response.body), now),
+    () => fromBodyFields(parseJsonOrUndefined(response.body), now),
     () => fromResetHeaders(response.headers, now),
     () => fromMessage(response.body)
   ]

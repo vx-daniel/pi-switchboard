@@ -25,6 +25,7 @@ import { proxyLogger } from '@proxy/logging'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { isLoopbackHost } from '@proxy/server/startup'
 import { askLine, pickLabel } from '@proxy/tui/dialogs'
+import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for proxy auth decisions. */
 const authLogger = proxyLogger('server', 'auth')
@@ -209,7 +210,7 @@ async function showToken(screens: AuthScreens, token: string): Promise<void> {
     await screens.copy(token)
   } catch (error) {
     authLogger.warn('Could not copy the token: {reason}', {
-      reason: error instanceof Error ? error.message : String(error)
+      reason: errorMessage(error)
     })
   }
 }

@@ -20,6 +20,7 @@ import {
   logEffectiveConfig,
   SERVER_ARGS
 } from '@proxy/server/startup'
+import { errorMessage } from '@proxy/utils/guards'
 import { defineCommand, runMain } from 'citty'
 
 import packageJson from '../package.json' with { type: 'json' }
@@ -102,7 +103,7 @@ const main = defineCommand({
       lifecycleLogger.fatal('Cannot listen on {host}:{port}: {error}', {
         host: config.host,
         port: config.port,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       })
       process.exitCode = 1
       return undefined

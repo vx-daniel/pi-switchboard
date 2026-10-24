@@ -39,7 +39,7 @@ import {
   HTTP_UNAUTHORIZED,
   HTTP_UNPROCESSABLE_ENTITY
 } from '@proxy/server/http-status'
-import { isRecord } from '@proxy/utils/guards'
+import { isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
 import * as z from 'zod'
 
 /** OpenAI's error response body. Documents the response; never parsed. */
@@ -335,12 +335,7 @@ const STATUS_POSITIONS: readonly RegExp[] = [
  */
 function googleBodyStatus(message: string): number | undefined {
   if (!message.startsWith('{')) return undefined
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(message)
-  } catch {
-    return undefined
-  }
+  const parsed = parseJsonOrUndefined(message)
   const errorBody = isRecord(parsed) ? parsed['error'] : undefined
   const code = isRecord(errorBody) ? errorBody['code'] : undefined
   return typeof code === 'number' && code >= FIRST_ERROR_STATUS && code < PAST_LAST_ERROR_STATUS

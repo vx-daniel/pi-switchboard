@@ -27,6 +27,7 @@ import {
   type UsageStats
 } from '@proxy/stats/store'
 import { isStatsWindow, type StatsWindow, windowMinutes } from '@proxy/stats/windows'
+import { errorMessage } from '@proxy/utils/guards'
 import { MS_PER_MINUTE } from '@proxy/utils/time'
 import * as z from 'zod'
 
@@ -181,7 +182,7 @@ function closeQuietly(store: UsageStore | undefined): void {
     store?.close()
   } catch (error) {
     usageLogger.debug('Could not close the stats file after a failed read: {reason}', {
-      reason: error instanceof Error ? error.message : String(error)
+      reason: errorMessage(error)
     })
   }
 }
@@ -217,7 +218,7 @@ function createUsageReader(
       closeQuietly(store)
       store = undefined
       usageLogger.warn('Could not read usage from the stats file: {reason}', {
-        reason: error instanceof Error ? error.message : String(error)
+        reason: errorMessage(error)
       })
       return 'unreadable'
     }

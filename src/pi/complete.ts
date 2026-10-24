@@ -35,7 +35,7 @@ import { getRuntime } from '@proxy/pi/registry'
 import { capturingFetch, type FailedResponse } from '@proxy/pi/reset-time'
 import { upstreamTemperature } from '@proxy/pi/temperature'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
-import { isRecord } from '@proxy/utils/guards'
+import { errorMessage, isRecord } from '@proxy/utils/guards'
 
 /** Logger for upstream calls. */
 const completeLogger = proxyLogger('pi', 'complete')
@@ -475,7 +475,7 @@ function logUpstreamThrow(call: UpstreamCall, error: unknown): void {
     abortCause: aborted ? abortCause(call.options.signal, call.opts.signal) : undefined,
     errorName: error instanceof Error ? error.name : typeof error
   }))
-  logUpstreamErrorDetail(error instanceof Error ? error.message : String(error))
+  logUpstreamErrorDetail(errorMessage(error))
 }
 
 /** What one upstream call needs: the model, pi's context, the OpenAI request and its options. */

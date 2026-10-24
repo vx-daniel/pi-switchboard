@@ -25,7 +25,7 @@
 import type { Api, AssistantMessage, Model } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import type { OpenAIMessage, PromptCacheBreakpoint } from '@proxy/openai/schemas'
-import { isRecord } from '@proxy/utils/guards'
+import { isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
 
 /** Logger for upstream payload handling. */
 const breakpointLogger = proxyLogger('pi', 'complete')
@@ -175,12 +175,7 @@ function modelKey(model: Model<Api>): string {
 function badRequestParam(errorMessage: string): unknown {
   const prefix = BAD_REQUEST_PREFIX.exec(errorMessage)?.[0]
   if (prefix === undefined) return undefined
-  let body: unknown
-  try {
-    body = JSON.parse(errorMessage.slice(prefix.length))
-  } catch {
-    return undefined
-  }
+  const body = parseJsonOrUndefined(errorMessage.slice(prefix.length))
   if (!isRecord(body)) return undefined
   return isRecord(body['error']) ? body['error']['param'] : body['param']
 }

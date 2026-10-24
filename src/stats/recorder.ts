@@ -26,6 +26,7 @@ import type {
   StatsBatch,
   StatsStore
 } from '@proxy/stats/store'
+import { errorMessage } from '@proxy/utils/guards'
 import { MS_PER_MINUTE } from '@proxy/utils/time'
 
 /** Logger for the stats. */
@@ -221,7 +222,7 @@ export function startStatsRecorder(store: StatsStore, options: RecorderOptions =
     try {
       store.prune(Math.floor(now() / MS_PER_MINUTE) - retentionMinutes)
     } catch (error) {
-      statsLogger.warn('Could not prune old stats: {reason}', { reason: errorText(error) })
+      statsLogger.warn('Could not prune old stats: {reason}', { reason: errorMessage(error) })
     }
   }
   /** Writes the counts and starts over, logging a failure and dropping the rows. */
@@ -235,7 +236,7 @@ export function startStatsRecorder(store: StatsStore, options: RecorderOptions =
       store.add(batch)
     } catch (error) {
       statsLogger.warn('Could not write stats, dropped a batch: {reason}', {
-        reason: errorText(error)
+        reason: errorMessage(error)
       })
     }
   }
@@ -268,16 +269,6 @@ export function startStatsRecorder(store: StatsStore, options: RecorderOptions =
 }
 
 /**
- * Names what went wrong, by message only: a SQLite error carries no request data.
- *
- * @param error - what was thrown
- * @returns its message
- */
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-/**
  * Names the stats file: `pi-switchboard-stats.sqlite` in pi's agent dir.
  *
  * @returns its path
@@ -305,7 +296,7 @@ export function recordStatsToFile(): (() => void) | undefined {
   } catch (error) {
     statsLogger.warn('Stats are off: could not open {path}: {reason}', {
       path,
-      reason: errorText(error)
+      reason: errorMessage(error)
     })
     return undefined
   }

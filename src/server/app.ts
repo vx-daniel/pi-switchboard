@@ -30,7 +30,7 @@ import {
 import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { createRoutes, type ExposureConfigReader, fileConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
-import { errorCode } from '@proxy/utils/guards'
+import { errorCode, errorMessage } from '@proxy/utils/guards'
 import { Hono } from 'hono'
 import { describeRoute, openAPIRouteHandler } from 'hono-openapi'
 import { HTTPException } from 'hono/http-exception'
@@ -141,7 +141,7 @@ export function createApp(
       error: errorCode(error)
     })
     httpLogger.debug('Internal error detail: {detail}', {
-      detail: error instanceof Error ? error.message : String(error)
+      detail: errorMessage(error)
     })
     return context.json(internalError(), HTTP_INTERNAL_SERVER_ERROR)
   })

@@ -28,6 +28,7 @@ import {
   type Model
 } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
+import { errorMessage } from '@proxy/utils/guards'
 import { MS_PER_SECOND } from '@proxy/utils/time'
 
 /** Logger for relay failures; shares the upstream call's category. */
@@ -193,7 +194,7 @@ export function relayUpstreamActivity(
         afterFinalEvent: terminated
       })
       relayLogger.debug('Upstream stream failure detail: {detail}', {
-        detail: error instanceof Error ? error.message : String(error)
+        detail: errorMessage(error)
       })
       if (!terminated) relayed.push({ type: 'error', reason: 'error', error: relayFailure(model) })
     })

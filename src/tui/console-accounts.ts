@@ -31,6 +31,7 @@ import {
 } from '@proxy/tui/login'
 import { type AccountAction, accountActions, clampSelection } from '@proxy/tui/navigation'
 import { credentialChanged } from '@proxy/tui/status-refresh'
+import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for the console's own actions. */
 const consoleLogger = proxyLogger('tui')
@@ -46,7 +47,7 @@ const LOGOUT_TIMEOUT_MS = 15_000
  * @returns the summary
  */
 function failureReason(error: unknown): string {
-  return summarizeAuthError(error instanceof Error ? error.message : String(error))
+  return summarizeAuthError(errorMessage(error))
 }
 
 /**

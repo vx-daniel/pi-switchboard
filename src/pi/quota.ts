@@ -19,6 +19,7 @@
  * @packageDocumentation
  */
 
+import { parsePlainNumber } from '@proxy/utils/numbers'
 import { MS_PER_SECOND } from '@proxy/utils/time'
 
 /** One usage window: how much of it is used, and when it resets. */
@@ -83,17 +84,6 @@ interface WindowFields {
 const quotas = new Map<string, ProviderQuota>()
 
 /**
- * Reads a plain non-negative number.
- *
- * @param text - the header value
- * @returns the number, or `undefined` when it is not one
- */
-function plainNumber(text: string): number | undefined {
-  if (!/^\s*\d+(?:\.\d+)?\s*$/.test(text)) return undefined
-  return Number.parseFloat(text)
-}
-
-/**
  * Reads a status or plan word, lower-cased.
  *
  * @param text - the header value
@@ -111,7 +101,7 @@ function word(text: string | null): string | undefined {
  * @returns the share from 0 to 1, or `undefined` when out of range or not a number
  */
 function share(text: string, percent: boolean): number | undefined {
-  const value = plainNumber(text)
+  const value = parsePlainNumber(text)
   if (value === undefined) return undefined
   const fraction = percent ? value / PERCENT : value
   return fraction <= 1 ? fraction : undefined
@@ -134,12 +124,12 @@ function addField(fields: WindowFields, field: string, value: string): void {
     }
     case 'reset':
     case 'reset-at': {
-      const seconds = plainNumber(value)
+      const seconds = parsePlainNumber(value)
       if (seconds !== undefined) fields.resetsAt = seconds * MS_PER_SECOND
       return
     }
     case 'window-minutes': {
-      const minutes = plainNumber(value)
+      const minutes = parsePlainNumber(value)
       if (minutes !== undefined) fields.windowMinutes = minutes
       return
     }

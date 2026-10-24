@@ -15,7 +15,7 @@
  */
 
 import type { Api, ThinkingContent } from '@earendil-works/pi-ai'
-import { isRecord } from '@proxy/utils/guards'
+import { isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
 
 /** The token's version: a token of another version is refused, not misread. */
 const TOKEN_VERSION = 1
@@ -72,12 +72,7 @@ function stringField(payload: Record<string, unknown>, key: string): string | un
  * @returns the block and its model, or `undefined` when it is not a token this proxy wrote
  */
 export function decodeReasoningToken(encoded: string): ReasoningToken | undefined {
-  let payload: unknown
-  try {
-    payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
-  } catch {
-    return undefined
-  }
+  const payload = parseJsonOrUndefined(Buffer.from(encoded, 'base64url').toString('utf8'))
   if (!isRecord(payload) || payload['version'] !== TOKEN_VERSION) return undefined
   const provider = stringField(payload, 'provider')
   const api = stringField(payload, 'api')
