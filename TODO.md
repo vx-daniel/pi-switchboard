@@ -424,7 +424,7 @@ since the rename; each issue holds the detailed checklist.
           sidebar regrouped as QUOTA / IN FLIGHT / RECENT / SESSION, folding thresholds
     - [x] Phase 2: the Accounts view as a table with quota gauges and a detail pane (keeping
           `below reserve` and cooldowns)
-    - [ ] Phase 3: Stats with plain-number tiles that fold before the timeline, and `$ today` on
+    - [x] Phase 3: Stats with plain-number tiles that fold before the timeline, and `$ today` on
           the strip from a store-level daily cost
     - [ ] Phase 4: the Models view as a thinking-level matrix with an aliases box, keeping the
           diagnostics and family resolutions

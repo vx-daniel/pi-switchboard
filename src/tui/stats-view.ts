@@ -7,6 +7,7 @@
 
 import { visibleWidth } from '@earendil-works/pi-tui'
 import type { RouteTotals } from '@proxy/server/route-totals'
+import { usd } from '@proxy/tui/panel'
 import { paint, strong } from '@proxy/tui/theme'
 
 /** Widths of the Stats view's number columns. */
@@ -49,7 +50,7 @@ const COLUMNS: readonly {
   {
     title: 'cost',
     width: WIDTHS.cost,
-    cell: (counts) => `$${counts.costUsd.toFixed(COST_DECIMALS)}`
+    cell: (counts) => usd(counts.costUsd, COST_DECIMALS)
   },
   { title: 'fellback', width: WIDTHS.count, cell: (counts) => count(counts.fallbacks) },
   { title: 'input', width: WIDTHS.tokens, cell: (counts) => count(counts.inputTokens) },

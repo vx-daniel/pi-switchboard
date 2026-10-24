@@ -7,6 +7,7 @@
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
+import { STATS_KEPT_DAYS, STATS_WINDOWS, type StatsWindow } from '@proxy/stats/windows'
 import { keycap, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */
@@ -81,6 +82,16 @@ export function accountActions(account: ProviderCredentialStatus): readonly Acco
 /** A key and what it does, for the footer. */
 type KeyHint = readonly [key: string, action: string]
 
+/**
+ * The Stats view's window keys and what each window is called: in the footer, on the view's
+ * window pills and in its tab's context.
+ */
+export const STATS_WINDOW_KEYS: Readonly<Record<StatsWindow, KeyHint>> = {
+  today: ['t', 'today'],
+  week: ['w', 'week'],
+  all: ['a', `all ${String(STATS_KEPT_DAYS)} days`]
+}
+
 /** Each view's keys, the ones worth learning first at the front: a narrow footer cuts the end. */
 const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
   logs: [
@@ -97,11 +108,7 @@ const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
     ['x', 'log out'],
     ['c', 'clear cooldowns']
   ],
-  stats: [
-    ['t', 'today'],
-    ['w', 'week'],
-    ['a', 'all 30 days']
-  ],
+  stats: STATS_WINDOWS.map((window) => STATS_WINDOW_KEYS[window]),
   models: [
     ['↑↓', 'select'],
     ['↵', 'edit or add an alias'],

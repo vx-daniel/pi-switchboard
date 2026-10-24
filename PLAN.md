@@ -2070,21 +2070,27 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   today (from local midnight), the last 7 days, or all 30 days kept; `t` `w` `a` pick one. The
   console opens the stats file itself, beside the recorder's connection (WAL lets it read while
   the recorder writes), and reads a snapshot at most every 5 s for one window and chart width, so
-  the redraws that every request causes don't query the file. Panels: OVERVIEW (sums of the
-  per-model numbers, the average weighted by requests), TIMELINE (one bar per column, the bucket
-  size rounded up so the window fits, bars drawn in eighths of a row against the busiest bucket
-  and ending under `now`; a bucket's failed and rejected requests are stacked at the foot of its
-  bar, at least one cell, red when any failed and yellow when they were only rejected, since
-  coloring a whole bar would mark nearly every busy bar), MODELS, ALIASES (only when a request
-  named an alias, since direct requests alone would repeat the totals; `direct` for those) and
-  ERRORS, the two tables with the same columns, fallbacks included. The timeline takes the room
-  the tables don't need, 3 to 16 rows of bars; on a short screen the tables give way
-  first (`+N more`), then the bars, then the bottom is cut. With stats off or a file that won't
-  open, the view falls back to #70's in-memory route totals (`stats-view.ts`), one row per alias ×
-  served model plus a total, under a line that says why. A read that fails once the file is open
-  is logged once and falls back the same way for the rest of the session, rather than trying
-  again (and maybe waiting out the busy timeout) on every redraw. Panels, label-value lines and
-  compact numbers are shared with the sidebar (`panel.ts`).
+  the redraws that every request causes don't query the file. Window pills (the current one
+  amber), then tiles of plain numbers (sums of the per-model numbers, the averages weighted by
+  requests; six from 110 columns, four under), then panels: TIMELINE (one bar per column, the
+  bucket size rounded up so the window fits, bars drawn in eighths of a row against the busiest
+  bucket and ending under `now`; a bucket's failed and rejected requests are stacked at the foot
+  of its bar, at least one cell, red when any failed and yellow when they were only rejected,
+  since coloring a whole bar would mark nearly every busy bar), MODELS, ALIASES (only when a
+  request named an alias, since direct requests alone would repeat the totals; `direct` for
+  those), the two tables with the same columns, fallbacks included; then one errors line (failed
+  and rejected requests, failed attempts by class, rejections by status). The timeline takes the
+  room the tables don't need, 3 to 16 rows of bars; on a short screen the bars past 3 give way
+  first, then the tables' rows past one (`+N more`), then the tiles, then the bottom is cut
+  (`dashboardLayout`). Today's cost for the status strip is read by its own source
+  (`createTodayCostSource`, also every 5 s) so it doesn't push out the dashboard's snapshot; it is
+  `undefined`, and the strip leaves it out, whenever the view shows the totals instead. With stats
+  off or a file that won't open, the view falls back to #70's in-memory route totals
+  (`stats-view.ts`), one row per alias × served model plus a total, under a line that says why. A
+  read that fails once the file is open (the dashboard's or the strip's cost) is logged once and
+  both fall back for the rest of the session, rather than trying again (and maybe waiting out the
+  busy timeout) on every redraw. Panels, label-value lines and compact numbers are shared with the
+  sidebar (`panel.ts`).
 - **Models** (`models-view.ts`, `console-models.ts`, `aliases.ts`; #230). The exposed models
   (public ID, provider, the efforts each supports, any cooldown), then every configured alias with
   its targets, each target's effort, `fallbackOn`, and its diagnostics in red, then **+ New

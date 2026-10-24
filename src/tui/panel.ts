@@ -23,6 +23,8 @@ const PAD_DIGITS = 2
 const THOUSAND = 1000
 /** A million, for compact counts. */
 const MILLION = 1_000_000
+/** Decimal places a cost is shown with unless asked for more: dollars and cents. */
+const CENTS_DECIMALS = 2
 /** Share used from which a quota window shows as nearly spent, then as spent. */
 export const USED_LEVELS = { warn: 0.7, high: 0.9 } as const
 /** A gauge cell's eighths, from one eighth filled to full. */
@@ -104,6 +106,17 @@ export function latency(ms: number): string {
   if (ms < MS_PER_SECOND) return `${String(Math.max(0, Math.round(ms)))}ms`
   if (ms < SIXTY * MS_PER_SECOND) return `${(ms / MS_PER_SECOND).toFixed(1)}s`
   return compactDuration(ms)
+}
+
+/**
+ * Formats a cost in US dollars: `$1.23`, or with more places, `$0.0042`.
+ *
+ * @param amount - the cost, in US dollars
+ * @param decimals - the decimal places; more than cents where a request's cost matters
+ * @returns the text
+ */
+export function usd(amount: number, decimals = CENTS_DECIMALS): string {
+  return `$${amount.toFixed(decimals)}`
 }
 
 /**

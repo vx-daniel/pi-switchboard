@@ -36,6 +36,7 @@ function snapshot(fields: Partial<StatusStripInput> = {}): StatusStripInput {
     modelsJsonError: false,
     perMinute: Array.from({ length: SPARKLINE_MINUTES }, () => 0),
     saturated: false,
+    todayCostUsd: undefined,
     ...fields
   }
 }
@@ -78,6 +79,7 @@ describe('statusStrip', () => {
   test.each([60, 80, 100, 120, 160])('is exactly as wide as a %d-column terminal', (width) => {
     expect(visibleWidth(statusStrip(snapshot(), width))).toBe(width)
     expect(visibleWidth(statusStrip(snapshot({ modelsJsonError: true }), width))).toBe(width)
+    expect(visibleWidth(statusStrip(snapshot({ todayCostUsd: 1234.567 }), width))).toBe(width)
   })
 
   // Catches the strip losing its order of the details, or a wide terminal not showing them all.
@@ -114,6 +116,17 @@ describe('statusStrip', () => {
   test('drops the counts before the traffic, and the sparkline before the rate', () => {
     expect(plain(snapshot(), 100)).toMatch(/auth off +0\.0 req\/min $/)
     expect(plain(snapshot(), 60)).not.toContain('req/min')
+  })
+
+  // Catches today's cost missing while the stats are read, shown when they aren't (a `$0.00` that
+  // isn't true), or dropped before the sparkline and the rate: it is the right group's headline.
+  test('shows today’s cost last on the right, only while the stats are read, and drops it last', () => {
+    const withCost = snapshot({ todayCostUsd: 1.234 })
+
+    expect(plain(withCost, 200)).toMatch(/ · 0\.0 req\/min · \$1\.23 today $/)
+    expect(plain(snapshot(), 200)).not.toContain('today')
+    expect(plain(withCost, 100)).toMatch(/auth off +0\.0 req\/min · \$1\.23 today $/)
+    expect(plain(withCost, 80)).toMatch(/auth off +\$1\.23 today $/)
   })
 
   // Catches an error dropped for a count or for the version on a narrow terminal: it is what the

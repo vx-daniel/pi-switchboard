@@ -42,7 +42,8 @@ function screen(size: { columns: number; rows: number }, sidebarHidden = false):
       cooldowns: 0,
       modelsJsonError: false,
       perMinute: Array.from({ length: SPARKLINE_MINUTES }, () => 0),
-      saturated: false
+      saturated: false,
+      todayCostUsd: undefined
     },
     context: 'idle',
     note: '3 lines',
