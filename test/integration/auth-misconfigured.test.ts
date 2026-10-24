@@ -11,7 +11,12 @@ import { mkdirSync, rmSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { type CliOverrides, loadConfig, UnusableProxyAuthError } from '@proxy/config/env'
-import { DEFAULT_CONFIG, loadConfigFromFile, saveConfigToFile } from '@proxy/config/schema'
+import {
+  DEFAULT_CONFIG,
+  describeConfigFileProblem,
+  loadConfigFromFile,
+  saveConfigToFile
+} from '@proxy/config/schema'
 import { createApp } from '@proxy/server/app'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -156,6 +161,17 @@ describe('a config file that cannot be used refuses to start', () => {
     rmSync(join(agentDir.path, 'proxy-config.json'), { force: true })
 
     expect((await ask('/v1/models')).status).toBe(HTTP_OK)
+  })
+})
+
+describe('describeConfigFileProblem', () => {
+  // Catches the fatal line and the extension's notification wording drifting apart, or the
+  // unreadable case losing the fs error code that says what to fix.
+  test.each([
+    ['unreadable', { problem: 'unreadable', code: 'EACCES' } as const, 'cannot be read (EACCES)'],
+    ['not JSON', { problem: 'not-json' } as const, 'is not valid JSON']
+  ])('%s: the words that follow "the file"', (_label, problem, expected) => {
+    expect(describeConfigFileProblem(problem)).toBe(expected)
   })
 })
 
