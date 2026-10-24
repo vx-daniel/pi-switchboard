@@ -15,7 +15,9 @@
  */
 
 import type { Api, ThinkingContent } from '@earendil-works/pi-ai'
-import { isRecord } from '@proxy/utils/guards'
+import { textSchema } from '@proxy/openai/text-schemas'
+import { parseJsonOrUndefined } from '@proxy/utils/guards'
+import * as z from 'zod'
 
 /** The token's version: a token of another version is refused, not misread. */
 const TOKEN_VERSION = 1
@@ -49,16 +51,19 @@ export function encodeReasoningToken(token: ReasoningToken): string {
 }
 
 /**
- * Reads a string field of a decoded token.
- *
- * @param payload - the decoded token
- * @param key - the field
- * @returns its value, or `undefined` when it is not a string
+ * What a token decodes to: the fields {@link encodeReasoningToken} writes, and only as it writes
+ * them. `thinking` and `signature` are {@link textSchema}, never trimmed: they go back to the
+ * provider as they came (#145), and the lint's autofix would add `.trim()` to a bare `z.string()`.
  */
-function stringField(payload: Record<string, unknown>, key: string): string | undefined {
-  const value = payload[key]
-  return typeof value === 'string' ? value : undefined
-}
+const ReasoningTokenPayloadSchema = z.object({
+  version: z.literal(TOKEN_VERSION),
+  provider: z.string().trim(),
+  api: z.string().trim(),
+  model: z.string().trim(),
+  thinking: textSchema,
+  signature: textSchema.optional(),
+  redacted: z.literal(true).optional()
+})
 
 /**
  * Decodes a reasoning item's `encrypted_content` back into the thinking block.
@@ -72,27 +77,11 @@ function stringField(payload: Record<string, unknown>, key: string): string | un
  * @returns the block and its model, or `undefined` when it is not a token this proxy wrote
  */
 export function decodeReasoningToken(encoded: string): ReasoningToken | undefined {
-  let payload: unknown
-  try {
-    payload = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'))
-  } catch {
-    return undefined
-  }
-  if (!isRecord(payload) || payload['version'] !== TOKEN_VERSION) return undefined
-  const provider = stringField(payload, 'provider')
-  const api = stringField(payload, 'api')
-  const model = stringField(payload, 'model')
-  const thinking = stringField(payload, 'thinking')
-  const signature = payload['signature']
-  if (
-    provider === undefined ||
-    api === undefined ||
-    model === undefined ||
-    thinking === undefined
-  ) {
-    return undefined
-  }
-  if (signature !== undefined && typeof signature !== 'string') return undefined
+  const parsed = ReasoningTokenPayloadSchema.safeParse(
+    parseJsonOrUndefined(Buffer.from(encoded, 'base64url').toString('utf8'))
+  )
+  if (!parsed.success) return undefined
+  const { provider, api, model, thinking, signature, redacted } = parsed.data
   return {
     provider,
     api,
@@ -101,7 +90,7 @@ export function decodeReasoningToken(encoded: string): ReasoningToken | undefine
       type: 'thinking',
       thinking,
       ...(signature === undefined ? {} : { thinkingSignature: signature }),
-      ...(payload['redacted'] === true ? { redacted: true } : {})
+      ...(redacted === true ? { redacted: true } : {})
     }
   }
 }

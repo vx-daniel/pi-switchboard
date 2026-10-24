@@ -14,15 +14,14 @@ import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
 import { activeCooldown, type Cooldown, loginSubject } from '@proxy/pi/cooldowns'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
+import { MS_PER_SECOND, unixSecondsNow } from '@proxy/utils/time'
 import * as z from 'zod'
 
-/** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
-const MS_PER_SECOND = 1000
 /**
  * Unix timestamp (seconds) from when the module was first loaded: every model's `created`. pi's
  * catalogue has no release dates (#176), and OpenAI's model object requires the field.
  */
-const MODULE_CREATED = Math.floor(Date.now() / MS_PER_SECOND)
+const MODULE_CREATED = unixSecondsNow()
 
 /** An OpenAI model object, as on `/v1/models`. Documents the response; never parsed. */
 export const openAIModelSchema = z

@@ -51,8 +51,8 @@ const BODY_SIZE_MB = 3
 const BYTES_PER_MB = 1_048_576
 const UPSTREAM_TIMEOUT_SEC = 7
 const MS_PER_SECOND = 1000
-/** The four warnings the invalid-input test provokes, logged before anything else. */
-const WARNING_COUNT = 4
+/** The three warnings the invalid-env-var test provokes, logged before anything else. */
+const WARNING_COUNT = 3
 /** How long an info flag's test waits for a server it must not have started, in milliseconds. */
 const SERVER_SETTLE_MS = 1000
 
@@ -320,6 +320,27 @@ describe('starting', () => {
       })
     )
   })
+
+  // Catches a corrupt config file starting the proxy on the defaults (auth off) with only a
+  // warning, as it did: with no flag or env token it is a fatal line naming the file and the
+  // problem, never the file's contents, and exit 1.
+  test('a config file that is not valid JSON refuses to start with a fatal line and exit 1', async () => {
+    assert(agentDir !== undefined, 'no fixture agent dir')
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{"authToken": "notarealsecret-fi')
+
+    await runCli(['--log-format', 'json'])
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        level: 'FATAL',
+        message: expect.stringContaining('exists but "is not valid JSON"') as unknown
+      })
+    )
+    expect(stderr.join('')).not.toContain('notarealsecret-fi')
+  })
 })
 
 describe('tui', () => {
@@ -397,6 +418,35 @@ describe('--config', () => {
   })
 })
 
+describe('numeric flags', () => {
+  // Catches a mistyped or out-of-range --port, --max-body-size or --upstream-timeout starting the
+  // proxy anyway on the config's value (which it did, with a warning), or not naming the range the
+  // user can pick from. CONSTITUTION principle II: an invalid flag refuses to start and lists the
+  // valid values; the config file's bounds apply to the flag too.
+  test.each([
+    ['--port abc', ['--port', 'abc'], '--port must be an integer from 1 to 65535\n'],
+    ['--port 70000', ['--port', '70000'], '--port must be an integer from 1 to 65535\n'],
+    [
+      '--max-body-size 0',
+      ['--max-body-size', '0'],
+      '--max-body-size must be an integer from 1 to 500\n'
+    ],
+    [
+      '--upstream-timeout 4',
+      ['--upstream-timeout', '4'],
+      '--upstream-timeout must be an integer from 5 to 600\n'
+    ]
+  ])('%s refuses to start and names the range', async (_label, args, message) => {
+    await runCli(args)
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect(stderr).toEqual([message])
+    expect(stdout).toEqual([])
+  })
+})
+
 describe('starting the server', () => {
   // Catches a CLI flag being dropped on its way to the server: the port it binds, the token it
   // demands, the body and timeout limits, remote images, the docs UI and the log level.
@@ -457,15 +507,17 @@ describe('starting the server', () => {
     expect(JSON.stringify(logRecords())).not.toContain(FIXTURE_TOKEN)
   })
 
-  // Catches a typo in the environment or a bad numeric flag stopping the proxy, or silently
-  // changing what it does, instead of being ignored with a warning.
-  test('invalid env vars and numeric flags are ignored with a warning', async () => {
+  // Catches a typo in the environment stopping the proxy, or silently changing what it does,
+  // instead of being ignored with a warning (CONSTITUTION principle II: an invalid env var is
+  // ignored with a warning; an invalid flag refuses to start, tested under "numeric flags").
+  test('invalid env vars are ignored with a warning', async () => {
     const port = await freePort()
     writeConfigFile({ port })
     vi.stubEnv('PI_SWITCHBOARD_LOG_FORMAT', 'xml')
     vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'loud')
+    vi.stubEnv('PI_SWITCHBOARD_PORT', '70000')
 
-    await runCli(['--port', 'abc', '--max-body-size', '0', '--log-format', 'json'])
+    await runCli(['--log-format', 'json'])
     await waitForListening(`http://127.0.0.1:${String(port)}`)
 
     // String values are quoted in JSON log messages on purpose, so a value can never pose as
@@ -475,8 +527,7 @@ describe('starting the server', () => {
         .map((record) => record['message'])
         .slice(0, WARNING_COUNT)
     ).toEqual([
-      'Ignoring --"port"="abc": not a positive integer',
-      'Ignoring --"max-body-size"="0": not a positive integer',
+      `Ignoring "PI_SWITCHBOARD_PORT"="70000": not an integer from 1 to 65535; using ${String(port)}`,
       'Ignoring PI_SWITCHBOARD_LOG_LEVEL="loud": not one of ["trace","debug","info","warning","error","fatal"]; using "info"',
       'Ignoring PI_SWITCHBOARD_LOG_FORMAT="xml": not one of ["pretty","json"]'
     ])

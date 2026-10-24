@@ -55,6 +55,7 @@ import {
 } from '@proxy/server/openapi'
 import type { ExposureConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
+import { errorMessage } from '@proxy/utils/guards'
 import { type Context, Hono } from 'hono'
 import { type DescribeRouteOptions, describeRoute, validator } from 'hono-openapi'
 import * as z from 'zod'
@@ -243,7 +244,7 @@ const credentialsHealthDescription: DescribeRouteOptions = {
 function failedCheck(context: HealthContext, check: string, error: unknown): Response {
   healthLogger.warn('The {check} health check threw: {error}', {
     check,
-    error: error instanceof Error ? error.message : String(error)
+    error: errorMessage(error)
   })
   return context.json(
     { status: 'unavailable', error: `the ${check} check failed; see the proxy log` },

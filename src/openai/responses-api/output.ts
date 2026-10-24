@@ -23,9 +23,7 @@ import type {
 import { type ResponseRoute, type RouteFields, routeFields } from '@proxy/openai/responses'
 import { encodeReasoningToken } from '@proxy/openai/responses-api/reasoning-token'
 import type { CreateResponseRequest } from '@proxy/openai/responses-api/request-schema'
-
-/** Milliseconds per second, for Unix timestamps. */
-const MS_PER_SECOND = 1000
+import { unixSecondsNow } from '@proxy/utils/time'
 
 /** A `message` output item. */
 export interface OutputMessageItem {
@@ -141,7 +139,7 @@ function reasoningEcho(request: CreateResponseRequest): Record<string, unknown> 
 export function responseFrame(requestId: string, request: CreateResponseRequest): ResponseFrame {
   return {
     id: `resp_${requestId}`,
-    createdAt: Math.floor(Date.now() / MS_PER_SECOND),
+    createdAt: unixSecondsNow(),
     includeReasoning: request.include?.includes('reasoning.encrypted_content') === true,
     echo: {
       instructions: request.instructions ?? null,

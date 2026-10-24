@@ -14,6 +14,7 @@ import {
   isPublicModelIdMode,
   LifetimeSchema,
   loadConfigFromFile,
+  MAX_PORT,
   ModelExposureModeSchema,
   type ProxyConfig,
   PublicModelIdModeSchema,
@@ -27,8 +28,6 @@ import { maybeAutoSyncZed } from './zed-sync'
 
 /** Rows visible in the settings list before it scrolls. */
 const SETTINGS_PANEL_VISIBLE_ROWS = 12
-/** Highest valid TCP port. */
-const MAX_PORT = 65535
 /** Random bytes in a generated auth token (rendered as hex, so twice as many characters). */
 const AUTH_TOKEN_BYTES = 16
 /** Radix for rendering token bytes as hex. */

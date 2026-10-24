@@ -32,6 +32,7 @@ import type { Attempt, ResponseRoute } from '@proxy/openai/responses'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
 import { clearCooldowns, loginSubject } from '@proxy/pi/cooldowns'
+import { canonicalModelId } from '@proxy/pi/model-id'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
 import type { FailedResponse } from '@proxy/pi/reset-time'
@@ -217,7 +218,7 @@ async function checkCredential(
   }
   chatLogger.warn('Rejected chat request: no upstream auth for {provider}: {reason}', {
     provider: model.provider,
-    model: `${model.provider}/${model.id}`,
+    model: canonicalModelId(model),
     reason: requestAuth.error
   })
   return CREDENTIALS_MISSING

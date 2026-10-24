@@ -14,6 +14,7 @@ import type { Api, Model } from '@earendil-works/pi-ai'
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
 import { registerStoredAccounts } from '@proxy/pi/accounts'
+import { errorMessage } from '@proxy/utils/guards'
 import * as z from 'zod'
 
 /** Logger for runtime setup and credential lookups. */
@@ -121,7 +122,7 @@ export async function initRegistry(): Promise<string | undefined> {
       await runtime.refresh({ allowNetwork: false })
     } catch (error) {
       registryLogger.warn('Refreshing availability after registering logins failed: {reason}', {
-        reason: error instanceof Error ? error.message : String(error)
+        reason: errorMessage(error)
       })
     }
   }
@@ -248,7 +249,7 @@ interface AuthFailureSource {
  * @returns the summary ({@link summarizeAuthError})
  */
 function reportAuthFailure(source: AuthFailureSource, error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = errorMessage(error)
   const summary = summarizeAuthError(message)
   registryLogger.warn('Credential {action} failed for provider {provider}: {reason}', {
     ...source,

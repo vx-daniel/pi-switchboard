@@ -16,6 +16,7 @@ import {
   targetSummary
 } from '@vx-daniel/pi-switchboard/config'
 import {
+  canonicalModelId,
   computeModelExposure,
   type ExposedModel,
   type ModelExposureOutcome
@@ -405,7 +406,7 @@ function collectCustomModelIssues(
   customModels: readonly string[],
   models: readonly Model<Api>[]
 ): string[] {
-  const canonicalSet = new Set(models.map((model) => `${model.provider}/${model.id}`))
+  const canonicalSet = new Set(models.map((model) => canonicalModelId(model)))
   const issues = customModels
     .filter((canonicalId) => !canonicalSet.has(canonicalId))
     .map((canonicalId) => `Custom model '${canonicalId}' is not available (no auth or unknown).`)

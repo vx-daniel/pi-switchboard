@@ -35,6 +35,7 @@ import type { Provider, ProviderAuth } from '@earendil-works/pi-ai'
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
+import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for account registration. */
 const accountsLogger = proxyLogger('pi', 'registry')
@@ -325,7 +326,7 @@ export async function registerStoredAccounts(
   } catch (error) {
     accountsLogger.warn(
       'Could not list the stored credentials; extra logins are not registered: {reason}',
-      { reason: error instanceof Error ? error.message : String(error) }
+      { reason: errorMessage(error) }
     )
     return []
   }

@@ -16,7 +16,8 @@ import { isLogLevel, type LogLevel } from '@logtape/logtape'
 import { piAgentDir } from '@proxy/config/agent-dir'
 import { proxyLogger } from '@proxy/logging'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
-import { errorCode, isRecord } from '@proxy/utils/guards'
+import { errorCode, isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** Logger for config file reading and repair (`config` category). */
@@ -28,11 +29,9 @@ const configLogger = proxyLogger('config')
 
 /** Bytes in one mebibyte: converts `maxBodySizeMb` to bytes. */
 export const BYTES_PER_MB = 1_048_576
-/** Milliseconds in one second: converts `upstreamTimeoutSec` to milliseconds. */
-export const MS_PER_SECOND = 1000
 
 /** Highest TCP port. */
-const MAX_PORT = 65_535
+export const MAX_PORT = 65_535
 /** Upper bound of `maxBodySizeMb`. */
 const MAX_BODY_SIZE_MB = 500
 /** Lower bound of `upstreamTimeoutSec`. */
@@ -98,10 +97,53 @@ const VerbatimNameSchema = VerbatimStringSchema.refine(
  *
  * @param min - The smallest accepted value.
  * @param max - The largest accepted value.
- * @returns A zod integer schema; {@link clampInt} reads its bounds back.
+ * @returns A zod integer schema; {@link intBounds} reads its bounds back.
  */
 function boundedInt(min: number, max: number): z.ZodInt {
   return z.int().min(min).max(max)
+}
+
+/** The inclusive bounds of an integer schema. */
+export interface IntBounds {
+  /** The smallest accepted value. */
+  readonly min: number
+  /** The largest accepted value. */
+  readonly max: number
+}
+
+/**
+ * Reads an integer schema's bounds back, for clamping to them and for naming them in a message.
+ *
+ * @param schema - The integer schema, from {@link boundedInt} or `z.int()`.
+ * @returns Its bounds; a side the schema leaves open is the safe-integer limit.
+ */
+export function intBounds(schema: z.ZodInt): IntBounds {
+  return {
+    min: schema.minValue ?? Number.MIN_SAFE_INTEGER,
+    max: schema.maxValue ?? Number.MAX_SAFE_INTEGER
+  }
+}
+
+/** An integer written out in decimal digits, and nothing else. */
+const DECIMAL_DIGITS = /^\d+$/
+
+/**
+ * Parses an integer from text an operator wrote (an env var, a CLI flag, a PID file) against a
+ * schema's bounds.
+ *
+ * @remarks
+ * Only decimal digits, around which whitespace is allowed: `80abc` is refused, where
+ * `Number.parseInt` would read 80, and so are `0x50` and `8e1`, which `Number` would read as 80.
+ *
+ * @param text - The text to parse.
+ * @param schema - The integer schema the value must satisfy.
+ * @returns The integer, or `undefined` when the text is not one within the schema's bounds.
+ */
+export function parseIntText(text: string, schema: z.ZodInt): number | undefined {
+  const trimmed = text.trim()
+  if (!DECIMAL_DIGITS.test(trimmed)) return undefined
+  const parsed = schema.safeParse(Number(trimmed))
+  return parsed.success ? parsed.data : undefined
 }
 
 /** The `zed` section of the config: syncing the proxy's models into Zed's settings. */
@@ -310,7 +352,7 @@ const LabelsSchema = z.record(z.string().min(1), LabelSchema).readonly()
 export type LoginLabels = z.infer<typeof LabelsSchema>
 
 /** The JSON config file's fields and the values each accepts. */
-const ProxyConfigSchema = z.object({
+export const ProxyConfigSchema = z.object({
   /** Bind address. Surrounding whitespace is a typo; empty means unset. */
   host: z.string().trim().min(1),
   /** Listen port. */
@@ -422,13 +464,39 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
  * @returns The repair function.
  */
 function clampInt(schema: z.ZodInt, fallback: number): (value: unknown) => number {
-  const min = schema.minValue ?? Number.MIN_SAFE_INTEGER
-  const max = schema.maxValue ?? Number.MAX_SAFE_INTEGER
+  const { min, max } = intBounds(schema)
   return (value) =>
     typeof value === 'number' && Number.isFinite(value)
       ? Math.max(min, Math.min(max, Math.round(value)))
       : fallback
 }
+
+/**
+ * Returns an integer schema with another's bounds scaled to a different unit.
+ *
+ * @param schema - The schema whose bounds to scale.
+ * @param factor - What one of the schema's units is in the new unit.
+ * @returns A zod integer schema bounded by `min * factor` and `max * factor`.
+ */
+function scaledInt(schema: z.ZodInt, factor: number): z.ZodInt {
+  const { min, max } = intBounds(schema)
+  return boundedInt(min * factor, max * factor)
+}
+
+/**
+ * `PI_SWITCHBOARD_MAX_BODY_SIZE`, in bytes: `maxBodySizeMb`'s bounds, so the env var accepts
+ * exactly the sizes the config file does.
+ */
+export const MaxBodySizeBytesSchema = scaledInt(ProxyConfigSchema.shape.maxBodySizeMb, BYTES_PER_MB)
+
+/**
+ * `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS`, in milliseconds: `upstreamTimeoutSec`'s bounds, so the env
+ * var accepts exactly the waits the config file does.
+ */
+export const UpstreamTimeoutMsSchema = scaledInt(
+  ProxyConfigSchema.shape.upstreamTimeoutSec,
+  MS_PER_SECOND
+)
 
 /**
  * Keeps the list entries {@link VerbatimNameSchema} accepts.
@@ -673,46 +741,79 @@ export function getConfigPath(): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * Why a config file that exists cannot be used: it could not be read (`unreadable`, with the fs
+ * error code) or it is not valid JSON (`not-json`).
+ */
+export type ConfigFileProblem =
+  | { readonly problem: 'unreadable'; readonly code: string }
+  | { readonly problem: 'not-json' }
+
+/**
+ * The config file as it is on disk: absent, present but unusable, or parsed (not yet normalized).
+ */
+type ConfigFileContents =
+  | { readonly kind: 'absent' }
+  | ({ readonly kind: 'unusable' } & ConfigFileProblem)
+  | { readonly kind: 'parsed'; readonly value: unknown; readonly bytes: number }
+
+/**
+ * Reads and parses the config file without normalizing it. Never throws and never logs: the
+ * callers decide what each outcome means and what to say about it.
+ *
+ * @returns The file's contents, or why there are none.
+ */
+function readConfigFile(): ConfigFileContents {
+  const configPath = getConfigPath()
+  if (!existsSync(configPath)) return { kind: 'absent' }
+  let text: string
+  try {
+    text = readFileSync(configPath, 'utf-8')
+  } catch (error) {
+    return { kind: 'unusable', problem: 'unreadable', code: errorCode(error) }
+  }
+  const value = parseJsonOrUndefined(text)
+  if (value === undefined) return { kind: 'unusable', problem: 'not-json' }
+  return { kind: 'parsed', value, bytes: text.length }
+}
+
+/**
  * Loads and normalizes the JSON config file.
  *
  * @remarks
  * Never throws: a missing, unreadable or non-JSON file gives a copy of {@link DEFAULT_CONFIG}, with
- * a warning for the last two.
+ * a warning for the last two. Whether the proxy may start on those defaults is decided by the
+ * caller: `loadConfig` refuses when the file exists but cannot be used and no flag or env var
+ * sets the token ({@link configFileProblem}), since the file may hold a token the proxy cannot see.
  *
  * @returns The config from the file, or the defaults.
  */
 export function loadConfigFromFile(): ProxyConfig {
   const configPath = getConfigPath()
-  if (!existsSync(configPath)) {
+  const contents = readConfigFile()
+  if (contents.kind === 'absent') {
     configLogger.debug('No config file at {path}; using defaults', { path: configPath })
     return { ...DEFAULT_CONFIG }
   }
-  let text: string
-  try {
-    text = readFileSync(configPath, 'utf-8')
-  } catch (error) {
-    configLogger.warn('Could not read config file {path} ({code}); using defaults', {
-      path: configPath,
-      code: errorCode(error)
-    })
-    return { ...DEFAULT_CONFIG }
-  }
-  let raw: unknown
-  try {
-    raw = JSON.parse(text)
-  } catch {
-    // Not the parser's message: it quotes the file, which can hold the auth token.
-    configLogger.warn('Config file {path} is not valid JSON; using defaults', {
-      path: configPath,
-      bytes: text.length
-    })
+  if (contents.kind === 'unusable') {
+    if (contents.problem === 'unreadable') {
+      configLogger.warn('Could not read config file {path} ({code}); using defaults', {
+        path: configPath,
+        code: contents.code
+      })
+    } else {
+      // Not the parser's message: it quotes the file, which can hold the auth token.
+      configLogger.warn('Config file {path} is not valid JSON; using defaults', {
+        path: configPath
+      })
+    }
     return { ...DEFAULT_CONFIG }
   }
   configLogger.debug('Read config file {path}', {
     path: configPath,
-    fields: isRecord(raw) ? Object.keys(raw) : []
+    bytes: contents.bytes,
+    fields: isRecord(contents.value) ? Object.keys(contents.value) : []
   })
-  return normalizeConfig(raw)
+  return normalizeConfig(contents.value)
 }
 
 /**
@@ -721,11 +822,40 @@ export function loadConfigFromFile(): ProxyConfig {
  * @returns The parsed JSON, or `undefined` when the file is missing, unreadable or not JSON.
  */
 function rawConfigFile(): unknown {
-  try {
-    return JSON.parse(readFileSync(getConfigPath(), 'utf-8'))
-  } catch {
-    return undefined
-  }
+  const contents = readConfigFile()
+  return contents.kind === 'parsed' ? contents.value : undefined
+}
+
+/**
+ * Checks whether the config file exists but cannot be used: it cannot be read, or it is not valid
+ * JSON.
+ *
+ * @remarks
+ * Such a file may hold an `authToken` the proxy cannot see. Starting on the defaults would turn
+ * that token into auth off, so `loadConfig` refuses to start instead when neither the flag nor
+ * `PI_SWITCHBOARD_AUTH_TOKEN` sets a token (CONSTITUTION principle II's exception). A missing file is not
+ * this case: it holds nothing. Reads the file on every call.
+ *
+ * @returns Why the file cannot be used, or `undefined` when it is absent or parsed.
+ */
+export function configFileProblem(): ConfigFileProblem | undefined {
+  const contents = readConfigFile()
+  if (contents.kind !== 'unusable') return undefined
+  return contents.problem === 'unreadable'
+    ? { problem: 'unreadable', code: contents.code }
+    : { problem: 'not-json' }
+}
+
+/**
+ * Words a {@link ConfigFileProblem} for a log line or notification: `cannot be read (EACCES)` or
+ * `is not valid JSON`. Never the parser's message, which quotes the file.
+ *
+ * @param file - why the config file cannot be used
+ * @returns the wording, to follow "the file …"
+ */
+export function describeConfigFileProblem(file: ConfigFileProblem): string {
+  if (file.problem === 'unreadable') return `cannot be read (${file.code})`
+  return 'is not valid JSON'
 }
 
 /**

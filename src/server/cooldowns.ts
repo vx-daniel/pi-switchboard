@@ -15,11 +15,11 @@
  * @packageDocumentation
  */
 
-import { MS_PER_SECOND } from '@proxy/config/schema'
 import type { ModelExposureResult } from '@proxy/openai/model-exposure'
 import { activeCooldowns, clearCooldownsFor, type Cooldown } from '@proxy/pi/cooldowns'
 import { loginNotFound, modelNotFound, type OpenAIError } from '@proxy/server/errors'
 import { HTTP_NOT_FOUND, HTTP_OK } from '@proxy/server/http-status'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** One active cooldown, as `/healthz/models` and the clear route show it. */

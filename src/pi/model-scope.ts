@@ -23,6 +23,7 @@
  */
 
 import type { Api, Model, ModelThinkingLevel } from '@earendil-works/pi-ai'
+import { canonicalModelId } from '@proxy/pi/model-id'
 import { minimatch } from 'minimatch'
 import * as z from 'zod'
 
@@ -365,7 +366,7 @@ function globMatches(
   }
   return models.filter(
     (model) =>
-      minimatch(`${model.provider}/${model.id}`, globPattern, { nocase: true }) ||
+      minimatch(canonicalModelId(model), globPattern, { nocase: true }) ||
       minimatch(model.id, globPattern, { nocase: true })
   )
 }

@@ -14,12 +14,13 @@ import { configFileAuthTokenInvalid, getConfigPath, loadConfigFromFile } from '@
 import { LOG_FORMATS, proxyLogger, resolveLogFormat } from '@proxy/logging'
 import { initRegistry } from '@proxy/pi/registry'
 import {
-  invalidLoggingFlag,
+  invalidFlag,
   listen,
   loadConfigWithLogging,
   logEffectiveConfig,
   SERVER_ARGS
 } from '@proxy/server/startup'
+import { errorMessage } from '@proxy/utils/guards'
 import { defineCommand, runMain } from 'citty'
 
 import packageJson from '../package.json' with { type: 'json' }
@@ -68,9 +69,9 @@ const main = defineCommand({
   },
   run: async ({ args }) => {
     // An unusable flag refuses every path, `--config` included, with the valid values (#95).
-    const invalidFlag = invalidLoggingFlag(args)
-    if (invalidFlag !== undefined) {
-      process.stderr.write(`${invalidFlag}\n`)
+    const refusal = invalidFlag(args)
+    if (refusal !== undefined) {
+      process.stderr.write(`${refusal}\n`)
       process.exitCode = 1
       return
     }
@@ -102,7 +103,7 @@ const main = defineCommand({
       lifecycleLogger.fatal('Cannot listen on {host}:{port}: {error}', {
         host: config.host,
         port: config.port,
-        error: error instanceof Error ? error.message : String(error)
+        error: errorMessage(error)
       })
       process.exitCode = 1
       return undefined

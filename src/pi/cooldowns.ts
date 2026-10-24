@@ -19,9 +19,9 @@
  * @packageDocumentation
  */
 
-import { MS_PER_SECOND } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { LATEST_DATE_MS } from '@proxy/pi/reset-time'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 
 /** Logger for routing decisions. */
 const cooldownLogger = proxyLogger('server', 'chat')

@@ -17,13 +17,15 @@
  * @packageDocumentation
  */
 
-import { MS_PER_SECOND } from '@proxy/config/schema'
 import {
   HTTP_OVERLOADED,
   HTTP_SERVICE_UNAVAILABLE,
   HTTP_TOO_MANY_REQUESTS
 } from '@proxy/server/http-status'
-import { isRecord } from '@proxy/utils/guards'
+import { parseJsonOrUndefined } from '@proxy/utils/guards'
+import { parsePlainNumber } from '@proxy/utils/numbers'
+import { MS_PER_DAY, MS_PER_HOUR, MS_PER_MINUTE, MS_PER_SECOND } from '@proxy/utils/time'
+import * as z from 'zod'
 
 /** A failed upstream response, as {@link capturingFetch} kept it. */
 export interface FailedResponse {
@@ -51,13 +53,6 @@ const BODY_READ_MS = 2000
  * could not be shown: `toISOString()` throws on it.
  */
 export const LATEST_DATE_MS = 8_640_000_000_000_000
-
-/** Milliseconds in a minute. */
-const MS_PER_MINUTE = 60_000
-/** Milliseconds in an hour. */
-const MS_PER_HOUR = 3_600_000
-/** Milliseconds in a day. */
-const MS_PER_DAY = 86_400_000
 
 /** Milliseconds in each unit a duration can be written in, by the unit's lower-case name. */
 const UNIT_MS: ReadonlyMap<string, number> = new Map([
@@ -152,12 +147,10 @@ function parseResetValue(value: unknown, now: number): number | undefined {
   if (typeof value === 'number' && Number.isFinite(value)) return parseResetNumber(value, now)
   if (typeof value !== 'string' || value.trim() === '') return undefined
   const trimmed = value.trim()
-  if (/^\d+(?:\.\d+)?$/.test(trimmed)) return parseResetNumber(Number.parseFloat(trimmed), now)
+  const plain = parsePlainNumber(trimmed)
+  if (plain !== undefined) return parseResetNumber(plain, now)
   return parseDuration(trimmed) ?? parseDate(trimmed, now)
 }
-
-/** A plain non-negative number, as `retry-after` and `retry-after-ms` write one. */
-const PLAIN_NUMBER = /^\s*\d+(?:\.\d+)?\s*$/
 
 /**
  * Reads the wait from the `retry-after-ms` header (OpenAI's SDKs send and read it).
@@ -167,9 +160,7 @@ const PLAIN_NUMBER = /^\s*\d+(?:\.\d+)?\s*$/
  */
 function fromRetryAfterMs(headers: Headers): number | undefined {
   const retryAfterMs = headers.get('retry-after-ms')
-  return retryAfterMs !== null && PLAIN_NUMBER.test(retryAfterMs)
-    ? Number.parseFloat(retryAfterMs)
-    : undefined
+  return retryAfterMs === null ? undefined : parsePlainNumber(retryAfterMs)
 }
 
 /**
@@ -182,10 +173,25 @@ function fromRetryAfterMs(headers: Headers): number | undefined {
 function fromRetryAfter(headers: Headers, now: number): number | undefined {
   const retryAfter = headers.get('retry-after')
   if (retryAfter === null) return undefined
-  return PLAIN_NUMBER.test(retryAfter)
-    ? Number.parseFloat(retryAfter) * MS_PER_SECOND
-    : parseDate(retryAfter, now)
+  const seconds = parsePlainNumber(retryAfter)
+  return seconds === undefined ? parseDate(retryAfter, now) : seconds * MS_PER_SECOND
 }
+
+/**
+ * The reset fields a failed body may carry (Codex's `resets_in_seconds` and `resets_at`, others'
+ * `retry_after`). A field of the wrong type is read as absent, not as a refusal of the body: the
+ * other fields may still say when to retry.
+ */
+const ResetFieldsSchema = z.object({
+  resets_in_seconds: z.number().optional().catch(undefined),
+  retry_after: z.number().optional().catch(undefined),
+  resets_at: z.union([z.number(), z.string().trim()]).optional().catch(undefined)
+})
+
+/** A failed body: the reset fields at the top level, and again under `error`, where most put them. */
+const ResetBodySchema = ResetFieldsSchema.extend({
+  error: ResetFieldsSchema.optional().catch(undefined)
+})
 
 /**
  * Reads the wait from a JSON error body's own fields, at the top level or under `error`.
@@ -195,13 +201,13 @@ function fromRetryAfter(headers: Headers, now: number): number | undefined {
  * @returns the wait in milliseconds, or `undefined`
  */
 function fromBodyFields(body: unknown, now: number): number | undefined {
-  const scopes = isRecord(body) ? [body, body['error']].filter(isRecord) : []
+  const parsed = ResetBodySchema.safeParse(body)
+  if (!parsed.success) return undefined
+  const scopes = [parsed.data, parsed.data.error].filter((scope) => scope !== undefined)
   for (const scope of scopes) {
-    if (typeof scope['resets_in_seconds'] === 'number') {
-      return scope['resets_in_seconds'] * MS_PER_SECOND
-    }
-    if (typeof scope['retry_after'] === 'number') return scope['retry_after'] * MS_PER_SECOND
-    const resetsAt = parseResetValue(scope['resets_at'], now)
+    if (scope.resets_in_seconds !== undefined) return scope.resets_in_seconds * MS_PER_SECOND
+    if (scope.retry_after !== undefined) return scope.retry_after * MS_PER_SECOND
+    const resetsAt = parseResetValue(scope.resets_at, now)
     if (resetsAt !== undefined) return resetsAt
   }
   return undefined
@@ -217,7 +223,8 @@ function fromBodyFields(body: unknown, now: number): number | undefined {
  */
 function bucketHasRoom(headers: Headers, resetHeader: string): boolean {
   const remaining = headers.get(resetHeader.replace(/reset/i, 'remaining'))
-  return remaining !== null && PLAIN_NUMBER.test(remaining) && Number.parseFloat(remaining) > 0
+  const left = remaining === null ? undefined : parsePlainNumber(remaining)
+  return left !== undefined && left > 0
 }
 
 /**
@@ -254,20 +261,6 @@ function fromMessage(body: string): number | undefined {
 }
 
 /**
- * Parses a body as JSON, or not at all.
- *
- * @param body - the body text
- * @returns the parsed value, or `undefined` when it is not JSON
- */
-function parseJson(body: string): unknown {
-  try {
-    return JSON.parse(body)
-  } catch {
-    return undefined
-  }
-}
-
-/**
  * Reads how long a failed response says to wait before trying the provider again.
  *
  * @remarks
@@ -286,7 +279,7 @@ export function resetAfterMs(
   const sources: readonly (() => number | undefined)[] = [
     () => fromRetryAfterMs(response.headers),
     () => fromRetryAfter(response.headers, now),
-    () => fromBodyFields(parseJson(response.body), now),
+    () => fromBodyFields(parseJsonOrUndefined(response.body), now),
     () => fromResetHeaders(response.headers, now),
     () => fromMessage(response.body)
   ]

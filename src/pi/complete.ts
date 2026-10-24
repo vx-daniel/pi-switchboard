@@ -19,10 +19,11 @@ import {
   type Model,
   type SimpleStreamOptions
 } from '@earendil-works/pi-ai'
-import { proxyLogger } from '@proxy/logging'
+import { firstTimeInfoLog, proxyLogger } from '@proxy/logging'
 import { supportedReasoningEfforts, thinkingLevelFor } from '@proxy/openai/reasoning-effort'
 import type { ChatCompletionRequest, ReasoningEffort } from '@proxy/openai/schemas'
 import { breakpointPatch, retryWithoutBreakpoints } from '@proxy/pi/cache-breakpoints'
+import { canonicalModelId } from '@proxy/pi/model-id'
 import {
   ANTHROPIC_APIS,
   collectPayloadFields,
@@ -35,7 +36,7 @@ import { getRuntime } from '@proxy/pi/registry'
 import { capturingFetch, type FailedResponse } from '@proxy/pi/reset-time'
 import { upstreamTemperature } from '@proxy/pi/temperature'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
-import { isRecord } from '@proxy/utils/guards'
+import { errorMessage, isRecord } from '@proxy/utils/guards'
 
 /** Logger for upstream calls. */
 const completeLogger = proxyLogger('pi', 'complete')
@@ -100,10 +101,10 @@ function combineSignals(
 }
 
 /**
- * Models, as `provider/id`, a clamped `reasoning_effort` has been logged for in this process;
- * each is logged at info once (#175), as dropped temperatures are.
+ * Logs a clamped `reasoning_effort`: at info the first time per model (as `provider/id`) in this
+ * process (#175), then at debug, as dropped temperatures are.
  */
-const modelsWithClampedEffort = new Set<string>()
+const logClampedEffort = firstTimeInfoLog(completeLogger)
 
 /**
  * Converts `reasoning_effort` to the thinking level `model` runs at (`thinkingLevelFor`).
@@ -125,19 +126,16 @@ function reasoningLevel(
 ): SimpleStreamOptions['reasoning'] {
   const { level, clamped } = thinkingLevelFor(model, effort)
   if (clamped) {
-    const key = `${model.provider}/${model.id}`
-    const firstForModel = !modelsWithClampedEffort.has(key)
-    modelsWithClampedEffort.add(key)
-    const message =
-      'Clamped reasoning_effort {reasoningEffort} to thinking level {thinkingLevel} for {modelId}'
-    const properties = {
-      reasoningEffort: effort,
-      thinkingLevel: level,
-      modelId: model.id,
-      supportedEfforts: supportedReasoningEfforts(model)
-    }
-    if (firstForModel) completeLogger.info(message, properties)
-    else completeLogger.debug(message, properties)
+    logClampedEffort(
+      canonicalModelId(model),
+      'Clamped reasoning_effort {reasoningEffort} to thinking level {thinkingLevel} for {modelId}',
+      {
+        reasoningEffort: effort,
+        thinkingLevel: level,
+        modelId: model.id,
+        supportedEfforts: supportedReasoningEfforts(model)
+      }
+    )
   }
   return level === 'off' ? undefined : level
 }
@@ -475,7 +473,7 @@ function logUpstreamThrow(call: UpstreamCall, error: unknown): void {
     abortCause: aborted ? abortCause(call.options.signal, call.opts.signal) : undefined,
     errorName: error instanceof Error ? error.name : typeof error
   }))
-  logUpstreamErrorDetail(error instanceof Error ? error.message : String(error))
+  logUpstreamErrorDetail(errorMessage(error))
 }
 
 /** What one upstream call needs: the model, pi's context, the OpenAI request and its options. */

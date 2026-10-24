@@ -7,7 +7,7 @@
 
 import {
   type CliArgs,
-  invalidLoggingFlag,
+  invalidFlag,
   loadConfigWithLogging,
   logEffectiveConfig,
   SERVER_ARGS
@@ -26,14 +26,14 @@ const NOT_INTERACTIVE =
   'pi-switchboard tui needs an interactive terminal; run pi-switchboard without tui for the headless proxy'
 
 /**
- * Says why the console cannot start: no terminal, or an unusable logging flag.
+ * Says why the console cannot start: no terminal, or an unusable flag.
  *
  * @param args - the parsed flags
  * @returns the reason, or `undefined` when it can start
  */
 function startRefusal(args: CliArgs): string | undefined {
   const interactive = process.stdin.isTTY && process.stdout.isTTY
-  return interactive ? invalidLoggingFlag(args) : NOT_INTERACTIVE
+  return interactive ? invalidFlag(args) : NOT_INTERACTIVE
 }
 
 /** The `pi-switchboard tui` command. */

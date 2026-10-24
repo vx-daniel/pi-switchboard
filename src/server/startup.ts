@@ -11,7 +11,7 @@
 
 import type { ServerType } from '@hono/node-server'
 import { serve } from '@hono/node-server'
-import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
+import { getLogLevels, isLogLevel } from '@logtape/logtape'
 import {
   type CliOverrides,
   type InvalidAuthCause,
@@ -19,21 +19,40 @@ import {
   type ServerConfig,
   UnusableProxyAuthError
 } from '@proxy/config/env'
-import { getConfigPath } from '@proxy/config/schema'
+import {
+  describeConfigFileProblem,
+  getConfigPath,
+  intBounds,
+  parseIntText,
+  ProxyConfigSchema
+} from '@proxy/config/schema'
 import {
   configureLogging,
   isLogFormat,
   LOG_FORMATS,
   proxyLogger,
+  resolveLogLevel,
   type SinkFormat
 } from '@proxy/logging'
 import { getAvailableModels } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { recordStatsToFile } from '@proxy/stats/recorder'
+import type * as z from 'zod'
 
 /** Logger for process lifecycle (`server` category). */
 const lifecycleLogger = proxyLogger('server')
+
+/**
+ * Words an integer schema's bounds for a flag's help text or refusal: `1 to 65535`.
+ *
+ * @param schema - the integer schema
+ * @returns the bounds as text
+ */
+function rangeText(schema: z.ZodInt): string {
+  const { min, max } = intBounds(schema)
+  return `${String(min)} to ${String(max)}`
+}
 
 /** The server flags, as citty declares them; the CLI and the console both take them. */
 export const SERVER_ARGS = {
@@ -43,7 +62,7 @@ export const SERVER_ARGS = {
   },
   'port': {
     type: 'string',
-    description: 'Listen port (default: from config or 4141)'
+    description: `Listen port, ${rangeText(ProxyConfigSchema.shape.port)} (default: from config or 4141)`
   },
   'auth-token': {
     type: 'string',
@@ -71,12 +90,11 @@ export const SERVER_ARGS = {
   },
   'max-body-size': {
     type: 'string',
-    description: 'Maximum request body size in MB (default: from config or 50)'
+    description: `Maximum request body size in MB, ${rangeText(ProxyConfigSchema.shape.maxBodySizeMb)} (default: from config or 50)`
   },
   'upstream-timeout': {
     type: 'string',
-    description:
-      'Seconds the upstream provider may send nothing before a call is aborted (default: from config or 120)'
+    description: `Seconds the upstream provider may send nothing before a call is aborted, ${rangeText(ProxyConfigSchema.shape.upstreamTimeoutSec)} (default: from config or 120)`
   },
   'log-level': {
     type: 'string',
@@ -109,28 +127,42 @@ export function isLoopbackHost(host: string): boolean {
   return host === 'localhost' || host === '::1' || host.startsWith('127.')
 }
 
-/**
- * Parses a CLI integer argument, warning when it is given but not a positive integer.
- *
- * @param name - The flag's name without `--`, for the warning.
- * @param value - The flag's value, or `undefined` when it is absent.
- * @returns The parsed integer, or `undefined` when absent or invalid.
- */
-function parsePositiveIntArg(name: string, value: string | undefined): number | undefined {
-  if (value === undefined) return undefined
-  const parsed = Number.parseInt(value, 10)
-  if (Number.isFinite(parsed) && parsed > 0) return parsed
-  lifecycleLogger.warn('Ignoring --{name}={value}: not a positive integer', { name, value })
-  return undefined
+/** An integer flag: which flag, which override it sets, and the bounds its value must satisfy. */
+interface IntFlag {
+  /** The flag's name without `--`. */
+  readonly flag: 'port' | 'max-body-size' | 'upstream-timeout'
+  /** The override the flag sets. */
+  readonly key: 'port' | 'maxBodySizeMb' | 'upstreamTimeoutSec'
+  /** The config file's bounds for the same setting, in the flag's unit. */
+  readonly schema: z.ZodInt
 }
 
+/** The integer flags, checked by {@link invalidFlag} and read by `buildCliOverrides`. */
+const INT_FLAGS: readonly IntFlag[] = [
+  { flag: 'port', key: 'port', schema: ProxyConfigSchema.shape.port },
+  { flag: 'max-body-size', key: 'maxBodySizeMb', schema: ProxyConfigSchema.shape.maxBodySizeMb },
+  {
+    flag: 'upstream-timeout',
+    key: 'upstreamTimeoutSec',
+    schema: ProxyConfigSchema.shape.upstreamTimeoutSec
+  }
+]
+
 /**
- * Checks the logging flags, so a typo fails the start with a message, never a stack trace.
+ * Checks the flags that take a closed set or range of values, so a typo fails the start with a
+ * message naming the valid values or the range (CONSTITUTION principle II), never a stack trace
+ * or a proxy that quietly ignored the flag.
  *
  * @param args - The parsed CLI flags.
- * @returns The error message for the first unusable logging flag, or `undefined`.
+ * @returns The error message for the first unusable flag, or `undefined`.
  */
-export function invalidLoggingFlag(args: CliArgs): string | undefined {
+export function invalidFlag(args: CliArgs): string | undefined {
+  for (const { flag, schema } of INT_FLAGS) {
+    const value = args[flag]
+    if (value !== undefined && parseIntText(value, schema) === undefined) {
+      return `--${flag} must be an integer from ${rangeText(schema)}`
+    }
+  }
   const level = args['log-level']
   if (level !== undefined && !isLogLevel(level)) {
     return `--log-level must be one of: ${getLogLevels().join(', ')}`
@@ -143,18 +175,15 @@ export function invalidLoggingFlag(args: CliArgs): string | undefined {
 }
 
 /**
- * Builds CLI overrides from parsed args; invalid numbers are warned about and left out.
+ * Copies the string and boolean flags that were given into the overrides.
  *
  * @param args - The parsed CLI flags.
- * @returns The overrides for {@link loadConfig}.
+ * @param cli - The overrides to fill; written to.
  */
-function buildCliOverrides(args: CliArgs): CliOverrides {
-  const cli: CliOverrides = {}
+function copyPlainFlags(args: CliArgs, cli: CliOverrides): void {
   if (args.host !== undefined) {
     cli.host = args.host
   }
-  const port = parsePositiveIntArg('port', args.port)
-  if (port !== undefined) cli.port = port
   if (args['auth-token'] !== undefined) {
     cli.authToken = args['auth-token']
   }
@@ -170,10 +199,26 @@ function buildCliOverrides(args: CliArgs): CliOverrides {
   if (args.stats !== undefined) {
     cli.stats = args.stats
   }
-  const mb = parsePositiveIntArg('max-body-size', args['max-body-size'])
-  if (mb !== undefined) cli.maxBodySizeMb = mb
-  const sec = parsePositiveIntArg('upstream-timeout', args['upstream-timeout'])
-  if (sec !== undefined) cli.upstreamTimeoutSec = sec
+}
+
+/**
+ * Builds CLI overrides from parsed args.
+ *
+ * @remarks
+ * {@link invalidFlag} has refused any value outside its bounds before this runs, so an integer
+ * flag that does not parse here is left out rather than reported again.
+ *
+ * @param args - The parsed CLI flags.
+ * @returns The overrides for {@link loadConfig}.
+ */
+function buildCliOverrides(args: CliArgs): CliOverrides {
+  const cli: CliOverrides = {}
+  copyPlainFlags(args, cli)
+  for (const { flag, key, schema } of INT_FLAGS) {
+    const value = args[flag]
+    const parsed = value === undefined ? undefined : parseIntText(value, schema)
+    if (parsed !== undefined) cli[key] = parsed
+  }
   const logLevel = args['log-level']
   if (logLevel !== undefined && isLogLevel(logLevel)) cli.logLevel = logLevel
   return cli
@@ -201,6 +246,14 @@ function logUnusableProxyAuth(invalid: InvalidAuthCause): void {
       lifecycleLogger.fatal(
         'Refusing to start: authToken in {configPath} is not a string. Fix it, or set a token with --auth-token or PI_SWITCHBOARD_AUTH_TOKEN',
         { configPath: getConfigPath() }
+      )
+      break
+    case 'file-unusable':
+      // The file may hold a token the proxy cannot see; starting on the defaults could turn it
+      // into auth off. Never the parser's message: it quotes the file.
+      lifecycleLogger.fatal(
+        'Refusing to start: {configPath} exists but {problem}, so a token in it cannot be applied. Fix or remove the file, or set a token with --auth-token or PI_SWITCHBOARD_AUTH_TOKEN',
+        { configPath: getConfigPath(), problem: describeConfigFileProblem(invalid.file) }
       )
       break
     case 'renamed-env-var':
@@ -235,10 +288,11 @@ export interface LogOutput {
  */
 export function loadConfigWithLogging(args: CliArgs, output: LogOutput): ServerConfig | undefined {
   const { format, write } = output
-  const earlyLogLevel =
-    [args['log-level'], process.env.PI_SWITCHBOARD_LOG_LEVEL].find(
-      (candidate): candidate is LogLevel => candidate !== undefined && isLogLevel(candidate)
-    ) ?? 'info'
+  const earlyLogLevel = resolveLogLevel(
+    args['log-level'],
+    process.env.PI_SWITCHBOARD_LOG_LEVEL,
+    'info'
+  )
   configureLogging({ level: earlyLogLevel, format, write })
 
   let config: ServerConfig

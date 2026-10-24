@@ -6,6 +6,7 @@
  */
 
 import type { MinuteRange } from '@proxy/stats/store'
+import { MS_PER_MINUTE } from '@proxy/utils/time'
 
 /** The windows, shortest first. */
 export const STATS_WINDOWS = ['today', 'week', 'all'] as const
@@ -13,8 +14,6 @@ export const STATS_WINDOWS = ['today', 'week', 'all'] as const
 /** A window of the stats file's history. */
 export type StatsWindow = (typeof STATS_WINDOWS)[number]
 
-/** Milliseconds in a minute: the stats are kept per minute. */
-export const MS_PER_MINUTE = 60_000
 /** Minutes in a day. */
 const MINUTES_PER_DAY = 1440
 /** Days in each window that isn't today; `all` is the stats file's retention. */

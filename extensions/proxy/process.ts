@@ -12,8 +12,11 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { type ExtensionContext, getAgentDir } from '@earendil-works/pi-coding-agent'
 import {
   configFileAuthTokenInvalid,
+  configFileProblem,
   configToEnv,
+  describeConfigFileProblem,
   loadConfigFromFile,
+  parseIntText,
   type ProxyConfig
 } from '@vx-daniel/pi-switchboard/config'
 import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
@@ -21,6 +24,8 @@ import * as z from 'zod'
 
 import { type ProxyState, proxyUrl } from './state'
 
+/** What the PID file holds: one process ID, a positive integer. */
+const PidSchema = z.int().min(1)
 /** Abort a reachability probe after this long. */
 const PROBE_TIMEOUT_MS = 2000
 /** How long `/proxy start` waits for a freshly spawned proxy to answer. */
@@ -117,9 +122,8 @@ function readPid(): number | undefined {
     return undefined
   }
   try {
-    const raw = readFileSync(pidPath, 'utf-8').trim()
-    const pid = Number.parseInt(raw, 10)
-    if (!Number.isFinite(pid) || pid <= 0) {
+    const pid = parseIntText(readFileSync(pidPath, 'utf-8'), PidSchema)
+    if (pid === undefined) {
       processLogger.warn('Ignoring PID file {pidPath}: content is not a valid PID', { pidPath })
       return undefined
     }
@@ -505,6 +509,12 @@ function startRefusal(config: ProxyConfig): string | undefined {
   }
   if (token === undefined && process.env['PI_PROXY_AUTH_TOKEN'] !== undefined) {
     return "PI_PROXY_AUTH_TOKEN is set in pi's environment but no longer read, and the proxy refuses to start over it. Rename it PI_SWITCHBOARD_AUTH_TOKEN, or set a token in /proxy config."
+  }
+  // The config this extension holds came from the defaults when the file could not be used, so
+  // its '' says nothing about the token the file may hold; the child refuses over the file.
+  const fileProblem = token === undefined ? configFileProblem() : undefined
+  if (fileProblem !== undefined) {
+    return `proxy-config.json exists but ${describeConfigFileProblem(fileProblem)}, and the proxy refuses to start over it: the file may hold a token. Fix or remove the file, or set PI_SWITCHBOARD_AUTH_TOKEN in pi's environment.`
   }
   if (token === undefined && configFileAuthTokenInvalid()) {
     return 'authToken in proxy-config.json is not a string, and the proxy refuses to start with it. Set a new token in /proxy config.'

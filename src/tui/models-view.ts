@@ -25,13 +25,12 @@ import type { ExposedModel, ModelExposureResult } from '@proxy/openai/model-expo
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { activeCooldown, loginSubject } from '@proxy/pi/cooldowns'
 import { highlight, paint } from '@proxy/tui/theme'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 
 /** The label of the row after the aliases, which adds one. */
 const NEW_ALIAS_ROW = '+ New alias…'
 /** Widths of the view's first columns: the model or alias name, and the provider. */
 const COLUMNS = { name: 34, provider: 16 } as const
-/** Milliseconds per second, to show a cooldown's time left. */
-const MS_PER_SECOND = 1000
 
 /** What the Models view lists: the exposed models and the configured aliases. */
 export interface ModelsData {

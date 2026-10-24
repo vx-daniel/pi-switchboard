@@ -14,8 +14,12 @@ export const HTTP_MULTIPLE_CHOICES = 300
 export const HTTP_BAD_REQUEST = 400
 /** HTTP 401 Unauthorized. */
 export const HTTP_UNAUTHORIZED = 401
+/** HTTP 403 Forbidden. */
+export const HTTP_FORBIDDEN = 403
 /** HTTP 404 Not Found. */
 export const HTTP_NOT_FOUND = 404
+/** HTTP 408 Request Timeout. */
+export const HTTP_REQUEST_TIMEOUT = 408
 /** HTTP 413 Payload Too Large. */
 export const HTTP_PAYLOAD_TOO_LARGE = 413
 /** HTTP 422 Unprocessable Entity. */
