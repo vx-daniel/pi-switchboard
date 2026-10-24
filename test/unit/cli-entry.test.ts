@@ -320,6 +320,27 @@ describe('starting', () => {
       })
     )
   })
+
+  // Catches a corrupt config file starting the proxy on the defaults (auth off) with only a
+  // warning, as it did: with no flag or env token it is a fatal line naming the file and the
+  // problem, never the file's contents, and exit 1.
+  test('a config file that is not valid JSON refuses to start with a fatal line and exit 1', async () => {
+    assert(agentDir !== undefined, 'no fixture agent dir')
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{"authToken": "notarealsecret-fi')
+
+    await runCli(['--log-format', 'json'])
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        level: 'FATAL',
+        message: expect.stringContaining('exists but "is not valid JSON"') as unknown
+      })
+    )
+    expect(stderr.join('')).not.toContain('notarealsecret-fi')
+  })
 })
 
 describe('tui', () => {

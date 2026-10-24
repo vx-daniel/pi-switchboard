@@ -562,4 +562,31 @@ describe('startProxy', () => {
       pidFileKept: true
     })
   })
+
+  // Catches the unreadable variant (a directory in the file's place fails like a permission error,
+  // without needing one) being treated as "no file" and spawned over.
+  test('a config file that cannot be read: refused with the error code, nothing spawned', async () => {
+    const freePort = await closedPort()
+    rmSync(join(agentDir, 'proxy-config.json'), { force: true })
+    mkdirSync(join(agentDir, 'proxy-config.json'))
+    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
+      Object.assign(new Error('fetch failed'), { code: 'ECONNREFUSED' })
+    )
+    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    const { context, notifications, statuses } = fakeCommandContext({})
+
+    await startProxy(stateOn(freePort), context)
+
+    expect({ notifications, statuses, pidFileKept: existsSync(pidPath()) }).toEqual({
+      notifications: [
+        {
+          message:
+            "Proxy not started: proxy-config.json exists but cannot be read (EISDIR), and the proxy refuses to start over it: the file may hold a token. Fix or remove the file, or set PI_SWITCHBOARD_AUTH_TOKEN in pi's environment.",
+          level: 'error'
+        }
+      ],
+      statuses: [],
+      pidFileKept: true
+    })
+  })
 })
