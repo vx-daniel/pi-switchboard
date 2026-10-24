@@ -16,6 +16,7 @@ import {
   configToEnv,
   describeConfigFileProblem,
   loadConfigFromFile,
+  parseIntText,
   type ProxyConfig
 } from '@vx-daniel/pi-switchboard/config'
 import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
@@ -23,6 +24,8 @@ import * as z from 'zod'
 
 import { type ProxyState, proxyUrl } from './state'
 
+/** What the PID file holds: one process ID, a positive integer. */
+const PidSchema = z.int().min(1)
 /** Abort a reachability probe after this long. */
 const PROBE_TIMEOUT_MS = 2000
 /** How long `/proxy start` waits for a freshly spawned proxy to answer. */
@@ -119,9 +122,8 @@ function readPid(): number | undefined {
     return undefined
   }
   try {
-    const raw = readFileSync(pidPath, 'utf-8').trim()
-    const pid = Number.parseInt(raw, 10)
-    if (!Number.isFinite(pid) || pid <= 0) {
+    const pid = parseIntText(readFileSync(pidPath, 'utf-8'), PidSchema)
+    if (pid === undefined) {
       processLogger.warn('Ignoring PID file {pidPath}: content is not a valid PID', { pidPath })
       return undefined
     }

@@ -30,10 +30,16 @@ import {
   BYTES_PER_MB,
   configFileAuthTokenInvalid,
   configFileProblem,
+  intBounds,
   loadConfigFromFile,
-  MS_PER_SECOND
+  MaxBodySizeBytesSchema,
+  MS_PER_SECOND,
+  parseIntText,
+  ProxyConfigSchema,
+  UpstreamTimeoutMsSchema
 } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import type * as z from 'zod'
 
 /** Logger for config resolution (`config` category). */
 const configLogger = proxyLogger('config')
@@ -249,22 +255,33 @@ function envLogLevel(raw: string | undefined, fallback: LogLevel): LogLevel {
 }
 
 /**
- * Parses a positive integer env var, warning and using `fallback` when it is not one.
+ * Parses an integer env var against the config file's bounds for the same setting, warning and
+ * using `fallback` when it is not one within them.
+ *
+ * @remarks
+ * Warn and fall back, never clamp: an invalid env var is ignored (CONSTITUTION principle II),
+ * where an invalid config-file value is repaired to the nearest bound.
  *
  * @param name - The env var's name, for the warning.
  * @param raw - The env var's value, or `undefined` when unset.
+ * @param schema - The bounds, in the env var's unit.
  * @param fallback - The value to use when `raw` is unset or invalid.
  * @returns The parsed integer, or `fallback`.
  */
-function parsePositiveInt(name: string, raw: string | undefined, fallback: number): number {
+function parseEnvInt(
+  name: string,
+  raw: string | undefined,
+  schema: z.ZodInt,
+  fallback: number
+): number {
   if (raw === undefined) return fallback
-  const parsed = Number.parseInt(raw, 10)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    configLogger.warn('Ignoring {name}={value}: not a positive integer; using {fallback}', {
-      name,
-      value: raw,
-      fallback
-    })
+  const parsed = parseIntText(raw, schema)
+  if (parsed === undefined) {
+    const { min, max } = intBounds(schema)
+    configLogger.warn(
+      'Ignoring {name}={value}: not an integer from {min} to {max}; using {fallback}',
+      { name, value: raw, min, max, fallback }
+    )
     return fallback
   }
   return parsed
@@ -329,7 +346,13 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
 
   const host = cli.host ?? process.env.PI_SWITCHBOARD_HOST ?? file.host
   const port =
-    cli.port ?? parsePositiveInt('PI_SWITCHBOARD_PORT', process.env.PI_SWITCHBOARD_PORT, file.port)
+    cli.port ??
+    parseEnvInt(
+      'PI_SWITCHBOARD_PORT',
+      process.env.PI_SWITCHBOARD_PORT,
+      ProxyConfigSchema.shape.port,
+      file.port
+    )
 
   // Auth: CLI > env > file. A file token that is not a string, an override that is set but empty,
   // or a token left in the old env var refuses to start rather than run with auth off (#82, #99,
@@ -365,23 +388,29 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
 
   const maxBodySize =
     cli.maxBodySizeMb === undefined
-      ? parsePositiveInt(
+      ? parseEnvInt(
           'PI_SWITCHBOARD_MAX_BODY_SIZE',
           process.env.PI_SWITCHBOARD_MAX_BODY_SIZE,
+          MaxBodySizeBytesSchema,
           file.maxBodySizeMb * BYTES_PER_MB
         )
       : cli.maxBodySizeMb * BYTES_PER_MB
 
   const upstreamTimeoutMs =
     cli.upstreamTimeoutSec === undefined
-      ? parsePositiveInt(
+      ? parseEnvInt(
           'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
           process.env.PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS,
+          UpstreamTimeoutMsSchema,
           file.upstreamTimeoutSec * MS_PER_SECOND
         )
       : cli.upstreamTimeoutSec * MS_PER_SECOND
 
-  const agenticEnabled = process.env.PI_SWITCHBOARD_AGENTIC === 'true'
+  const agenticEnabled = parseBoolean(
+    'PI_SWITCHBOARD_AGENTIC',
+    process.env.PI_SWITCHBOARD_AGENTIC,
+    false
+  )
 
   return {
     host,

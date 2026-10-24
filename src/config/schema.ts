@@ -32,7 +32,7 @@ export const BYTES_PER_MB = 1_048_576
 export const MS_PER_SECOND = 1000
 
 /** Highest TCP port. */
-const MAX_PORT = 65_535
+export const MAX_PORT = 65_535
 /** Upper bound of `maxBodySizeMb`. */
 const MAX_BODY_SIZE_MB = 500
 /** Lower bound of `upstreamTimeoutSec`. */
@@ -98,10 +98,53 @@ const VerbatimNameSchema = VerbatimStringSchema.refine(
  *
  * @param min - The smallest accepted value.
  * @param max - The largest accepted value.
- * @returns A zod integer schema; {@link clampInt} reads its bounds back.
+ * @returns A zod integer schema; {@link intBounds} reads its bounds back.
  */
 function boundedInt(min: number, max: number): z.ZodInt {
   return z.int().min(min).max(max)
+}
+
+/** The inclusive bounds of an integer schema. */
+export interface IntBounds {
+  /** The smallest accepted value. */
+  readonly min: number
+  /** The largest accepted value. */
+  readonly max: number
+}
+
+/**
+ * Reads an integer schema's bounds back, for clamping to them and for naming them in a message.
+ *
+ * @param schema - The integer schema, from {@link boundedInt} or `z.int()`.
+ * @returns Its bounds; a side the schema leaves open is the safe-integer limit.
+ */
+export function intBounds(schema: z.ZodInt): IntBounds {
+  return {
+    min: schema.minValue ?? Number.MIN_SAFE_INTEGER,
+    max: schema.maxValue ?? Number.MAX_SAFE_INTEGER
+  }
+}
+
+/** An integer written out in decimal digits, and nothing else. */
+const DECIMAL_DIGITS = /^\d+$/
+
+/**
+ * Parses an integer from text an operator wrote (an env var, a CLI flag, a PID file) against a
+ * schema's bounds.
+ *
+ * @remarks
+ * Only decimal digits, around which whitespace is allowed: `80abc` is refused, where
+ * `Number.parseInt` would read 80, and so are `0x50` and `8e1`, which `Number` would read as 80.
+ *
+ * @param text - The text to parse.
+ * @param schema - The integer schema the value must satisfy.
+ * @returns The integer, or `undefined` when the text is not one within the schema's bounds.
+ */
+export function parseIntText(text: string, schema: z.ZodInt): number | undefined {
+  const trimmed = text.trim()
+  if (!DECIMAL_DIGITS.test(trimmed)) return undefined
+  const parsed = schema.safeParse(Number(trimmed))
+  return parsed.success ? parsed.data : undefined
 }
 
 /** The `zed` section of the config: syncing the proxy's models into Zed's settings. */
@@ -310,7 +353,7 @@ const LabelsSchema = z.record(z.string().min(1), LabelSchema).readonly()
 export type LoginLabels = z.infer<typeof LabelsSchema>
 
 /** The JSON config file's fields and the values each accepts. */
-const ProxyConfigSchema = z.object({
+export const ProxyConfigSchema = z.object({
   /** Bind address. Surrounding whitespace is a typo; empty means unset. */
   host: z.string().trim().min(1),
   /** Listen port. */
@@ -422,13 +465,39 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
  * @returns The repair function.
  */
 function clampInt(schema: z.ZodInt, fallback: number): (value: unknown) => number {
-  const min = schema.minValue ?? Number.MIN_SAFE_INTEGER
-  const max = schema.maxValue ?? Number.MAX_SAFE_INTEGER
+  const { min, max } = intBounds(schema)
   return (value) =>
     typeof value === 'number' && Number.isFinite(value)
       ? Math.max(min, Math.min(max, Math.round(value)))
       : fallback
 }
+
+/**
+ * Returns an integer schema with another's bounds scaled to a different unit.
+ *
+ * @param schema - The schema whose bounds to scale.
+ * @param factor - What one of the schema's units is in the new unit.
+ * @returns A zod integer schema bounded by `min * factor` and `max * factor`.
+ */
+function scaledInt(schema: z.ZodInt, factor: number): z.ZodInt {
+  const { min, max } = intBounds(schema)
+  return boundedInt(min * factor, max * factor)
+}
+
+/**
+ * `PI_SWITCHBOARD_MAX_BODY_SIZE`, in bytes: `maxBodySizeMb`'s bounds, so the env var accepts
+ * exactly the sizes the config file does.
+ */
+export const MaxBodySizeBytesSchema = scaledInt(ProxyConfigSchema.shape.maxBodySizeMb, BYTES_PER_MB)
+
+/**
+ * `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS`, in milliseconds: `upstreamTimeoutSec`'s bounds, so the env
+ * var accepts exactly the waits the config file does.
+ */
+export const UpstreamTimeoutMsSchema = scaledInt(
+  ProxyConfigSchema.shape.upstreamTimeoutSec,
+  MS_PER_SECOND
+)
 
 /**
  * Keeps the list entries {@link VerbatimNameSchema} accepts.

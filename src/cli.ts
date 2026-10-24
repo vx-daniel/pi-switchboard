@@ -14,7 +14,7 @@ import { configFileAuthTokenInvalid, getConfigPath, loadConfigFromFile } from '@
 import { LOG_FORMATS, proxyLogger, resolveLogFormat } from '@proxy/logging'
 import { initRegistry } from '@proxy/pi/registry'
 import {
-  invalidLoggingFlag,
+  invalidFlag,
   listen,
   loadConfigWithLogging,
   logEffectiveConfig,
@@ -68,9 +68,9 @@ const main = defineCommand({
   },
   run: async ({ args }) => {
     // An unusable flag refuses every path, `--config` included, with the valid values (#95).
-    const invalidFlag = invalidLoggingFlag(args)
-    if (invalidFlag !== undefined) {
-      process.stderr.write(`${invalidFlag}\n`)
+    const refusal = invalidFlag(args)
+    if (refusal !== undefined) {
+      process.stderr.write(`${refusal}\n`)
       process.exitCode = 1
       return
     }
