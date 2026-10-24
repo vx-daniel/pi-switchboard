@@ -422,7 +422,7 @@ since the rename; each issue holds the detailed checklist.
         reviewed 2026-10-23):
     - [x] Phase 1, chrome: status strip, folder/compact tabs around a framed view, keycap footer,
           sidebar regrouped as QUOTA / IN FLIGHT / RECENT / SESSION, folding thresholds
-    - [ ] Phase 2: the Accounts view as a table with quota gauges and a detail pane (keeping
+    - [x] Phase 2: the Accounts view as a table with quota gauges and a detail pane (keeping
           `below reserve` and cooldowns)
     - [ ] Phase 3: Stats with plain-number tiles that fold before the timeline, and `$ today` on
           the strip from a store-level daily cost

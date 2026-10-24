@@ -2045,8 +2045,17 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   them must not push out the others. The minute's count reads `500+` (or `100+ rejected`) when a
   list may be missing some of it. Like the route totals, all of it is in memory and no HTTP route
   serves it.
-- **Accounts.** The providers pi has a credential for (`getCredentialStatuses`, as
-  `/healthz/creds`): login type, source and model count; never the credential. `↑` `↓` select a
+- **Accounts** (`accounts-view.ts`). The logins pi has a credential for (`getCredentialStatuses`,
+  as `/healthz/creds`): login type, source and model count; never the credential. A table: a
+  status dot (red on a failed verification, yellow while cooling down or below the reserve), the
+  login, its label, its kind, its models, each quota window's share used with an eighths gauge
+  where the width allows (a narrow view keeps the numbers), and notes for the reserve, the
+  soonest cooldown and the verification. Under it, when the view has room for both, a detail pane
+  for the selected row: source, each window's gauge and reset, the reserve with the share left,
+  each cooldown, the verification, and the actions from `accountActions`. Rendering is a function
+  of a snapshot (`accountsSnapshot`, with the quota store and the reserve check passed in as
+  lookups); the quota colour rule (`quotaColor`) and the gauge are `panel.ts`'s, shared with the
+  sidebar. The table scrolls to keep the selection on screen. `↑` `↓` select a
   row (`navigation.ts`; the selection stays on the list when a logout shortens it), and `Enter`
   opens that provider's actions in pi's `ExtensionSelectorComponent`: verify, log in again (or a
   new API key), log out. A last row opens pi's login selector, as `n` does. `v` verifies them all,
