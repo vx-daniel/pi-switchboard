@@ -1,0 +1,644 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How routing picks a model and login</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #24283b;
+        --color-ink: #c0caf5;
+        --color-muted: #a9b1d6;
+        --color-accent: #e0af68;
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', 'Noto Serif', serif;
+        --font-mono: 'Geist Mono', ui-monospace, monospace;
+      }
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 2rem;
+      }
+      .frame {
+        max-width: 1200px;
+        width: 100%;
+      }
+      .diagram-container {
+        width: 100%;
+        overflow-x: auto;
+      }
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 1.5rem;
+      }
+      svg {
+        width: 100%;
+        min-width: 960px;
+        display: block;
+      }
+      @media print {
+        .diagram-container {
+          overflow-x: visible;
+        }
+        svg {
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Flowchart · pi-switchboard</p>
+      <h1>How routing picks a model and login</h1>
+      <div class="diagram-container">
+        <svg
+          viewBox="0 0 960 640"
+          xmlns="http://www.w3.org/2000/svg"
+          role="img"
+          aria-labelledby="routing-dark-title routing-dark-desc"
+        >
+          <title id="routing-dark-title">How routing picks a model and login</title>
+          <desc id="routing-dark-desc">
+            Routing walks the candidates in order, skipping one that is cooling down or below its
+            quota reserve while another can serve, calling the rest, and moving on after a failure
+            whose class the alias or the logins fall back on.
+          </desc>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#a9b1d6" />
+            </marker>
+            <marker
+              id="arrow-accent"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#e0af68" />
+            </marker>
+            <marker
+              id="arrow-link"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#7aa2f7" />
+            </marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#24283b" />
+          <path
+            d="M400,80 V96"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M400,112 V128"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M400,208 V232"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M516,168 H600"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M400,312 V336"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M516,272 H600"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M400,384 V408"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M510,448 H600"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M400,488 V512"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M668,144 V112 Q668,104 660,104 H404"
+            fill="none"
+            stroke="#e0af68"
+            stroke-width="1.4"
+            marker-end="url(#arrow-accent)"
+          />
+          <rect x="410" y="214" width="20" height="12" rx="2" fill="#24283b" />
+          <text
+            x="420"
+            y="223"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            NO
+          </text>
+          <rect x="543" y="142" width="30" height="12" rx="2" fill="#24283b" />
+          <text
+            x="558"
+            y="151"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            SKIP
+          </text>
+          <rect x="410" y="318" width="20" height="12" rx="2" fill="#24283b" />
+          <text
+            x="420"
+            y="327"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            NO
+          </text>
+          <rect x="543" y="246" width="30" height="12" rx="2" fill="#24283b" />
+          <text
+            x="558"
+            y="255"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            SKIP
+          </text>
+          <rect x="532" y="422" width="46" height="12" rx="2" fill="#24283b" />
+          <text
+            x="555"
+            y="431"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            MOVE ON
+          </text>
+          <rect x="410" y="494" width="20" height="12" rx="2" fill="#24283b" />
+          <text
+            x="420"
+            y="503"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            NO
+          </text>
+          <text
+            x="40"
+            y="136"
+            fill="#c0caf5"
+            font-size="14"
+            font-style="italic"
+            font-family="'Instrument Serif', 'Noto Serif', serif"
+          >
+            Every later one cooling too?
+          </text>
+          <text
+            x="40"
+            y="154"
+            fill="#c0caf5"
+            font-size="14"
+            font-style="italic"
+            font-family="'Instrument Serif', 'Noto Serif', serif"
+          >
+            The one whose cooldown
+          </text>
+          <text
+            x="40"
+            y="172"
+            fill="#c0caf5"
+            font-size="14"
+            font-style="italic"
+            font-family="'Instrument Serif', 'Noto Serif', serif"
+          >
+            ends first is called.
+          </text>
+          <path
+            d="M 264 172 Q 276 172 284 168"
+            fill="none"
+            stroke="rgba(192,202,245,0.40)"
+            stroke-width="1"
+            stroke-dasharray="4,3"
+          />
+          <circle cx="284" cy="168" r="2" fill="#c0caf5" />
+          <text
+            x="40"
+            y="256"
+            fill="#c0caf5"
+            font-size="14"
+            font-style="italic"
+            font-family="'Instrument Serif', 'Noto Serif', serif"
+          >
+            Every one below its reserve?
+          </text>
+          <text
+            x="40"
+            y="274"
+            fill="#c0caf5"
+            font-size="14"
+            font-style="italic"
+            font-family="'Instrument Serif', 'Noto Serif', serif"
+          >
+            The one with the most
+          </text>
+          <text
+            x="40"
+            y="292"
+            fill="#c0caf5"
+            font-size="14"
+            font-style="italic"
+            font-family="'Instrument Serif', 'Noto Serif', serif"
+          >
+            left is called.
+          </text>
+          <path
+            d="M 264 276 Q 276 276 284 272"
+            fill="none"
+            stroke="rgba(192,202,245,0.40)"
+            stroke-width="1"
+            stroke-dasharray="4,3"
+          />
+          <circle cx="284" cy="272" r="2" fill="#c0caf5" />
+          <rect x="320" y="40" width="160" height="40" rx="20" fill="#24283b" />
+          <rect
+            x="320"
+            y="40"
+            width="160"
+            height="40"
+            rx="20"
+            fill="rgba(192,202,245,0.03)"
+            stroke="rgba(192,202,245,0.30)"
+            stroke-width="1"
+          />
+          <text
+            x="400.0"
+            y="64.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Candidates, in order
+          </text>
+          <circle cx="400" cy="104" r="4" fill="#c0caf5" />
+          <polygon points="400,128 516,168 400,208 284,168" fill="#24283b" />
+          <polygon
+            points="400,128 516,168 400,208 284,168"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="400"
+            y="165"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Cooling down, with
+          </text>
+          <text
+            x="400"
+            y="179"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            a later one to try?
+          </text>
+          <polygon points="400,232 516,272 400,312 284,272" fill="#24283b" />
+          <polygon
+            points="400,232 516,272 400,312 284,272"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="400"
+            y="269"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Below its reserve,
+          </text>
+          <text
+            x="400"
+            y="283"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            with room elsewhere?
+          </text>
+          <rect x="320" y="336" width="160" height="48" rx="6" fill="#24283b" />
+          <rect
+            x="320"
+            y="336"
+            width="160"
+            height="48"
+            rx="6"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="400.0"
+            y="358.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Call it
+          </text>
+          <text
+            x="400.0"
+            y="373.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            through pi, on its login
+          </text>
+          <polygon points="400,408 510,448 400,488 290,448" fill="#24283b" />
+          <polygon
+            points="400,408 510,448 400,488 290,448"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="400"
+            y="445"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Failed, with a class
+          </text>
+          <text
+            x="400"
+            y="459"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            that moves on?
+          </text>
+          <rect x="600" y="144" width="136" height="328" rx="6" fill="#24283b" />
+          <rect
+            x="600"
+            y="144"
+            width="136"
+            height="328"
+            rx="6"
+            fill="rgba(224,175,104,0.10)"
+            stroke="#e0af68"
+            stroke-width="1"
+          />
+          <text
+            x="668.0"
+            y="306.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Next candidate
+          </text>
+          <text
+            x="668.0"
+            y="321.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            in order
+          </text>
+          <rect x="320" y="512" width="160" height="40" rx="20" fill="#24283b" />
+          <rect
+            x="320"
+            y="512"
+            width="160"
+            height="40"
+            rx="20"
+            fill="rgba(192,202,245,0.03)"
+            stroke="rgba(192,202,245,0.30)"
+            stroke-width="1"
+          />
+          <text
+            x="400.0"
+            y="536.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Answer the client
+          </text>
+          <line
+            x1="40"
+            y1="584"
+            x2="920"
+            y2="584"
+            stroke="rgba(192,202,245,0.10)"
+            stroke-width="0.8"
+          />
+          <text
+            x="40"
+            y="600"
+            fill="#a9b1d6"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            letter-spacing="0.18em"
+          >
+            LEGEND
+          </text>
+          <rect
+            x="40"
+            y="616"
+            width="24"
+            height="12"
+            rx="6"
+            fill="rgba(192,202,245,0.03)"
+            stroke="rgba(192,202,245,0.30)"
+            stroke-width="1"
+          />
+          <text
+            x="72"
+            y="626"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Start / end
+          </text>
+          <rect
+            x="152"
+            y="616"
+            width="24"
+            height="12"
+            rx="2"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="184"
+            y="626"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Step
+          </text>
+          <polygon
+            points="231,622 243,616 255,622 243,628"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="263"
+            y="626"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Decision
+          </text>
+          <rect
+            x="329"
+            y="616"
+            width="24"
+            height="12"
+            rx="2"
+            fill="rgba(224,175,104,0.10)"
+            stroke="#e0af68"
+            stroke-width="1"
+          />
+          <text
+            x="361"
+            y="626"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            The loop
+          </text>
+          <line
+            x1="427"
+            y1="622"
+            x2="451"
+            y2="622"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <text
+            x="459"
+            y="626"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Branch
+          </text>
+        </svg>
+      </div>
+    </div>
+  </body>
+</html>
