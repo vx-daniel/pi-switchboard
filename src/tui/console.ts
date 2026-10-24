@@ -284,31 +284,23 @@ function viewRows(
 }
 
 /**
- * Gathers what the sidebar shows, now: the proxy's status, each login with its quota, the
- * cooldowns, the requests in flight and the route totals.
+ * Gathers what the sidebar shows, now: each login with its label and quota, the cooldowns, the
+ * requests in flight and the route totals.
  *
  * @param context - the console
  * @returns the snapshot
  */
 function sidebarInput(context: ConsoleContext): SidebarInput {
-  const { config, state } = context
+  const { state } = context
   const now = Date.now()
   const status: Partial<Status> = state.status ?? {}
   const reserve = status.reserve ?? {}
   return {
     now,
-    proxy: {
-      address: `${config.host}:${String(config.port)}`,
-      proxyAuth: context.proxyAuth.current().kind,
-      startedAt: context.startedAt,
-      connections: state.connections,
-      exposed: status.exposed,
-      available: status.available,
-      modelsJsonError: status.modelsJsonError !== undefined
-    },
     accounts: state.accounts.map((account) => ({
       provider: account.provider,
       type: account.type,
+      label: status.labels?.[account.provider],
       models: account.availableModelCount,
       quota: providerQuota(account.provider, now),
       belowReserve: providerBelowReserve(account.provider, reserve, now) !== undefined
