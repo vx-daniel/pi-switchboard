@@ -148,7 +148,9 @@ jobs:
       # shows as failed, so the overview is not left stale unnoticed.
       - name: Update the Docker Hub overview
         continue-on-error: true
-        uses: peter-evans/dockerhub-description@v5
+        # Pinned by commit: a third-party action given a token that can write and delete on Docker
+        # Hub, so a moved tag must not change the code it runs. Bump the SHA and the comment together.
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
