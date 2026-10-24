@@ -46,7 +46,12 @@ export function panel(
   extra = ''
 ): string[] {
   const inner = Math.max(1, width - FRAME_COLUMNS)
-  const label = `${strong(paint('accent', ` ${title}`))}${extra === '' ? '' : paint('dim', ` ${extra}`)} `
+  const fullLabel = `${strong(paint('accent', ` ${title}`))}${extra === '' ? '' : paint('dim', ` ${extra}`)} `
+  // The corners and the border's first `─` around the title: a longer title is cut with `…`, so
+  // the top border is never wider than the panel (a long login and its label, #260 review).
+  const labelRoom = Math.max(0, width - CORNER_COLUMNS - 1)
+  const label =
+    visibleWidth(fullLabel) > labelRoom ? truncateToWidth(fullLabel, labelRoom, '…') : fullLabel
   const rest = Math.max(0, width - CORNER_COLUMNS - 1 - visibleWidth(label))
   const top = `${paint('border', '╭─')}${label}${paint('border', `${'─'.repeat(rest)}╮`)}`
   const body = lines.map(

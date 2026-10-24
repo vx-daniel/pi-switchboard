@@ -36,8 +36,8 @@ const PERCENT_COLUMNS = '100%'.length
 const TABLE_GAUGE = { least: 4, most: 16 } as const
 /** The gauge's cells in the detail pane. */
 const DETAIL_GAUGE = { least: 10, most: 32 } as const
-/** Columns the detail pane's window line takes besides its gauge. */
-const DETAIL_WINDOW_TEXT = 44
+/** Columns between the detail pane's window name, its gauge and the text after it. */
+const DETAIL_GAP = '  '
 /** Between two windows in the table's quota cell. */
 const WINDOW_GAP = '  '
 /** Rows the table needs above the detail pane: its heading, and a blank row between. */
@@ -46,6 +46,9 @@ const TABLE_CHROME_ROWS = 2
 const QUOTA_GAP = '  '
 /** Columns the selection mark takes before a row. */
 const MARK_COLUMNS = '› '.length
+/** Columns a row's fixed cells take: the dot, login, label, kind and models, a space between each. */
+const FIXED_COLUMNS =
+  1 + COLUMNS.login + COLUMNS.label + COLUMNS.kind + COLUMNS.models + Object.keys(COLUMNS).length
 
 /** What the Accounts view shows. */
 export interface AccountsView {
@@ -211,15 +214,34 @@ function tableGaugeCells(windows: readonly QuotaWindow[], room: number): number 
 }
 
 /**
+ * Picks the table's one gauge size: the largest every login's row has room for beside its notes,
+ * so the gauges line up in a column; 0 when some row has no room for even the least.
+ *
+ * @param facts - the logins
+ * @param width - a row's columns, after the selection mark
+ * @param now - the current time, for the notes
+ * @returns the gauge's cells
+ */
+function tableGauge(facts: readonly AccountFacts[], width: number, now: number): number {
+  const withQuota = facts.filter((login) => login.windows.length > 0)
+  if (withQuota.length === 0) return 0
+  return Math.min(
+    ...withQuota.map((login) => {
+      const room = width - FIXED_COLUMNS - QUOTA_GAP.length - visibleWidth(rowNotes(login, now))
+      return tableGaugeCells(login.windows, room)
+    })
+  )
+}
+
+/**
  * Renders a row's quota cell: each window's name, a gauge when there is room, and its share used.
  *
  * @param facts - the login
- * @param room - the cell's columns
+ * @param cells - the gauge's cells, the table's one size; 0 for none
  * @returns the cell; `—` for a login that reported no quota
  */
-function quotaCell(facts: AccountFacts, room: number): string {
+function quotaCell(facts: AccountFacts, cells: number): string {
   if (facts.windows.length === 0) return paint('border', '—')
-  const cells = tableGaugeCells(facts.windows, room)
   const belowReserve = facts.reserve !== undefined
   return facts.windows
     .map((window) => {
@@ -236,11 +258,11 @@ function quotaCell(facts: AccountFacts, room: number): string {
  * kind, its model count, its quota and its notes.
  *
  * @param facts - the login
- * @param width - the row's columns, after the selection mark
+ * @param cells - the gauge's cells, the table's one size
  * @param now - the current time
  * @returns the row
  */
-function accountRow(facts: AccountFacts, width: number, now: number): string {
+function accountRow(facts: AccountFacts, cells: number, now: number): string {
   const { account } = facts
   const label = facts.label === undefined ? paint('border', '—') : paint('accent', facts.label)
   const kind = account.type === 'oauth' ? 'account' : 'API key'
@@ -253,9 +275,7 @@ function accountRow(facts: AccountFacts, width: number, now: number): string {
     paint('muted', kind.padEnd(COLUMNS.kind)),
     String(account.availableModelCount).padStart(COLUMNS.models)
   ].join(' ')
-  const notes = rowNotes(facts, now)
-  const room = width - visibleWidth(fixed) - QUOTA_GAP.length - visibleWidth(notes)
-  return `${fixed}${QUOTA_GAP}${quotaCell(facts, room)}${notes}`
+  return `${fixed}${QUOTA_GAP}${quotaCell(facts, cells)}${rowNotes(facts, now)}`
 }
 
 /**
@@ -290,32 +310,36 @@ function heading(width: number): string {
 }
 
 /**
- * Renders one quota window in the detail pane: its gauge, the share used and the time to its
- * reset.
+ * Renders a login's quota windows in the detail pane: each one's name, a gauge, the share used
+ * and the time to its reset, the gauges one size and in one column.
  *
- * @param window - the window
- * @param facts - the login, for its reserve
+ * @param facts - the login, its windows and its reserve
  * @param width - the pane's content columns
  * @param now - the current time
- * @returns the line
+ * @returns one line per window
  */
-function detailWindow(
-  window: QuotaWindow,
-  facts: AccountFacts,
-  width: number,
-  now: number
-): string {
-  const color = quotaColor(window.used, facts.reserve !== undefined)
-  const cells = Math.min(
-    DETAIL_GAUGE.most,
-    Math.max(DETAIL_GAUGE.least, width - DETAIL_WINDOW_TEXT)
-  )
-  const reset =
-    window.resetsAt === undefined
-      ? ''
-      : `${paint('dim', ' · resets in ')}${compactDuration(window.resetsAt - now)}`
-  const name = paint('dim', `${window.name} window`.padEnd('primary window'.length))
-  return `${name}  ${gauge(window.used, cells, color)}  ${strong(percent(window.used))}${paint('dim', ' used')}${reset}`
+function detailWindows(facts: AccountFacts, width: number, now: number): string[] {
+  const names = facts.windows.map((window) => `${window.name} window`)
+  const tails = facts.windows.map((window) => {
+    const reset =
+      window.resetsAt === undefined
+        ? ''
+        : `${paint('dim', ' · resets in ')}${compactDuration(window.resetsAt - now)}`
+    return `${strong(percent(window.used))}${paint('dim', ' used')}${reset}`
+  })
+  // Measured, so the gauges line up whatever the providers call their windows, and the gauge
+  // gives way before the time to reset does.
+  const nameWidth = Math.max(0, ...names.map((windowName) => windowName.length))
+  const tailWidth = Math.max(0, ...tails.map((tail) => visibleWidth(tail)))
+  // One gap between the name and the gauge, one between the gauge and the text after it.
+  const room = width - nameWidth - tailWidth - `${DETAIL_GAP}${DETAIL_GAP}`.length
+  const cells = Math.min(DETAIL_GAUGE.most, Math.max(DETAIL_GAUGE.least, room))
+  return facts.windows.map((window, windowIndex) => {
+    const color = quotaColor(window.used, facts.reserve !== undefined)
+    const name = paint('dim', (names[windowIndex] ?? '').padEnd(nameWidth))
+    const bar = gauge(window.used, cells, color)
+    return `${name}${DETAIL_GAP}${bar}${DETAIL_GAP}${tails[windowIndex] ?? ''}`
+  })
 }
 
 /**
@@ -357,7 +381,7 @@ function detailLines(facts: AccountFacts, width: number, now: number): string[] 
   if (facts.windows.length === 0) {
     lines.push(`${paint('dim', 'quota ')}no quota reported yet`)
   }
-  for (const window of facts.windows) lines.push(detailWindow(window, facts, width, now))
+  lines.push(...detailWindows(facts, width, now))
   if (facts.reserve !== undefined) {
     const { window, left, reserve } = facts.reserve
     lines.push(
@@ -421,10 +445,10 @@ export function accountRows(
 ): string[] {
   const facts = view.accounts.map((account) => factsOf(account, view))
   const current = clampSelection(view.selected, facts.length)
-  const rowWidth = size.width - MARK_COLUMNS
+  const cells = tableGauge(facts, size.width - MARK_COLUMNS, view.now)
   const table = [
     ...facts.map((login, index) =>
-      selectable(accountRow(login, rowWidth, view.now), index === current, size.width)
+      selectable(accountRow(login, cells, view.now), index === current, size.width)
     ),
     selectable(LOGIN_ROW, current === facts.length, size.width)
   ]

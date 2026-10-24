@@ -3,7 +3,7 @@
  */
 
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
-import { gauge, quotaColor } from '@proxy/tui/panel'
+import { gauge, panel, quotaColor } from '@proxy/tui/panel'
 import { describe, expect, test } from 'vite-plus/test'
 
 describe('gauge', () => {
@@ -37,5 +37,24 @@ describe('quotaColor', () => {
     [0.1, true, 'error']
   ] as const)('%d used, below reserve %s, is %s', (used, belowReserve, color) => {
     expect(quotaColor(used, belowReserve)).toBe(color)
+  })
+})
+
+describe('panel', () => {
+  // Catches a long title (a long login and its label in the Accounts detail pane, #260 review)
+  // pushing the top border past the panel's width, which the frame then cuts, losing the corner.
+  test('cuts a title too long for the top border, keeping the corner', () => {
+    const rows = panel('qwen-token-plan-individual', ['a line'], 30, 'a label far too long')
+    const top = stripTerminalSequences(rows[0] ?? '')
+
+    for (const row of rows) expect(visibleWidth(row)).toBe(30)
+    expect(top).toBe('╭─ qwen-token-plan-individua…╮')
+  })
+
+  // Catches the cut reaching a title that fits.
+  test('keeps a title that fits whole', () => {
+    expect(stripTerminalSequences(panel('QUOTA', [], 30, '4 logins')[0] ?? '')).toBe(
+      `╭─ QUOTA 4 logins ${'─'.repeat(11)}╮`
+    )
   })
 })

@@ -156,6 +156,27 @@ describe('the console Accounts view', () => {
     expect(rendered(input, { height: TALL, width: NARROW })[1]).toMatch(/ {2}5h +12% {2}7d +85%$/)
   })
 
+  // Catches gauges of different sizes on different rows (each sized to its own row's notes), so
+  // the gauges do not line up in a column (#260 review).
+  test('draws every row’s gauges one size, in one column', () => {
+    const rows = rendered(
+      view({
+        accounts: [account('alpha', { verified: false, error: 'token expired' }), account('beta')],
+        quotas: new Map([
+          ['alpha', quota('alpha', [0.12, 0.5])],
+          ['beta', quota('beta', [0.9, 0.3])]
+        ])
+      })
+    )
+    const gaugeAt = (row: string): [number, number] => {
+      const match = /[▏▎▍▌▋▊▉█░]+/.exec(row)
+      return [match?.index ?? -1, match?.[0].length ?? 0]
+    }
+
+    expect(gaugeAt(rows[1] ?? '')[1]).toBeGreaterThan(0)
+    expect(gaugeAt(rows[1] ?? '')).toEqual(gaugeAt(rows[2] ?? ''))
+  })
+
   // Catches a login that reports no quota shown as 0%, or as nothing at all.
   test('marks a login with no quota report', () => {
     expect(rendered(view())[1]).toMatch(/ 17 {2}—$/)
@@ -254,6 +275,40 @@ describe('the console Accounts view', () => {
       '',
       '↵ actions: verify all logins, log in again, set a label, log out of anthropic'
     ])
+  })
+
+  // Catches a window name longer than `5h` misaligning the pane's gauges, or the time to reset
+  // cut on a narrow pane while the gauge keeps its room (#260 review).
+  test('lines up the pane’s gauges whatever the windows are called, and keeps the resets', () => {
+    const report: ProviderQuota = {
+      ...quota('codex', [0.2, 0.6]),
+      windows: [
+        {
+          name: 'primary',
+          used: 0.2,
+          resetsAt: NOW + 3_600_000,
+          windowMinutes: undefined,
+          status: undefined
+        },
+        {
+          name: '7d',
+          used: 0.6,
+          resetsAt: NOW + 554_400_000,
+          windowMinutes: 10_080,
+          status: undefined
+        }
+      ]
+    }
+    const lines = detail(
+      rendered(view({ accounts: [account('codex')], quotas: new Map([['codex', report]]) }), {
+        height: TALL,
+        width: 60
+      })
+    ).filter((line) => line.includes(' window'))
+
+    expect(lines[0]?.search(/[▏▎▍▌▋▊▉█░]/)).toBe(lines[1]?.search(/[▏▎▍▌▋▊▉█░]/))
+    expect(lines[0]).toMatch(/resets in 1h00m$/)
+    expect(lines[1]).toMatch(/resets in 6d10h$/)
   })
 
   // Catches the pane's title missing the login or its label.
