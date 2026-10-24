@@ -426,7 +426,7 @@ since the rename; each issue holds the detailed checklist.
           `below reserve` and cooldowns)
     - [x] Phase 3: Stats with plain-number tiles that fold before the timeline, and `$ today` on
           the strip from a store-level daily cost
-    - [ ] Phase 4: the Models view as a thinking-level matrix with an aliases box, keeping the
+    - [x] Phase 4: the Models view as a thinking-level matrix with an aliases box, keeping the
           diagnostics and family resolutions
     - [ ] Phase 5: a Requests table over the log (`r` for the raw log), which needs a registry of
           every route's requests, not only chat
