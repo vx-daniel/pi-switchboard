@@ -704,7 +704,7 @@ curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141
 
 ## Standalone binary
 
-Each GitHub release after 0.3.0 carries the proxy as one executable for Linux and macOS (x64 and arm64): `pi-switchboard-linux-x64`, `pi-switchboard-linux-arm64`, `pi-switchboard-darwin-x64`, `pi-switchboard-darwin-arm64`, and a `SHA256SUMS` file. It needs no Node and no pi install: pi is compiled in. Windows builds (`pi-switchboard-windows-x64.exe`, `pi-switchboard-windows-arm64.exe` and `SHA256SUMS-windows`) are added to a release by hand, so not every release has them. 0.3.0 and earlier have no binaries: their source predates it.
+Each GitHub release after 0.3.0 carries the proxy as one executable for Linux, macOS and Windows (x64 and arm64): `pi-switchboard-linux-x64`, `pi-switchboard-linux-arm64`, `pi-switchboard-darwin-x64`, `pi-switchboard-darwin-arm64` with a `SHA256SUMS` file, and `pi-switchboard-windows-x64.exe`, `pi-switchboard-windows-arm64.exe` with a `SHA256SUMS-windows` file. It needs no Node and no pi install: pi is compiled in. The macOS and Windows binaries are unsigned, so Gatekeeper and SmartScreen warn on the first run. 0.3.0 and earlier have no binaries: their source predates it.
 
 ```bash
 version=<version>   # a release after 0.3.0

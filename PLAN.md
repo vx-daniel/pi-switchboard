@@ -1837,13 +1837,15 @@ release workflow, never in `check:all` or the pre-commit hook.
   `dist-bin/SHA256SUMS`; `--windows` cross-compiles `pi-switchboard-windows-x64.exe` and
   `-windows-arm64.exe`, with `dist-bin/SHA256SUMS-windows`. The macOS and Windows binaries are
   unsigned.
-- **Windows, by hand only.** `binary.yml` with `platforms: windows` builds the Windows set, runs
+- **Windows.** `binary.yml` with `platforms: windows` builds the Windows set, runs
   the binary test suite on `windows-latest` against the cross-compiled
   `pi-switchboard-windows-x64.exe` the release gets (`PI_SWITCHBOARD_BINARY` names it, so the
   suite tests the shipped file, not a rebuild), runs `--version` on `windows-latest` and
   `windows-11-arm`, and with a tag uploads the two `.exe` files and `SHA256SUMS-windows` to that
-  release, attested like the others. The release workflow never runs it, to save Actions minutes:
-  a release gets Windows binaries when someone runs it with the release's tag. The test suite
+  release, attested like the others. The release workflow runs both sets for each release, at once
+  (`binary` and `binary-windows`), each set's files in its own artifact (`binaries-unix`,
+  `binaries-windows`): the two calls share the release run, where an artifact name can be uploaded
+  only once. Until 0.4.0 the Windows set was run by hand after the release. The test suite
   starts the binary with `USERPROFILE` and `SystemRoot` as well as `HOME`
   (`test/fixtures/platform-env.ts`): Windows takes the home from `USERPROFILE`, and a process
   without `SystemRoot` cannot open sockets.
