@@ -73,9 +73,9 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 
 ### Stable surface
 
-The routes covered by constitution principle I, the one list of them (AGENTS.md and README link
-here). Each one meets principle I's criteria: an OpenAI-defined route, checked against the pinned
-spec, described in `openapi.json`, documented in README and here.
+The routes covered by constitution principle I, the one list of them (AGENTS.md and
+`docs/api.md` link here). Each one meets principle I's criteria: an OpenAI-defined route, checked
+against the pinned spec, described in `openapi.json`, documented in `docs/api.md` and here.
 
 | Route | Since | Decision |
 |---|---|---|
@@ -1643,7 +1643,7 @@ model is not available with the provider login the proxy uses. Choose another mo
 OpenAI's answer for a model an account cannot use, and agent clients move on to another model on
 it; a 502 read as an outage and was retried. The wording is Codex's own and could change: if it
 does, the refusal is a 502 again. The route logs it as an error, as the operator can fix it by
-hiding the model (README, "Exposure modes"). Live, Codex refuses before pi's first event, so a
+hiding the model (`docs/api.md`, "Exposure modes"). Live, Codex refuses before pi's first event, so a
 stream gets the 404 too; a stream that has started gets the same body as its error event.
 
 A streaming request is not answered until pi's first event. pi's adapters emit `start` only once the
@@ -1773,7 +1773,7 @@ share it widely. npmjs comes later, by choice.
   whose package is missing.
 - **Installing needs a token.** GitHub Packages requires a classic personal access token with
   `read:packages` to install any package, public ones included, unlike GHCR. Every user sets the
-  `@vx-daniel` scope and the token in `~/.npmrc` once (README, "Installation").
+  `@vx-daniel` scope and the token in `~/.npmrc` once (`docs/install.md`, "Installation").
 - **Ruled out, tested with pi 1.3.0:**
   - `pi install git:github.com/vx-daniel/pi-switchboard` clones `dev` and runs
     `npm install --omit=dev`. `dist/` is not in git, and `prepare` needs the dev dependencies,

@@ -74,7 +74,7 @@ const createResponseDescription: DescribeRouteOptions = {
     422: errorResponse(
       'A field the proxy does not accept (`unsupported_parameter`): stored state ' +
         '(`previous_response_id`, `conversation`, `background`, `prompt`, `store: true`), a tool ' +
-        'that is not a function, and the others listed in the README.'
+        'that is not a function, and the others listed in docs/api.md.'
     )
   }
 }
