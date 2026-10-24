@@ -27,7 +27,7 @@ import type { ExposedModel, ModelExposureResult } from '@proxy/openai/model-expo
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
 import { activeCooldown, loginSubject } from '@proxy/pi/cooldowns'
-import { firstShown, FRAME_COLUMNS, panel } from '@proxy/tui/panel'
+import { compactDuration, firstShown, FRAME_COLUMNS, panel } from '@proxy/tui/panel'
 import { highlight, paint, strong, tabAccent } from '@proxy/tui/theme'
 import { MS_PER_SECOND } from '@proxy/utils/time'
 
@@ -52,10 +52,10 @@ const MARK_COLUMNS = 2
 /** The matrix's model column: as wide as fits between these. */
 const NAME_COLUMNS = { least: 14, most: 30 } as const
 /**
- * Columns after the effort cells for a model's cooldown: at least `cooling 59s`, at most with its
- * reason as well.
+ * Columns after the effort cells for a model's cooldown, its space before it included: at least
+ * the longest countdown, `cooling 12d23h`; at most with its reason as well.
  */
-const COOLDOWN_COLUMNS = { least: 12, most: 26 } as const
+const COOLDOWN_COLUMNS = { least: 15, most: 29 } as const
 /** The alias column in the ALIASES box. */
 const ALIAS_NAME_COLUMNS = 16
 /** Where an alias's targets start in the box: after the selection mark, the alias and a space. */
@@ -204,7 +204,7 @@ interface MatrixColumns {
 }
 
 /**
- * Renders a model's cooldown, if it has one: the seconds left, and the reason when it fits too,
+ * Renders a model's cooldown, if it has one: the time left (`42s`, `3m00s`), and the reason when it fits too,
  * so a narrow cell keeps the countdown.
  *
  * @param model - the exposed model
@@ -215,8 +215,9 @@ interface MatrixColumns {
 function cooldownCell(model: ExposedModel, now: number, room: number): string {
   const cooldown = activeCooldown(loginSubject(model), now)
   if (cooldown === undefined) return ''
-  const left = Math.max(0, Math.ceil((cooldown.until - now) / MS_PER_SECOND))
-  const countdown = `cooling ${String(left)}s`
+  // Rounded up to the second: a cooldown with a moment left still reads `1s`, not `0s`.
+  const left = Math.max(0, Math.ceil((cooldown.until - now) / MS_PER_SECOND)) * MS_PER_SECOND
+  const countdown = `cooling ${compactDuration(left)}`
   const withReason = `${countdown} ${cooldown.reason}`
   return paint('warning', visibleWidth(withReason) <= room ? withReason : countdown)
 }

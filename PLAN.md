@@ -2094,8 +2094,8 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
 - **Models** (`models-view.ts`, `console-models.ts`, `aliases.ts`; #230). The exposed models
   as a matrix, grouped by provider in the order they first appear: a dot under each of
   `REASONING_EFFORTS` the model runs at as asked (`supportedReasoningEfforts`), then any cooldown
-  (the seconds, and the reason when it fits). Then an ALIASES box, beside the matrix from 148
-  columns and under it otherwise: every configured alias with its targets, each target's effort,
+  (the time left, `3m00s`, and the reason when it fits). Then an ALIASES box, beside the matrix
+  from 151 columns and under it otherwise: every configured alias with its targets, each target's effort,
   `fallbackOn`, and its diagnostics in red, wrapped onto more lines rather than cut, then **+ New
   alias…**. The selection order is the matrix's (`modelsItems` walks the same provider groups),
   so `Enter` acts on the row marked. The matrix and the box each scroll to keep the selection on

@@ -157,14 +157,34 @@ describe('the console Models view', () => {
     expect(rendered(view, 10, 86)).toContainEqual(expect.stringMatching(/ cooling 42s/u))
   })
 
+  // Catches a long countdown cut at the narrowest side-by-side view (#262 review: a 180 s backoff
+  // read `cooling 18…`), or minutes shown as a pile of seconds.
+  test.each([
+    [180_000, 'cooling 3m00s'],
+    [(12 * 24 + 23) * 3_600_000, 'cooling 12d23h']
+  ])('beside the matrix at 151 columns, a %i ms cooldown reads %s whole', (waitMs, countdown) => {
+    startCooldown({ provider: 'alpha', canonicalId: 'alpha/hot' }, 'unavailable', waitMs, 0)
+    const view = {
+      models: [exposed('hot')],
+      aliases: {},
+      diagnostics: [],
+      families: [],
+      selected: 0
+    }
+
+    const row = rendered(view, 10, 151).find((line) => line.startsWith('› hot '))
+
+    expect(row).toContain(` ${countdown} `)
+  })
+
   // Catches a row wider or narrower than the view on either side of the box's move, which the
   // alt screen cuts without a word.
   test.each([
     [40, 12],
     [64, 20],
     [STACKED, 30],
-    [147, 30],
-    [148, 30],
+    [150, 30],
+    [151, 30],
     [SIDE_BY_SIDE, 8]
   ])('every row is exactly %i columns', (width, height) => {
     const view = {
@@ -183,7 +203,7 @@ describe('the console Models view', () => {
   })
 
   // Catches the box left under the matrix on a wide view, or put beside it on a narrow one.
-  test('the ALIASES box sits beside the matrix from 148 columns, under it below', () => {
+  test('the ALIASES box sits beside the matrix from 151 columns, under it below', () => {
     const view = {
       models: [exposed('m0')],
       aliases: { only: 'alpha/m0' },
@@ -192,8 +212,8 @@ describe('the console Models view', () => {
       selected: 0
     }
 
-    expect(rendered(view, 10, 148)[0]).toMatch(/^ {2}model .* ╭─ ALIASES 1 /u)
-    expect(rendered(view, 10, 147)[0]).not.toContain('ALIASES')
+    expect(rendered(view, 10, 151)[0]).toMatch(/^ {2}model .* ╭─ ALIASES 1 /u)
+    expect(rendered(view, 10, 150)[0]).not.toContain('ALIASES')
   })
 
   // Catches an alias the proxy leaves out shown as if it worked: its diagnostic is under it.
@@ -335,8 +355,8 @@ describe('the console Models view', () => {
     startCooldown({ provider: 'alpha', canonicalId: 'alpha/m0' }, 'unavailable', 42_000, 0)
     const cooling = boxStart()
 
-    expect(idle).toBe(2 + 30 + 42 + 12 + 2)
-    expect(cooling).toBe(2 + 30 + 42 + 26 + 2)
+    expect(idle).toBe(2 + 30 + 42 + 15 + 2)
+    expect(cooling).toBe(2 + 30 + 42 + 29 + 2)
   })
 
   // Catches a selection left past the end after a delete opening nothing, or the wrong row.
