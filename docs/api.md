@@ -286,4 +286,4 @@ Credential answers (#128):
 
 So a client that asks its user for a new key on `401` only does so when the key was its own. The last row is answered before any call, and an alias whose `fallbackOn` names `auth` moves past it.
 
-The proxy describes its own API as an OpenAPI document (see [API documentation](#api-documentation)). For what each field means, the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat/create) is the primary documentation, noting the supported subset listed in this README.
+The proxy describes its own API as an OpenAPI document (see [API documentation](#api-documentation)). For what each field means, the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat/create) is the primary documentation, noting the supported subset listed on this page.
