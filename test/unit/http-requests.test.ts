@@ -4,6 +4,7 @@ import {
   endHttpRequest,
   httpRequests,
   onHttpRequestsChange,
+  PATH_KEPT,
   requestLogMiddleware
 } from '@proxy/server/http-requests'
 import { requestIdMiddleware } from '@proxy/server/middleware'
@@ -82,6 +83,48 @@ describe('the HTTP requests kept for the console', () => {
 
     expect(await sentAndKept(app, '/healthz')).toBeUndefined()
     expect(await sentAndKept(app, '/healthz/models')).toMatchObject({ status: 503 })
+  })
+
+  // Catches each poll of a passing health check flashing an in-flight row and redrawing the
+  // console twice for nothing (#263 review), or a failing one never shown.
+  test('a health check is listed and announced only once it has failed', () => {
+    let changes = 0
+    const unsubscribe = onHttpRequestsChange(() => {
+      changes += 1
+    })
+    const passing = beginHttpRequest({ requestId: 'poll-ok', method: 'GET', path: '/healthz' })
+    const failing = beginHttpRequest({
+      requestId: 'poll-down',
+      method: 'GET',
+      path: '/healthz/models'
+    })
+    const listedWhileRunning = httpRequests().filter(({ requestId }) =>
+      requestId.startsWith('poll-')
+    )
+    endHttpRequest(passing, 200)
+    const afterPassing = changes
+    endHttpRequest(failing, 503)
+    unsubscribe()
+
+    expect(listedWhileRunning).toEqual([])
+    expect(afterPassing).toBe(0)
+    expect(changes).toBe(1)
+    expect(httpRequests().map(({ requestId }) => requestId)).toContain('poll-down')
+  })
+
+  // Catches a caller who sends a very long URL making the proxy hold all of it, up to 600 times
+  // (#263 review).
+  test('cuts a path longer than it keeps', () => {
+    const sequence = beginHttpRequest({
+      requestId: 'long-path',
+      method: 'GET',
+      path: `/v1/${'x'.repeat(PATH_KEPT * 4)}`
+    })
+    endHttpRequest(sequence, 404)
+
+    const kept = httpRequests().find(({ requestId }) => requestId === 'long-path')
+    expect(kept?.path).toHaveLength(PATH_KEPT + 1)
+    expect(kept?.path.endsWith('…')).toBe(true)
   })
 
   // Catches memory that grows with every request a long-running proxy answers, or a flood of

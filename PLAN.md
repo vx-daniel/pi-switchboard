@@ -1980,10 +1980,13 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   request: `requestLogMiddleware`, registered right after the request ID middleware and so ahead
   of proxy auth and the body size limit, adds each request as it arrives and ends it with its
   status when its answer is ready (a stream's headers). It keeps the method, the path without the
-  query (where a caller could put a secret), the status and the timings, never a header, a body or
-  a credential: the last 500 answered requests and, apart from them, the last 100 client errors
-  (4xx), so anyone who can reach the port can't flood out the rest; a health check answered with
-  a 2xx isn't kept, as the request log puts those lines at debug. In memory only, and no HTTP
+  query (where a caller could put a secret) and cut at 256 characters, the status and the
+  timings, never a header, a body or a credential: the last 500 answered requests and, apart from
+  them, the last 100 client errors (4xx), so anyone who can reach the port can't flood out the
+  rest. A health check shows only once it has failed, as the request log puts passing ones at
+  debug: one in flight isn't listed or redrawn for, and one answered with a 2xx isn't kept. The
+  console's redraws are coalesced by pi-tui (at most one per 16 ms), so a flood can't storm the
+  screen. In memory only, and no HTTP
   route serves it. A chat request's row joins its chat request (`active-requests.ts`) by the
   request ID, which the proxy generates: the model or alias it named, the model that served it,
   the time to its first event, and for a stream the true end, when the stream closed. The right

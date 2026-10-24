@@ -11,12 +11,13 @@
  * The middleware runs before proxy auth, so anyone who can reach the port can add entries. As in
  * `active-requests.ts`, client errors (4xx: auth, size, validation, unknown paths) are kept apart
  * from the rest, each list with its own bound, so a flood of them can't push out the requests that
- * did something. A health check answered with a 2xx is not kept: monitors poll it every few
- * seconds and would fill the table, as the request log puts those lines at debug for the same
- * reason. No HTTP route serves this.
+ * did something. A health check shows only once it has failed: monitors poll it every few seconds,
+ * so one in flight is not listed and tells no listener, and one answered with a 2xx is not kept,
+ * as the request log puts those lines at debug for the same reason. No HTTP route serves this.
  *
  * An entry holds the request's ID, method, path (without its query, where a caller could put a
- * secret), status and timings: never a header, a body, or a credential.
+ * secret, and cut at {@link PATH_KEPT} characters), status and timings: never a header, a body, or
+ * a credential.
  *
  * @packageDocumentation
  */
@@ -31,6 +32,12 @@ import {
 import { isHealthPath } from '@proxy/server/middleware'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { MiddlewareHandler } from 'hono'
+
+/**
+ * The longest path kept, in characters; a longer one is cut with `…`. Every route's path is far
+ * shorter: this bounds what a caller who sends a long URL can make the proxy hold.
+ */
+export const PATH_KEPT = 256
 
 /** Logger for a listener that throws. */
 const httpRequestsLogger = proxyLogger('server', 'http')
@@ -85,7 +92,7 @@ function notify(): void {
  * @param start - its ID, method and path
  * @param start.requestId - the proxy's request ID
  * @param start.method - the HTTP method
- * @param start.path - the path, without the query
+ * @param start.path - the path, without the query; cut at {@link PATH_KEPT} characters
  * @param now - the current time; `Date.now()` by default
  * @returns its place in the order, to end it with
  */
@@ -95,14 +102,17 @@ export function beginHttpRequest(
 ): number {
   const sequence = nextSequence
   nextSequence += 1
+  const path = start.path.length > PATH_KEPT ? `${start.path.slice(0, PATH_KEPT)}…` : start.path
   inFlight.set(sequence, {
     ...start,
+    path,
     sequence,
     startedAt: now,
     status: undefined,
     endedAt: undefined
   })
-  notify()
+  // A health check in flight isn't listed: telling the listeners would only redraw for nothing.
+  if (!isHealthPath(path)) notify()
   return sequence
 }
 
@@ -118,10 +128,8 @@ export function endHttpRequest(sequence: number, status: number, now: number = D
   const request = inFlight.get(sequence)
   if (request === undefined) return
   inFlight.delete(sequence)
-  if (isHealthPath(request.path) && status < HTTP_MULTIPLE_CHOICES) {
-    notify()
-    return
-  }
+  // A health check that passed was never listed, so nothing changed for the listeners.
+  if (isHealthPath(request.path) && status < HTTP_MULTIPLE_CHOICES) return
   // 5xx answers are kept with the others: the proxy failed, not the client.
   const clientError = status >= HTTP_BAD_REQUEST && status < HTTP_INTERNAL_SERVER_ERROR
   const [kept, bound] = clientError ? [clientErrors, REJECTED_KEPT] : [answered, FINISHED_KEPT]
@@ -136,7 +144,8 @@ export function endHttpRequest(sequence: number, status: number, now: number = D
  * @returns them, in the order they arrived, oldest first
  */
 export function httpRequests(): readonly HttpRequest[] {
-  return [...answered, ...clientErrors, ...inFlight.values()].toSorted(
+  const listedInFlight = [...inFlight.values()].filter((request) => !isHealthPath(request.path))
+  return [...answered, ...clientErrors, ...listedInFlight].toSorted(
     (left, right) => left.sequence - right.sequence
   )
 }

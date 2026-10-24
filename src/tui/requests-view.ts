@@ -20,6 +20,7 @@
 import { truncateToWidth } from '@earendil-works/pi-tui'
 import type { ActiveRequest, FinishedRequest } from '@proxy/server/active-requests'
 import type { HttpRequest } from '@proxy/server/http-requests'
+import { REQUEST_ID_PREFIX } from '@proxy/server/request-id'
 import { gauge, latency } from '@proxy/tui/panel'
 import { timeOfDay } from '@proxy/tui/screen'
 import { type ConsoleColor, paint, strong } from '@proxy/tui/theme'
@@ -44,8 +45,6 @@ const SHOWN_FROM = { duration: 84, firstEvent: 104, id: 120 } as const
 const GAUGE_FULL_MS = 6000
 /** A duration from which the gauge is yellow, in milliseconds. */
 const SLOW_MS = 4000
-/** What every proxy request ID starts with; the ID cell shows what follows. */
-const REQUEST_ID_PREFIX = 'piproxy-'
 /** The status classes' first statuses. */
 const STATUS_CLASS = { redirect: 300, client: 400, server: 500 } as const
 
