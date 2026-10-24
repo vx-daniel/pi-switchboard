@@ -1,0 +1,640 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg
+          viewBox="0 0 960 516"
+          xmlns="http://www.w3.org/2000/svg"
+          role="img"
+          aria-labelledby="numbers-dark-title numbers-dark-desc" id="numbers-dark-root"
+        >
+          <title id="numbers-dark-title">Where the numbers come from</title>
+          <desc id="numbers-dark-desc">
+            Requests feed in-memory registries that the console reads live and the stats file stores
+            every five seconds; provider answers feed quota and cooldowns; the console and the HTTP
+            routes read the stats file and the quota.
+          </desc>
+          <defs>
+      <style>#numbers-dark-root { --color-paper: #24283b;
+        --color-ink: #c0caf5;
+        --color-muted: #a9b1d6;
+        --color-accent: #e0af68;
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', 'Noto Serif', serif;
+        --font-mono: 'Geist Mono', ui-monospace, monospace; }
+      #numbers-dark-root { font-family: var(--font-sans); color: var(--color-ink); }
+      #numbers-dark-root .diagram-container { width: 100%;
+        overflow-x: auto; }
+      #numbers-dark-root .diagram-container { overflow-x: visible; }</style>
+            <marker id="numbers-dark-arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#a9b1d6" />
+            </marker>
+            <marker
+              id="numbers-dark-arrow-accent"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#e0af68" />
+            </marker>
+            <marker
+              id="numbers-dark-arrow-link"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#7aa2f7" />
+            </marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#24283b" />
+          <path
+            d="M176,120 H232"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow)"
+          />
+          <path
+            d="M176,376 H232"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow)"
+          />
+          <path
+            d="M408,104 H728"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow)"
+          />
+          <path
+            d="M376,152 V240 Q376,248 384,248 H480"
+            fill="none"
+            stroke="#e0af68"
+            stroke-width="1.4"
+            marker-end="url(#numbers-dark-arrow-accent)"
+          />
+          <path
+            d="M587,216 V128 Q587,120 595,120 H728"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow)"
+          />
+          <path
+            d="M640,264 H688 a 8,8 0 0,1 16,0 H776 Q784,264 784,272 V344"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow)"
+          />
+          <path
+            d="M408,365 H688 Q696,365 696,357 V144 Q696,136 704,136 H728"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow)"
+          />
+          <path
+            d="M408,387 H728"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow)"
+          />
+          <rect x="553" y="84" width="30" height="12" rx="2" fill="#24283b" />
+          <text
+            x="568"
+            y="93"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            LIVE
+          </text>
+          <rect x="399" y="226" width="58" height="12" rx="2" fill="#24283b" />
+          <text
+            x="428"
+            y="235"
+            fill="#e0af68"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            EVERY 5 S
+          </text>
+          <rect x="597" y="160" width="62" height="12" rx="2" fill="#24283b" />
+          <text
+            x="628"
+            y="169"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            STATS VIEW
+          </text>
+          <rect x="722" y="274" width="36" height="12" rx="2" fill="#24283b" />
+          <text
+            x="740"
+            y="283"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            USAGE
+          </text>
+          <rect x="706" y="306" width="36" height="12" rx="2" fill="#24283b" />
+          <text
+            x="724"
+            y="315"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            QUOTA
+          </text>
+          <rect x="547" y="395" width="42" height="12" rx="2" fill="#24283b" />
+          <text
+            x="568"
+            y="404"
+            fill="#8a94c0"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            HEALTH
+          </text>
+          <rect x="40" y="88" width="136" height="64" rx="6" fill="#24283b" />
+          <rect
+            x="40"
+            y="88"
+            width="136"
+            height="64"
+            rx="6"
+            fill="#a9b1d6"
+            stroke="#8a94c0"
+            stroke-width="1" fill-opacity="0.10"
+          />
+          <text
+            x="108.0"
+            y="118.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Each request
+          </text>
+          <text
+            x="108.0"
+            y="133.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            HTTP and chat
+          </text>
+          <rect x="40" y="344" width="136" height="64" rx="6" fill="#24283b" />
+          <rect
+            x="40"
+            y="344"
+            width="136"
+            height="64"
+            rx="6"
+            fill="#c0caf5"
+            stroke="rgba(192,202,245,0.30)"
+            stroke-width="1" fill-opacity="0.03"
+          />
+          <rect
+            x="48"
+            y="350"
+            width="28"
+            height="12"
+            rx="2"
+            fill="none"
+            stroke="rgba(192,202,245,0.30)"
+            stroke-opacity="0.5"
+            stroke-width="0.8"
+          />
+          <text
+            x="62.0"
+            y="359"
+            fill="#8a94c0"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.08em"
+          >
+            EXT
+          </text>
+          <text
+            x="108.0"
+            y="378.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Provider answers
+          </text>
+          <text
+            x="108.0"
+            y="393.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            headers · 429 · 503
+          </text>
+          <rect x="232" y="88" width="176" height="64" rx="6" fill="#24283b" />
+          <rect
+            x="232"
+            y="88"
+            width="176"
+            height="64"
+            rx="6"
+            fill="#c0caf5"
+            stroke="#a9b1d6"
+            stroke-width="1" fill-opacity="0.05"
+          />
+          <rect
+            x="240"
+            y="94"
+            width="46"
+            height="12"
+            rx="2"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-opacity="0.5"
+            stroke-width="0.8"
+          />
+          <text
+            x="263.0"
+            y="103"
+            fill="#8a94c0"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.08em"
+          >
+            MEMORY
+          </text>
+          <text
+            x="320.0"
+            y="122.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Request registries
+          </text>
+          <text
+            x="320.0"
+            y="137.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            HTTP · chat · totals
+          </text>
+          <rect x="232" y="344" width="176" height="64" rx="6" fill="#24283b" />
+          <rect
+            x="232"
+            y="344"
+            width="176"
+            height="64"
+            rx="6"
+            fill="#c0caf5"
+            stroke="#a9b1d6"
+            stroke-width="1" fill-opacity="0.05"
+          />
+          <rect
+            x="240"
+            y="350"
+            width="46"
+            height="12"
+            rx="2"
+            fill="none"
+            stroke="#a9b1d6"
+            stroke-opacity="0.5"
+            stroke-width="0.8"
+          />
+          <text
+            x="263.0"
+            y="359"
+            fill="#8a94c0"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.08em"
+          >
+            MEMORY
+          </text>
+          <text
+            x="320.0"
+            y="378.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Quota and cooldowns
+          </text>
+          <text
+            x="320.0"
+            y="393.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            per login
+          </text>
+          <rect x="480" y="216" width="160" height="64" rx="6" fill="#24283b" />
+          <rect
+            x="480"
+            y="216"
+            width="160"
+            height="64"
+            rx="6"
+            fill="#e0af68"
+            stroke="#e0af68"
+            stroke-width="1" fill-opacity="0.10"
+          />
+          <rect
+            x="488"
+            y="222"
+            width="34"
+            height="12"
+            rx="2"
+            fill="none"
+            stroke="#e0af68"
+            stroke-opacity="0.5"
+            stroke-width="0.8"
+          />
+          <text
+            x="505.0"
+            y="231"
+            fill="#8a94c0"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.08em"
+          >
+            DISK
+          </text>
+          <text
+            x="560.0"
+            y="250.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Stats file
+          </text>
+          <text
+            x="560.0"
+            y="265.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            SQLite · 30 days
+          </text>
+          <rect x="728" y="88" width="192" height="64" rx="6" fill="#24283b" />
+          <rect
+            x="728"
+            y="88"
+            width="192"
+            height="64"
+            rx="6"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="824.0"
+            y="118.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            The console
+          </text>
+          <text
+            x="824.0"
+            y="133.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            every view
+          </text>
+          <rect x="728" y="344" width="192" height="64" rx="6" fill="#24283b" />
+          <rect
+            x="728"
+            y="344"
+            width="192"
+            height="64"
+            rx="6"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="824.0"
+            y="374.0"
+            fill="#c0caf5"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            HTTP routes
+          </text>
+          <text
+            x="824.0"
+            y="389.0"
+            fill="#a9b1d6"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            usage · healthz · models
+          </text>
+          <line
+            x1="40"
+            y1="456"
+            x2="920"
+            y2="456"
+            stroke="rgba(192,202,245,0.10)"
+            stroke-width="0.8"
+          />
+          <text
+            x="40"
+            y="472"
+            fill="#a9b1d6"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            letter-spacing="0.18em"
+          >
+            LEGEND
+          </text>
+          <rect
+            x="40"
+            y="488"
+            width="24"
+            height="12"
+            rx="2"
+            fill="#e0af68"
+            stroke="#e0af68"
+            stroke-width="1" fill-opacity="0.10"
+          />
+          <text
+            x="72"
+            y="498"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Stored (focal)
+          </text>
+          <rect
+            x="167"
+            y="488"
+            width="24"
+            height="12"
+            rx="2"
+            fill="#c0caf5"
+            stroke="#a9b1d6"
+            stroke-width="1" fill-opacity="0.05"
+          />
+          <text
+            x="199"
+            y="498"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            In memory
+          </text>
+          <rect
+            x="270"
+            y="488"
+            width="24"
+            height="12"
+            rx="2"
+            fill="#a9b1d6"
+            stroke="#8a94c0"
+            stroke-width="1" fill-opacity="0.10"
+          />
+          <text
+            x="302"
+            y="498"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Source
+          </text>
+          <rect
+            x="359"
+            y="488"
+            width="24"
+            height="12"
+            rx="2"
+            fill="#c0caf5"
+            stroke="rgba(192,202,245,0.30)"
+            stroke-width="1" fill-opacity="0.03"
+          />
+          <text
+            x="391"
+            y="498"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            External
+          </text>
+          <rect
+            x="457"
+            y="488"
+            width="24"
+            height="12"
+            rx="2"
+            fill="#292e42"
+            stroke="#c0caf5"
+            stroke-width="1"
+          />
+          <text
+            x="489"
+            y="498"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Reads it
+          </text>
+          <line
+            x1="555"
+            y1="494"
+            x2="579"
+            y2="494"
+            stroke="#e0af68"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow-accent)"
+          />
+          <text
+            x="587"
+            y="498"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Written every 5 s
+          </text>
+          <line
+            x1="696"
+            y1="494"
+            x2="720"
+            y2="494"
+            stroke="#a9b1d6"
+            stroke-width="1.2"
+            marker-end="url(#numbers-dark-arrow)"
+          />
+          <text
+            x="728"
+            y="498"
+            fill="#a9b1d6"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Read
+          </text>
+        </svg>

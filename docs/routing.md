@@ -1,5 +1,12 @@
 # Routing
 
+A request that names a model runs on that model; one that names an alias runs on the alias's targets in turn. Either way each model runs under every login that serves it ([Several logins per provider](logins.md#several-logins-per-provider)), so the candidates are the targets, each under each login, in order. The proxy walks them: it skips one that is [cooling down](#cooldowns) or below its [quota reserve](#quota) while a later one can serve, calls the next, and moves on after a failure only when the alias's `fallbackOn` names its class ([Fallback chains](#fallback-chains)), or between two logins of one model, `routing.logins.fallbackOn`.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="diagrams/routing-dark.svg">
+  <img alt="How routing walks the candidates: skip one cooling down or below its reserve while another can serve, call it, and move on after a failure whose class the alias or the logins fall back on" src="diagrams/routing.svg">
+</picture>
+
 ## Aliases
 
 Most clients only let you pick a model name, so an alias is the routing control every client has. Define names in `proxy-config.json`, each pointing at an exposed model's canonical ID:

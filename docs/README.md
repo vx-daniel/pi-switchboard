@@ -22,7 +22,7 @@ pi-switchboard is a local HTTP API over pi's models, logins and providers that s
 | [The console](console.md) | `pi-switchboard tui`: requests, accounts and logins, stats, models and aliases |
 | [Pi Integration](pi-extension.md) | The `/proxy` commands and the settings panel inside pi |
 | [Security](security.md) | The defaults: the bind address, remote images, size limits, timeouts |
-| [Architecture](architecture.md) | How a request flows through the proxy and pi's SDK |
+| [Architecture](architecture.md) | How it fits together, a chat request end to end, and where the numbers come from, as diagrams; pi's SDK layers |
 | [Coming from pi-openai-proxy](migration.md) | What the rename changed |
 
 ## For contributors
@@ -31,4 +31,5 @@ pi-switchboard is a local HTTP API over pi's models, logins and providers that s
 - [CONSTITUTION.md](../CONSTITUTION.md): the principles every change is checked against.
 - [PLAN.md](../PLAN.md): the architecture, the API compatibility policy and the security boundaries in full.
 - [ROADMAP.md](../ROADMAP.md) and [TODO.md](../TODO.md): what is done and what comes next.
+- `diagrams/`: the diagrams these pages show, each as an HTML source per skin (Tokyo Night Light and Storm) and the SVG exported from it.
 - `reference/`, `engineering/` and `discovery/`: comparisons, analyses and research behind past decisions; `archive/`: plans from before the rename.
