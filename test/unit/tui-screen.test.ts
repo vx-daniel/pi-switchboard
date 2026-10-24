@@ -89,7 +89,9 @@ describe('consoleScreen', () => {
 })
 
 describe('clockLabel', () => {
-  // Catches a locale-dependent date, or an unpadded time.
+  // Catches a locale-dependent date, or an unpadded time. The clock is local time, and the test
+  // runs in any zone: 03:04 UTC on Monday 5 January is still Sunday 4 January west of UTC, so
+  // both days are allowed here on purpose; the padded minute and second are what is pinned.
   test('formats the weekday, day, month and a padded time', () => {
     expect(stripTerminalSequences(clockLabel(Date.UTC(2026, 0, 5, 3, 4, 5)))).toMatch(
       /^(Sun|Mon) [45] Jan {2}\d\d:0[45]:05$/
