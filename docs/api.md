@@ -1,5 +1,51 @@
 # The HTTP API
 
+## Examples
+
+### List available models
+
+```bash
+curl http://localhost:4141/v1/models | jq '.data[].id'
+```
+
+### Chat completion (non-streaming)
+
+```bash
+curl http://localhost:4141/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "anthropic/claude-sonnet-4-20250514",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### Chat completion (streaming)
+
+```bash
+curl http://localhost:4141/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-4o",
+    "messages": [{"role": "user", "content": "Tell me a joke"}],
+    "stream": true
+  }'
+```
+
+### Use with any OpenAI-compatible client
+
+Point any client that supports `OPENAI_API_BASE` (or equivalent) at `http://localhost:4141/v1`:
+
+```bash
+# Example: Aider
+OPENAI_API_BASE=http://localhost:4141/v1 aider --model anthropic/claude-sonnet-4-20250514
+
+# Example: Continue (in settings.json)
+# "apiBase": "http://localhost:4141/v1"
+
+# Example: Open WebUI
+# Set "OpenAI API Base URL" to http://localhost:4141/v1
+```
+
 ## Supported Endpoints
 
 The stable routes are the first three rows. [`PLAN.md`](../PLAN.md) "Stable surface" is the authoritative list, and says what a route must meet to join it.
