@@ -113,16 +113,51 @@ export function highlight(text: string): string {
 }
 
 /**
- * Marks the current tab: bold accent, inverted, so it reads as a pill on the header's background.
- * pi-tui's `styleText` for the inversion, as in {@link strong}: the theme's `inverse` goes through
- * chalk, which emits nothing in the console.
+ * Marks the current tab where the tabs sit in the frame's border: bold in the chrome's amber,
+ * inverted, so it reads as a pill. pi-tui's `styleText` for the inversion, as in {@link strong}:
+ * the theme's `inverse` goes through chalk, which emits nothing in the console.
  *
  * @param text - the tab's label
  * @returns the label, marked when a theme is installed
  */
 export function activeTab(text: string): string {
   if (active === undefined) return text
-  return styleText(strong(active.fg('accent', text)), { inverse: true }, active.getColorMode())
+  return styleText(strong(tabAccent(text)), { inverse: true }, active.getColorMode())
+}
+
+/**
+ * Colors the chrome's accent: the current tab's outline and each tab's key digit, and the
+ * headline numbers of the status strip. The instrument panel's amber is the theme's yellow, named
+ * here once so no chrome module paints a tab with `warning`.
+ *
+ * @param text - the text
+ * @returns the text, amber when a theme is installed
+ */
+export function tabAccent(text: string): string {
+  return paint('warning', text)
+}
+
+/**
+ * Marks a badge in the status strip (`● SERVING`): bold success text on the success background.
+ *
+ * @param text - the badge's text, with its own padding
+ * @returns the badge, marked when a theme is installed
+ */
+export function badge(text: string): string {
+  if (active === undefined) return text
+  return active.bg('toolSuccessBg', strong(active.fg('success', text)))
+}
+
+/**
+ * Draws a key as a raised chip in the footer: bold on the selection background, as
+ * {@link highlight} does, in the plain text color so it reads as a key, not a selected item.
+ *
+ * @param text - the key's text, with its own padding
+ * @returns the chip, marked when a theme is installed
+ */
+export function keycap(text: string): string {
+  if (active === undefined) return text
+  return active.bg('selectedBg', strong(text))
 }
 
 /**

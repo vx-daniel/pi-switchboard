@@ -51,16 +51,20 @@ import { accountRows } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
 import { openSelectedModelsItem } from '@proxy/tui/console-models'
 import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
+import { exposedModelsLabel } from '@proxy/tui/frame'
+import { consoleLayout, type ConsoleLayout } from '@proxy/tui/layout'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
 import { loginLabels } from '@proxy/tui/login'
 import { modelsItems, modelsRows, modelsViewData } from '@proxy/tui/models-view'
-import { footerLine, moveSelection, stepView, tabsLine, type View } from '@proxy/tui/navigation'
+import { moveSelection, stepView, type View } from '@proxy/tui/navigation'
 import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
-import { besideSidebar, type SidebarInput, sidebarRows, sidebarWidth } from '@proxy/tui/sidebar'
+import { consoleScreen } from '@proxy/tui/screen'
+import { type SidebarInput, sidebarRows } from '@proxy/tui/sidebar'
 import { createRefresh, type RefreshState } from '@proxy/tui/status-refresh'
+import { requestsPerMinute, type StatusStripInput } from '@proxy/tui/status-strip'
 import { captureWrites } from '@proxy/tui/stderr-capture'
-import { chrome, installConsoleTheme, paint, strong } from '@proxy/tui/theme'
+import { installConsoleTheme } from '@proxy/tui/theme'
 
 import packageJson from '../../package.json' with { type: 'json' }
 
@@ -70,8 +74,12 @@ const STATUS_REFRESH_MS = 5000
 const TICK_MS = 1000
 /** Lines a page key scrolls the log view by. */
 const PAGE_LINES = 10
-/** Rows the header, the tab bar and the footer take. */
-const CHROME_ROWS = 3
+/** What the Stats tab's context calls each window. */
+const WINDOW_LABELS: Readonly<Record<StatsWindow, string>> = {
+  today: 'today',
+  week: 'week',
+  all: 'all 30 days'
+}
 
 /** What the status line shows; read every few seconds, never the credentials themselves. */
 interface Status {
@@ -151,37 +159,63 @@ async function readStatus(): Promise<Status> {
 }
 
 /**
- * Renders the status part of the header: exposed models, cooldowns, a models.json error.
+ * Gathers what the status strip shows, now: the proxy's address and auth, the last status read,
+ * the uptime and connections, and the last half hour of finished chat requests.
  *
- * @param status - the last status read
- * @returns the parts, in order
+ * @param context - the console
+ * @param now - the current time
+ * @returns the snapshot
  */
-function statusParts(status: Status): string[] {
-  const exposed =
-    typeof status.exposed === 'number'
-      ? `${String(status.exposed)}/${String(status.available)} exposed`
-      : paint('error', `exposure config: ${status.exposed}`)
-  const parts = [exposed, `${String(status.cooldowns)} cooldowns`]
-  if (status.modelsJsonError !== undefined) parts.push(paint('error', 'models.json error'))
-  return parts
+function stripInput(context: ConsoleContext, now: number): StatusStripInput {
+  const { config, state } = context
+  const traffic = requestsPerMinute(finishedRequests(), now)
+  // Before the first status read, the strip shows no model counts and no errors.
+  const status =
+    state.status === undefined
+      ? { exposed: undefined, available: undefined, cooldowns: 0, modelsJsonError: false }
+      : {
+          exposed: state.status.exposed,
+          available: state.status.available,
+          cooldowns: state.status.cooldowns,
+          modelsJsonError: state.status.modelsJsonError !== undefined
+        }
+  return {
+    ...status,
+    version: packageJson.version,
+    address: `${config.host}:${String(config.port)}`,
+    proxyAuth: context.proxyAuth.current().kind,
+    uptimeMs: now - context.startedAt,
+    connections: state.connections,
+    perMinute: traffic.perMinute,
+    saturated: traffic.saturated
+  }
 }
 
 /**
- * Renders the header: version and address, then auth and the status line unless the sidebar shows
- * them.
- *
- * @param context - the console: its config, its last status read, and the auth applied now
- * @param withSidebar - whether the sidebar is shown, with the status in its PROXY panel
- * @returns the header line, untruncated
+ * What the right end of the tab row says about each view: what is in flight on Logs, the logins
+ * and cooldowns on Accounts, the window on Stats, the models and aliases on Models.
  */
-function headerLine(context: ConsoleContext, withSidebar: boolean): string {
-  const { config, state } = context
-  const title = strong(paint('accent', ` pi-switchboard ${packageJson.version}`))
-  const address = `${config.host}:${String(config.port)}`
-  if (withSidebar) return [title, address].join(' · ')
-  const parts = [title, address, `auth ${context.proxyAuth.current().kind}`]
-  if (state.status !== undefined) parts.push(...statusParts(state.status))
-  return parts.join(' · ')
+const TAB_CONTEXT: Readonly<Record<View, (state: ConsoleState) => string>> = {
+  logs: () => {
+    const inFlight = activeRequests().length
+    return inFlight === 0 ? 'idle' : `${String(inFlight)} in flight`
+  },
+  accounts: (state) =>
+    `${String(state.accounts.length)} logins · ${String(state.status?.cooldowns ?? 0)} cooldowns`,
+  stats: (state) => WINDOW_LABELS[state.statsWindow],
+  models: (state) =>
+    exposedModelsLabel(state.status?.exposed, Object.keys(state.status?.aliases ?? {}).length)
+}
+
+/**
+ * What the right end of the frame's bottom border notes about each view: how many log lines,
+ * logins or exposed models it holds. Stats notes nothing.
+ */
+const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
+  logs: ({ logs }) => `${String(logs.dropped() + logs.lines().length)} lines`,
+  accounts: ({ state }) => `${String(state.accounts.length)} logins`,
+  stats: () => '',
+  models: ({ state }) => exposedModelsLabel(state.status?.exposed)
 }
 
 /** What the Accounts view takes from the status before the first read: no reserve, no labels. */
@@ -235,31 +269,23 @@ function viewRows(
 }
 
 /**
- * Gathers what the sidebar shows, now: the proxy's status, each login with its quota, the
- * cooldowns, the requests in flight and the route totals.
+ * Gathers what the sidebar shows, now: each login with its label and quota, the cooldowns, the
+ * requests in flight and the route totals.
  *
  * @param context - the console
  * @returns the snapshot
  */
 function sidebarInput(context: ConsoleContext): SidebarInput {
-  const { config, state } = context
+  const { state } = context
   const now = Date.now()
   const status: Partial<Status> = state.status ?? {}
   const reserve = status.reserve ?? {}
   return {
     now,
-    proxy: {
-      address: `${config.host}:${String(config.port)}`,
-      proxyAuth: context.proxyAuth.current().kind,
-      startedAt: context.startedAt,
-      connections: state.connections,
-      exposed: status.exposed,
-      available: status.available,
-      modelsJsonError: status.modelsJsonError !== undefined
-    },
     accounts: state.accounts.map((account) => ({
       provider: account.provider,
       type: account.type,
+      label: status.labels?.[account.provider],
       models: account.availableModelCount,
       quota: providerQuota(account.provider, now),
       belowReserve: providerBelowReserve(account.provider, reserve, now) !== undefined
@@ -272,22 +298,34 @@ function sidebarInput(context: ConsoleContext): SidebarInput {
 }
 
 /**
- * Renders the sidebar on the chrome's background, down to the bottom of the screen: the rows
- * below its last panel are background too.
+ * Renders the screen for a layout: the strip, the framed view with the sidebar beside it, and the
+ * footer.
  *
  * @param context - the console
- * @param height - the rows the sidebar covers, from the tab bar to the footer
- * @param width - the sidebar's columns
+ * @param layout - where everything goes
  * @returns the rows
  */
-function sidebarChrome(context: ConsoleContext, height: number, width: number): string[] {
-  const rows = sidebarRows(sidebarInput(context), { height, width })
-  return Array.from({ length: height }, (_, row) => chrome(rows[row] ?? '', width))
+function screenRows(context: ConsoleContext, layout: ConsoleLayout): string[] {
+  const now = Date.now()
+  const sidebar =
+    layout.sidebarWidth === undefined
+      ? undefined
+      : sidebarRows(sidebarInput(context), { height: layout.frameRows, width: layout.sidebarWidth })
+  return consoleScreen({
+    view: context.state.view,
+    layout,
+    now,
+    strip: stripInput(context, now),
+    context: TAB_CONTEXT[context.state.view](context.state),
+    note: FRAME_NOTE[context.state.view](context),
+    body: viewRows(context, { height: layout.viewHeight, width: layout.viewWidth }),
+    sidebar
+  })
 }
 
 /**
- * Creates the console's root component: the header, then the tab bar over the current view with
- * the sidebar beside them on a wide enough terminal, and the footer on the screen's last row.
+ * Creates the console's root component: the status strip, the tabs and the framed view with the
+ * sidebar beside it on a wide enough terminal, and the footer on the screen's last row.
  *
  * @param context - the console
  * @param terminal - the terminal, for its height
@@ -301,26 +339,11 @@ function createRootView(
 ): Component {
   return {
     render(width) {
-      const height = Math.max(1, terminal.rows - CHROME_ROWS)
-      const { state } = context
-      const side = state.sidebarHidden ? undefined : sidebarWidth(width)
-      const mainWidth = side === undefined ? width : width - side - 1
-      const body = viewRows(context, { height, width: mainWidth })
-      const main = [
-        chrome(tabsLine(state.view), mainWidth),
-        ...body,
-        ...Array.from({ length: Math.max(0, height - body.length) }, () => '')
-      ]
-      const middle =
-        side === undefined
-          ? main
-          : besideSidebar(main, sidebarChrome(context, main.length, side), mainWidth)
-      const rows = [
-        chrome(headerLine(context, side !== undefined), width),
-        ...middle,
-        footerLine(state.view, sidebarWidth(width) !== undefined)
-      ]
-      return rows.map((row) => truncateToWidth(row, width))
+      const layout = consoleLayout(
+        { columns: width, rows: terminal.rows },
+        context.state.sidebarHidden
+      )
+      return screenRows(context, layout).map((row) => truncateToWidth(row, width))
     },
     handleInput,
     handleMouse(event) {

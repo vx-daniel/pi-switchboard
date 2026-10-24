@@ -1989,30 +1989,47 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   by default), moving further on a fast spin (`wheelScrollLines: 'auto'`); it scrolls the log view
   only. The screen's own viewport scrolling would take PgUp and PgDn first, so the console unbinds
   them there.
-- **Status.** The header shows the address, proxy auth (`token` or `off`), exposed and available
-  models (exposure computed as `/healthz/models` does), active cooldowns and a models.json error,
-  read every 5 s and after each login or logout. With the sidebar shown, the header keeps the
-  version and address and the sidebar's PROXY panel shows the rest.
+- **Screen** (`layout.ts`, `screen.ts`, `frame.ts`, `status-strip.ts`). The screen is rendered
+  as rows from one input per frame (`consoleScreen`), so a test holds every row to the terminal's
+  width (pi-tui throws on a wider one) at every size. `consoleLayout` says where things go: the
+  status strip on the first row; on a terminal of 30 rows or more two rows of folder tabs
+  (`folderTabs`), the current one opening into the frame's top border; below that the tabs sit in
+  the top border, the current one an inverted amber pill; the view inside the frame's side
+  borders; the bottom border; the footer. The strip shows the name and version, a `● SERVING`
+  badge, the address, proxy auth, exposed and available models (exposure computed as
+  `/healthz/models` does), uptime, open connections and active cooldowns, read every 5 s and
+  after each login or logout, and on the right the last 30 minutes of finished chat requests as
+  a sparkline (from `finishedRequests()`, so under load the oldest minutes may be undercounted;
+  the rate carries `+` then) with the rate over the last 5 minutes. Too narrow, the counts drop
+  from the end, then the right group, then the version; an exposure-config or models.json error
+  is never dropped. The tab row's right end says a word about the view, the bottom border's its
+  size. The footer draws keys as chips (`keycap`): the view's keys left, the global keys right
+  with `q quit (stops the proxy)` fixed at the end; a narrow footer drops the other global keys
+  from the front, then the view's keys from the end. The redesign follows the instrument-panel
+  mock an open-design agent drew (`.local/index2.html`, local and not committed; the
+  screenshots are in the PR); this is its phase 1 (chrome). Later phases: the Accounts table,
+  plain-number Stats tiles, the Models effort matrix, and a Requests table over the log.
 - **Ending cooldowns** (#182). `c` in the Accounts and Models views, the two that show cooldowns
   and list the key, ends every cooldown (`clearCooldownsFor({})`), as
   `DELETE /v1/switchboard/cooldowns` does with no query, then reads the status again. One login's
   or one model's is ended through the route.
 - **Sidebar** (`sidebar.ts`). On a terminal at least 100 columns wide, the right 30% (34 to 48
-  columns) shows five panels beside the tab bar and the view; `s` hides and shows it. PROXY
-  (address, auth, uptime, open connections, models, cooldown count, models.json error),
-  ACCOUNTS (each login with its quota windows as bars, the time to each reset, below-reserve,
-  and its cooldowns), ACTIVE (the chat requests in flight), RECENT (the last minute's requests,
-  failures, average time and time to a stream's first event, then the latest finished
-  requests) and TRAFFIC (the route totals summed). Rendering is a function of a snapshot the
-  console gathers per frame; a 1 s tick moves the clocks on and counts the server's open
-  connections (`getConnections`). Under stress (a cooldown, a login below its reserve, or a
-  request that failed or was rejected in the last minute; #215) ACTIVE and RECENT come before
-  ACCOUNTS, RECENT's title names the minute's failures (or, with none, its rejected requests), and
-  a quiet login (no cooldown, not below its reserve, every window under 70%) collapses to one row.
-  The usual layout returns a minute after the last failure or rejection, once nothing is cooling
-  down or below its reserve: the reorder follows the same window RECENT counts. On a short screen
-  the blank rows between panels go first, then TRAFFIC, then RECENT's list down to its summary,
-  then the bottom is cut. The requests come from `active-requests.ts`: the chat route adds one
+  columns) shows four panels beside the frame, from its top border to its bottom border, with the
+  date and time over them on a tall terminal; `s` hides and shows it. QUOTA (each login with its
+  label, its quota windows as bars, the time to each reset, `no quota reported`, below-reserve,
+  and its cooldowns), IN FLIGHT (the chat requests in flight), RECENT (the last minute's requests
+  with the average time and time to a stream's first event, its failures and rejections on a
+  second line when any, then the latest finished requests) and SESSION (the route totals summed).
+  The proxy's own status is the strip's. Rendering is a function of a snapshot the console
+  gathers per frame; a 1 s tick moves the clocks on and counts the server's open connections
+  (`getConnections`). Under stress (a cooldown, a login below its reserve, or a request that
+  failed or was rejected in the last minute; #215) IN FLIGHT and RECENT come before QUOTA,
+  RECENT's title names the minute's failures (or, with none, its rejected requests), and a quiet
+  login (no cooldown, not below its reserve, every window under 70%) collapses to one row. The
+  usual layout returns a minute after the last failure or rejection, once nothing is cooling down
+  or below its reserve: the reorder follows the same window RECENT counts. On a short screen the
+  blank rows between panels go first, then SESSION, then RECENT's list down to its summary, then
+  the bottom is cut. The requests come from `active-requests.ts`: the chat route adds one
   before
   it dispatches (never message content or a credential), the dispatcher names each attempt's
   model and marks a stream's first event, and the request ends when the dispatch returns or, for
@@ -2038,8 +2055,8 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   that provider, which was about the old credential (`status-refresh.ts`).
 - **Navigation.** `←` `→`, `Tab` and `Shift+Tab` move between the views, wrapping around; `1`
   to `4` jump to one. `↑` `↓` act on the view shown: scrolling in Logs, selection in Accounts and
-  Models.
-  The footer sits on the screen's last row and lists the current view's keys.
+  Models. The footer sits on the screen's last row and lists the current view's keys as chips,
+  with the global keys at the right end (see **Screen**).
 - **Stats** (`dashboard.ts`, #216). A dashboard over the stats store, for one of three windows:
   today (from local midnight), the last 7 days, or all 30 days kept; `t` `w` `a` pick one. The
   console opens the stats file itself, beside the recorder's connection (WAL lets it read while
@@ -2097,11 +2114,14 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   on (`Symbol.for('@earendil-works/pi-coding-agent:theme')`), and pi's dialogs (login, selectors)
   draw with it. That key is pi's, not public API: the console calls `initTheme()` first, so a pi
   that moves it keeps its system theme in the dialogs. The console's own text is colored by role
-  (`paint`, `strong`, `highlight`, `activeTab`), and its chrome (the header, the tab bar, the
-  sidebar to the footer) sits on `bgHighlight` (`chrome()`). A chrome row may already be styled,
-  so the background is set again after every reset inside it. The current tab is inverted accent,
-  a pill on that background; inversion and bold go through pi-tui's `styleText`, because the
-  theme's own `inverse` and `bold` go through chalk, which emits nothing in the console. A
+  (`paint`, `strong`, `highlight`, `activeTab`, `tabAccent`, `badge`, `keycap`); the status strip
+  sits on `bgHighlight` (`chrome()`), the frame, sidebar and footer on the plain background. A
+  chrome row may already be styled, so the background is set again after every reset inside it.
+  The instrument panel's amber is the theme's yellow, named once as `tabAccent` (the current
+  tab's outline, the tab digits, the strip's mark and cost figures); the compact tabs' current
+  pill is that amber inverted; the `SERVING` badge is success on `toolSuccessBg`; a footer key is
+  bold on `selectedBg`. Inversion and bold go through pi-tui's `styleText`, because the theme's
+  own `inverse` and `bold` go through chalk, which emits nothing in the console. A
   non-empty `NO_COLOR` turns all of it off: plain text, pi's system theme, and an uncolored log
   view.
 

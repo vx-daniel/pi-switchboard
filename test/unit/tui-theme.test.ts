@@ -5,7 +5,17 @@ import {
   stripTerminalSequences,
   visibleWidth
 } from '@earendil-works/pi-tui'
-import { activeTab, chrome, highlight, installConsoleTheme, paint, strong } from '@proxy/tui/theme'
+import {
+  activeTab,
+  badge,
+  chrome,
+  highlight,
+  installConsoleTheme,
+  keycap,
+  paint,
+  strong,
+  tabAccent
+} from '@proxy/tui/theme'
 import { STORM } from '@proxy/tui/tokyonight-storm'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -44,7 +54,10 @@ describe('the console theme', () => {
       paint('success', 'ok'),
       strong('ok'),
       highlight('ok'),
-      activeTab('ok')
+      activeTab('ok'),
+      tabAccent('ok'),
+      badge('ok'),
+      keycap('ok')
     ]) {
       expect(painted).not.toBe('ok')
       expect(stripTerminalSequences(painted)).toBe('ok')
@@ -56,12 +69,15 @@ describe('the console theme', () => {
     installConsoleTheme('1')
 
     expect(piThemeName()).not.toBe('tokyonight-storm')
-    expect([paint('error', 'x'), strong('x'), highlight('x'), activeTab('x')]).toEqual([
-      'x',
-      'x',
-      'x',
-      'x'
-    ])
+    expect([
+      paint('error', 'x'),
+      strong('x'),
+      highlight('x'),
+      activeTab('x'),
+      tabAccent('x'),
+      badge('x'),
+      keycap('x')
+    ]).toEqual(Array.from({ length: 7 }, () => 'x'))
     expect(chrome('x', 20)).toBe('x')
   })
 

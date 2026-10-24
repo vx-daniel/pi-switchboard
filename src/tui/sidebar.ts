@@ -1,7 +1,8 @@
 /**
  * The console's sidebar (#61): the proxy's status at a glance beside the current view. Panels
- * show the proxy (address, auth, uptime, open connections, models), each login with its quota
- * windows and cooldowns, the chat requests in flight, and the traffic since the proxy started.
+ * show each login's quota windows (QUOTA), the chat requests in flight (IN FLIGHT), the last
+ * minute and the latest finished requests (RECENT), and the traffic since the proxy started
+ * (SESSION). The proxy's own status (address, auth, uptime, models) is the status strip's.
  *
  * @remarks
  * Rendering only: the console gathers a {@link SidebarInput} snapshot and redraws. Nothing here
@@ -30,7 +31,7 @@ import {
   spread
 } from '@proxy/tui/panel'
 import { fitLabel, sum } from '@proxy/tui/stats-view'
-import { type ConsoleColor, paint, strong } from '@proxy/tui/theme'
+import { type ConsoleColor, paint, strong, tabAccent } from '@proxy/tui/theme'
 
 /** The narrowest terminal that shows the sidebar; narrower, the view takes the whole width. */
 const MIN_TERMINAL_WIDTH = 100
@@ -61,30 +62,16 @@ const OUTCOME_MARKS: Readonly<Record<RequestOutcome, string>> = {
 const PERCENT = 100
 /** Decimal places a cost is shown with: a request can cost a fraction of a cent. */
 const COST_DECIMALS = 4
-
-/** The proxy's own status, from the server config and the status the console reads. */
-export interface SidebarProxy {
-  /** `host:port`, without the scheme. */
-  readonly address: string
-  /** Proxy auth: `token` or `off`. */
-  readonly proxyAuth: string
-  /** When the console started the proxy, in milliseconds since the epoch. */
-  readonly startedAt: number
-  /** Open client connections, or `undefined` before the first count. */
-  readonly connections: number | undefined
-  /** Exposed model count or the exposure config's error, or `undefined` before the first read. */
-  readonly exposed: number | string | undefined
-  /** Available model count, or `undefined` before the first read. */
-  readonly available: number | undefined
-  /** Whether pi's `models.json` failed to load. */
-  readonly modelsJsonError: boolean
-}
+/** The mark before a login, and before a request in flight. */
+const MARK = '●'
 
 /** One login, as the sidebar shows it: never the credential itself. */
 export interface SidebarAccount {
   readonly provider: string
   /** `oauth` (an account) or `api_key`. */
   readonly type: 'oauth' | 'api_key'
+  /** The label the operator gave the login (`labels`), or `undefined` for none. */
+  readonly label: string | undefined
   /** How many of its models are available. */
   readonly models: number
   /** Its latest quota report, or `undefined` when it reported none. */
@@ -95,9 +82,8 @@ export interface SidebarAccount {
 
 /** Everything one render of the sidebar shows. */
 export interface SidebarInput {
-  /** The current time, for uptimes, elapsed times and time left. */
+  /** The current time, for elapsed times and time left. */
   readonly now: number
-  readonly proxy: SidebarProxy
   readonly accounts: readonly SidebarAccount[]
   /** Active cooldowns, soonest end first. */
   readonly cooldowns: readonly Cooldown[]
@@ -119,32 +105,6 @@ export function sidebarWidth(terminalWidth: number): number | undefined {
   if (terminalWidth < MIN_TERMINAL_WIDTH) return undefined
   const share = Math.round(terminalWidth * SIDEBAR_SHARE)
   return Math.min(SIDEBAR_WIDTH.most, Math.max(SIDEBAR_WIDTH.least, share))
-}
-
-/**
- * Renders the PROXY panel's lines: address and auth, uptime and connections, models, and what is
- * wrong, if anything.
- *
- * @param input - the snapshot
- * @param width - the content's columns
- * @returns the lines
- */
-function proxyLines(input: SidebarInput, width: number): string[] {
-  const { proxy, now } = input
-  const connections = proxy.connections === undefined ? '' : ` · ${String(proxy.connections)} conn`
-  const lines = [
-    spread(proxy.address, `auth ${proxy.proxyAuth}`, width),
-    `up ${compactDuration(now - proxy.startedAt)}${connections}`
-  ]
-  if (typeof proxy.exposed === 'string') lines.push(paint('error', 'exposure config error'))
-  else if (proxy.exposed !== undefined && proxy.available !== undefined) {
-    lines.push(`models ${String(proxy.exposed)}/${String(proxy.available)} exposed`)
-  }
-  if (input.cooldowns.length > 0) {
-    lines.push(paint('warning', `${String(input.cooldowns.length)} cooling down`))
-  }
-  if (proxy.modelsJsonError) lines.push(paint('error', 'models.json error'))
-  return lines
 }
 
 /**
@@ -204,7 +164,8 @@ function cooldownLine(cooldown: Cooldown, now: number, width: number): string {
 }
 
 /**
- * Renders a login's first row: provider, login type and model count.
+ * Renders a login's first row: a mark and the provider, then its label, or its login type and
+ * model count when it has no label.
  *
  * @param account - the login
  * @param width - the content's columns
@@ -212,16 +173,16 @@ function cooldownLine(cooldown: Cooldown, now: number, width: number): string {
  */
 function accountHeader(account: SidebarAccount, width: number): string {
   const login = account.type === 'oauth' ? 'account' : 'API key'
-  return spread(
-    strong(account.provider),
-    paint('dim', `${login} · ${String(account.models)}`),
-    width
-  )
+  const right =
+    account.label === undefined
+      ? paint('dim', `${login} · ${String(account.models)}`)
+      : paint('accent', account.label)
+  return spread(`${paint('success', MARK)} ${strong(account.provider)}`, right, width)
 }
 
 /**
- * Renders one login: its first row, then each quota window, whether it is below its reserve, and
- * its cooldowns.
+ * Renders one login: its first row, then each quota window (or that it reports none), whether it
+ * is below its reserve, and its cooldowns.
  *
  * @param account - the login
  * @param input - the snapshot
@@ -230,9 +191,9 @@ function accountHeader(account: SidebarAccount, width: number): string {
  */
 function accountLines(account: SidebarAccount, input: SidebarInput, width: number): string[] {
   const lines = [accountHeader(account, width)]
-  for (const window of account.quota?.windows ?? []) {
-    lines.push(windowLine(window, account, input, width))
-  }
+  const windows = account.quota?.windows ?? []
+  if (windows.length === 0) lines.push(paint('dim', '  no quota reported'))
+  for (const window of windows) lines.push(windowLine(window, account, input, width))
   if (account.belowReserve) lines.push(paint('error', '  below reserve'))
   for (const cooldown of input.cooldowns) {
     if (cooldown.provider === account.provider) lines.push(cooldownLine(cooldown, input.now, width))
@@ -257,7 +218,7 @@ function quiet(account: SidebarAccount, input: SidebarInput): boolean {
 }
 
 /**
- * Renders the ACCOUNTS panel's lines: every login, or how to add one. Under stress a quiet login
+ * Renders the QUOTA panel's lines: every login, or how to add one. Under stress a quiet login
  * takes its first row only, so the logins in trouble stand out and the panel stays short.
  *
  * @param input - the snapshot
@@ -265,7 +226,7 @@ function quiet(account: SidebarAccount, input: SidebarInput): boolean {
  * @param collapseQuiet - whether to collapse quiet logins
  * @returns the lines
  */
-function accountsLines(input: SidebarInput, width: number, collapseQuiet: boolean): string[] {
+function quotaLines(input: SidebarInput, width: number, collapseQuiet: boolean): string[] {
   if (input.accounts.length === 0) return [paint('dim', 'No logins · n to log in')]
   return input.accounts.flatMap((account) =>
     collapseQuiet && quiet(account, input)
@@ -275,8 +236,8 @@ function accountsLines(input: SidebarInput, width: number, collapseQuiet: boolea
 }
 
 /**
- * Renders one request in flight: the model and its elapsed time, then its alias, mode, phase and
- * attempt.
+ * Renders one request in flight: a mark, the model and its elapsed time, then its alias, phase
+ * and attempt.
  *
  * @param request - the request
  * @param now - the current time
@@ -284,26 +245,30 @@ function accountsLines(input: SidebarInput, width: number, collapseQuiet: boolea
  * @returns two lines
  */
 function activeLines(request: ActiveRequest, now: number, width: number): string[] {
-  const elapsed = compactDuration(now - request.startedAt)
-  const modelWidth = Math.max(1, width - visibleWidth(elapsed) - 1)
+  const elapsed = tabAccent(latency(now - request.startedAt))
+  const modelWidth = Math.max(1, width - visibleWidth(elapsed) - visibleWidth(`${MARK}  `))
   const model = fitLabel(request.model, modelWidth)
   // A stream waits for the model's first event, then streams; a plain request only waits.
   let state = request.stream ? 'waiting · stream' : 'waiting'
   if (request.firstEventAt !== undefined) state = paint('success', 'streaming')
   const details = [request.alias ?? 'direct', state]
   if (request.attempt > 1) details.push(paint('warning', `try ${String(request.attempt)}`))
-  return [`${model} ${elapsed}`, `  ${details.join(paint('dim', ' · '))}`]
+  return [
+    spread(`${tabAccent(MARK)} ${model}`, elapsed, width),
+    paint('dim', `  ${details.join(' · ')}`)
+  ]
 }
 
 /**
- * Renders the ACTIVE panel's lines: the requests in flight, oldest first, or that there are none.
+ * Renders the IN FLIGHT panel's lines: the requests in flight, oldest first, or that there are
+ * none.
  *
  * @param input - the snapshot
  * @param width - the content's columns
  * @returns the lines
  */
-function activeRequestLines(input: SidebarInput, width: number): string[] {
-  if (input.active.length === 0) return [paint('dim', 'idle')]
+function inFlightLines(input: SidebarInput, width: number): string[] {
+  if (input.active.length === 0) return [paint('dim', 'nothing in flight')]
   const listed = input.active
     .slice(0, MAX_ACTIVE_LISTED)
     .flatMap((request) => activeLines(request, input.now, width))
@@ -324,7 +289,8 @@ function average(times: readonly (number | undefined)[]): number | undefined {
 }
 
 /**
- * Renders RECENT's last-minute line: the requests, with the failed and the rejected ones apart.
+ * Renders RECENT's first line: the last minute's requests, with the average time and a stream's
+ * average time to its first event of those the proxy dispatched.
  *
  * @param lastMinute - the requests that finished in the last minute
  * @param width - the content's columns
@@ -334,15 +300,39 @@ function lastMinuteLine(lastMinute: readonly FinishedRequest[], width: number): 
   const rejected = lastMinute.filter((request) => request.outcome === 'rejected').length
   // Each kind keeps only its newest (FINISHED_KEPT, REJECTED_KEPT): a full one may be missing some
   // of the minute.
-  const rejectedFull = rejected >= REJECTED_KEPT
-  const full = lastMinute.length - rejected >= FINISHED_KEPT || rejectedFull
-  const parts = [`${String(lastMinute.length)}${full ? '+' : ''} req`]
+  const full = lastMinute.length - rejected >= FINISHED_KEPT || rejected >= REJECTED_KEPT
+  const count = `${String(lastMinute.length)}${full ? '+' : ''}`
+  // A rejected request is answered at once: its time would only pull the averages down.
+  const dispatched = lastMinute.filter((request) => request.outcome !== 'rejected')
+  const took = average(dispatched.map((request) => request.endedAt - request.startedAt))
+  const first = average(
+    dispatched.map((request) =>
+      request.firstEventAt === undefined ? undefined : request.firstEventAt - request.startedAt
+    )
+  )
+  const times: string[] = []
+  if (took !== undefined) times.push(`${paint('dim', 'avg ')}${latency(took)}`)
+  if (first !== undefined) times.push(`${paint('dim', '1st ')}${latency(first)}`)
+  return spread(`${paint('dim', 'last min ')}${strong(count)}`, times.join('  '), width)
+}
+
+/**
+ * Renders RECENT's second line, when the last minute had failures or rejections: how many of
+ * each.
+ *
+ * @param lastMinute - the requests that finished in the last minute
+ * @returns the line, or `undefined` when nothing went wrong
+ */
+function troubleLine(lastMinute: readonly FinishedRequest[]): string | undefined {
   const failed = lastMinute.filter((request) => request.outcome === 'failed').length
+  const rejected = lastMinute.filter((request) => request.outcome === 'rejected').length
+  const parts: string[] = []
   if (failed > 0) parts.push(paint('error', `${String(failed)} failed`))
   if (rejected > 0) {
-    parts.push(paint('warning', `${String(rejected)}${rejectedFull ? '+' : ''} rejected`))
+    const full = rejected >= REJECTED_KEPT ? '+' : ''
+    parts.push(paint('warning', `${String(rejected)}${full} rejected`))
   }
-  return spread('last minute', parts.join(' · '), width)
+  return parts.length === 0 ? undefined : `  ${parts.join(' · ')}`
 }
 
 /**
@@ -365,9 +355,8 @@ function finishedLine(request: FinishedRequest, width: number): string {
 }
 
 /**
- * Renders the RECENT panel's lines: a summary (the last minute's requests, failures and
- * rejections, the average time and average time to a stream's first event of those the proxy
- * dispatched), then the latest finished requests.
+ * Renders the RECENT panel's lines: a summary (the last minute's requests and average times, then
+ * its failures and rejections if any), then the latest finished requests.
  *
  * @param input - the snapshot
  * @param lastMinute - the requests that finished in the last minute
@@ -381,16 +370,8 @@ function recentLines(
 ): { summary: string[]; list: string[] } {
   if (input.finished.length === 0) return { summary: [paint('dim', 'none yet')], list: [] }
   const summary = [lastMinuteLine(lastMinute, width)]
-  // A rejected request is answered at once: its time would only pull the average down.
-  const dispatched = lastMinute.filter((request) => request.outcome !== 'rejected')
-  const took = average(dispatched.map((request) => request.endedAt - request.startedAt))
-  if (took !== undefined) summary.push(spread('  avg time', latency(took), width))
-  const first = average(
-    dispatched.map((request) =>
-      request.firstEventAt === undefined ? undefined : request.firstEventAt - request.startedAt
-    )
-  )
-  if (first !== undefined) summary.push(spread('  first event', latency(first), width))
+  const trouble = troubleLine(lastMinute)
+  if (trouble !== undefined) summary.push(trouble)
   const list = input.finished
     .slice(0, MAX_RECENT_LISTED)
     .map((request) => finishedLine(request, width))
@@ -398,34 +379,40 @@ function recentLines(
 }
 
 /**
- * Renders the TRAFFIC panel's lines: requests, failures, fallbacks, tokens and cost since the
- * proxy started.
+ * Renders the SESSION panel's lines: requests, failures and fallbacks, tokens, cache and cost
+ * since the proxy started.
  *
  * @param input - the snapshot
  * @param width - the content's columns
  * @returns the lines
  */
-function trafficLines(input: SidebarInput, width: number): string[] {
+function sessionLines(input: SidebarInput, width: number): string[] {
   const counts = sum(input.totals)
   const failed = String(counts.failures)
+  const separator = paint('border', ' · ')
   return [
-    spread('requests', String(counts.requests), width),
-    spread('failed', counts.failures > 0 ? paint('error', failed) : failed, width),
-    spread('fallbacks', String(counts.fallbacks), width),
+    spread('requests', strong(String(counts.requests)), width),
     spread(
-      'tokens in/out',
-      `${compactCount(counts.inputTokens)} / ${compactCount(counts.outputTokens)}`,
+      'failed · fallbacks',
+      `${counts.failures > 0 ? paint('error', failed) : failed}${separator}${String(counts.fallbacks)}`,
+      width
+    ),
+    spread(
+      'tokens in / out',
+      `${compactCount(counts.inputTokens)}${paint('border', ' / ')}${compactCount(counts.outputTokens)}`,
       width
     ),
     spread('cache', compactCount(counts.cacheReadTokens + counts.cacheWriteTokens), width),
-    spread('cost', `$${counts.costUsd.toFixed(COST_DECIMALS)}`, width)
+    spread('cost', tabAccent(`$${counts.costUsd.toFixed(COST_DECIMALS)}`), width)
   ]
 }
 
 /** One panel before it is framed: its title, its lines, and how many of them a short screen keeps. */
 interface PanelSpec {
-  readonly id: 'proxy' | 'accounts' | 'active' | 'recent' | 'traffic'
+  readonly id: 'quota' | 'inFlight' | 'recent' | 'session'
   readonly title: string
+  /** A word after the title: how many logins, how many in flight. */
+  readonly extra: string
   readonly lines: readonly string[]
   /** The lines kept when the screen is short: all of them, but RECENT's summary only. */
   readonly keep: number
@@ -436,11 +423,17 @@ interface PanelSpec {
  *
  * @param id - which panel
  * @param title - its title
+ * @param extra - the word after its title
  * @param lines - its lines
  * @returns the panel
  */
-function whole(id: PanelSpec['id'], title: string, lines: readonly string[]): PanelSpec {
-  return { id, title, lines, keep: lines.length }
+function whole(
+  id: PanelSpec['id'],
+  title: string,
+  extra: string,
+  lines: readonly string[]
+): PanelSpec {
+  return { id, title, extra, lines, keep: lines.length }
 }
 
 /**
@@ -465,13 +458,13 @@ function underStress(input: SidebarInput, lastMinute: readonly FinishedRequest[]
  * hide it.
  *
  * @param lastMinute - the requests that finished in the last minute
- * @returns the title
+ * @returns the word after the title, or `''`
  */
-function recentTitle(lastMinute: readonly FinishedRequest[]): string {
+function recentExtra(lastMinute: readonly FinishedRequest[]): string {
   const failed = lastMinute.filter((request) => request.outcome === 'failed').length
-  if (failed > 0) return `RECENT · ${String(failed)} failed`
+  if (failed > 0) return `· ${String(failed)} failed`
   const rejected = lastMinute.filter((request) => request.outcome === 'rejected').length
-  return rejected > 0 ? `RECENT · ${String(rejected)} rejected` : 'RECENT'
+  return rejected > 0 ? `· ${String(rejected)} rejected` : ''
 }
 
 /**
@@ -484,14 +477,14 @@ function recentTitle(lastMinute: readonly FinishedRequest[]): string {
  */
 function stack(specs: readonly PanelSpec[], width: number, gaps: boolean): string[] {
   return specs.flatMap((spec, index) => {
-    const rows = panel(spec.title, spec.lines, width)
+    const rows = panel(spec.title, spec.lines, width, spec.extra)
     return gaps && index > 0 ? ['', ...rows] : rows
   })
 }
 
 /**
  * Fits the panels to the height: with blank rows between them if they fit so, else without; then
- * without TRAFFIC; then with RECENT's list cut down to its summary; then cut at the bottom.
+ * without SESSION; then with RECENT's list cut down to its summary; then cut at the bottom.
  *
  * @param specs - the panels, in order
  * @param size - the space available
@@ -507,7 +500,7 @@ function fitPanels(
   if (spaced.length <= size.height) return spaced
   const tight = stack(specs, size.width, false)
   if (tight.length <= size.height) return tight
-  const kept = specs.filter((spec) => spec.id !== 'traffic')
+  const kept = specs.filter((spec) => spec.id !== 'session')
   const over = stack(kept, size.width, false).length - size.height
   const trimmed = kept.map((spec) =>
     spec.id === 'recent'
@@ -518,8 +511,8 @@ function fitPanels(
 }
 
 /**
- * Renders the sidebar: PROXY, ACCOUNTS, ACTIVE, RECENT and TRAFFIC panels. Under stress
- * ({@link underStress}) ACTIVE and RECENT come before ACCOUNTS, whose quiet logins collapse to one
+ * Renders the sidebar: QUOTA, IN FLIGHT, RECENT and SESSION panels. Under stress
+ * ({@link underStress}) IN FLIGHT and RECENT come before QUOTA, whose quiet logins collapse to one
  * row, and RECENT's title carries the last minute's failures.
  *
  * @param input - the snapshot
@@ -538,27 +531,25 @@ export function sidebarRows(
   )
   const stressed = underStress(input, lastMinute)
   const recent = recentLines(input, lastMinute, inner)
-  const proxy = whole('proxy', 'PROXY', proxyLines(input, inner))
-  const accounts = whole(
-    'accounts',
-    `ACCOUNTS · ${String(input.accounts.length)}`,
-    accountsLines(input, inner, stressed)
-  )
-  const active = whole(
-    'active',
-    `ACTIVE · ${String(input.active.length)}`,
-    activeRequestLines(input, inner)
+  const logins = `${String(input.accounts.length)} ${input.accounts.length === 1 ? 'login' : 'logins'}`
+  const quota = whole('quota', 'QUOTA', logins, quotaLines(input, inner, stressed))
+  const inFlight = whole(
+    'inFlight',
+    'IN FLIGHT',
+    String(input.active.length),
+    inFlightLines(input, inner)
   )
   const recentPanel: PanelSpec = {
     id: 'recent',
-    title: recentTitle(lastMinute),
+    title: 'RECENT',
+    extra: recentExtra(lastMinute),
     lines: [...recent.summary, ...recent.list],
     keep: recent.summary.length
   }
-  const traffic = whole('traffic', 'TRAFFIC', trafficLines(input, inner))
+  const session = whole('session', 'SESSION', '', sessionLines(input, inner))
   const order = stressed
-    ? [proxy, active, recentPanel, accounts, traffic]
-    : [proxy, accounts, active, recentPanel, traffic]
+    ? [inFlight, recentPanel, quota, session]
+    : [quota, inFlight, recentPanel, session]
   return fitPanels(order, size).map((row) => truncateToWidth(row, size.width, '', true))
 }
 

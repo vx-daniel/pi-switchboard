@@ -30,13 +30,19 @@ const MILLION = 1_000_000
  * @param title - the title, shown in the top border
  * @param lines - the content lines; each is cut or padded to the content's width
  * @param width - the panel's columns, borders included
+ * @param extra - a word after the title in the top border, dimmer (`4 logins`); `''` for none
  * @returns the panel's rows
  */
-export function panel(title: string, lines: readonly string[], width: number): string[] {
+export function panel(
+  title: string,
+  lines: readonly string[],
+  width: number,
+  extra = ''
+): string[] {
   const inner = Math.max(1, width - FRAME_COLUMNS)
-  const label = ` ${title} `
+  const label = `${strong(paint('accent', ` ${title}`))}${extra === '' ? '' : paint('dim', ` ${extra}`)} `
   const rest = Math.max(0, width - CORNER_COLUMNS - 1 - visibleWidth(label))
-  const top = `${paint('border', '╭─')}${strong(paint('accent', label))}${paint('border', `${'─'.repeat(rest)}╮`)}`
+  const top = `${paint('border', '╭─')}${label}${paint('border', `${'─'.repeat(rest)}╮`)}`
   const body = lines.map(
     (line) =>
       `${paint('border', '│ ')}${truncateToWidth(line, inner, '…', true)}${paint('border', ' │')}`

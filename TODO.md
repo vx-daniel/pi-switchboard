@@ -418,6 +418,18 @@ since the rename; each issue holds the detailed checklist.
   - [x] The console's per-route stats from #70's totals
   - [x] The console's sidebar: proxy status, logins with quota and cooldowns, requests in flight,
         traffic
+  - [ ] Console redesign after the instrument-panel mock (`.local/index2.html`, not committed;
+        reviewed 2026-10-23):
+    - [x] Phase 1, chrome: status strip, folder/compact tabs around a framed view, keycap footer,
+          sidebar regrouped as QUOTA / IN FLIGHT / RECENT / SESSION, folding thresholds
+    - [ ] Phase 2: the Accounts view as a table with quota gauges and a detail pane (keeping
+          `below reserve` and cooldowns)
+    - [ ] Phase 3: Stats with plain-number tiles that fold before the timeline, and `$ today` on
+          the strip from a store-level daily cost
+    - [ ] Phase 4: the Models view as a thinking-level matrix with an aliases box, keeping the
+          diagnostics and family resolutions
+    - [ ] Phase 5: a Requests table over the log (`r` for the raw log), which needs a registry of
+          every route's requests, not only chat
 
 ## Phase 5 — Routing across pi's logins
 

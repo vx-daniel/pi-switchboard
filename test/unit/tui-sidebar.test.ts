@@ -28,15 +28,6 @@ const TALL = 60
 function snapshot(fields: Partial<SidebarInput> = {}): SidebarInput {
   return {
     now: NOW,
-    proxy: {
-      address: '127.0.0.1:4141',
-      proxyAuth: 'token',
-      startedAt: NOW - 3_725_000,
-      connections: 2,
-      exposed: 26,
-      available: 30,
-      modelsJsonError: false
-    },
     accounts: [],
     cooldowns: [],
     active: [],
@@ -117,6 +108,18 @@ function panelLines(rows: readonly string[], title: string): string[] {
 }
 
 /**
+ * Returns the panels' titles, in order: the first word after each top border.
+ *
+ * @param rows - the rendered rows
+ * @returns the titles
+ */
+function titles(rows: readonly string[]): string[] {
+  return rows
+    .filter((row) => row.startsWith('╭─ '))
+    .map((row) => row.replace(/^╭─ /, '').replace(/ [─·\d].*$/, ''))
+}
+
+/**
  * Builds a login with a quota window per share used.
  *
  * @param provider - the provider
@@ -127,6 +130,7 @@ function login(provider: string, shares: readonly number[]): SidebarAccount {
   return {
     provider,
     type: 'oauth',
+    label: undefined,
     models: 3,
     quota: {
       provider,
@@ -156,7 +160,7 @@ describe('the console sidebar', () => {
   })
 
   // Catches a row wider or narrower than the sidebar (a long model name, a wide character, a
-  // colour code counted as width), which shifts the right border or wraps the screen.
+  // colour code counted as width, a long label), which shifts the right border or wraps the screen.
   test('renders every row exactly as wide as the sidebar', () => {
     const rows = sidebarRows(
       snapshot({
@@ -164,6 +168,7 @@ describe('the console sidebar', () => {
           {
             provider: 'a-provider-with-a-very-long-name-indeed',
             type: 'oauth',
+            label: 'a label that is also far too long for the panel',
             models: 12,
             quota: {
               provider: 'a-provider-with-a-very-long-name-indeed',
@@ -198,7 +203,7 @@ describe('the console sidebar', () => {
     const full = rendered(snapshot())
     const gaps = full.filter((row) => row === '').length
 
-    expect(gaps).toBe(4)
+    expect(gaps).toBe(3)
     expect(rendered(snapshot(), { height: full.length - 1, width: WIDTH })).toEqual(
       full.filter((row) => row !== '')
     )
@@ -206,21 +211,20 @@ describe('the console sidebar', () => {
   })
 
   // Catches a short screen losing RECENT's last-minute line (what is happening now) to keep
-  // TRAFFIC (totals since start) or RECENT's own list of single requests.
-  test('on a short screen drops TRAFFIC, then RECENT’s list, before RECENT’s summary', () => {
+  // SESSION (totals since start) or RECENT's own list of single requests.
+  test('on a short screen drops SESSION, then RECENT’s list, before RECENT’s summary', () => {
     const finished = Array.from({ length: 5 }, (_, index) =>
       done({ requestId: `req-${String(index)}`, model: `alpha/model-${String(index)}` })
     )
     const input = snapshot({ finished })
     const tight = rendered(input).filter((row) => row !== '')
-    const traffic = tight.findIndex((row) => row.startsWith('╭─ TRAFFIC'))
-    // Two list rows too few for everything but TRAFFIC.
-    const rows = rendered(input, { height: traffic - 2, width: WIDTH })
+    const session = tight.findIndex((row) => row.startsWith('╭─ SESSION'))
+    // Two list rows too few for everything but SESSION.
+    const rows = rendered(input, { height: session - 2, width: WIDTH })
 
-    expect(rows.some((row) => row.startsWith('╭─ TRAFFIC'))).toBe(false)
+    expect(rows.some((row) => row.startsWith('╭─ SESSION'))).toBe(false)
     expect(panelLines(rows, 'RECENT').map((line) => line.replaceAll(/ {2,}/g, ' '))).toEqual([
-      'last minute 5 req',
-      ' avg time 2.3s',
+      'last min 5 avg 2.3s',
       '✓ alpha/model-0 2.3s',
       '✓ alpha/model-1 2.3s',
       '✓ alpha/model-2 2.3s'
@@ -228,16 +232,15 @@ describe('the console sidebar', () => {
     expect(rows.at(-1)?.startsWith('╰')).toBe(true)
   })
 
-  // Catches a healthy proxy losing its usual layout: ACCOUNTS before ACTIVE, every quota window
+  // Catches a healthy proxy losing its usual layout: QUOTA before IN FLIGHT, every quota window
   // shown, and a plain RECENT title.
   test('keeps the usual order and every quota window while the proxy is healthy', () => {
     const rows = rendered(
       snapshot({ accounts: [login('anthropic', [0.2, 0.4])], finished: [done({})] })
     )
-    const titles = rows.filter((row) => row.startsWith('╭─')).map((row) => row.split(' ')[1])
 
-    expect(titles).toEqual(['PROXY', 'ACCOUNTS', 'ACTIVE', 'RECENT', 'TRAFFIC'])
-    expect(panelLines(rows, 'ACCOUNTS')).toHaveLength(3)
+    expect(titles(rows)).toEqual(['QUOTA', 'IN FLIGHT', 'RECENT', 'SESSION'])
+    expect(panelLines(rows, 'QUOTA')).toHaveLength(3)
     expect(rows.some((row) => row.startsWith('╭─ RECENT ─'))).toBe(true)
   })
 
@@ -260,16 +263,15 @@ describe('the console sidebar', () => {
       },
       title: 'RECENT · 2 rejected'
     }
-  ])('under stress from $trigger, puts ACTIVE and RECENT first', ({ fields, title }) => {
+  ])('under stress from $trigger, puts IN FLIGHT and RECENT first', ({ fields, title }) => {
     const rows = rendered(snapshot(fields))
-    const titles = rows.filter((row) => row.startsWith('╭─')).map((row) => row.split(' ')[1])
 
-    expect(titles.slice(0, 3)).toEqual(['PROXY', 'ACTIVE', 'RECENT'])
+    expect(titles(rows).slice(0, 2)).toEqual(['IN FLIGHT', 'RECENT'])
     expect(rows.some((row) => row.startsWith(`╭─ ${title} ─`))).toBe(true)
   })
 
-  // Catches a screen too short even for PROXY and RECENT's summary overflowing instead of being
-  // cut to its height.
+  // Catches a screen too short even for IN FLIGHT and RECENT's summary overflowing instead of
+  // being cut to its height.
   test('cuts to the height when even the kept panels do not fit', () => {
     const input = snapshot({ finished: [done({ outcome: 'failed' })] })
 
@@ -279,9 +281,9 @@ describe('the console sidebar', () => {
   })
 
   // Catches the stressed case burying what is happening now: on a short screen with many logins,
-  // a cooldown and failures, ACTIVE and RECENT's summary must come before ACCOUNTS and stay
+  // a cooldown and failures, IN FLIGHT and RECENT's summary must come before QUOTA and stay
   // visible, the failure count must show in RECENT's title, and quiet logins take one row.
-  test('under stress puts ACTIVE and RECENT first and collapses quiet logins', () => {
+  test('under stress puts IN FLIGHT and RECENT first and collapses quiet logins', () => {
     const cooldown: Cooldown = {
       scope: 'provider',
       provider: 'cooling',
@@ -307,51 +309,25 @@ describe('the console sidebar', () => {
       ]
     })
     const rows = rendered(input, { height: 30, width: WIDTH })
-    const titles = rows.filter((row) => row.startsWith('╭─')).map((row) => row.split(' ')[1])
 
-    expect(titles.slice(0, 3)).toEqual(['PROXY', 'ACTIVE', 'RECENT'])
-    expect(panelLines(rows, 'ACTIVE')).toHaveLength(4)
+    expect(titles(rows).slice(0, 2)).toEqual(['IN FLIGHT', 'RECENT'])
+    expect(panelLines(rows, 'IN FLIGHT')).toHaveLength(4)
     expect(rows.some((row) => row.startsWith('╭─ RECENT · 2 failed'))).toBe(true)
-    expect(panelLines(rows, 'RECENT')[0]?.replaceAll(/ {2,}/g, ' ')).toBe(
-      'last minute 6 req · 2 failed'
-    )
+    expect(
+      panelLines(rows, 'RECENT')
+        .slice(0, 2)
+        .map((line) => line.replaceAll(/ {2,}/g, ' '))
+    ).toEqual(['last min 6 avg 2.3s', ' 2 failed'])
     // Rendered in full, the quiet logins take a row each; the cooling one keeps its detail.
-    const full = panelLines(rendered(input), 'ACCOUNTS')
-    expect(full.filter((line) => /^(one|two|three|four) /.test(line))).toHaveLength(4)
+    const full = panelLines(rendered(input), 'QUOTA')
+    expect(full.filter((line) => /^● (one|two|three|four) /.test(line))).toHaveLength(4)
     expect(full).toHaveLength(4 + 1 + 2 + 1)
   })
 
-  // Catches the proxy panel losing what the header no longer shows when the sidebar is on: the
-  // address, auth, uptime, connections, models and what is wrong.
-  test('shows the proxy: address, auth, uptime, connections, models, and what is wrong', () => {
-    const cooldown: Cooldown = {
-      scope: 'provider',
-      provider: 'alpha',
-      model: undefined,
-      reason: 'rate_limit',
-      since: NOW,
-      until: NOW + 90_000,
-      source: 'response',
-      streak: 0
-    }
-    const input = snapshot({ cooldowns: [cooldown] })
-    const lines = panelLines(
-      rendered({ ...input, proxy: { ...input.proxy, modelsJsonError: true } }),
-      'PROXY'
-    )
-
-    expect(lines).toEqual([
-      expect.stringMatching(/^127\.0\.0\.1:4141 +auth token$/),
-      'up 1h02m · 2 conn',
-      'models 26/30 exposed',
-      '1 cooling down',
-      'models.json error'
-    ])
-  })
-
   // Catches a quota shown under the wrong provider or without its reset, a provider below its
-  // reserve not marked, or a cooldown listed under a provider it does not belong to.
-  test('lists each login with its quota windows, reserve and cooldowns', () => {
+  // reserve not marked, a cooldown listed under a provider it does not belong to, a label lost,
+  // or a login that reports no quota shown as if it had one.
+  test('lists each login with its label, quota windows, reserve and cooldowns', () => {
     const lines = panelLines(
       rendered(
         snapshot({
@@ -359,6 +335,7 @@ describe('the console sidebar', () => {
             {
               provider: 'anthropic',
               type: 'oauth',
+              label: 'work-primary',
               models: 9,
               quota: {
                 provider: 'anthropic',
@@ -384,7 +361,14 @@ describe('the console sidebar', () => {
               },
               belowReserve: true
             },
-            { provider: 'groq', type: 'api_key', models: 3, quota: undefined, belowReserve: false }
+            {
+              provider: 'groq',
+              type: 'api_key',
+              label: undefined,
+              models: 3,
+              quota: undefined,
+              belowReserve: false
+            }
           ],
           cooldowns: [
             {
@@ -400,15 +384,16 @@ describe('the console sidebar', () => {
           ]
         })
       ),
-      'ACCOUNTS · 2'
+      'QUOTA 2 logins'
     )
 
     expect(lines).toEqual([
-      expect.stringMatching(/^anthropic +account · 9$/),
+      expect.stringMatching(/^● anthropic +work-primary$/),
       expect.stringMatching(/^ {2}5h +████░░░░ +50% ↻1h20m$/),
       expect.stringMatching(/^ {2}7d +████████ +95%$/),
       '  below reserve',
-      expect.stringMatching(/^groq +API key · 3$/),
+      expect.stringMatching(/^● groq +API key · 3$/),
+      '  no quota reported',
       expect.stringMatching(/^ {2}⏸ llama +1m05s$/)
     ])
     // The bars start on the same column whether or not a window says when it resets.
@@ -416,7 +401,7 @@ describe('the console sidebar', () => {
   })
 
   // Catches the requests in flight shown without their route, mode, phase or retry, or a long
-  // list pushing the traffic off the screen.
+  // list pushing the session totals off the screen.
   test('lists requests in flight with their route and age, and sums up the rest', () => {
     const active = [
       request({ alias: 'coding', attempt: 2, firstEventAt: NOW - 60_000 }, 65_000),
@@ -424,14 +409,14 @@ describe('the console sidebar', () => {
         request({ requestId: `req-${String(index)}`, stream: false })
       )
     ]
-    const lines = panelLines(rendered(snapshot({ active })), 'ACTIVE · 8')
+    const lines = panelLines(rendered(snapshot({ active })), 'IN FLIGHT 8')
 
     expect(lines.slice(0, 2)).toEqual([
-      expect.stringMatching(/^alpha\/model +1m05s$/),
+      expect.stringMatching(/^● alpha\/model +1m05s$/),
       '  coding · streaming · try 2'
     ])
     expect(lines.slice(2, 4)).toEqual([
-      expect.stringMatching(/^alpha\/model +12s$/),
+      expect.stringMatching(/^● alpha\/model +12\.0s$/),
       '  direct · waiting'
     ])
     expect(lines).toHaveLength(13)
@@ -454,9 +439,8 @@ describe('the console sidebar', () => {
     const lines = panelLines(rendered(snapshot({ finished })), 'RECENT')
 
     expect(lines.map((line) => line.replaceAll(/ {2,}/g, ' '))).toEqual([
-      'last minute 3 req · 1 failed',
-      ' avg time 2.4s',
-      ' first event 400ms',
+      'last min 3 avg 2.4s 1st 400ms',
+      ' 1 failed',
       '✓ alpha/streamed 2.4s',
       '✗ alpha/broken 850ms',
       '↩ alpha/gone 4.0s',
@@ -481,8 +465,8 @@ describe('the console sidebar', () => {
     const lines = panelLines(rendered(snapshot({ finished })), 'RECENT')
 
     expect(lines.map((line) => line.replaceAll(/ {2,}/g, ' '))).toEqual([
-      'last minute 3 req · 2 rejected',
-      ' avg time 2.0s',
+      'last min 3 avg 2.0s',
+      ' 2 rejected',
       '⊘ no/such-model 404',
       '⊘ - 401',
       '✓ alpha/model 2.0s'
@@ -490,12 +474,16 @@ describe('the console sidebar', () => {
   })
 
   // Catches an empty panel that reads as broken before the first request.
-  test('says so when no request has finished', () => {
-    expect(panelLines(rendered(snapshot()), 'RECENT')).toEqual(['none yet'])
+  test('says so when no request has finished, and when nothing is in flight', () => {
+    const rows = rendered(snapshot())
+
+    expect(panelLines(rows, 'RECENT')).toEqual(['none yet'])
+    expect(panelLines(rows, 'IN FLIGHT 0')).toEqual(['nothing in flight'])
+    expect(panelLines(rows, 'QUOTA 0 logins')).toEqual(['No logins · n to log in'])
   })
 
-  // Catches a traffic panel that does not add up the routes.
-  test('adds up the traffic over every route', () => {
+  // Catches a session panel that does not add up the routes.
+  test('adds up the session over every route', () => {
     const route = (fields: Partial<RouteTotals>): RouteTotals => ({
       alias: null,
       provider: 'alpha',
@@ -527,14 +515,13 @@ describe('the console sidebar', () => {
           ]
         })
       ),
-      'TRAFFIC'
+      'SESSION'
     )
 
     expect(lines.map((line) => line.replaceAll(/ {2,}/g, ' '))).toEqual([
       'requests 5',
-      'failed 1',
-      'fallbacks 1',
-      'tokens in/out 1.3M / 400',
+      'failed · fallbacks 1 · 1',
+      'tokens in / out 1.3M / 400',
       'cache 900',
       'cost $0.7500'
     ])
