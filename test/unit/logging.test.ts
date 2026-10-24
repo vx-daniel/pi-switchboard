@@ -7,16 +7,21 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 
-import { dispose, resetSync } from '@logtape/logtape'
+import { visibleWidth } from '@earendil-works/pi-tui'
+import { dispose, getLogger, resetSync } from '@logtape/logtape'
 import {
   configureFileLogging,
   configureLogging,
   type LogFormat,
   proxyLogger,
-  resolveLogFormat
+  resolveLogFormat,
+  type SinkFormat
 } from '@proxy/logging'
 import { isRecord } from '@proxy/utils/guards'
 import { afterEach, assert, describe, expect, test, vi } from 'vite-plus/test'
+
+/** Where a message starts in the console layout, in terminal columns. */
+const CONSOLE_MESSAGE_COLUMN = 42
 
 let lines: string[] = []
 
@@ -26,7 +31,7 @@ let lines: string[] = []
  * @param level - the lowest level written
  * @param format - the output format; JSON Lines by default
  */
-function capture(level: 'debug' | 'info', format: LogFormat = 'json'): void {
+function capture(level: 'debug' | 'info', format: SinkFormat = 'json'): void {
   lines = []
   configureLogging({ level, format, write: (line) => lines.push(line) })
 }
@@ -193,6 +198,34 @@ describe('pretty output', () => {
 
     const plain = stripVTControlCharacters(lines[0] ?? '')
     expect(plain).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3} \+09 /)
+  })
+})
+
+describe('console layout', () => {
+  // Catches the console's log view getting the CLI's wide layout back, where the date, offset and
+  // root category leave a message no room on an 80-column terminal (#204): the time only, the
+  // category under the package's root, and the message at column 42.
+  test('stamps the time only and drops the package root from the category', () => {
+    capture('info', 'console')
+    proxyLogger('server', 'http').info('Listening on {port}', { port: 4141 })
+
+    const plain = stripVTControlCharacters(lines[0] ?? '')
+    expect(plain).toMatch(/^\d{2}:\d{2}:\d{2}\.\d{3} /)
+    expect(plain).toContain(' server·http ')
+    expect(plain).not.toContain('pi-switchboard')
+    expect(visibleWidth(plain.slice(0, plain.indexOf('Listening')))).toBe(CONSOLE_MESSAGE_COLUMN)
+  })
+
+  // Catches the root stripped down to an empty category, or a category outside the package (such
+  // as LogTape's own) cut short as if it were under it.
+  test('keeps a category that is the root itself or outside the package', () => {
+    capture('info', 'console')
+    proxyLogger().info('Root record')
+    getLogger(['logtape', 'meta']).warning('Meta record')
+
+    const plain = lines.map((line) => stripVTControlCharacters(line))
+    expect(plain[0]).toContain(' pi-switchboard ')
+    expect(plain[1]).toContain(' logtape·meta ')
   })
 })
 

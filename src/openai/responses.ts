@@ -21,6 +21,9 @@ import type {
 } from '@earendil-works/pi-ai'
 import { FailureClassSchema } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import type { EffortReport } from '@proxy/openai/reasoning-effort'
+import { REASONING_EFFORTS } from '@proxy/openai/schemas'
+import { unixSecondsNow } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** Logger for non-streaming response building. */
@@ -28,16 +31,41 @@ const responsesLogger = proxyLogger('openai', 'responses')
 
 /**
  * One model of an alias's fallback chain (#67) that did not answer, before the one that did: tried
- * and failed, or skipped while cooling down (#68). Documents the response; never parsed.
+ * and failed, skipped while cooling down (#68), or skipped with its provider below its quota
+ * reserve (#69). Documents the response; never parsed.
  */
 const attemptSchema = z.object({
   model: z.string().trim().meta({ description: 'The canonical ID of the model.' }),
-  reason: FailureClassSchema.meta({
-    description: 'Why the chain moved on from it: its failure, or the one it is cooling down from.'
+  login: z
+    .string()
+    .trim()
+    .optional()
+    .meta({
+      description:
+        'The login tried (`anthropic`, `anthropic-2`), when the model has more than one ' +
+        '(#227). Absent otherwise.'
+    }),
+  reasoning_effort: z
+    .enum(REASONING_EFFORTS)
+    .optional()
+    .meta({
+      description:
+        "The effort the alias's target runs it at (#230), replacing the request's. Absent when " +
+        'the target sets none.'
+    }),
+  reason: z.enum([...FailureClassSchema.options, 'quota']).meta({
+    description:
+      'Why the chain moved on from it: its failure, the one it is cooling down from, or `quota` ' +
+      "when its provider had less than the config's `routing.reserve` left."
   }),
-  skipped: z.literal(true).optional().meta({
-    description: 'Not called: it was cooling down after that failure (#68). Absent when tried.'
-  })
+  skipped: z
+    .literal(true)
+    .optional()
+    .meta({
+      description:
+        'Not called: it was cooling down after that failure (#68), or below its quota reserve ' +
+        '(#69). Absent when tried.'
+    })
 })
 
 /** One model of an alias's fallback chain that did not answer (#67, #68). */
@@ -53,34 +81,77 @@ export const attemptsSchema = z
       '(#67); present only when one did.'
   })
 
-/** Which model answered a request, and how the request got to it (#66, #67). */
+/** `x_pi.login`: documents the response; never parsed. */
+export const loginSchema = z
+  .string()
+  .trim()
+  .optional()
+  .meta({
+    description:
+      'The login that answered (`anthropic`, `anthropic-2`), when the model has more ' +
+      'than one (#227); absent otherwise.'
+  })
+
+/** `x_pi.reasoning_effort`: documents the response; never parsed. */
+export const reasoningEffortSchema = z
+  .object({
+    requested: z
+      .enum(REASONING_EFFORTS)
+      .nullable()
+      .meta({ description: 'The `reasoning_effort` the request sent, or null when it sent none.' }),
+    applied: z.enum(REASONING_EFFORTS).meta({
+      description:
+        "The effort the proxy asked pi to run the model at: the alias target's when it sets one " +
+        '(#230), else `requested` when the model supports it, else the nearest level it does. ' +
+        "pi's adapter may still translate it for the provider."
+    })
+  })
+  .optional()
+  .meta({
+    description:
+      'What the request asked for and what the model that answered runs at (#175); present ' +
+      "only when the request set `reasoning_effort` or the alias's target sets an effort (#230)."
+  })
+
+/** Which model answered a request, and how the request got to it (#66, #67, #227). */
 export interface ResponseRoute {
   /** The canonical ID of the model that answered, reported as `model`. */
   readonly model: string
+  /** The login that answered, reported as `x_pi.login` when the model has more than one. */
+  readonly login?: string
   /** The alias the request named, reported as `x_pi.alias`. */
   readonly alias?: string
   /** The alias's failed attempts before `model`, reported as `x_pi.attempts`. */
   readonly attempts?: readonly Attempt[]
+  /** The effort asked for and applied on `model`, reported as `x_pi.reasoning_effort`. */
+  readonly reasoningEffort?: EffortReport | undefined
+}
+
+/** The `x_pi` fields a route adds. */
+export interface RouteFields {
+  readonly alias?: string
+  readonly login?: string
+  readonly attempts?: Attempt[]
+  readonly reasoning_effort?: EffortReport
 }
 
 /**
- * Returns the `x_pi` fields a route adds: the alias, and the failed attempts, each only when there
- * is one, so a request without them is unchanged.
+ * Returns the `x_pi` fields a route adds: the alias, the login, the failed attempts and the
+ * effort report, each only when there is one, so a request without them is unchanged.
  *
  * @param route - how the request got to the model that answered
  * @returns the fields to spread into `x_pi`
  */
-export function routeFields(route: ResponseRoute): { alias?: string; attempts?: Attempt[] } {
+export function routeFields(route: ResponseRoute): RouteFields {
   return {
     ...(route.alias === undefined ? {} : { alias: route.alias }),
+    ...(route.login === undefined ? {} : { login: route.login }),
     ...(route.attempts === undefined || route.attempts.length === 0
       ? {}
-      : { attempts: [...route.attempts] })
+      : { attempts: [...route.attempts] }),
+    ...(route.reasoningEffort === undefined ? {} : { reasoning_effort: route.reasoningEffort })
   }
 }
-
-/** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
-const MS_PER_SECOND = 1000
 
 /** The finish reasons the proxy sends; pi cannot tell apart any other OpenAI one. */
 export const finishReasonSchema = z.enum(['stop', 'length', 'tool_calls'])
@@ -169,6 +240,8 @@ export const openAIChatCompletionSchema = z
         alias: z.string().trim().optional().meta({
           description: 'The alias the request named (#66); present only when it named one.'
         }),
+        login: loginSchema,
+        reasoning_effort: reasoningEffortSchema,
         attempts: attemptsSchema
       })
       .meta({
@@ -298,7 +371,7 @@ export function buildChatCompletion(
   return {
     id: requestId,
     object: 'chat.completion',
-    created: Math.floor(Date.now() / MS_PER_SECOND),
+    created: unixSecondsNow(),
     model: canonicalModelId,
     choices: [
       {

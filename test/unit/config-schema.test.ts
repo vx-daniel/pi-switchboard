@@ -11,7 +11,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { resetSync } from '@logtape/logtape'
-import { DEFAULT_CONFIG, getConfigPath, normalizeConfig } from '@proxy/config/schema'
+import {
+  DEFAULT_CONFIG,
+  getConfigPath,
+  intBounds,
+  normalizeConfig,
+  parseIntText,
+  ProxyConfigSchema
+} from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -184,6 +191,115 @@ describe('normalizeConfig', () => {
     expect(result.aliases).toEqual({ chain })
   })
 
+  // Catches a target with an effort kept without its model or with an effort nobody defined, or
+  // a model object without an effort kept (it would look like an alias that sets one): each is
+  // dropped, and the valid single and chain forms beside them are kept as written (#230).
+  test('keeps targets that set a valid effort and drops the invalid ones', () => {
+    const reviewer = { model: 'anthropic/opus', reasoningEffort: 'high' }
+    const builder = {
+      targets: [{ model: 'anthropic/opus', reasoningEffort: 'high' }, 'openai/gpt'],
+      fallbackOn: ['rate_limit']
+    }
+    const result = normalizeConfig({
+      aliases: {
+        reviewer,
+        builder,
+        'no-effort': { model: 'anthropic/opus' },
+        'bad-effort': { model: 'anthropic/opus', reasoningEffort: 'extreme' },
+        'no-model': { reasoningEffort: 'high' },
+        'bad-in-chain': {
+          targets: [{ model: 'anthropic/opus', reasoningEffort: 'turbo' }],
+          fallbackOn: []
+        }
+      }
+    })
+
+    expect(result.aliases).toEqual({ reviewer, builder })
+  })
+
+  // Catches an entry mixing a model and a family read as one of them with the other key silently
+  // ignored (#231): it is dropped with the config warning, beside valid family targets.
+  test('keeps family targets, and drops one that also names a model', () => {
+    const latest = { family: 'anthropic/claude-opus' }
+    const steady = {
+      family: 'anthropic/claude-opus',
+      pin: 'anthropic/claude-opus-5',
+      reasoningEffort: 'high'
+    }
+    const result = normalizeConfig({
+      aliases: {
+        latest,
+        steady,
+        'mixed': { model: 'anthropic/claude-opus-5', family: 'anthropic/claude-opus' },
+        'mixed-effort': {
+          model: 'anthropic/claude-opus-5',
+          family: 'anthropic/claude-opus',
+          reasoningEffort: 'high'
+        },
+        'no-family': { pin: 'anthropic/claude-opus-5' }
+      }
+    })
+
+    expect(result.aliases).toEqual({ latest, steady })
+  })
+
+  // Catches one bad reserve costing the others, or a share outside 0–1 kept: a reserve above 1
+  // would skip a provider whenever it reports quota, and a negative one never would (#69).
+  test('keeps the valid quota reserves and drops the invalid ones', () => {
+    const result = normalizeConfig({
+      routing: {
+        reserve: {
+          'anthropic': 0.2,
+          'openai-codex': 0,
+          'google': 1.5,
+          'xai': -0.1,
+          'mistral': '0.3',
+          '': 0.5
+        }
+      }
+    })
+
+    expect(result.routing.reserve).toEqual({ 'anthropic': 0.2, 'openai-codex': 0 })
+    expect(normalizeConfig({}).routing).toEqual({
+      reserve: {},
+      logins: { fallbackOn: ['rate_limit'] }
+    })
+  })
+
+  // Catches an invalid class list kept (a typo would turn login fallback off silently) or the
+  // default lost when the section is left out: the default is the reason to log in twice (#227).
+  test('repairs routing.logins.fallbackOn to its default and keeps a valid list', () => {
+    expect(
+      normalizeConfig({ routing: { logins: { fallbackOn: ['rate-limit'] } } }).routing.logins
+    ).toEqual({ fallbackOn: ['rate_limit'] })
+    expect(normalizeConfig({ routing: { logins: { fallbackOn: [] } } }).routing.logins).toEqual({
+      fallbackOn: []
+    })
+    expect(
+      normalizeConfig({ routing: { logins: { fallbackOn: ['auth', 'unavailable'] } } }).routing
+        .logins
+    ).toEqual({ fallbackOn: ['auth', 'unavailable'] })
+  })
+
+  // Catches one bad label costing the others, an empty or padded label kept (the console shows it
+  // beside the login), or a label that is not text.
+  test('keeps the valid login labels, trimmed, and drops the invalid ones', () => {
+    const result = normalizeConfig({
+      labels: {
+        'anthropic-2': '  work  ',
+        'openai-codex': 'personal',
+        'google': '',
+        'xai': '   ',
+        'groq': 7,
+        'mistral': 'x'.repeat(41),
+        '': 'nobody'
+      }
+    })
+
+    expect(result.labels).toEqual({ 'anthropic-2': 'work', 'openai-codex': 'personal' })
+    expect(normalizeConfig({}).labels).toEqual({})
+  })
+
   // Catches a valid field being dropped or replaced by its default during normalization.
   test('preserves all fields from a complete valid config', () => {
     const full = {
@@ -193,6 +309,8 @@ describe('normalizeConfig', () => {
       authToken: 'tok',
       remoteImages: true,
       docsUi: true,
+      responsesApi: true,
+      stats: false,
       maxBodySizeMb: 100,
       upstreamTimeoutSec: 300,
       publicModelIdMode: 'always-prefixed',
@@ -200,7 +318,9 @@ describe('normalizeConfig', () => {
       customModels: ['openai/gpt-4o'],
       providerPrefixes: { openai: 'oai' },
       aliases: { coding: 'openai/gpt-4o' },
+      labels: { 'anthropic-2': 'work' },
       logLevel: 'debug',
+      routing: { reserve: { anthropic: 0.2 }, logins: { fallbackOn: ['rate_limit', 'auth'] } },
       zed: { providerName: 'My Proxy', autoSync: true }
     }
     expect(normalizeConfig(full)).toEqual(full)
@@ -387,5 +507,39 @@ describe('getConfigPath', () => {
     vi.stubEnv('HOME', undefined)
 
     expect(getConfigPath()).toBe(join(homedir(), ...under, 'proxy-config.json'))
+  })
+})
+
+describe('parseIntText', () => {
+  const fields = ProxyConfigSchema.shape
+  const cases = [
+    ['port', fields.port],
+    ['maxBodySizeMb', fields.maxBodySizeMb],
+    ['upstreamTimeoutSec', fields.upstreamTimeoutSec]
+  ] as const
+
+  // Catches an off-by-one at either bound of a field's schema: the env vars and the CLI flags are
+  // held to exactly the file's range, inclusive.
+  test.each(cases)('%s: both bounds are accepted and one past each is not', (_name, schema) => {
+    const { min, max } = intBounds(schema)
+
+    expect(parseIntText(String(min), schema)).toBe(min)
+    expect(parseIntText(String(max), schema)).toBe(max)
+    expect(parseIntText(String(min - 1), schema)).toBeUndefined()
+    expect(parseIntText(String(max + 1), schema)).toBeUndefined()
+  })
+
+  // Catches whitespace around a value (a shell's `PORT=" 8080 "`) being refused, and the lenient
+  // forms `Number.parseInt` and `Number` would read being accepted.
+  test.each([
+    [' 8080 ', 8080],
+    ['8080\n', 8080],
+    ['80abc', undefined],
+    ['0x1F90', undefined],
+    ['8e3', undefined],
+    ['-1', undefined],
+    ['', undefined]
+  ])('%j parses as %s', (text, expected) => {
+    expect(parseIntText(text, ProxyConfigSchema.shape.port)).toBe(expected)
   })
 })

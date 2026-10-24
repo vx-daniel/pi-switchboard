@@ -4,14 +4,19 @@
  * @packageDocumentation
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
+import { type Api, getSupportedThinkingLevels, type Model } from '@earendil-works/pi-ai'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
+  aliasFallbackOn,
+  aliasModels,
   configFileAuthTokenInvalid,
+  isAliasChain,
   loadConfigFromFile,
-  type ProxyConfig
+  type ProxyConfig,
+  targetSummary
 } from '@vx-daniel/pi-switchboard/config'
 import {
+  canonicalModelId,
   computeModelExposure,
   type ExposedModel,
   type ModelExposureOutcome
@@ -58,7 +63,11 @@ export async function buildConfigReport(state: ProxyState): Promise<string> {
   const enabledModels =
     config.modelExposureMode === 'scoped' ? await getSessionEnabledModels(state) : undefined
   const models = getSessionAvailableModels(state)
-  const outcome = computeModelExposure(models, await buildExposureConfig(state))
+  const outcome = computeModelExposure(
+    models,
+    await buildExposureConfig(state),
+    getSupportedThinkingLevels
+  )
   if (!outcome.ok) {
     reportsLogger.warn('Model exposure error in /proxy show: {message}', {
       message: outcome.message
@@ -141,6 +150,7 @@ function formatServerSettings(config: ProxyConfig): string[] {
     `auth: ${authDisplay}`,
     `remote images: ${String(config.remoteImages)}`,
     `docs ui: ${String(config.docsUi)}`,
+    `stats: ${String(config.stats)}`,
     `max body: ${String(config.maxBodySizeMb)} MB`,
     `timeout: ${String(config.upstreamTimeoutSec)}s`
   ]
@@ -173,11 +183,15 @@ function formatExposurePolicy(
     )
     lines.push(`prefixes: ${pairs.join(', ')}`)
   }
-  const aliasPairs = Object.entries(config.aliases).map(([alias, target]) =>
-    typeof target === 'string'
-      ? `${alias}=${target}`
-      : `${alias}=${target.targets.join(' > ')} (on ${target.fallbackOn.join(', ') || 'nothing'})`
-  )
+  const aliasPairs = Object.entries(config.aliases).map(([alias, target]) => {
+    const models = aliasModels(target).map((aliasTarget) =>
+      aliasTarget.reasoningEffort === undefined
+        ? targetSummary(aliasTarget)
+        : `${targetSummary(aliasTarget)}@${aliasTarget.reasoningEffort}`
+    )
+    if (!isAliasChain(target)) return `${alias}=${models.join('')}`
+    return `${alias}=${models.join(' > ')} (on ${aliasFallbackOn(target).join(', ') || 'nothing'})`
+  })
   if (aliasPairs.length > 0) lines.push(`aliases: ${aliasPairs.join(', ')}`)
   return lines
 }
@@ -247,7 +261,11 @@ export async function showModels(state: ProxyState, context: ExtensionContext): 
 export async function buildModelsReport(state: ProxyState): Promise<Report> {
   state.config = loadConfigFromFile()
   const models = getSessionAvailableModels(state)
-  const outcome = computeModelExposure(models, await buildExposureConfig(state))
+  const outcome = computeModelExposure(
+    models,
+    await buildExposureConfig(state),
+    getSupportedThinkingLevels
+  )
 
   if (!outcome.ok) {
     reportsLogger.warn('Model exposure error in /proxy models: {message}', {
@@ -325,7 +343,11 @@ export async function buildVerifyReport(state: ProxyState): Promise<Report> {
   const { config } = state
   const models = getSessionAvailableModels(state)
   // Run the full exposure computation to catch ID/prefix errors
-  const outcome = computeModelExposure(models, await buildExposureConfig(state))
+  const outcome = computeModelExposure(
+    models,
+    await buildExposureConfig(state),
+    getSupportedThinkingLevels
+  )
   const issues = collectExposureIssues(config, models, outcome)
   const exposedCount = outcome.ok ? outcome.models.length : 0
 
@@ -384,7 +406,7 @@ function collectCustomModelIssues(
   customModels: readonly string[],
   models: readonly Model<Api>[]
 ): string[] {
-  const canonicalSet = new Set(models.map((model) => `${model.provider}/${model.id}`))
+  const canonicalSet = new Set(models.map((model) => canonicalModelId(model)))
   const issues = customModels
     .filter((canonicalId) => !canonicalSet.has(canonicalId))
     .map((canonicalId) => `Custom model '${canonicalId}' is not available (no auth or unknown).`)

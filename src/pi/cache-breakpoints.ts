@@ -25,7 +25,8 @@
 import type { Api, AssistantMessage, Model } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import type { OpenAIMessage, PromptCacheBreakpoint } from '@proxy/openai/schemas'
-import { isRecord } from '@proxy/utils/guards'
+import { canonicalModelId } from '@proxy/pi/model-id'
+import { isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
 
 /** Logger for upstream payload handling. */
 const breakpointLogger = proxyLogger('pi', 'complete')
@@ -156,16 +157,6 @@ function messageField(model: Model<Api>): 'messages' | 'input' | undefined {
 }
 
 /**
- * The key a model is remembered by: `provider/id`, as two providers can serve one model ID.
- *
- * @param model - the pi model
- * @returns the model's `provider/id`
- */
-function modelKey(model: Model<Api>): string {
-  return `${model.provider}/${model.id}`
-}
-
-/**
  * Reads which request field an upstream 400 names, from the JSON body pi puts after the status.
  *
  * @param errorMessage - the failed call's error message, as pi's OpenAI adapters word it
@@ -175,12 +166,7 @@ function modelKey(model: Model<Api>): string {
 function badRequestParam(errorMessage: string): unknown {
   const prefix = BAD_REQUEST_PREFIX.exec(errorMessage)?.[0]
   if (prefix === undefined) return undefined
-  let body: unknown
-  try {
-    body = JSON.parse(errorMessage.slice(prefix.length))
-  } catch {
-    return undefined
-  }
+  const body = parseJsonOrUndefined(errorMessage.slice(prefix.length))
   if (!isRecord(body)) return undefined
   return isRecord(body['error']) ? body['error']['param'] : body['param']
 }
@@ -297,7 +283,7 @@ export function breakpointPatch(
     )
     return undefined
   }
-  if (modelsRefusingBreakpoints.has(modelKey(model))) {
+  if (modelsRefusingBreakpoints.has(canonicalModelId(model))) {
     breakpointLogger.debug(
       'Dropped {count} prompt_cache_breakpoint(s) for {modelId}: the model refused them earlier',
       { count: plan.count, modelId: model.id, api: model.api }
@@ -355,7 +341,7 @@ export function retryWithoutBreakpoints(
   if (failed.stopReason !== 'error') return false
   if (badRequestParam(failed.errorMessage ?? '') !== 'prompt_cache_breakpoint') return false
   if (breakpointPlan(messages) === undefined || messageField(model) === undefined) return false
-  const key = modelKey(model)
+  const key = canonicalModelId(model)
   if (modelsRefusingBreakpoints.has(key)) return true
   modelsRefusingBreakpoints.add(key)
   breakpointLogger.info(

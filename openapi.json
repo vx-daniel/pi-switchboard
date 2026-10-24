@@ -183,7 +183,11 @@
                   "type": "string",
                   "enum": [
                     "shadows-model",
-                    "target-not-exposed"
+                    "target-not-exposed",
+                    "effort-unsupported",
+                    "family-unknown",
+                    "pin-outside-family",
+                    "family-unparsed"
                   ]
                 },
                 "alias": {
@@ -192,7 +196,7 @@
                 },
                 "target": {
                   "type": "string",
-                  "description": "The canonical ID it names, as written."
+                  "description": "The canonical ID or family it names, as written; for `family-unparsed`, a member pi has (exposed or hidden) whose version the family rule cannot read."
                 },
                 "message": {
                   "type": "string"
@@ -206,7 +210,84 @@
               ],
               "additionalProperties": false
             },
-            "description": "Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the check fail), or naming no exposed model (`target-not-exposed`)."
+            "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), following a family no rule knows (`family-unknown`, #231) or pinned outside it (`pin-outside-family`), all of which make the check fail; naming no exposed model (`target-not-exposed`); or a family member whose version the rule can't read (`family-unparsed`, never picked)."
+          },
+          "familyAliases": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "alias": {
+                  "type": "string",
+                  "description": "The alias, as written."
+                },
+                "position": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991,
+                  "description": "The target's place in the alias, from 0."
+                },
+                "family": {
+                  "type": "string",
+                  "description": "The family it follows, as written."
+                },
+                "pin": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The canonical ID it is pinned to."
+                },
+                "resolved": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The canonical ID it serves now: the pin, else the newest exposed member."
+                },
+                "newest": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The newest exposed member."
+                },
+                "newerHidden": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "A newer member pi has that the exposure config hides; the alias honours the hiding."
+                }
+              },
+              "required": [
+                "alias",
+                "position",
+                "family",
+                "pin",
+                "resolved",
+                "newest",
+                "newerHidden"
+              ],
+              "additionalProperties": false
+            },
+            "description": "What each family alias target resolves to now (#231): its pin, else the newest exposed member, with a newer member the exposure config hides."
           },
           "cooldowns": {
             "type": "array",
@@ -221,7 +302,8 @@
                   ]
                 },
                 "provider": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "The login's provider ID."
                 },
                 "model": {
                   "anyOf": [
@@ -293,6 +375,7 @@
           "exposureError",
           "scopeDiagnostics",
           "aliasDiagnostics",
+          "familyAliases",
           "cooldowns",
           "modelsJsonError"
         ],
@@ -361,12 +444,114 @@
                 },
                 "error": {
                   "type": "string"
+                },
+                "quota": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "observedAt": {
+                          "type": "string",
+                          "description": "When the response that reported it arrived, as an ISO 8601 time."
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "plan": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "windows": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string"
+                              },
+                              "used": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The share used, from 0 to 1."
+                              },
+                              "resetsAt": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "An ISO 8601 time."
+                              },
+                              "windowMinutes": {
+                                "anyOf": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 0
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "used",
+                              "resetsAt",
+                              "windowMinutes",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "observedAt",
+                        "status",
+                        "plan",
+                        "windows"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The provider's latest subscription quota, from its response headers (#69), or null when it reports none. A window that has reset since is left out."
                 }
               },
               "required": [
                 "provider",
                 "type",
-                "availableModelCount"
+                "availableModelCount",
+                "quota"
               ],
               "additionalProperties": false
             }
@@ -439,7 +624,11 @@
                 "max"
               ]
             },
-            "description": "The `reasoning_effort` values the model runs at as asked, lowest first. Any other value is accepted and clamped to the nearest level the model supports. `[\"none\"]` for a model without reasoning."
+            "description": "The `reasoning_effort` values the model runs at as asked, lowest first. Any other value is accepted and clamped to the nearest level the model supports. `[\"none\"]` for a model without reasoning. For an alias whose first target sets its effort, that effort alone."
+          },
+          "reasoning_effort_fixed": {
+            "type": "boolean",
+            "description": "True for an alias whose first target sets its effort (#230): a request's `reasoning_effort` is replaced by the one listed. A fallback chain lists its first target; a later target runs at its own effort, or the request's. False otherwise."
           },
           "input": {
             "type": "array",
@@ -516,7 +705,7 @@
                       "provider",
                       "model"
                     ],
-                    "description": "A 429 cools the whole provider (its login); an overload, the model."
+                    "description": "A 429 cools the whole login; an overload, the model."
                   },
                   "until": {
                     "type": "integer",
@@ -536,7 +725,283 @@
                 "type": "null"
               }
             ],
-            "description": "The cooldown the model is under (#68), or null. An alias chain that names the reason in `fallbackOn` skips it until then; a request that names the model still calls it."
+            "description": "The cooldown the model is under (#68), or null. A route that names the reason in its `fallbackOn` skips it until then; one that names neither still calls it."
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "observed_at": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "When the response that reported it arrived, in Unix seconds."
+                  },
+                  "status": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The provider's overall status, such as Anthropic's `allowed`."
+                  },
+                  "plan": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "The plan, such as Codex's `plus`."
+                  },
+                  "windows": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "name": {
+                          "type": "string",
+                          "description": "The provider's name for the window: `5h`, `7d`, `primary`, `secondary`."
+                        },
+                        "used": {
+                          "type": "number",
+                          "minimum": 0,
+                          "maximum": 1,
+                          "description": "The share used, from 0 to 1."
+                        },
+                        "resets_at": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When it resets, in Unix seconds."
+                        },
+                        "window_minutes": {
+                          "anyOf": [
+                            {
+                              "type": "number",
+                              "minimum": 0
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "name",
+                        "used",
+                        "resets_at",
+                        "window_minutes",
+                        "status"
+                      ],
+                      "additionalProperties": false
+                    }
+                  }
+                },
+                "required": [
+                  "observed_at",
+                  "status",
+                  "plan",
+                  "windows"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The login's latest subscription quota, from its response headers (#69), or null when it reports none (Google, API keys, or no call since the proxy started). A window that has reset since is left out."
+          },
+          "logins": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "description": "The login: the provider, or one of its extra logins (`anthropic-2`, #227)."
+                },
+                "cooldown": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "reason": {
+                          "type": "string",
+                          "enum": [
+                            "rate_limit",
+                            "unavailable"
+                          ],
+                          "description": "The failure it is cooling down from: a 429, or a 503 or 529."
+                        },
+                        "scope": {
+                          "type": "string",
+                          "enum": [
+                            "provider",
+                            "model"
+                          ],
+                          "description": "A 429 cools the whole login; an overload, the model."
+                        },
+                        "until": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991,
+                          "description": "When it ends, in Unix seconds."
+                        }
+                      },
+                      "required": [
+                        "reason",
+                        "scope",
+                        "until"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The cooldown the model is under (#68), or null. A route that names the reason in its `fallbackOn` skips it until then; one that names neither still calls it."
+                },
+                "quota": {
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "observed_at": {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991,
+                          "description": "When the response that reported it arrived, in Unix seconds."
+                        },
+                        "status": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The provider's overall status, such as Anthropic's `allowed`."
+                        },
+                        "plan": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The plan, such as Codex's `plus`."
+                        },
+                        "windows": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "description": "The provider's name for the window: `5h`, `7d`, `primary`, `secondary`."
+                              },
+                              "used": {
+                                "type": "number",
+                                "minimum": 0,
+                                "maximum": 1,
+                                "description": "The share used, from 0 to 1."
+                              },
+                              "resets_at": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "When it resets, in Unix seconds."
+                              },
+                              "window_minutes": {
+                                "anyOf": [
+                                  {
+                                    "type": "number",
+                                    "minimum": 0
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "status": {
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "name",
+                              "used",
+                              "resets_at",
+                              "window_minutes",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          }
+                        }
+                      },
+                      "required": [
+                        "observed_at",
+                        "status",
+                        "plan",
+                        "windows"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "The login's latest subscription quota, from its response headers (#69), or null when it reports none (Google, API keys, or no call since the proxy started). A window that has reset since is left out."
+                }
+              },
+              "required": [
+                "id",
+                "cooldown",
+                "quota"
+              ],
+              "additionalProperties": false
+            },
+            "description": "The logins that may serve the model, in the order routing tries them (#227). The model's own `cooldown` and `quota` are the first login's."
           }
         },
         "required": [
@@ -544,11 +1009,14 @@
           "provider",
           "reasoning",
           "reasoning_efforts",
+          "reasoning_effort_fixed",
           "input",
           "context_window",
           "max_output_tokens",
           "cost",
-          "cooldown"
+          "cooldown",
+          "quota",
+          "logins"
         ],
         "additionalProperties": false,
         "description": "What pi knows about an exposed model."
@@ -876,7 +1344,11 @@
                             "type": "string",
                             "enum": [
                               "shadows-model",
-                              "target-not-exposed"
+                              "target-not-exposed",
+                              "effort-unsupported",
+                              "family-unknown",
+                              "pin-outside-family",
+                              "family-unparsed"
                             ]
                           },
                           "alias": {
@@ -885,7 +1357,7 @@
                           },
                           "target": {
                             "type": "string",
-                            "description": "The canonical ID it names, as written."
+                            "description": "The canonical ID or family it names, as written; for `family-unparsed`, a member pi has (exposed or hidden) whose version the family rule cannot read."
                           },
                           "message": {
                             "type": "string"
@@ -899,7 +1371,84 @@
                         ],
                         "additionalProperties": false
                       },
-                      "description": "Aliases left out (#66): named like an exposed model (`shadows-model`, which makes the check fail), or naming no exposed model (`target-not-exposed`)."
+                      "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), following a family no rule knows (`family-unknown`, #231) or pinned outside it (`pin-outside-family`), all of which make the check fail; naming no exposed model (`target-not-exposed`); or a family member whose version the rule can't read (`family-unparsed`, never picked)."
+                    },
+                    "familyAliases": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "alias": {
+                            "type": "string",
+                            "description": "The alias, as written."
+                          },
+                          "position": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991,
+                            "description": "The target's place in the alias, from 0."
+                          },
+                          "family": {
+                            "type": "string",
+                            "description": "The family it follows, as written."
+                          },
+                          "pin": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The canonical ID it is pinned to."
+                          },
+                          "resolved": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The canonical ID it serves now: the pin, else the newest exposed member."
+                          },
+                          "newest": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The newest exposed member."
+                          },
+                          "newerHidden": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "A newer member pi has that the exposure config hides; the alias honours the hiding."
+                          }
+                        },
+                        "required": [
+                          "alias",
+                          "position",
+                          "family",
+                          "pin",
+                          "resolved",
+                          "newest",
+                          "newerHidden"
+                        ],
+                        "additionalProperties": false
+                      },
+                      "description": "What each family alias target resolves to now (#231): its pin, else the newest exposed member, with a newer member the exposure config hides."
                     },
                     "cooldowns": {
                       "type": "array",
@@ -914,7 +1463,8 @@
                             ]
                           },
                           "provider": {
-                            "type": "string"
+                            "type": "string",
+                            "description": "The login's provider ID."
                           },
                           "model": {
                             "anyOf": [
@@ -986,6 +1536,7 @@
                     "exposureError",
                     "scopeDiagnostics",
                     "aliasDiagnostics",
+                    "familyAliases",
                     "cooldowns",
                     "modelsJsonError"
                   ],
@@ -1131,12 +1682,114 @@
                           },
                           "error": {
                             "type": "string"
+                          },
+                          "quota": {
+                            "anyOf": [
+                              {
+                                "type": "object",
+                                "properties": {
+                                  "observedAt": {
+                                    "type": "string",
+                                    "description": "When the response that reported it arrived, as an ISO 8601 time."
+                                  },
+                                  "status": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "plan": {
+                                    "anyOf": [
+                                      {
+                                        "type": "string"
+                                      },
+                                      {
+                                        "type": "null"
+                                      }
+                                    ]
+                                  },
+                                  "windows": {
+                                    "type": "array",
+                                    "items": {
+                                      "type": "object",
+                                      "properties": {
+                                        "name": {
+                                          "type": "string"
+                                        },
+                                        "used": {
+                                          "type": "number",
+                                          "minimum": 0,
+                                          "maximum": 1,
+                                          "description": "The share used, from 0 to 1."
+                                        },
+                                        "resetsAt": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ],
+                                          "description": "An ISO 8601 time."
+                                        },
+                                        "windowMinutes": {
+                                          "anyOf": [
+                                            {
+                                              "type": "number",
+                                              "minimum": 0
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        },
+                                        "status": {
+                                          "anyOf": [
+                                            {
+                                              "type": "string"
+                                            },
+                                            {
+                                              "type": "null"
+                                            }
+                                          ]
+                                        }
+                                      },
+                                      "required": [
+                                        "name",
+                                        "used",
+                                        "resetsAt",
+                                        "windowMinutes",
+                                        "status"
+                                      ],
+                                      "additionalProperties": false
+                                    }
+                                  }
+                                },
+                                "required": [
+                                  "observedAt",
+                                  "status",
+                                  "plan",
+                                  "windows"
+                                ],
+                                "additionalProperties": false
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The provider's latest subscription quota, from its response headers (#69), or null when it reports none. A window that has reset since is left out."
                           }
                         },
                         "required": [
                           "provider",
                           "type",
-                          "availableModelCount"
+                          "availableModelCount",
+                          "quota"
                         ],
                         "additionalProperties": false
                       }
@@ -1447,6 +2100,811 @@
             }
           }
         }
+      }
+    },
+    "/v1/switchboard/usage": {
+      "get": {
+        "operationId": "getUsage",
+        "tags": [
+          "Switchboard"
+        ],
+        "summary": "Usage over a window, from the stats file",
+        "description": "Not OpenAI's: requests, timings, attempts, tokens and cost per served model and per alias, failures by class, rejected requests by status, and a timeline, from the stats the proxy keeps. Routes and counts only: never message content, `user` or a credential.",
+        "responses": {
+          "200": {
+            "description": "The usage over the window.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "switchboard.usage"
+                    },
+                    "window": {
+                      "type": "string",
+                      "enum": [
+                        "today",
+                        "week",
+                        "all"
+                      ]
+                    },
+                    "from": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "description": "The window's first minute."
+                    },
+                    "to": {
+                      "type": "string",
+                      "format": "date-time",
+                      "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$",
+                      "description": "The minute after its last."
+                    },
+                    "bucket_minutes": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991,
+                      "description": "Minutes per `timeline` bucket."
+                    },
+                    "models": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "model": {
+                            "type": "string"
+                          },
+                          "requests": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Finished requests, rejected ones excluded."
+                          },
+                          "failed": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "left": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Requests the client left before the answer."
+                          },
+                          "average_ms": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Average time per request."
+                          },
+                          "slowest_ms": {
+                            "type": "number"
+                          },
+                          "average_first_event_ms": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Average time to a stream's first event."
+                          },
+                          "attempts": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Upstream calls, fallbacks included."
+                          },
+                          "fallbacks": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "input_tokens": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "output_tokens": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "cache_tokens": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Cache reads and writes."
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "model",
+                          "requests",
+                          "failed",
+                          "left",
+                          "average_ms",
+                          "slowest_ms",
+                          "average_first_event_ms",
+                          "attempts",
+                          "fallbacks",
+                          "input_tokens",
+                          "output_tokens",
+                          "cache_tokens",
+                          "cost_usd"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "aliases": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "alias": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The alias; `null` for requests that named a model directly."
+                          },
+                          "requests": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Finished requests, rejected ones excluded."
+                          },
+                          "failed": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "left": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Requests the client left before the answer."
+                          },
+                          "average_ms": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Average time per request."
+                          },
+                          "slowest_ms": {
+                            "type": "number"
+                          },
+                          "average_first_event_ms": {
+                            "anyOf": [
+                              {
+                                "type": "number"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "Average time to a stream's first event."
+                          },
+                          "attempts": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Upstream calls, fallbacks included."
+                          },
+                          "fallbacks": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "input_tokens": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "output_tokens": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "cache_tokens": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Cache reads and writes."
+                          },
+                          "cost_usd": {
+                            "type": "number"
+                          }
+                        },
+                        "required": [
+                          "alias",
+                          "requests",
+                          "failed",
+                          "left",
+                          "average_ms",
+                          "slowest_ms",
+                          "average_first_event_ms",
+                          "attempts",
+                          "fallbacks",
+                          "input_tokens",
+                          "output_tokens",
+                          "cache_tokens",
+                          "cost_usd"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "failures": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "class": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "class",
+                          "count"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "rejected": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "status": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "count": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "status",
+                          "count"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "timeline": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "start": {
+                            "type": "string",
+                            "format": "date-time",
+                            "pattern": "^(?:(?:\\d\\d[2468][048]|\\d\\d[13579][26]|\\d\\d0[48]|[02468][048]00|[13579][26]00)-02-29|\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|(?:02)-(?:0[1-9]|1\\d|2[0-8])))T(?:(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d+)?)?(?:Z))$"
+                          },
+                          "requests": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991,
+                            "description": "Finished requests, rejected ones included."
+                          },
+                          "failed": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          },
+                          "rejected": {
+                            "type": "integer",
+                            "minimum": -9007199254740991,
+                            "maximum": 9007199254740991
+                          }
+                        },
+                        "required": [
+                          "start",
+                          "requests",
+                          "failed",
+                          "rejected"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "window",
+                    "from",
+                    "to",
+                    "bucket_minutes",
+                    "models",
+                    "aliases",
+                    "failures",
+                    "rejected",
+                    "timeline"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The stats file's usage over a window."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`window` is not `today`, `week` or `all`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "Stats are off (`--no-stats`), or the stats file could not be read (`stats_unavailable`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "window",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "description": "`today` (from local midnight; the default), `week` (the last 7 days) or `all` (the last 30 days, all the stats file keeps)."
+          }
+        ]
+      }
+    },
+    "/v1/switchboard/cooldowns": {
+      "delete": {
+        "operationId": "clearCooldowns",
+        "tags": [
+          "Switchboard"
+        ],
+        "summary": "End cooldowns early",
+        "description": "Not OpenAI's (#182): ends the cooldowns a 429, 503 or 529 started, so a fallback chain calls those models again at once. No query ends every one; `provider` ends a login's, `model` a model's own, and both end both. The next failure without a time waits 60 s again.",
+        "responses": {
+          "200": {
+            "description": "The cooldowns ended; empty when none was active.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "object": {
+                      "type": "string",
+                      "const": "list"
+                    },
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "scope": {
+                            "type": "string",
+                            "enum": [
+                              "provider",
+                              "model"
+                            ]
+                          },
+                          "provider": {
+                            "type": "string",
+                            "description": "The login's provider ID."
+                          },
+                          "model": {
+                            "anyOf": [
+                              {
+                                "type": "string"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ],
+                            "description": "The canonical ID, for a model."
+                          },
+                          "reason": {
+                            "type": "string",
+                            "enum": [
+                              "rate_limit",
+                              "unavailable"
+                            ]
+                          },
+                          "until": {
+                            "type": "string",
+                            "description": "When it ends, as an ISO 8601 time."
+                          },
+                          "secondsLeft": {
+                            "type": "integer",
+                            "minimum": 0,
+                            "maximum": 9007199254740991
+                          },
+                          "source": {
+                            "type": "string",
+                            "enum": [
+                              "response",
+                              "backoff"
+                            ],
+                            "description": "Whether the failed response gave the time, or the growing default did (60 s, 180 s, then doubling)."
+                          }
+                        },
+                        "required": [
+                          "scope",
+                          "provider",
+                          "model",
+                          "reason",
+                          "until",
+                          "secondsLeft",
+                          "source"
+                        ],
+                        "additionalProperties": false
+                      }
+                    }
+                  },
+                  "required": [
+                    "object",
+                    "data"
+                  ],
+                  "additionalProperties": false,
+                  "description": "The cooldowns that were active and are now ended, soonest end first."
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No login by the `provider` ID serves an exposed model or is cooling down (`login_not_found`), or no model by the `model` ID is exposed or cooling down (`model_not_found`).",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "query",
+            "name": "provider",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "description": "A login's provider ID, such as `anthropic-2`: ends its cooldown after a 429."
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              ]
+            },
+            "description": "A model's canonical or public ID: ends the model's own cooldown after a 503 or 529, not its logins'. A 429 cools the login, not the model: end it with `provider`, as `model` alone then answers an empty list."
+          }
+        ]
       }
     },
     "/v1/models/{model}": {
@@ -1769,6 +3227,54 @@
                           "description": "The alias the request named (#66); present only when it named one.",
                           "type": "string"
                         },
+                        "login": {
+                          "description": "The login that answered (`anthropic`, `anthropic-2`), when the model has more than one (#227); absent otherwise.",
+                          "type": "string"
+                        },
+                        "reasoning_effort": {
+                          "description": "What the request asked for and what the model that answered runs at (#175); present only when the request set `reasoning_effort` or the alias's target sets an effort (#230).",
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "minimal",
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The `reasoning_effort` the request sent, or null when it sent none."
+                            },
+                            "applied": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "minimal",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max"
+                              ],
+                              "description": "The effort the proxy asked pi to run the model at: the alias target's when it sets one (#230), else `requested` when the model supports it, else the nearest level it does. pi's adapter may still translate it for the provider."
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "applied"
+                          ],
+                          "additionalProperties": false
+                        },
                         "attempts": {
                           "description": "The models an alias tried before the one that answered, in order, and why each failed (#67); present only when one did.",
                           "type": "array",
@@ -1779,6 +3285,23 @@
                                 "type": "string",
                                 "description": "The canonical ID of the model."
                               },
+                              "login": {
+                                "description": "The login tried (`anthropic`, `anthropic-2`), when the model has more than one (#227). Absent otherwise.",
+                                "type": "string"
+                              },
+                              "reasoning_effort": {
+                                "description": "The effort the alias's target runs it at (#230), replacing the request's. Absent when the target sets none.",
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              },
                               "reason": {
                                 "type": "string",
                                 "enum": [
@@ -1787,12 +3310,13 @@
                                   "timeout",
                                   "auth",
                                   "refused",
-                                  "upstream_error"
+                                  "upstream_error",
+                                  "quota"
                                 ],
-                                "description": "Why the chain moved on from it: its failure, or the one it is cooling down from."
+                                "description": "Why the chain moved on from it: its failure, the one it is cooling down from, or `quota` when its provider had less than the config's `routing.reserve` left."
                               },
                               "skipped": {
-                                "description": "Not called: it was cooling down after that failure (#68). Absent when tried.",
+                                "description": "Not called: it was cooling down after that failure (#68), or below its quota reserve (#69). Absent when tried.",
                                 "type": "boolean",
                                 "const": true
                               }
@@ -1952,6 +3476,54 @@
                           "description": "The alias the request named (#66).",
                           "type": "string"
                         },
+                        "login": {
+                          "description": "The login that answered (`anthropic`, `anthropic-2`), when the model has more than one (#227); absent otherwise.",
+                          "type": "string"
+                        },
+                        "reasoning_effort": {
+                          "description": "What the request asked for and what the model that answered runs at (#175); present only when the request set `reasoning_effort` or the alias's target sets an effort (#230).",
+                          "type": "object",
+                          "properties": {
+                            "requested": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "minimal",
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ],
+                              "description": "The `reasoning_effort` the request sent, or null when it sent none."
+                            },
+                            "applied": {
+                              "type": "string",
+                              "enum": [
+                                "none",
+                                "minimal",
+                                "low",
+                                "medium",
+                                "high",
+                                "xhigh",
+                                "max"
+                              ],
+                              "description": "The effort the proxy asked pi to run the model at: the alias target's when it sets one (#230), else `requested` when the model supports it, else the nearest level it does. pi's adapter may still translate it for the provider."
+                            }
+                          },
+                          "required": [
+                            "requested",
+                            "applied"
+                          ],
+                          "additionalProperties": false
+                        },
                         "attempts": {
                           "description": "The models an alias tried before the one that answered, in order, and why each failed (#67); present only when one did.",
                           "type": "array",
@@ -1962,6 +3534,23 @@
                                 "type": "string",
                                 "description": "The canonical ID of the model."
                               },
+                              "login": {
+                                "description": "The login tried (`anthropic`, `anthropic-2`), when the model has more than one (#227). Absent otherwise.",
+                                "type": "string"
+                              },
+                              "reasoning_effort": {
+                                "description": "The effort the alias's target runs it at (#230), replacing the request's. Absent when the target sets none.",
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              },
                               "reason": {
                                 "type": "string",
                                 "enum": [
@@ -1970,12 +3559,13 @@
                                   "timeout",
                                   "auth",
                                   "refused",
-                                  "upstream_error"
+                                  "upstream_error",
+                                  "quota"
                                 ],
-                                "description": "Why the chain moved on from it: its failure, or the one it is cooling down from."
+                                "description": "Why the chain moved on from it: its failure, the one it is cooling down from, or `quota` when its provider had less than the config's `routing.reserve` left."
                               },
                               "skipped": {
-                                "description": "Not called: it was cooling down after that failure (#68). Absent when tried.",
+                                "description": "Not called: it was cooling down after that failure (#68), or below its quota reserve (#69). Absent when tried.",
                                 "type": "boolean",
                                 "const": true
                               }
@@ -2064,7 +3654,7 @@
             }
           },
           "401": {
-            "description": "Proxy auth failed, or pi has no credential for the model and no `X-Switchboard-Upstream-Api-Key` was sent.",
+            "description": "Proxy auth failed, or the provider rejected the key sent in `X-Switchboard-Upstream-Api-Key` (`upstream_api_key_invalid`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -2359,7 +3949,7 @@
             }
           },
           "502": {
-            "description": "The provider refused the credential, or failed.",
+            "description": "The provider refused pi's stored credential (`upstream_auth_error`), pi has no credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent (`upstream_credentials_missing`), or the provider failed.",
             "content": {
               "application/json": {
                 "schema": {
@@ -3220,6 +4810,1513 @@
         }
       }
     },
+    "/v1/responses": {
+      "post": {
+        "operationId": "createResponse",
+        "tags": [
+          "OpenAI-compatible"
+        ],
+        "summary": "Create a response (experimental)",
+        "description": "OpenAI's Responses API, stateless: off unless `responsesApi` is on. Runs as chat completions do, with function tools only and nothing stored. Unsupported fields are rejected, not ignored: 422 for a field the proxy does not accept, 400 for an invalid value.",
+        "responses": {
+          "200": {
+            "description": "With `stream` false or absent, one `response` object. With `stream: true`, server-sent `response.*` events, ending with `response.completed`, `response.incomplete` or `response.failed`.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": {
+                      "type": "string"
+                    },
+                    "object": {
+                      "type": "string",
+                      "const": "response"
+                    },
+                    "created_at": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "in_progress",
+                        "completed",
+                        "incomplete",
+                        "failed"
+                      ]
+                    },
+                    "error": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "code": {
+                              "type": "string"
+                            },
+                            "message": {
+                              "type": "string"
+                            }
+                          },
+                          "required": [
+                            "code",
+                            "message"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "incomplete_details": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "reason": {
+                              "type": "string",
+                              "const": "max_output_tokens"
+                            }
+                          },
+                          "required": [
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "model": {
+                      "type": "string",
+                      "description": "The canonical ID of the model that answered."
+                    },
+                    "output": {
+                      "type": "array",
+                      "items": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "message"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "role": {
+                                "type": "string",
+                                "const": "assistant"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "in_progress",
+                                  "completed",
+                                  "incomplete"
+                                ]
+                              },
+                              "content": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "output_text"
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    },
+                                    "annotations": {
+                                      "type": "array",
+                                      "items": {}
+                                    },
+                                    "logprobs": {
+                                      "type": "array",
+                                      "items": {}
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "text",
+                                    "annotations",
+                                    "logprobs"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "role",
+                              "status",
+                              "content"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "function_call"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "call_id": {
+                                "type": "string",
+                                "description": "Send it back in `function_call_output`."
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "arguments": {
+                                "type": "string"
+                              },
+                              "status": {
+                                "type": "string",
+                                "enum": [
+                                  "in_progress",
+                                  "completed",
+                                  "incomplete"
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "call_id",
+                              "name",
+                              "arguments",
+                              "status"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "reasoning"
+                              },
+                              "id": {
+                                "type": "string"
+                              },
+                              "summary": {
+                                "type": "array",
+                                "items": {
+                                  "type": "object",
+                                  "properties": {
+                                    "type": {
+                                      "type": "string",
+                                      "const": "summary_text"
+                                    },
+                                    "text": {
+                                      "type": "string"
+                                    }
+                                  },
+                                  "required": [
+                                    "type",
+                                    "text"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              },
+                              "encrypted_content": {
+                                "description": "With `include: [\"reasoning.encrypted_content\"]`: the token that replays this reasoning to the model that produced it, when sent back in `input`. base64url JSON, not encrypted by the proxy: the thinking text is readable in it.",
+                                "type": "string"
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "id",
+                              "summary"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "usage": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "input_tokens": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "input_tokens_details": {
+                              "type": "object",
+                              "properties": {
+                                "cached_tokens": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                },
+                                "cache_write_tokens": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "cached_tokens",
+                                "cache_write_tokens"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "output_tokens": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            },
+                            "output_tokens_details": {
+                              "type": "object",
+                              "properties": {
+                                "reasoning_tokens": {
+                                  "type": "integer",
+                                  "minimum": -9007199254740991,
+                                  "maximum": 9007199254740991
+                                }
+                              },
+                              "required": [
+                                "reasoning_tokens"
+                              ],
+                              "additionalProperties": false
+                            },
+                            "total_tokens": {
+                              "type": "integer",
+                              "minimum": -9007199254740991,
+                              "maximum": 9007199254740991
+                            }
+                          },
+                          "required": [
+                            "input_tokens",
+                            "input_tokens_details",
+                            "output_tokens",
+                            "output_tokens_details",
+                            "total_tokens"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "instructions": {
+                      "anyOf": [
+                        {
+                          "type": "string"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "metadata": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {
+                        "type": "string"
+                      }
+                    },
+                    "parallel_tool_calls": {
+                      "type": "boolean"
+                    },
+                    "temperature": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "top_p": {
+                      "anyOf": [
+                        {
+                          "type": "number"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "tool_choice": {},
+                    "tools": {
+                      "type": "array",
+                      "items": {}
+                    },
+                    "reasoning": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "effort": {
+                              "anyOf": [
+                                {
+                                  "type": "string",
+                                  "enum": [
+                                    "none",
+                                    "minimal",
+                                    "low",
+                                    "medium",
+                                    "high",
+                                    "xhigh",
+                                    "max"
+                                  ]
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            },
+                            "summary": {
+                              "anyOf": [
+                                {
+                                  "type": "string"
+                                },
+                                {
+                                  "type": "null"
+                                }
+                              ]
+                            }
+                          },
+                          "required": [
+                            "effort",
+                            "summary"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    },
+                    "store": {
+                      "type": "boolean",
+                      "const": false
+                    },
+                    "x_pi": {
+                      "type": "object",
+                      "propertyNames": {
+                        "type": "string"
+                      },
+                      "additionalProperties": {},
+                      "description": "Not OpenAI's: pi's cost and cache counts, and the route, as on chat completions."
+                    }
+                  },
+                  "required": [
+                    "id",
+                    "object",
+                    "created_at",
+                    "status",
+                    "error",
+                    "incomplete_details",
+                    "model",
+                    "output",
+                    "usage",
+                    "instructions",
+                    "metadata",
+                    "parallel_tool_calls",
+                    "temperature",
+                    "top_p",
+                    "tool_choice",
+                    "tools",
+                    "reasoning",
+                    "store",
+                    "x_pi"
+                  ],
+                  "additionalProperties": false,
+                  "description": "A Responses API response (experimental, #140)."
+                }
+              },
+              "text/event-stream": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "type": "string",
+                      "description": "`response.created`, `response.in_progress`, `response.output_item.added`/`.done`, `response.content_part.added`/`.done`, `response.output_text.delta`/`.done`, `response.function_call_arguments.delta`/`.done`, `response.reasoning_summary_part.added`/`.done`, `response.reasoning_summary_text.delta`/`.done`, and one of `response.completed`, `response.incomplete` or `response.failed`."
+                    },
+                    "sequence_number": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "sequence_number"
+                  ],
+                  "additionalProperties": {},
+                  "description": "One event of a streamed response."
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Invalid JSON, an invalid field value, a reasoning `encrypted_content` this proxy did not write, or the errors chat completions give.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "The Responses API is off, or no exposed model has this ID.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "A field the proxy does not accept (`unsupported_parameter`): stored state (`previous_response_id`, `conversation`, `background`, `prompt`, `store: true`), a tool that is not a function, and the others listed in the README.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "error": {
+                      "type": "object",
+                      "properties": {
+                        "message": {
+                          "type": "string",
+                          "description": "Fixed text; never quotes the provider."
+                        },
+                        "type": {
+                          "type": "string",
+                          "description": "Such as `invalid_request_error`."
+                        },
+                        "param": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "The request field at fault."
+                        },
+                        "code": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "Such as `model_not_found`."
+                        }
+                      },
+                      "required": [
+                        "message",
+                        "type",
+                        "param",
+                        "code"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "error"
+                  ],
+                  "additionalProperties": false,
+                  "description": "OpenAI's error shape."
+                }
+              }
+            }
+          }
+        },
+        "parameters": [
+          {
+            "in": "header",
+            "name": "x-switchboard-upstream-api-key",
+            "schema": {
+              "type": "string"
+            },
+            "description": "An API key for the model's provider, used instead of pi's stored credential for this request. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string"
+                  },
+                  "input": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "minItems": 1,
+                        "type": "array",
+                        "items": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "message"
+                                },
+                                "role": {
+                                  "type": "string",
+                                  "const": "user"
+                                },
+                                "content": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "anyOf": [
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "const": "input_text"
+                                              },
+                                              "text": {
+                                                "type": "string"
+                                              },
+                                              "prompt_cache_breakpoint": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "mode": {
+                                                    "type": "string",
+                                                    "const": "explicit"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "mode"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            },
+                                            "required": [
+                                              "type",
+                                              "text"
+                                            ],
+                                            "additionalProperties": false
+                                          },
+                                          {
+                                            "type": "object",
+                                            "properties": {
+                                              "type": {
+                                                "type": "string",
+                                                "const": "input_image"
+                                              },
+                                              "image_url": {
+                                                "type": "string"
+                                              },
+                                              "detail": {
+                                                "type": "string",
+                                                "enum": [
+                                                  "auto",
+                                                  "low",
+                                                  "high",
+                                                  "original"
+                                                ]
+                                              },
+                                              "prompt_cache_breakpoint": {
+                                                "type": "object",
+                                                "properties": {
+                                                  "mode": {
+                                                    "type": "string",
+                                                    "const": "explicit"
+                                                  }
+                                                },
+                                                "required": [
+                                                  "mode"
+                                                ],
+                                                "additionalProperties": false
+                                              }
+                                            },
+                                            "required": [
+                                              "type",
+                                              "image_url"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        ]
+                                      }
+                                    }
+                                  ]
+                                },
+                                "status": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "in_progress",
+                                        "completed",
+                                        "incomplete"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "role",
+                                "content"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "message"
+                                },
+                                "role": {
+                                  "type": "string",
+                                  "enum": [
+                                    "system",
+                                    "developer"
+                                  ]
+                                },
+                                "content": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "const": "input_text"
+                                          },
+                                          "text": {
+                                            "type": "string"
+                                          },
+                                          "prompt_cache_breakpoint": {
+                                            "type": "object",
+                                            "properties": {
+                                              "mode": {
+                                                "type": "string",
+                                                "const": "explicit"
+                                              }
+                                            },
+                                            "required": [
+                                              "mode"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "type",
+                                          "text"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    }
+                                  ]
+                                },
+                                "status": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "in_progress",
+                                        "completed",
+                                        "incomplete"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "role",
+                                "content"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "message"
+                                },
+                                "role": {
+                                  "type": "string",
+                                  "const": "assistant"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "content": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "const": "output_text"
+                                          },
+                                          "text": {
+                                            "type": "string"
+                                          },
+                                          "annotations": {
+                                            "type": "array",
+                                            "prefixItems": []
+                                          },
+                                          "logprobs": {
+                                            "type": "array",
+                                            "prefixItems": []
+                                          }
+                                        },
+                                        "required": [
+                                          "type",
+                                          "text"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    }
+                                  ]
+                                },
+                                "status": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "in_progress",
+                                        "completed",
+                                        "incomplete"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "role",
+                                "content"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "function_call"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "call_id": {
+                                  "type": "string"
+                                },
+                                "name": {
+                                  "type": "string"
+                                },
+                                "arguments": {
+                                  "type": "string"
+                                },
+                                "status": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "in_progress",
+                                        "completed",
+                                        "incomplete"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "call_id",
+                                "name",
+                                "arguments"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "function_call_output"
+                                },
+                                "id": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "call_id": {
+                                  "type": "string"
+                                },
+                                "output": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "array",
+                                      "items": {
+                                        "type": "object",
+                                        "properties": {
+                                          "type": {
+                                            "type": "string",
+                                            "const": "input_text"
+                                          },
+                                          "text": {
+                                            "type": "string"
+                                          },
+                                          "prompt_cache_breakpoint": {
+                                            "type": "object",
+                                            "properties": {
+                                              "mode": {
+                                                "type": "string",
+                                                "const": "explicit"
+                                              }
+                                            },
+                                            "required": [
+                                              "mode"
+                                            ],
+                                            "additionalProperties": false
+                                          }
+                                        },
+                                        "required": [
+                                          "type",
+                                          "text"
+                                        ],
+                                        "additionalProperties": false
+                                      }
+                                    }
+                                  ]
+                                },
+                                "status": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "in_progress",
+                                        "completed",
+                                        "incomplete"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "call_id",
+                                "output"
+                              ],
+                              "additionalProperties": false
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "reasoning"
+                                },
+                                "id": {
+                                  "type": "string"
+                                },
+                                "summary": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "summary_text"
+                                      },
+                                      "text": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "text"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "content": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "object",
+                                    "properties": {
+                                      "type": {
+                                        "type": "string",
+                                        "const": "reasoning_text"
+                                      },
+                                      "text": {
+                                        "type": "string"
+                                      }
+                                    },
+                                    "required": [
+                                      "type",
+                                      "text"
+                                    ],
+                                    "additionalProperties": false
+                                  }
+                                },
+                                "encrypted_content": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string"
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                },
+                                "status": {
+                                  "anyOf": [
+                                    {
+                                      "type": "string",
+                                      "enum": [
+                                        "in_progress",
+                                        "completed",
+                                        "incomplete"
+                                      ]
+                                    },
+                                    {
+                                      "type": "null"
+                                    }
+                                  ]
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "id",
+                                "summary"
+                              ],
+                              "additionalProperties": false
+                            }
+                          ]
+                        }
+                      }
+                    ]
+                  },
+                  "instructions": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stream": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "stream_options": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "include_obfuscation": {
+                            "type": "boolean",
+                            "const": false
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "tools": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "type": {
+                          "type": "string",
+                          "const": "function"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "description": {
+                          "anyOf": [
+                            {
+                              "type": "string"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "parameters": {
+                          "anyOf": [
+                            {
+                              "type": "object",
+                              "propertyNames": {
+                                "type": "string"
+                              },
+                              "additionalProperties": {}
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "strict": {
+                          "anyOf": [
+                            {
+                              "type": "boolean"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "type",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "tool_choice": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "auto",
+                          "required"
+                        ]
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "function"
+                          },
+                          "name": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "name"
+                        ],
+                        "additionalProperties": false
+                      }
+                    ]
+                  },
+                  "parallel_tool_calls": {
+                    "anyOf": [
+                      {
+                        "type": "boolean"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "temperature": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 2
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "top_p": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "max_output_tokens": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "reasoning": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "effort": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "enum": [
+                                  "none",
+                                  "minimal",
+                                  "low",
+                                  "medium",
+                                  "high",
+                                  "xhigh",
+                                  "max"
+                                ]
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          },
+                          "summary": {
+                            "anyOf": [
+                              {
+                                "type": "string",
+                                "const": "auto"
+                              },
+                              {
+                                "type": "null"
+                              }
+                            ]
+                          }
+                        },
+                        "additionalProperties": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "text": {
+                    "type": "object",
+                    "properties": {
+                      "format": {
+                        "oneOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "text"
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "json_object"
+                              }
+                            },
+                            "required": [
+                              "type"
+                            ],
+                            "additionalProperties": false
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "type": {
+                                "type": "string",
+                                "const": "json_schema"
+                              },
+                              "name": {
+                                "type": "string"
+                              },
+                              "description": {
+                                "type": "string"
+                              },
+                              "schema": {
+                                "type": "object",
+                                "propertyNames": {
+                                  "type": "string"
+                                },
+                                "additionalProperties": {}
+                              },
+                              "strict": {
+                                "anyOf": [
+                                  {
+                                    "type": "boolean"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              }
+                            },
+                            "required": [
+                              "type",
+                              "name",
+                              "schema"
+                            ],
+                            "additionalProperties": false
+                          }
+                        ]
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "metadata": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "propertyNames": {
+                          "type": "string"
+                        },
+                        "additionalProperties": {
+                          "type": "string"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "user": {
+                    "anyOf": [
+                      {
+                        "type": "string"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "prompt_cache_key": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "store": {
+                    "anyOf": [
+                      {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "include": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "const": "reasoning.encrypted_content"
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "model",
+                  "input"
+                ],
+                "additionalProperties": false,
+                "examples": [
+                  {
+                    "model": "MODEL_ID",
+                    "input": "Hello!"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
     "/v1/completions": {
       "get": {
         "operationId": "notSupportedGetV1Completions",
@@ -3667,6 +6764,46 @@
       },
       "post": {
         "operationId": "notSupportedPostV1FineTuningPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      }
+    },
+    "/v1/responses/{path}": {
+      "parameters": [
+        {
+          "name": "path",
+          "in": "path",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "get": {
+        "operationId": "notSupportedGetV1ResponsesPath",
+        "tags": [
+          "Not supported"
+        ],
+        "summary": "Not supported by this proxy",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "deprecated": true,
+        "responses": {
+          "404": {
+            "$ref": "#/components/responses/NotSupported"
+          }
+        }
+      },
+      "post": {
+        "operationId": "notSupportedPostV1ResponsesPath",
         "tags": [
           "Not supported"
         ],

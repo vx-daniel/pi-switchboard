@@ -13,6 +13,8 @@
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
+import { registerStoredAccounts } from '@proxy/pi/accounts'
+import { errorMessage } from '@proxy/utils/guards'
 import * as z from 'zod'
 
 /** Logger for runtime setup and credential lookups. */
@@ -84,8 +86,15 @@ export function describeModelsJsonError(error: string): string {
     : `models.json is not valid JSON at position ${String(offset[1])}`
 }
 
+/** How long listing pi's stored credentials at startup may take. */
+const CREDENTIAL_LIST_TIMEOUT_MS = 15_000
+
 /**
  * Initializes the runtime and settings. Call once at startup.
+ *
+ * @remarks
+ * Every `{provider}-N` credential in pi's store gets its provider registered (#227) before
+ * the availability snapshot is taken.
  *
  * @returns the models.json error ({@link describeModelsJsonError}), or `undefined` on success
  */
@@ -100,6 +109,22 @@ export async function initRegistry(): Promise<string | undefined> {
       error: loadError,
       path: splitModelsJsonError(rawError).path
     })
+  }
+  const accounts = await registerStoredAccounts(
+    runtime,
+    AbortSignal.timeout(CREDENTIAL_LIST_TIMEOUT_MS)
+  )
+  if (accounts.length > 0) {
+    // A registered provider is only provisionally available until the next availability pass;
+    // this one settles it, from the stored credentials alone, before the snapshot is read. Should
+    // it fail, the proxy starts anyway: the provisional entries stand until the next pass.
+    try {
+      await runtime.refresh({ allowNetwork: false })
+    } catch (error) {
+      registryLogger.warn('Refreshing availability after registering logins failed: {reason}', {
+        reason: errorMessage(error)
+      })
+    }
   }
   registryLogger.info('Model runtime ready with {availableModelCount} available models', {
     availableModelCount: runtime.getAvailableSnapshot().length,
@@ -133,6 +158,17 @@ function getSettingsManager(): SettingsManager {
     throw new Error('SettingsManager not initialized. Call initRegistry() first.')
   }
   return settingsManager
+}
+
+/**
+ * Returns this installation's device ID, created on first use and kept in pi's settings, as pi's
+ * own `/login` does. Sign in with ChatGPT refuses to start without one.
+ *
+ * @returns the device ID (a UUID)
+ * @throws Error when {@link initRegistry} has not run
+ */
+export function getLoginDeviceId(): string {
+  return getSettingsManager().getOrCreateDeviceId()
 }
 
 /**
@@ -213,7 +249,7 @@ interface AuthFailureSource {
  * @returns the summary ({@link summarizeAuthError})
  */
 function reportAuthFailure(source: AuthFailureSource, error: unknown): string {
-  const message = error instanceof Error ? error.message : String(error)
+  const message = errorMessage(error)
   const summary = summarizeAuthError(message)
   registryLogger.warn('Credential {action} failed for provider {provider}: {reason}', {
     ...source,

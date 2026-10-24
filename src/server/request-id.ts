@@ -9,6 +9,8 @@
 
 import { randomBytes } from 'node:crypto'
 
+/** What every proxy request ID starts with. */
+export const REQUEST_ID_PREFIX = 'piproxy-'
 /** Random bytes in a request ID; hex-encoded, they give 24 characters. */
 const REQUEST_ID_BYTES = 12
 
@@ -18,5 +20,5 @@ const REQUEST_ID_BYTES = 12
  * @returns `piproxy-` followed by 24 random hex characters
  */
 export function generateRequestId(): string {
-  return `piproxy-${randomBytes(REQUEST_ID_BYTES).toString('hex')}`
+  return `${REQUEST_ID_PREFIX}${randomBytes(REQUEST_ID_BYTES).toString('hex')}`
 }

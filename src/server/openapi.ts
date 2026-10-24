@@ -25,7 +25,9 @@ import { openAIModelListSchema, openAIModelSchema, piModelListSchema } from '@pr
 import { openAIChatCompletionSchema } from '@proxy/openai/responses'
 import { chatCompletionRequestSchema } from '@proxy/openai/schemas'
 import { sseChunkSchema } from '@proxy/openai/sse'
+import { clearedCooldownsSchema } from '@proxy/server/cooldowns'
 import { openAIErrorSchema } from '@proxy/server/errors'
+import { usageSchema } from '@proxy/server/usage'
 import { type DescribeRouteOptions, type GenerateSpecOptions, resolver } from 'hono-openapi'
 import * as z from 'zod'
 
@@ -75,17 +77,56 @@ export const chatHeadersSchema = z.object({
 })
 
 /**
- * `GET /healthz/creds`'s query. Only `true` verifies; any other value is the same as none. A
- * repeated `verify` reaches the validator as an array, and its first value counts, as
- * `c.req.query()` read it before validation; rejecting it would answer in hono-openapi's error
- * shape, not OpenAI's. Surrounding spaces are trimmed (the repo's Zod lint rule), so `%20true`
- * verifies too.
+ * A query value a route judges itself, so a bad one is refused in OpenAI's error shape rather
+ * than hono-openapi's. A repeated name reaches the validator as an array; see
+ * {@link firstQueryValue}. Surrounding spaces are trimmed (the repo's Zod lint rule).
  */
+const queryValueSchema = z.union([z.string().trim(), z.array(z.string().trim())])
+
+/**
+ * Reads a query value as the routes count it: a repeated name by its first value, as
+ * `c.req.query()` read it before validation.
+ *
+ * @param value - the value the validator passed
+ * @returns the value, or `undefined` when it was not sent
+ */
+export function firstQueryValue(value: string | readonly string[] | undefined): string | undefined {
+  return typeof value === 'string' ? value : value?.[0]
+}
+
+/** `GET /healthz/creds`'s query. Only `true` verifies; any other value is the same as none. */
 export const credentialsQuerySchema = z.object({
-  verify: z
-    .union([z.string().trim(), z.array(z.string().trim())])
+  verify: queryValueSchema
     .optional()
     .meta({ description: '`true` asks pi to resolve each credential now.' })
+})
+
+/**
+ * The query of `GET /v1/switchboard/usage`. An unknown window is refused in OpenAI's error shape
+ * (`400`, `param: window`).
+ */
+export const usageQuerySchema = z.object({
+  window: queryValueSchema.optional().meta({
+    description:
+      '`today` (from local midnight; the default), `week` (the last 7 days) or `all` (the ' +
+      'last 30 days, all the stats file keeps).'
+  })
+})
+
+/**
+ * The query of `DELETE /v1/switchboard/cooldowns` (#182). A name nothing is known by is refused in
+ * OpenAI's error shape (`404`).
+ */
+export const cooldownsQuerySchema = z.object({
+  provider: queryValueSchema.optional().meta({
+    description: "A login's provider ID, such as `anthropic-2`: ends its cooldown after a 429."
+  }),
+  model: queryValueSchema.optional().meta({
+    description:
+      "A model's canonical or public ID: ends the model's own cooldown after a 503 or 529, not " +
+      "its logins'. A 429 cools the login, not the model: end it with `provider`, as `model` " +
+      'alone then answers an empty list.'
+  })
 })
 
 /** The prefix of the proxy's own routes, outside OpenAI's API (constitution, principle I). */
@@ -102,7 +143,7 @@ export const DOCS_PATH = '/docs'
 export const SWAGGER_UI_VERSION = '5.34.0'
 
 /** Tag of the OpenAI-compatible routes. */
-const OPENAI_TAG = 'OpenAI-compatible'
+export const OPENAI_TAG = 'OpenAI-compatible'
 /** Tag of the `/v1/switchboard/` routes. */
 const SWITCHBOARD_TAG = 'Switchboard'
 /** Tag of the health endpoints. */
@@ -133,7 +174,9 @@ export const UNSUPPORTED_ENDPOINTS = [
   '/v1/files/*',
   '/v1/batches',
   '/v1/batches/*',
-  '/v1/fine_tuning/*'
+  '/v1/fine_tuning/*',
+  // The Responses API's stored-response operations: the proxy keeps nothing (#140).
+  '/v1/responses/*'
 ] as const
 
 /** A documented response: a description and a JSON body. */
@@ -156,7 +199,7 @@ export function jsonResponse(description: string, schema: z.ZodType): Documented
  * @param description - when the error is sent
  * @returns the response object
  */
-function errorResponse(description: string): DocumentedResponse {
+export function errorResponse(description: string): DocumentedResponse {
   return jsonResponse(description, openAIErrorSchema)
 }
 
@@ -216,8 +259,8 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
         '(`upstream_invalid_request`), or the old `X-Pi-Upstream-Api-Key` header.'
     ),
     401: errorResponse(
-      'Proxy auth failed, or pi has no credential for the model and no ' +
-        '`X-Switchboard-Upstream-Api-Key` was sent.'
+      'Proxy auth failed, or the provider rejected the key sent in ' +
+        '`X-Switchboard-Upstream-Api-Key` (`upstream_api_key_invalid`).'
     ),
     404: errorResponse(
       'No exposed model has this ID, or the provider refused the model for the login the proxy ' +
@@ -226,7 +269,11 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
     413: errorResponse('The body is over the size limit.'),
     422: errorResponse('A field the proxy does not accept (`unsupported_parameter`).'),
     429: errorResponse('The provider rate-limited the request.'),
-    502: errorResponse('The provider refused the credential, or failed.'),
+    502: errorResponse(
+      "The provider refused pi's stored credential (`upstream_auth_error`), pi has no " +
+        "credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent " +
+        '(`upstream_credentials_missing`), or the provider failed.'
+    ),
     503: errorResponse('The provider is unavailable or overloaded.'),
     504: errorResponse('The provider timed out, or sent nothing for the upstream timeout.')
   }
@@ -243,6 +290,45 @@ export const listModelCapabilitiesDescription: DescribeRouteOptions = {
   responses: {
     200: jsonResponse('Each exposed model, with its capabilities.', piModelListSchema),
     401: UNAUTHORIZED
+  }
+}
+
+/** `GET /v1/switchboard/usage`. */
+export const usageDescription: DescribeRouteOptions = {
+  operationId: 'getUsage',
+  tags: [SWITCHBOARD_TAG],
+  summary: 'Usage over a window, from the stats file',
+  description:
+    "Not OpenAI's: requests, timings, attempts, tokens and cost per served model and per alias, " +
+    'failures by class, rejected requests by status, and a timeline, from the stats the proxy ' +
+    'keeps. Routes and counts only: never message content, `user` or a credential.',
+  responses: {
+    200: jsonResponse('The usage over the window.', usageSchema),
+    400: errorResponse('`window` is not `today`, `week` or `all`.'),
+    401: UNAUTHORIZED,
+    503: errorResponse(
+      'Stats are off (`--no-stats`), or the stats file could not be read (`stats_unavailable`).'
+    )
+  }
+}
+
+/** `DELETE /v1/switchboard/cooldowns`. */
+export const clearCooldownsDescription: DescribeRouteOptions = {
+  operationId: 'clearCooldowns',
+  tags: [SWITCHBOARD_TAG],
+  summary: 'End cooldowns early',
+  description:
+    "Not OpenAI's (#182): ends the cooldowns a 429, 503 or 529 started, so a fallback chain calls " +
+    "those models again at once. No query ends every one; `provider` ends a login's, `model` a " +
+    "model's own, and both end both. The next failure without a time waits 60 s again.",
+  responses: {
+    200: jsonResponse('The cooldowns ended; empty when none was active.', clearedCooldownsSchema),
+    401: UNAUTHORIZED,
+    404: errorResponse(
+      'No login by the `provider` ID serves an exposed model or is cooling down ' +
+        '(`login_not_found`), or no model by the `model` ID is exposed or cooling down ' +
+        '(`model_not_found`).'
+    )
   }
 }
 

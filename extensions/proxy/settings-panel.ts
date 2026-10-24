@@ -14,6 +14,7 @@ import {
   isPublicModelIdMode,
   LifetimeSchema,
   loadConfigFromFile,
+  MAX_PORT,
   ModelExposureModeSchema,
   type ProxyConfig,
   PublicModelIdModeSchema,
@@ -27,8 +28,6 @@ import { maybeAutoSyncZed } from './zed-sync'
 
 /** Rows visible in the settings list before it scrolls. */
 const SETTINGS_PANEL_VISIBLE_ROWS = 12
-/** Highest valid TCP port. */
-const MAX_PORT = 65535
 /** Random bytes in a generated auth token (rendered as hex, so twice as many characters). */
 const AUTH_TOKEN_BYTES = 16
 /** Radix for rendering token bytes as hex. */
@@ -162,6 +161,7 @@ const SETTING_DISPLAY_VALUES = {
   'authToken': (config: ProxyConfig) => authDisplay(config),
   'remoteImages': (config: ProxyConfig) => (config.remoteImages ? 'on' : 'off'),
   'docsUi': (config: ProxyConfig) => (config.docsUi ? 'on' : 'off'),
+  'stats': (config: ProxyConfig) => (config.stats ? 'on' : 'off'),
   'maxBodySizeMb': (config: ProxyConfig) => `${String(config.maxBodySizeMb)} MB`,
   'upstreamTimeoutSec': (config: ProxyConfig) => `${String(config.upstreamTimeoutSec)}s`,
   'logLevel': (config: ProxyConfig) => config.logLevel,
@@ -242,6 +242,14 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
         'Serve the Swagger UI docs page at /docs, without proxy auth; its scripts load from a CDN',
       currentValue: config.docsUi ? 'on' : 'off',
       values: ['off', 'on']
+    },
+    {
+      id: 'stats',
+      label: 'Stats',
+      description:
+        'Keep per-minute traffic stats (counts and timings, never content) in pi-switchboard-stats.sqlite, for the console',
+      currentValue: config.stats ? 'on' : 'off',
+      values: ['on', 'off']
     },
     {
       id: 'maxBodySizeMb',
@@ -390,6 +398,7 @@ const CONFIG_UPDATERS: Record<Exclude<SettingId, 'authToken'>, ConfigUpdater> = 
   }),
   'remoteImages': (config, value) => ({ ...config, remoteImages: value === 'on' }),
   'docsUi': (config, value) => ({ ...config, docsUi: value === 'on' }),
+  'stats': (config, value) => ({ ...config, stats: value === 'on' }),
   'maxBodySizeMb': (config, value) => {
     const mb = parsePositiveInt(value)
     return mb === undefined ? config : { ...config, maxBodySizeMb: mb }

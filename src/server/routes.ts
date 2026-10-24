@@ -6,6 +6,8 @@
  * - `GET  /v1/models`
  * - `GET  /v1/models/{model}` (URL-encoded IDs with slashes work)
  * - `GET  /v1/switchboard/models` (not OpenAI's: pi's capabilities for each exposed model)
+ * - `GET  /v1/switchboard/usage` (not OpenAI's: usage from the stats file)
+ * - `DELETE /v1/switchboard/cooldowns` (not OpenAI's: ends cooldowns early, #182)
  * - `POST /v1/chat/completions`
  * - a fixed list of OpenAI endpoints the proxy does not implement, answered with 404
  *
@@ -15,8 +17,9 @@
  * @packageDocumentation
  */
 
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type { ServerConfig } from '@proxy/config/env'
-import { loadConfigFromFile } from '@proxy/config/schema'
+import { type FailureClass, loadConfigFromFile, type Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { type ConversionSuccess, convertMessages } from '@proxy/openai/messages'
 import {
@@ -35,7 +38,10 @@ import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { convertTools } from '@proxy/openai/tools'
 import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/validate'
 import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
-import { dispatchChat, findCredentialedStart, planRoute } from '@proxy/server/chat-dispatch'
+import { beginActiveRequest, requestOutcome } from '@proxy/server/active-requests'
+import { type AnswerFormat, chatFormat } from '@proxy/server/answer-formats'
+import { dispatchChat, findCredentialedStart } from '@proxy/server/chat-dispatch'
+import { clearCooldownsAnswer } from '@proxy/server/cooldowns'
 import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
   HTTP_BAD_REQUEST,
@@ -46,27 +52,46 @@ import { jsonBodyMiddleware } from '@proxy/server/middleware'
 import {
   chatHeadersSchema,
   chatRequestBodySchema,
+  clearCooldownsDescription,
+  cooldownsQuerySchema,
   createChatCompletionDescription,
+  firstQueryValue,
   listModelCapabilitiesDescription,
   listModelsDescription,
   modelPathSchema,
   retrieveModelDescription,
   SWITCHBOARD_PREFIX,
-  UNSUPPORTED_ENDPOINTS
+  UNSUPPORTED_ENDPOINTS,
+  usageDescription,
+  usageQuerySchema
 } from '@proxy/server/openapi'
+import { rejectionResponse } from '@proxy/server/request-rejection'
+import { registerResponsesRoute } from '@proxy/server/responses-route'
+import { planRoute } from '@proxy/server/route-plan'
 import type { ProxyEnv } from '@proxy/server/types'
+import { createUsageAnswer } from '@proxy/server/usage'
 import { type Context, Hono } from 'hono'
 import { describeRoute, validator } from 'hono-openapi'
 
 /**
- * Reads the model exposure config.
+ * What a request reads from the config: the model exposure config, the quota reserve per login
+ * that fallback chains keep (`routing.reserve`, #69; none when left out), and the failures that
+ * move a request between a model's logins (`routing.logins.fallbackOn`, #227; none when left out).
+ */
+export interface RequestConfig extends ModelExposureConfig {
+  readonly reserve?: Reserve | undefined
+  readonly loginFallbackOn?: readonly FailureClass[] | undefined
+}
+
+/**
+ * Reads the config a request needs.
  *
  * @remarks
  * In production ({@link fileConfigReader}) this re-reads the config file and pi's settings on each
  * request (small JSON files, negligible next to upstream latency). Tests pass a reader that returns
  * fixed values.
  */
-export type ExposureConfigReader = () => ModelExposureConfig | Promise<ModelExposureConfig>
+export type ExposureConfigReader = () => RequestConfig | Promise<RequestConfig>
 
 /** Logger for chat and model requests. */
 const chatLogger = proxyLogger('server', 'chat')
@@ -74,11 +99,11 @@ const chatLogger = proxyLogger('server', 'chat')
 const httpLogger = proxyLogger('server', 'http')
 
 /**
- * Reads the exposure config from the proxy's config file and pi's `enabledModels` setting.
+ * Reads the request config from the proxy's config file and pi's `enabledModels` setting.
  *
- * @returns the exposure config; `enabledModels` is `undefined` when pi's settings set none
+ * @returns the config; `enabledModels` is `undefined` when pi's settings set none
  */
-export async function fileConfigReader(): Promise<ModelExposureConfig> {
+export async function fileConfigReader(): Promise<RequestConfig> {
   const file = loadConfigFromFile()
   const enabledModels = await getEnabledModels()
   chatLogger.debug('Read exposure config: {modelExposureMode}, {publicModelIdMode}', {
@@ -95,7 +120,9 @@ export async function fileConfigReader(): Promise<ModelExposureConfig> {
     enabledModels,
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
-    aliases: file.aliases
+    aliases: file.aliases,
+    reserve: file.routing.reserve,
+    loginFallbackOn: file.routing.logins.fallbackOn
   }
 }
 
@@ -119,13 +146,13 @@ type Step<T> = { ok: true; value: T } | { ok: false; response: Response }
 /**
  * Computes which models are exposed, from pi's available models and the exposure config.
  *
- * @param configReader - where the exposure config comes from
+ * @param config - the exposure config
  * @returns the exposed models and their scope diagnostics
  * @throws Error when the exposure config is invalid; Hono answers it with 500
  */
-async function getExposure(configReader: ExposureConfigReader): Promise<ModelExposureResult> {
+function exposureFrom(config: ModelExposureConfig): ModelExposureResult {
   const available = getAvailableModels()
-  const outcome = computeModelExposure(available, await configReader())
+  const outcome = computeModelExposure(available, config, getSupportedThinkingLevels)
   if (!outcome.ok) {
     // Thrown to Hono, which answers 500: the exposure config cannot serve any request.
     chatLogger.error('Model exposure configuration error: {message}', {
@@ -142,6 +169,17 @@ async function getExposure(configReader: ExposureConfigReader): Promise<ModelExp
 }
 
 /**
+ * Computes which models are exposed, reading the exposure config.
+ *
+ * @param configReader - where the exposure config comes from
+ * @returns the exposed models and their scope diagnostics
+ * @throws Error when the exposure config is invalid; Hono answers it with 500
+ */
+async function getExposure(configReader: ExposureConfigReader): Promise<ModelExposureResult> {
+  return exposureFrom(await configReader())
+}
+
+/**
  * Answers a chat request body that failed validation, as the chat route's `validator('json')`
  * hook: a named 422 for an unsupported or unknown field, a 400 for any other invalid value.
  *
@@ -154,21 +192,10 @@ async function getExposure(configReader: ExposureConfigReader): Promise<ModelExp
  * @returns the error response
  */
 function rejectChatRequest(context: Context, body: unknown): Response {
-  const rejection = chatRequestRejection(body)
-  // The field name only: validation messages can echo request values.
-  chatLogger.warn('Rejected chat request: invalid field {param} ({status})', {
-    param: rejection.param ?? 'unknown',
-    status: rejection.status
-  })
-  if (rejection.status === HTTP_UNPROCESSABLE_ENTITY) {
-    return context.json(
-      unsupportedParameter(rejection.param ?? 'unknown', rejection.message),
-      HTTP_UNPROCESSABLE_ENTITY
-    )
-  }
-  return context.json(
-    invalidRequest(rejection.message, rejection.param ?? undefined),
-    HTTP_BAD_REQUEST
+  return rejectionResponse(
+    context,
+    chatRequestRejection(body),
+    'Rejected chat request: invalid field {param} ({status})'
   )
 }
 
@@ -261,7 +288,7 @@ function buildPiContext(honoContext: ProxyContext, request: ChatRequest): Step<P
 }
 
 /** What the chat handler needs from the app beyond the request: set once when routes are built. */
-interface ChatRouteSettings {
+export interface ChatRouteSettings {
   /** The server config; `upstreamTimeoutMs` and `remoteImagesEnabled` are read. */
   readonly config: ServerConfig
   /** Where the exposure config comes from. */
@@ -271,28 +298,75 @@ interface ChatRouteSettings {
 }
 
 /**
- * Handles `POST /v1/chat/completions` for a validated request: resolves the model or alias, checks
- * upstream auth, inlines remote images, builds the pi context, then runs it on the model or the
- * alias's fallback chain (`chat-dispatch.ts`, #67).
- *
- * @param context - the request's Hono context
- * @param request - the request body, as the route's `validator('json')` parsed it
- * @param settings - the server config, exposure config reader and remote image policy
- * @returns the completion, or the first error response a step produces
- * @throws Error when the exposure config is invalid (from {@link getExposure})
+ * How a validated request is answered, beyond the chat request it runs as: the answer's format,
+ * and a change to the pi context once it is built (the Responses API's replayed reasoning, #140).
  */
-async function handleChatCompletion(
+export interface RunShape {
+  /**
+   * Builds the answer's format, once the request ID is known.
+   *
+   * @param requestId - the proxy's request ID
+   * @returns the format
+   */
+  format(requestId: string): AnswerFormat
+  /**
+   * Changes the pi context before it is sent.
+   *
+   * @param piContext - the context built from the chat messages
+   * @returns the context to send
+   */
+  adjust(piContext: PiContext): PiContext
+}
+
+/**
+ * The chat route's shape: chat completions, the pi context as built.
+ *
+ * @param request - the validated chat request
+ * @returns the shape
+ */
+function chatShape(request: ChatRequest): RunShape {
+  return {
+    format: (requestId) => chatFormat(requestId, request),
+    adjust: (piContext) => piContext
+  }
+}
+
+/** Runs a validated chat request in a given shape: {@link runChat}, as the Responses route gets it. */
+export type ChatRunner = (
   context: ProxyContext,
   request: ChatRequest,
-  settings: ChatRouteSettings
+  settings: ChatRouteSettings,
+  shape: RunShape
+) => Promise<Response>
+
+/**
+ * Runs a validated chat request: resolves the model or alias, checks upstream auth, inlines remote
+ * images, builds the pi context, then runs it on the model or the alias's fallback chain
+ * (`chat-dispatch.ts`, #67), answering in the shape's format.
+ *
+ * @param context - the request's Hono context
+ * @param request - the chat request: the body as the chat route validated it, or a Responses
+ *   request translated into one
+ * @param settings - the server config, exposure config reader and remote image policy
+ * @param shape - the answer's format, and any change to the pi context
+ * @returns the answer, or the first error response a step produces
+ * @throws Error when the exposure config is invalid (from {@link getExposure})
+ */
+async function runChat(
+  context: ProxyContext,
+  request: ChatRequest,
+  settings: ChatRouteSettings,
+  shape: RunShape
 ): Promise<Response> {
   const { config, configReader, remoteImageFetch } = settings
   const requestId = context.get('requestId')
   const upstreamApiKey = context.get('upstreamApiKey')
   logValidatedChatRequest(request)
+  context.set('chatModel', request.model)
 
-  // Resolve model through the exposure engine
-  const exposure = await getExposure(configReader)
+  // Resolve model through the exposure engine. The config is read once: the reserve comes with it.
+  const requestConfig = await configReader()
+  const exposure = exposureFrom(requestConfig)
   const resolved = resolveExposedModel(exposure, request.model)
   if (resolved === undefined) {
     chatLogger.warn('Rejected chat request: model {requestedModel} is not exposed', {
@@ -302,7 +376,7 @@ async function handleChatCompletion(
     return context.json(modelNotFound(request.model), HTTP_NOT_FOUND)
   }
 
-  const route = planRoute(resolved, request, upstreamApiKey)
+  const route = planRoute(resolved, request, upstreamApiKey, requestConfig.loginFallbackOn ?? [])
   const [first = resolved] = route.candidates
 
   // The request and response lines carry no model, so this one ties the call to the model that
@@ -312,10 +386,19 @@ async function handleChatCompletion(
     requestedModel: request.model,
     model: first.canonicalId,
     provider: first.provider,
+    login: first.login,
     stream: request.stream === true,
     ...(resolved.alias === undefined ? {} : { alias: resolved.alias }),
+    ...(request.reasoning_effort === undefined
+      ? {}
+      : { reasoningEffort: request.reasoning_effort }),
+    ...(first.reasoningEffort === undefined ? {} : { aliasEffort: first.reasoningEffort }),
     ...(route.candidates.length > 1
-      ? { fallbackModels: route.candidates.slice(1).map((candidate) => candidate.canonicalId) }
+      ? {
+          fallbackModels: route.candidates
+            .slice(1)
+            .map((candidate) => `${candidate.canonicalId}@${candidate.login}`)
+        }
       : {})
   })
 
@@ -330,22 +413,100 @@ async function handleChatCompletion(
   const built = buildPiContext(context, prepared.value)
   if (!built.ok) return built.response
 
-  return dispatchChat(context, {
+  // Listed among the requests in flight until it ends: here, or when its stream closes. Marked on
+  // the context, so `rejectedChatMiddleware` leaves it to the tracker from here.
+  const active = beginActiveRequest({
     requestId,
-    alias: resolved.alias,
-    candidates: start.candidates,
-    fallbackOn: route.fallbackOn,
-    attempts: start.attempts,
-    context: built.value,
-    request,
-    options: {
-      upstreamApiKey,
-      // The client's disconnect only. The dispatch reads it to tell a client that left from an
-      // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
-      signal: context.get('abortController').signal,
-      upstreamTimeoutMs: config.upstreamTimeoutMs
-    }
+    alias: resolved.alias ?? null,
+    model: start.candidates[0]?.canonicalId ?? first.canonicalId,
+    stream: request.stream === true
   })
+  context.set('chatDispatched', true)
+  // The client's disconnect only. The dispatch reads it to tell a client that left from an
+  // upstream failure; the upstream timeout gets its own signal in pi/complete.ts.
+  const signal = context.get('abortController').signal
+  // A dispatch that throws ends the request as failed.
+  let failed = true
+  try {
+    const response = await dispatchChat(context, {
+      requestId,
+      alias: resolved.alias,
+      candidates: start.candidates,
+      fallbackOn: route.fallbackOn,
+      loginFallbackOn: route.loginFallbackOn,
+      reserve: requestConfig.reserve ?? {},
+      attempts: start.attempts,
+      context: shape.adjust(built.value),
+      request,
+      format: shape.format(requestId),
+      options: { upstreamApiKey, signal, upstreamTimeoutMs: config.upstreamTimeoutMs },
+      active
+    })
+    failed = !response.ok
+    return response
+  } finally {
+    active.settled(requestOutcome(failed, signal))
+  }
+}
+
+/**
+ * Adds the `/v1/switchboard/` routes, which are not OpenAI's (constitution, principle I): pi's
+ * capabilities, usage from the stats file, and ending cooldowns.
+ *
+ * @param routes - the app to add them to
+ * @param config - the server config, for whether stats are kept
+ * @param configReader - where the exposure config comes from
+ */
+function addSwitchboardRoutes(
+  routes: Hono<ProxyEnv>,
+  config: ServerConfig,
+  configReader: ExposureConfigReader
+): void {
+  // --- GET /v1/switchboard/models ---
+  // pi's capabilities for each exposed model, which PLAN keeps off /v1/models.
+  routes.get(
+    `${SWITCHBOARD_PREFIX}/models`,
+    describeRoute(listModelCapabilitiesDescription),
+    async (context) => {
+      const exposure = await getExposure(configReader)
+      chatLogger.debug('Listing capabilities of {modelCount} models and {aliasCount} aliases', {
+        modelCount: exposure.models.length,
+        aliasCount: exposure.aliases.length
+      })
+      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
+    }
+  )
+
+  // --- GET /v1/switchboard/usage ---
+  // The stats file's usage over a window, for a proxy run without the console.
+  const answerUsage = createUsageAnswer(config.statsEnabled)
+  routes.get(
+    `${SWITCHBOARD_PREFIX}/usage`,
+    describeRoute(usageDescription),
+    validator('query', usageQuerySchema),
+    (context) => {
+      const answer = answerUsage(firstQueryValue(context.req.valid('query').window), Date.now())
+      return context.json(answer.body, answer.status)
+    }
+  )
+
+  // --- DELETE /v1/switchboard/cooldowns ---
+  // Ends cooldowns early (#182), for an operator who knows a limit has lifted. The only route
+  // that writes state; it changes what fallback chains skip, and calls no provider.
+  routes.delete(
+    `${SWITCHBOARD_PREFIX}/cooldowns`,
+    describeRoute(clearCooldownsDescription),
+    validator('query', cooldownsQuerySchema),
+    async (context) => {
+      const { provider, model } = context.req.valid('query')
+      const answer = await clearCooldownsAnswer(
+        { provider: firstQueryValue(provider), model: firstQueryValue(model) },
+        () => getExposure(configReader),
+        Date.now()
+      )
+      return context.json(answer.body, answer.status)
+    }
+  )
 }
 
 /**
@@ -364,6 +525,7 @@ export function createRoutes(
   remoteImageFetch: RemoteImageFetchOptions = STRICT_REMOTE_IMAGE_FETCH
 ): Hono<ProxyEnv> {
   const routes = new Hono<ProxyEnv>()
+  const settings: ChatRouteSettings = { config, configReader, remoteImageFetch }
 
   // --- GET /v1/models ---
   routes.get('/v1/models', describeRoute(listModelsDescription), async (context) => {
@@ -375,20 +537,7 @@ export function createRoutes(
     return context.json(buildModelList([...exposure.models, ...exposure.aliases]))
   })
 
-  // --- GET /v1/switchboard/models ---
-  // Not OpenAI's: pi's capabilities for each exposed model, which PLAN keeps off /v1/models.
-  routes.get(
-    `${SWITCHBOARD_PREFIX}/models`,
-    describeRoute(listModelCapabilitiesDescription),
-    async (context) => {
-      const exposure = await getExposure(configReader)
-      chatLogger.debug('Listing capabilities of {modelCount} models and {aliasCount} aliases', {
-        modelCount: exposure.models.length,
-        aliasCount: exposure.aliases.length
-      })
-      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
-    }
-  )
+  addSwitchboardRoutes(routes, config, configReader)
 
   // --- GET /v1/models/:model ---
   // `{.+}` lets the ID span slashes (`/v1/models/org/model` as well as `org%2Fmodel`); Hono
@@ -432,13 +581,14 @@ export function createRoutes(
     validator('json', chatRequestBodySchema, (result, context) =>
       result.success ? undefined : rejectChatRequest(context, result.data)
     ),
-    (context) =>
-      handleChatCompletion(context, context.req.valid('json'), {
-        config,
-        configReader,
-        remoteImageFetch
-      })
+    (context) => {
+      const request = context.req.valid('json')
+      return runChat(context, request, settings, chatShape(request))
+    }
   )
+
+  // --- POST /v1/responses (experimental, opt-in: #140) ---
+  registerResponsesRoute(routes, settings, runChat)
 
   // --- Unsupported endpoints: clear errors (documented by hand in `@proxy/server/openapi`) ---
   for (const path of UNSUPPORTED_ENDPOINTS) {

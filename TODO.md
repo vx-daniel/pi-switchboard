@@ -340,6 +340,10 @@ unsupported parameters clearly instead of silently ignoring them.
 - [x] `anyOf` is correctly listed as supported in PLAN.md (TODO item was stale)
 - [x] Update PLAN.md known gaps section to reflect resolved `tool_choice` and `strict` fixes
 
+### Clamped `reasoning_effort` unreported
+
+- [x] Report `x_pi.reasoning_effort: { requested, applied }` in the body and every chunk when the request sets `reasoning_effort`, for the model that answered; log the first clamp per model at info (#175)
+
 ## Pi 1.x migration [DONE]
 
 - [x] Depend on `@earendil-works/pi-*` `^1.3.0` (Pi 1.0 is the first release whose Anthropic client sends Claude Code 2.1.280, which Opus 5.5 requires)
@@ -347,6 +351,7 @@ unsupported parameters clearly instead of silently ignoring them.
 - [x] Map the `pending` and `deferred` stop reasons to `stop`
 - [x] Report cache reads and writes in `usage.prompt_tokens`, with `prompt_tokens_details`
 - [x] Refresh the extension's model registry on each entry point (`ctx.modelRegistry`)
+- [x] Upgrade to pi 1.4.0 (#198): a provider 413 is a context overflow (400 `context_length_exceeded`); the conformance matrix's Codex rows are on 1.4.0's catalog (`gpt-6-luna`, `gpt-6-sol`, `gpt-6.1-sol`)
 - [ ] Run the conformance suite against live models on Pi 1.x
 
 ## Phase 3D — Compatibility analysis and resilience [DONE]
@@ -406,6 +411,28 @@ since the rename; each issue holds the detailed checklist.
 - [x] Docker image (#60): built from source, published to Docker Hub and GHCR on each release
       (amd64, arm64)
 - [ ] Standalone binary (#61)
+  - [x] Bun-compiled binary for linux/darwin x64/arm64, tested in CI, uploaded to each release
+        with `SHA256SUMS` (ported from #86)
+  - [x] Opt-in `pi-switchboard tui` console: logs, status, accounts, and logins through pi's own
+        screens, in one process with the server
+  - [x] The console's per-route stats from #70's totals
+  - [x] The console's sidebar: proxy status, logins with quota and cooldowns, requests in flight,
+        traffic
+  - [x] Console redesign after the instrument-panel mock (`.local/index2.html`, not committed;
+        reviewed 2026-10-23; #259–#263):
+    - [x] Phase 1, chrome: status strip, folder/compact tabs around a framed view, keycap footer,
+          sidebar regrouped as QUOTA / IN FLIGHT / RECENT / SESSION, folding thresholds
+    - [x] Phase 2: the Accounts view as a table with quota gauges and a detail pane (keeping
+          `below reserve` and cooldowns)
+    - [x] Phase 3: Stats with plain-number tiles that fold before the timeline, and `$ today` on
+          the strip from a store-level daily cost
+    - [x] Phase 4: the Models view as a thinking-level matrix with an aliases box, keeping the
+          diagnostics and family resolutions
+    - [x] Phase 5: a Requests table over the log (`r` for the raw log), which needs a registry of
+          every route's requests, not only chat
+    - [ ] Left out on purpose, as follow-ups: view state in the chrome (#264), the Models detail
+          pane (#265), startup event rows and an animated in-flight mark in the Requests table
+          (#266)
 
 ## Phase 5 — Routing across pi's logins
 
@@ -415,18 +442,28 @@ serving model and login reported under `x_pi` and in the log.
 - [x] Aliases (#66): `aliases` in `proxy-config.json`, listed while the target is exposed, `x_pi.alias`, a shadowing alias reported in `/healthz/models`
 - [x] Fallback chains (#67): `{ targets, fallbackOn }` aliases, fallback only on the named failure classes before the response starts, `x_pi.attempts`, every hop logged
 - [x] Cooldowns after rate limits (#68): a 429 cools the provider, a 503 the model, for the time the response gives (else 60 s, 180 s, doubling); chains that name the class skip it; shown on `/healthz/models`, `/v1/switchboard/models` and `x_pi.attempts`
-- [ ] Quota awareness (#69)
-- [ ] Usage and cost by route (#70)
+- [x] Ending cooldowns early (#182): `DELETE /v1/switchboard/cooldowns` (all, `?provider=` a login's, `?model=` a model's own; `404` for an unknown name) and the console's `c` (all), constitution 3.8.0
+- [x] Quota awareness (#69): research, tracking (`/healthz/creds`, `/v1/switchboard/models`, the console's Accounts view), the per-provider reserve a fallback chain keeps (`routing.reserve`), and Anthropic's `quota` recording replayed end to end; Codex's recording and a Copilot probe are #238
+- [ ] Usage and cost by route (#70): done are the `alias` and `attempt` on the upstream log lines, the running totals per alias × provider × model in memory (`src/server/route-totals.ts`) for the console (#61), and per-minute stats kept across restarts in SQLite (`src/stats/`, #216); open is whether to serve them at `GET /healthz/usage`
+- [x] Stats dashboard (#216): the stats store and recorder, and the console's Stats view rebuilt on its queries (today, week and 30 days; overview, timeline, models, errors)
+- [x] Reasoning effort per alias target (#230): `{ model, reasoningEffort }` targets replace the request's effort (constitution 3.7.0), reported in `x_pi.reasoning_effort` and `x_pi.attempts`; an unsupported effort leaves the target out (`effort-unsupported`, `/healthz/models` 503); `/v1/switchboard/models` lists the fixed effort
+- [x] Console Models view (#230): view `4` lists the exposed models and every alias with its diagnostics; its menus create, rename, edit (targets, efforts from the model's ladder, `fallbackOn`) and delete aliases, saved to `proxy-config.json` and used by the next request
+- [x] Family aliases (#231): `{ family, pin?, reasoningEffort? }` targets follow the newest exposed model of `anthropic/claude-{opus,sonnet,haiku,fable}` or `openai-codex/{sol,luna,terra,astra}` by the version in the ID, resolved per request; moves logged at warning; `familyAliases` and the `family-unknown`, `pin-outside-family`, `family-unparsed` diagnostics on `/healthz/models`; the console's Models view shows resolutions and pins (**Pin to…**, **Follow newest**, family as a new alias); release dates (#176) would replace the ID rules
+- [x] Several logins per provider (#227): `{provider}-N` logins (copies of pi's built-ins, own credential in pi's store, requests sent as the base, never configured by the base's environment key), registered at startup for every stored slot credential and by the console's login list, which offers each logged-in provider's next slot; logout drops the slot; a label per login (asked after a login, `Set a label` in the menu, `labels` in the config) shown in the Accounts view and the pickers; a login is not a model (constitution 3.6.0): the model is listed once and routing picks the login (`routing.logins.fallbackOn`, default `rate_limit`), reported as `x_pi.login`, with cooldowns, quota, reserve and totals per login and `/v1/switchboard/models` listing each model's logins; proven offline against the mock provider
+- [ ] Logins, follow-up (#233): a recorded fixture through a copy (from a login made for recording); open: a console action that puts a login first
 
 ## Phase 6 — More of OpenAI's API
 
-- [ ] Responses API, stateless (#140): experimental first, then added to PLAN's "Stable surface"
+- [x] Responses API, stateless (#140), experimental: `POST /v1/responses` behind `responsesApi`; text, function tools, images, reasoning items with `encrypted_content` replay for every model; spec-checked against `CreateResponse`, `Response` and `ResponseStreamEvent`; the stored-response operations answer "not supported"
+- [ ] Responses API: Codex CLI end to end (it may send non-function `custom` tools), then promote to PLAN's "Stable surface"
 - [x] `prompt_cache_key` → pi's `sessionId`, 64-character limit, Zed capability on (#39)
 
 ## Open decisions
 
-- [ ] Proxy auth and upstream failure contract (#128): item 5 done (an upstream 400 or 422 is
-      `400 upstream_invalid_request`, #147); items 1–4 open
+- [x] Proxy auth and upstream failure contract (#128): constant-time token compare and RFC 7235
+      Bearer scheme (items 1–2); a client's own key refused upstream is
+      `401 upstream_api_key_invalid` and a missing login `502 upstream_credentials_missing`
+      (items 3–4); an upstream 400/422 is `400 upstream_invalid_request` (item 5, #147)
 
 ## Later, not planned: experimental agentic mode
 

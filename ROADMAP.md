@@ -146,9 +146,10 @@ What the name promises, under constitution principle VI (explicit, visible, expo
 
 - [x] Aliases: virtual model names (#66)
 - [x] Fallback chains for aliases (#67)
-- [x] Cooldowns after rate limits (#68); pi already makes no hidden SDK retries
-- [ ] Quota awareness from provider rate-limit headers (#69)
-- [ ] Usage and cost by route (#70)
+- [x] Cooldowns after rate limits (#68); pi already makes no hidden SDK retries; ended early by `DELETE /v1/switchboard/cooldowns` or the console's `c` (#182)
+- [x] Quota awareness from provider rate-limit headers (#69): tracked, shown, and kept in reserve by fallback chains (`routing.reserve`); Anthropic recorded, Codex and Copilot in #238
+- [ ] Usage and cost by route (#70): log tags and in-memory totals done; an HTTP view is undecided
+- [ ] Several logins per provider (#227): `{provider}-N` logins found in pi's store at startup and added from the console; one model, routing picks the login (constitution 3.6.0); a recording through a copy to come
 
 ## Phase 6 — More of OpenAI's API
 
@@ -160,7 +161,7 @@ Routes OpenAI defines that pi can back, each experimental first and then promote
 
 ## Open decisions
 
-- [ ] Proxy auth and upstream failure contract, 5 points (#128); point 5 done (#147)
+- [x] Proxy auth and upstream failure contract (#128): constant-time token compare and RFC 7235 Bearer scheme (items 1–2); a client's own key refused upstream answers `401 upstream_api_key_invalid`, a missing pi login `502 upstream_credentials_missing` (items 3–4); an upstream 400/422 answers `400 upstream_invalid_request` (item 5, #147)
 
 ## Later, not planned
 

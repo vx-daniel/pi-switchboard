@@ -1,5 +1,6 @@
 import type { AssistantMessage } from '@earendil-works/pi-ai'
 import {
+  forClientKey,
   invalidRequest,
   mapFailedCall,
   mapUpstreamError,
@@ -159,6 +160,32 @@ describe('mapUpstreamError', () => {
     expect(JSON.stringify(mapped)).not.toContain(SECRET)
   })
 
+  // Catches the client's own key (X-Switchboard-Upstream-Api-Key), refused by the provider,
+  // answered as the proxy's fault (502) or with the provider's text, which can quote the key
+  // (#128); and any other failure changed by it.
+  test('answers a refused client key with 401 upstream_api_key_invalid, nothing else', () => {
+    const refused = forClientKey(
+      mapUpstreamError(new Error(`OpenAI API error (401): Incorrect API key ${SECRET}`))
+    )
+
+    expect(refused).toEqual({
+      status: 401,
+      body: {
+        error: {
+          message: 'The provider rejected the API key in X-Switchboard-Upstream-Api-Key.',
+          type: 'authentication_error',
+          param: null,
+          code: 'upstream_api_key_invalid'
+        }
+      }
+    })
+    expect(JSON.stringify(refused)).not.toContain(SECRET)
+    for (const other of ['OpenAI API error (429): slow down', 'OpenAI API error (500): oops']) {
+      const mapped = mapUpstreamError(new Error(other))
+      expect(forClientKey(mapped)).toBe(mapped)
+    }
+  })
+
   // Catches a model the provider login cannot use answered as an outage (502), which a client
   // retries forever (#156): Codex refuses a model the ChatGPT plan lacks with a stream event and no
   // status, or a 400. A refusal on other grounds is not this, and the model ID never reaches the
@@ -282,6 +309,50 @@ describe('mapUpstreamError', () => {
     expect(mapUpstreamError(new Error(upstreamMessage))).toEqual(expected)
   })
 
+  const OVERLOADED = {
+    status: 503,
+    body: upstreamBody('Upstream provider is overloaded', 'provider_overloaded')
+  }
+
+  // Catches a usage limit or a provider out of capacity answered as an outage (502), which no
+  // fallback chain or cooldown acts on (#190). pi reports Codex's 429 for a ChatGPT login over its
+  // limit with no status, so the words decide; a status in the message still decides over them.
+  test.each([
+    [
+      'a Codex usage limit, with plan and wait',
+      'You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.',
+      RATE_LIMITED
+    ],
+    ['a Codex usage limit, no plan', 'You have hit your ChatGPT usage limit.', RATE_LIMITED],
+    ['a Codex stream error event', 'Codex error: usage_limit_reached', RATE_LIMITED],
+    [
+      'a ChatGPT Business workspace limit',
+      'subscription_sharing_workplace_individual_usage_limit_exceeded',
+      RATE_LIMITED
+    ],
+    ['"usage limitations" is not a limit', 'Read the usage limitations first', PROVIDER_FAILED],
+    ['usage limits, plural', 'You have reached your usage limits for today', RATE_LIMITED],
+    ['a model at capacity', 'The model is at capacity, please try again later', OVERLOADED],
+    ['busy servers', 'Servers are currently busy', OVERLOADED],
+    ['a server_busy code', '{"error":{"type":"server_busy"}}', OVERLOADED],
+    ['high demand', 'We are currently experiencing high demand', OVERLOADED],
+    // Only pi's own phrases: the words alone say nothing about the provider's load.
+    ['"capacity" alone is not overload', 'Context capacity planning failed', PROVIDER_FAILED],
+    [
+      '"high demand" alone is not overload',
+      'Feature in high demand is unavailable here',
+      PROVIDER_FAILED
+    ],
+    [
+      'a 500 that mentions a usage limit',
+      '500: {"message":"usage limit lookup failed"}',
+      PROVIDER_FAILED
+    ],
+    ['a 502 that says busy', '502: {"message":"Servers are currently busy"}', PROVIDER_FAILED]
+  ])('maps %s', (_case, upstreamMessage, expected) => {
+    expect(mapUpstreamError(new Error(upstreamMessage))).toEqual(expected)
+  })
+
   test('maps a thrown value that is not an Error to the generic 502', () => {
     expect(mapUpstreamError(`string error ${SECRET}`)).toEqual({
       status: 502,
@@ -352,6 +423,11 @@ describe('mapFailedCall', () => {
     [
       'Anthropic request too large (413)',
       `413 {"type":"error","error":{"type":"request_too_large","message":"${QUOTED}"}}`
+    ],
+    // pi 1.4.0: a 413 is an overflow whatever its body says (a 502 on 1.3.0).
+    [
+      'Copilot request too large (413), no overflow wording',
+      `github-copilot API error (413): {"message":"failed to parse request","code":""}`
     ],
     [
       'OpenAI Responses',

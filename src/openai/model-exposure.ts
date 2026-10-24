@@ -23,6 +23,9 @@
  * Aliases (`@proxy/openai/model-aliases`, #66) are names for exposed models, listed beside them
  * and resolved after the public and canonical IDs.
  *
+ * A provider's extra logins (`@proxy/openai/model-logins`, #227) are not models of their own: the
+ * base provider's model is the exposed one, and each entry lists the logins that may serve it.
+ *
  * @packageDocumentation
  */
 
@@ -34,8 +37,20 @@ import type {
   PublicModelIdMode
 } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
-import { type AliasDiagnostic, exposeAliases } from '@proxy/openai/model-aliases'
+import type { ThinkingLevelsOf } from '@proxy/openai/effort-levels'
+import {
+  type AliasDiagnostic,
+  exposeAliases,
+  type FamilyResolution
+} from '@proxy/openai/model-aliases'
+import { groupLogins } from '@proxy/openai/model-logins'
+import type { ReasoningEffort } from '@proxy/openai/schemas'
+import { canonicalModelId } from '@proxy/pi/model-id'
 import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
+
+// Re-exported so the pi extension, which reaches only the package's entry points, can name a
+// model the way the proxy does.
+export { canonicalModelId }
 
 /** Logger for model exposure. */
 const exposureLogger = proxyLogger('openai', 'exposure')
@@ -48,19 +63,31 @@ const exposureLogger = proxyLogger('openai', 'exposure')
 export interface ExposedModel {
   /** The public ID exposed on the HTTP API: for an alias, the alias. */
   readonly publicId: string
-  /** The canonical internal ID: "provider/model-id". */
+  /** The canonical internal ID: "provider/model-id", the base provider's. */
   readonly canonicalId: string
-  /** The underlying pi model. */
+  /** The pi model the login calls: the base's, or a login slot's copy (#227). */
   readonly model: Model<Api>
-  /** The provider key. */
+  /** The provider key: the base provider, `owned_by` on the API. */
   readonly provider: string
+  /** The login that serves this entry: the provider ID pi resolves auth for, `model.provider`. */
+  readonly login: string
   /** The alias, when this entry is one: the target's model under a name from the config (#66). */
   readonly alias?: string
+  /**
+   * The effort an alias runs this target at, replacing the request's (#230). Only on an alias's
+   * entries, and only when its config sets one; the model supports it.
+   */
+  readonly reasoningEffort?: ReasoningEffort
   /**
    * An alias's fallback chain (#67): every exposed target, this entry's own first, and the
    * failures that move to the next. Only on an alias entry.
    */
   readonly route?: AliasRoute
+  /**
+   * The logins that may serve this model, this entry's own first, when there is more than one
+   * (#227): the same model, each under its login. Routing tries them in this order.
+   */
+  readonly logins?: readonly ExposedModel[]
 }
 
 /** An alias's exposed targets, in order, and the failures that move to the next (#67). */
@@ -104,6 +131,8 @@ export interface ModelExposureResult {
   readonly byAlias: ReadonlyMap<string, ExposedModel>
   /** Configured aliases left out: named like an exposed model, or naming no exposed model. */
   readonly aliasDiagnostics: readonly AliasDiagnostic[]
+  /** What each family alias target resolves to now (#231). */
+  readonly familyResolutions: readonly FamilyResolution[]
 }
 
 /** A failed exposure computation: a config conflict that makes public IDs ambiguous. */
@@ -176,10 +205,10 @@ function filterExposedModels(
 
   // "custom": the proxy's own list of exact canonical IDs.
   const allowed = new Set(filter)
-  const filtered = available.filter((model) => allowed.has(`${model.provider}/${model.id}`))
+  const filtered = available.filter((model) => allowed.has(canonicalModelId(model)))
   if (filtered.length < allowed.size) {
     exposureLogger.debug('{unmatchedCount} custom model IDs match no available model', () => {
-      const availableIds = new Set(available.map((model) => `${model.provider}/${model.id}`))
+      const availableIds = new Set(available.map((model) => canonicalModelId(model)))
       const unmatched = [...allowed].filter((canonicalId) => !availableIds.has(canonicalId))
       return { unmatchedCount: unmatched.length, unmatched }
     })
@@ -449,6 +478,34 @@ function validatePrefixUniqueness(
 // ---------------------------------------------------------------------------
 
 /**
+ * Builds an exposed model's entry: the primary login's, carrying every login when there is more
+ * than one (#227).
+ *
+ * @param publicId - the model's public ID
+ * @param model - the model exposure selected: the base provider's
+ * @param logins - the models that may serve it, one per login, the primary first
+ * @returns the entry
+ */
+function exposedEntry(
+  publicId: string,
+  model: Model<Api>,
+  logins: readonly Model<Api>[]
+): ExposedModel {
+  const canonicalId = canonicalModelId(model)
+  const entries = logins.map((login): ExposedModel => ({
+    publicId,
+    canonicalId,
+    model: login,
+    provider: model.provider,
+    login: login.provider
+  }))
+  const [
+    first = { publicId, canonicalId, model, provider: model.provider, login: model.provider }
+  ] = entries
+  return entries.length > 1 ? { ...first, logins: entries } : first
+}
+
+/**
  * Computes the full model-exposure result from config and available models.
  *
  * @remarks
@@ -456,15 +513,25 @@ function validatePrefixUniqueness(
  *
  * @param available - the models with auth configured (`getAvailableModels()`)
  * @param config - the model exposure configuration
+ * @param thinkingLevels - pi's `getSupportedThinkingLevels`, to check an alias target's effort
+ *   (#230); passed in so that exposure loads without pi (#165)
  * @returns the exposed models and lookup maps, or the error for duplicate prefix labels or
  *   (in "universal" mode) a model ID two providers share
  */
 export function computeModelExposure(
   available: readonly Model<Api>[],
-  config: ModelExposureConfig
+  config: ModelExposureConfig,
+  thinkingLevels: ThinkingLevelsOf
 ): ModelExposureOutcome {
+  // 0. One model per provider, whatever its logins (#227): a login slot's models are the base's.
+  const groups = groupLogins(available)
+  const loginsOf = new Map(groups.map((group) => [group.primary, group.logins]))
+
   // 1. Filter to exposed set
-  const { models: exposed, scopeDiagnostics } = filterExposedModels(available, config)
+  const { models: exposed, scopeDiagnostics } = filterExposedModels(
+    groups.map((group) => group.primary),
+    config
+  )
 
   // 2. Validate prefix uniqueness (before generating IDs)
   const prefixError = validatePrefixUniqueness(
@@ -514,18 +581,10 @@ export function computeModelExposure(
   for (const model of exposed) {
     const publicId = idMap.get(model)
     if (publicId === undefined) continue
-
-    const canonicalId = `${model.provider}/${model.id}`
-    const entry: ExposedModel = {
-      publicId,
-      canonicalId,
-      model,
-      provider: model.provider
-    }
-
+    const entry = exposedEntry(publicId, model, loginsOf.get(model) ?? [model])
     models.push(entry)
     byPublicId.set(publicId, entry)
-    byCanonicalId.set(canonicalId, entry)
+    byCanonicalId.set(entry.canonicalId, entry)
   }
 
   exposureLogger.debug(
@@ -539,7 +598,12 @@ export function computeModelExposure(
     }
   )
 
-  const aliased = exposeAliases(config.aliases, byPublicId, byCanonicalId)
+  const aliased = exposeAliases(config.aliases, {
+    byPublicId,
+    byCanonicalId,
+    availableIds: groups.map(({ primary }) => canonicalModelId(primary)),
+    thinkingLevels
+  })
   return {
     ok: true,
     models,
@@ -548,7 +612,8 @@ export function computeModelExposure(
     scopeDiagnostics,
     aliases: aliased.aliases,
     byAlias: aliased.byAlias,
-    aliasDiagnostics: aliased.diagnostics
+    aliasDiagnostics: aliased.diagnostics,
+    familyResolutions: aliased.families
   }
 }
 

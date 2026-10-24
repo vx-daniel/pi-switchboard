@@ -25,6 +25,7 @@ import {
 } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { FAKE_CODEX_TOKEN } from '../fixtures/codex-token'
 import {
   finishChunk,
   googleSse,
@@ -66,6 +67,30 @@ function failingWith(status: number, answer: MockReply): MockReply {
   }
 }
 
+/** How long Codex's usage limit says to wait, in seconds. */
+const CODEX_RESETS_IN_SECONDS = 3600
+
+/**
+ * Answers as Codex does when a ChatGPT plan's usage limit is reached: 429, the reset in the body
+ * and no `retry-after` (the shape pi's adapter reads, `parseErrorResponse`).
+ *
+ * @param response - the mock's response
+ */
+const codexUsageLimit: MockReply = (response) => {
+  response.writeHead(429, { 'content-type': 'application/json' })
+  response.end(
+    JSON.stringify({
+      error: {
+        type: 'usage_limit_reached',
+        message: 'The usage limit has been reached',
+        plan_type: 'plus',
+        resets_in_seconds: CODEX_RESETS_IN_SECONDS
+      }
+    })
+  )
+  return undefined
+}
+
 beforeAll(async () => {
   const answer = sse([...textChunks('ok'), finishChunk('stop')])
   mock = await startMockProvider({
@@ -75,7 +100,8 @@ beforeAll(async () => {
     'limited-gemini': failingWith(429, googleSse('ok')),
     'unavailable-mock': failingWith(503, answer),
     'overloaded-mock': failingWith(529, answer),
-    'steady-mock': answer
+    'steady-mock': answer,
+    'limited-codex': codexUsageLimit
   })
   const provider = (models: string[]): Record<string, unknown> => ({
     baseUrl: `${mock.origin}/v1`,
@@ -89,7 +115,13 @@ beforeAll(async () => {
         alpha: provider(['limited-mock', 'sibling-mock']),
         beta: provider(['answer-mock']),
         gamma: provider(['unavailable-mock', 'overloaded-mock', 'steady-mock']),
-        google: { ...mock.provider('google-generative-ai'), models: [{ id: 'limited-gemini' }] }
+        google: { ...mock.provider('google-generative-ai'), models: [{ id: 'limited-gemini' }] },
+        codex: {
+          baseUrl: mock.origin,
+          api: 'openai-codex-responses',
+          apiKey: FAKE_CODEX_TOKEN,
+          models: [{ id: 'limited-codex' }]
+        }
       }
     }
   })
@@ -306,5 +338,187 @@ describe('a 503 or 529 cools only its model', () => {
         source: 'response'
       })
     ])
+  })
+})
+
+describe('a Codex usage limit (#185)', () => {
+  // Catches a Codex usage limit reaching the client as a 502 provider failure: pi throws it with
+  // only its own wording ("You have hit your ChatGPT usage limit"), no status, so the proxy has to
+  // know that wording to answer 429 rate_limit, as for any other provider's limit.
+  test('answers 429 rate_limit', async () => {
+    setAliases({})
+
+    const named = await ask('limited-codex')
+
+    expect(named.status).toBe(429)
+    expect(named.body).toMatchObject({ error: { code: 'rate_limit' } })
+  })
+
+  // Catches the proxy calling Codex over pi's WebSocket, where it sees no response: the 429 body's
+  // resets_in_seconds then never reaches the cooldown, which falls back to the 60 s default.
+  test('cools the provider for the reset Codex gives, read over SSE', async () => {
+    setAliases({
+      codexChain: {
+        targets: ['codex/limited-codex', 'beta/answer-mock'],
+        fallbackOn: ['rate_limit']
+      }
+    })
+    const upgradesBefore = mock.upgrades
+
+    expect((await ask('codexChain')).status).toBe(200)
+    expect(mock.upgrades).toBe(upgradesBefore)
+    expect(await listedCooldowns()).toEqual([
+      expect.objectContaining({
+        scope: 'provider',
+        provider: 'codex',
+        reason: 'rate_limit',
+        source: 'response',
+        secondsLeft: CODEX_RESETS_IN_SECONDS
+      })
+    ])
+  })
+})
+
+/**
+ * Sends `DELETE /v1/switchboard/cooldowns`.
+ *
+ * @param query - the query string, without `?`
+ * @param config - the server config; {@link testConfig} by default
+ * @param headers - request headers
+ * @returns the status and the parsed body
+ */
+async function clearCooldowns(
+  query = '',
+  config = testConfig(),
+  headers: Record<string, string> = {}
+): Promise<{ status: number; body: unknown }> {
+  const response = await createApp(config, fileConfigReader).request(
+    `/v1/switchboard/cooldowns${query === '' ? '' : `?${query}`}`,
+    { method: 'DELETE', headers }
+  )
+  return { status: response.status, body: await response.json() }
+}
+
+describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
+  // Catches the clear not reaching the state routing reads: after it, the chain must call the
+  // login again at once, not wait out the 429's time, and /healthz/models must stop listing it.
+  test("clearing a login's cooldown has the next chain request call it again", async () => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+    limiting = false
+
+    const cleared = await clearCooldowns('provider=alpha')
+
+    expect(cleared).toEqual({
+      status: 200,
+      body: {
+        object: 'list',
+        data: [
+          expect.objectContaining({
+            scope: 'provider',
+            provider: 'alpha',
+            reason: 'rate_limit',
+            secondsLeft: RETRY_AFTER_SECONDS
+          })
+        ]
+      }
+    })
+    expect((await ask('chain')).upstream).toEqual(['limited-mock'])
+    expect(await listedCooldowns()).toEqual([])
+  })
+
+  // Catches a public model ID not resolved to the canonical ID the cooldown is kept under, so the
+  // clear answers 200 and ends nothing.
+  test('a model is named by its public ID as well', async () => {
+    setAliases({
+      overload: {
+        targets: ['gamma/unavailable-mock', 'beta/answer-mock'],
+        fallbackOn: ['unavailable']
+      }
+    })
+    await ask('overload')
+
+    const cleared = await clearCooldowns('model=unavailable-mock')
+
+    expect(cleared.status).toBe(200)
+    expect(cleared.body).toMatchObject({
+      data: [{ scope: 'model', model: 'gamma/unavailable-mock' }]
+    })
+    expect(await listedCooldowns()).toEqual([])
+  })
+
+  // Catches a typo answered like a clear that found nothing, or one that ends something anyway.
+  test.each([
+    ['provider=alhpa', 'provider', 'login_not_found'],
+    ['model=alpha/nope', 'model', 'model_not_found']
+  ])('?%s is a 404 and clears nothing', async (query, param, code) => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+
+    const refused = await clearCooldowns(query)
+
+    expect(refused).toEqual({
+      status: 404,
+      body: { error: expect.objectContaining({ type: 'invalid_request_error', param, code }) }
+    })
+    expect(await listedCooldowns()).toHaveLength(1)
+  })
+
+  // Catches a name checked against the exposure alone: a cooldown on a login or model the
+  // exposure config has hidden since would then be a 404, and only clearing everything would end it.
+  test('a login or model hidden since it cooled can still be named', async () => {
+    setAliases({
+      chain: CHAIN,
+      overload: {
+        targets: ['gamma/unavailable-mock', 'beta/answer-mock'],
+        fallbackOn: ['unavailable']
+      }
+    })
+    await ask('chain')
+    await ask('overload')
+    writeFileSync(
+      join(agentDir.path, 'proxy-config.json'),
+      JSON.stringify({ modelExposureMode: 'custom', customModels: ['beta/answer-mock'] })
+    )
+    const listed = await getJson('/v1/models')
+    expect(listed['data']).toEqual([expect.objectContaining({ id: 'answer-mock' })])
+
+    const cleared = await clearCooldowns('provider=alpha&model=gamma/unavailable-mock')
+
+    expect(cleared.status).toBe(200)
+    expect(cleared.body).toMatchObject({
+      data: [
+        { scope: 'provider', provider: 'alpha' },
+        { scope: 'model', model: 'gamma/unavailable-mock' }
+      ]
+    })
+    expect(await listedCooldowns()).toEqual([])
+  })
+
+  // Catches a repeated name failing the query validator into hono-openapi's own 400 shape, or its
+  // later value used: the first one counts, as with `window` on /v1/switchboard/usage.
+  test.each([
+    ['provider=alpha&provider=alhpa', 200],
+    ['provider=alhpa&provider=alpha', 404]
+  ])('?%s counts by the first value', async (query, status) => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+
+    expect((await clearCooldowns(query)).status).toBe(status)
+  })
+
+  // Catches the one route that writes state reachable without the proxy token.
+  test('needs the proxy token when auth is on', async () => {
+    setAliases({ chain: CHAIN })
+    await ask('chain')
+    const token = 'notarealsecret-cooldowns-token'
+    const config = { ...testConfig(), proxyAuth: { kind: 'token', token } as const }
+
+    expect((await clearCooldowns('', config)).status).toBe(401)
+    expect(await listedCooldowns()).toHaveLength(1)
+    expect(await clearCooldowns('', config, { Authorization: `Bearer ${token}` })).toMatchObject({
+      status: 200,
+      body: { data: [{ provider: 'alpha' }] }
+    })
   })
 })

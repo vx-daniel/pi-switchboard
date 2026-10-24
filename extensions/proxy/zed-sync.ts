@@ -4,6 +4,7 @@
  * @packageDocumentation
  */
 
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import { loadConfigFromFile } from '@vx-daniel/pi-switchboard/config'
 import { computeModelExposure } from '@vx-daniel/pi-switchboard/exposure'
@@ -28,7 +29,11 @@ async function runZedSync(
   dryRun: boolean
 ): Promise<{ ok: boolean; message: string }> {
   const available = getSessionAvailableModels(state)
-  const outcome = computeModelExposure(available, await buildExposureConfig(state))
+  const outcome = computeModelExposure(
+    available,
+    await buildExposureConfig(state),
+    getSupportedThinkingLevels
+  )
   if (!outcome.ok) {
     return { ok: false, message: `Model exposure error: ${outcome.message}` }
   }

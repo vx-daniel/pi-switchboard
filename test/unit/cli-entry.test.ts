@@ -34,6 +34,8 @@ const PROXY_ENV_VARIABLES = [
   'PI_SWITCHBOARD_PORT',
   'PI_SWITCHBOARD_AUTH_TOKEN',
   'PI_SWITCHBOARD_REMOTE_IMAGES',
+  'PI_SWITCHBOARD_DOCS_UI',
+  'PI_SWITCHBOARD_STATS',
   'PI_SWITCHBOARD_MAX_BODY_SIZE',
   'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
   'PI_SWITCHBOARD_AGENTIC',
@@ -49,8 +51,8 @@ const BODY_SIZE_MB = 3
 const BYTES_PER_MB = 1_048_576
 const UPSTREAM_TIMEOUT_SEC = 7
 const MS_PER_SECOND = 1000
-/** The four warnings the invalid-input test provokes, logged before anything else. */
-const WARNING_COUNT = 4
+/** The three warnings the invalid-env-var test provokes, logged before anything else. */
+const WARNING_COUNT = 3
 /** How long an info flag's test waits for a server it must not have started, in milliseconds. */
 const SERVER_SETTLE_MS = 1000
 
@@ -295,6 +297,80 @@ describe('--version and --help', () => {
   })
 })
 
+describe('starting', () => {
+  // Catches a port already in use surfacing as an uncaught exception with a stack trace (and, in
+  // the console, after it took over the terminal): it is a fatal line naming the address, exit 1.
+  test('a port in use refuses to start with a fatal line and exit 1', async () => {
+    const occupied = createServer()
+    const origin = await listenOnLoopback(occupied)
+    writeConfigFile({ port: Number(new URL(origin).port) })
+
+    try {
+      await runCli([])
+      await vi.waitFor(() => {
+        expect(process.exitCode).toBe(1)
+      })
+    } finally {
+      occupied.close()
+    }
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        level: 'FATAL',
+        message: expect.stringContaining('Cannot listen on') as unknown
+      })
+    )
+  })
+
+  // Catches a corrupt config file starting the proxy on the defaults (auth off) with only a
+  // warning, as it did: with no flag or env token it is a fatal line naming the file and the
+  // problem, never the file's contents, and exit 1.
+  test('a config file that is not valid JSON refuses to start with a fatal line and exit 1', async () => {
+    assert(agentDir !== undefined, 'no fixture agent dir')
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{"authToken": "notarealsecret-fi')
+
+    await runCli(['--log-format', 'json'])
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+
+    expect(logRecords()).toContainEqual(
+      expect.objectContaining({
+        level: 'FATAL',
+        message: expect.stringContaining('exists but "is not valid JSON"') as unknown
+      })
+    )
+    expect(stderr.join('')).not.toContain('notarealsecret-fi')
+  })
+})
+
+describe('tui', () => {
+  // Catches the console started where there is no terminal to draw on (a script, a service),
+  // which would hang or corrupt its output: it refuses and names the headless command.
+  test.each([
+    ['tui', ['tui']],
+    ['tui after flags', ['--port', '4999', 'tui']],
+    ['tui after a --flag=value', ['--log-level=info', 'tui']]
+  ])('%s without a terminal refuses with exit 1', async (_case, args) => {
+    await runCli(args)
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect(stderr.join('')).toContain('pi-switchboard tui needs an interactive terminal')
+  })
+
+  // Catches a flag's value taken for the subcommand: `--log-format tui` is the headless CLI with
+  // an invalid format, not the console (third #195 review).
+  test('a flag whose value is tui stays headless', async () => {
+    await runCli(['--log-format', 'tui'])
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect(stderr).toEqual(['--log-format must be one of: pretty, json\n'])
+  })
+})
+
 describe('--config', () => {
   // Catches the effective-config output, which users paste into issues, leaking the auth token.
   test('prints the config file path and the config with the auth token masked', async () => {
@@ -342,6 +418,35 @@ describe('--config', () => {
   })
 })
 
+describe('numeric flags', () => {
+  // Catches a mistyped or out-of-range --port, --max-body-size or --upstream-timeout starting the
+  // proxy anyway on the config's value (which it did, with a warning), or not naming the range the
+  // user can pick from. CONSTITUTION principle II: an invalid flag refuses to start and lists the
+  // valid values; the config file's bounds apply to the flag too.
+  test.each([
+    ['--port abc', ['--port', 'abc'], '--port must be an integer from 1 to 65535\n'],
+    ['--port 70000', ['--port', '70000'], '--port must be an integer from 1 to 65535\n'],
+    [
+      '--max-body-size 0',
+      ['--max-body-size', '0'],
+      '--max-body-size must be an integer from 1 to 500\n'
+    ],
+    [
+      '--upstream-timeout 4',
+      ['--upstream-timeout', '4'],
+      '--upstream-timeout must be an integer from 5 to 600\n'
+    ]
+  ])('%s refuses to start and names the range', async (_label, args, message) => {
+    await runCli(args)
+
+    await vi.waitFor(() => {
+      expect(process.exitCode).toBe(1)
+    })
+    expect(stderr).toEqual([message])
+    expect(stdout).toEqual([])
+  })
+})
+
 describe('starting the server', () => {
   // Catches a CLI flag being dropped on its way to the server: the port it binds, the token it
   // demands, the body and timeout limits, remote images, the docs UI and the log level.
@@ -358,6 +463,8 @@ describe('starting the server', () => {
       FIXTURE_TOKEN,
       '--remote-images',
       '--docs-ui',
+      '--responses-api',
+      '--no-stats',
       '--max-body-size',
       String(BODY_SIZE_MB),
       '--upstream-timeout',
@@ -387,6 +494,8 @@ describe('starting the server', () => {
       agenticEnabled: false,
       remoteImagesEnabled: true,
       docsUiEnabled: true,
+      responsesApiEnabled: true,
+      statsEnabled: false,
       maxBodySize: BODY_SIZE_MB * BYTES_PER_MB,
       upstreamTimeoutMs: UPSTREAM_TIMEOUT_SEC * MS_PER_SECOND,
       publicModelIdMode: expect.any(String) as string,
@@ -398,15 +507,17 @@ describe('starting the server', () => {
     expect(JSON.stringify(logRecords())).not.toContain(FIXTURE_TOKEN)
   })
 
-  // Catches a typo in the environment or a bad numeric flag stopping the proxy, or silently
-  // changing what it does, instead of being ignored with a warning.
-  test('invalid env vars and numeric flags are ignored with a warning', async () => {
+  // Catches a typo in the environment stopping the proxy, or silently changing what it does,
+  // instead of being ignored with a warning (CONSTITUTION principle II: an invalid env var is
+  // ignored with a warning; an invalid flag refuses to start, tested under "numeric flags").
+  test('invalid env vars are ignored with a warning', async () => {
     const port = await freePort()
     writeConfigFile({ port })
     vi.stubEnv('PI_SWITCHBOARD_LOG_FORMAT', 'xml')
     vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'loud')
+    vi.stubEnv('PI_SWITCHBOARD_PORT', '70000')
 
-    await runCli(['--port', 'abc', '--max-body-size', '0', '--log-format', 'json'])
+    await runCli(['--log-format', 'json'])
     await waitForListening(`http://127.0.0.1:${String(port)}`)
 
     // String values are quoted in JSON log messages on purpose, so a value can never pose as
@@ -416,8 +527,7 @@ describe('starting the server', () => {
         .map((record) => record['message'])
         .slice(0, WARNING_COUNT)
     ).toEqual([
-      'Ignoring --"port"="abc": not a positive integer',
-      'Ignoring --"max-body-size"="0": not a positive integer',
+      `Ignoring "PI_SWITCHBOARD_PORT"="70000": not an integer from 1 to 65535; using ${String(port)}`,
       'Ignoring PI_SWITCHBOARD_LOG_LEVEL="loud": not one of ["trace","debug","info","warning","error","fatal"]; using "info"',
       'Ignoring PI_SWITCHBOARD_LOG_FORMAT="xml": not one of ["pretty","json"]'
     ])

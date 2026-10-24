@@ -5,9 +5,12 @@
  * @packageDocumentation
  */
 
+import { createHash, timingSafeEqual } from 'node:crypto'
+
 import { withContext } from '@logtape/logtape'
 import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
+import { recordRejectedRequest } from '@proxy/server/active-requests'
 import { authenticationError, invalidRequest } from '@proxy/server/errors'
 import {
   HTTP_BAD_REQUEST,
@@ -15,23 +18,39 @@ import {
   HTTP_PAYLOAD_TOO_LARGE,
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
+import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { generateRequestId } from '@proxy/server/request-id'
 import type { ProxyEnv } from '@proxy/server/types'
 import type { MiddlewareHandler } from 'hono'
+import { bodyLimit } from 'hono/body-limit'
 
 /** Logger for request and response lines. */
 const httpLogger = proxyLogger('server', 'http')
 /** Logger for proxy auth decisions. */
 const authLogger = proxyLogger('server', 'auth')
 
-/** The scheme prefix of an `Authorization` header that carries a bearer token. */
-const BEARER_PREFIX = 'Bearer '
+/**
+ * An `Authorization` header with a bearer token: the scheme in any case, then one or more spaces
+ * (RFC 7235 §2.1: `credentials = auth-scheme [ 1*SP ... ]`, and the scheme is case-insensitive),
+ * then the token, captured as sent.
+ */
+const BEARER = /^bearer +(\S.*)$/i
 /** The liveness path; it and the paths below it are logged as polling. */
 const HEALTH_PATH = '/healthz'
 /** The per-request upstream key header. */
 const UPSTREAM_API_KEY_HEADER = 'X-Switchboard-Upstream-Api-Key'
 /** Its name before the rename to pi-switchboard (#65); rejected, not read. */
 const OLD_UPSTREAM_API_KEY_HEADER = 'X-Pi-Upstream-Api-Key'
+
+/**
+ * Checks whether a path is a health check's, which container healthchecks and monitors poll.
+ *
+ * @param path - the request's path
+ * @returns whether it is `/healthz` or below it
+ */
+export function isHealthPath(path: string): boolean {
+  return path === HEALTH_PATH || path.startsWith(`${HEALTH_PATH}/`)
+}
 
 /**
  * Creates the middleware that sets the request's IDs and upstream API key, and logs the request
@@ -68,7 +87,7 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
     // their lines go to debug, except an answer that is not 2xx, which stays at info. At info, a
     // failed check therefore shows only its "answered" line: the request line was decided before
     // the status was known, and the answer line carries the same method, path and request id.
-    const polling = path === HEALTH_PATH || path.startsWith(`${HEALTH_PATH}/`)
+    const polling = isHealthPath(path)
     await withContext({ requestId, clientRequestId }, async () => {
       const received = {
         method,
@@ -119,23 +138,58 @@ export function renamedHeaderMiddleware(): MiddlewareHandler<ProxyEnv> {
 }
 
 /**
- * Creates the proxy auth middleware for `config.proxyAuth`.
+ * Hashes a token for {@link matchesToken}.
+ *
+ * @param token - the token
+ * @returns its SHA-256 digest
+ */
+function tokenDigest(token: string): Buffer {
+  return createHash('sha256').update(token).digest()
+}
+
+/**
+ * Compares a token from a request with the proxy's in constant time (#128 item 1).
+ *
+ * @remarks
+ * `!==` returns at the first character that differs, so its time tells how much of the token
+ * matched. Comparing SHA-256 digests with `timingSafeEqual` takes the same time for any token,
+ * and the digests' equal length hides the token's length too.
+ *
+ * @param token - the token the request sent
+ * @param expected - the digest of the proxy's token
+ * @returns whether they are the same token
+ */
+function matchesToken(token: string, expected: Buffer): boolean {
+  return timingSafeEqual(tokenDigest(token), expected)
+}
+
+/**
+ * Creates the proxy auth middleware, which applies the switch's auth to each request.
  *
  * @remarks
  * `off` lets everything through; `token` needs `Authorization: Bearer <token>` and answers 401 for
- * a missing header or a wrong token. Auth that cannot be applied never gets here: the proxy
- * refuses to start (`UnusableProxyAuthError`).
+ * a missing header or a wrong token. The scheme is matched in any case, with one or more spaces
+ * before the token, as RFC 7235 §2.1 allows; the token itself is matched exactly (#128 item 2).
+ * The switch is read on every request, so a change from the console applies to the next one.
+ * Auth that cannot be applied never gets here: the proxy refuses to start
+ * (`UnusableProxyAuthError`).
  *
- * @param config - the server config; only `proxyAuth` is read, once, when the middleware is made
+ * @param proxyAuth - the server's proxy auth switch
  * @returns the middleware
  */
-export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<ProxyEnv> {
-  const proxyAuth = config.proxyAuth
+export function proxyAuthMiddleware(proxyAuth: ProxyAuthSwitch): MiddlewareHandler<ProxyEnv> {
+  // Hashed once per token: every request compares against the same digest until it changes.
+  let hashed: { readonly token: string; readonly digest: Buffer } | undefined
   return async (context, next) => {
-    if (proxyAuth.kind === 'off') {
+    const applied = proxyAuth.current()
+    if (applied.kind === 'off') {
       await next()
       return undefined
     }
+    if (hashed?.token !== applied.token) {
+      hashed = { token: applied.token, digest: tokenDigest(applied.token) }
+    }
+    const expected = hashed.digest
 
     const authHeader = context.req.header('authorization')
     if (authHeader === undefined) {
@@ -146,15 +200,15 @@ export function proxyAuthMiddleware(config: ServerConfig): MiddlewareHandler<Pro
       return context.json(authenticationError('Missing Authorization header'), HTTP_UNAUTHORIZED)
     }
 
-    const isBearer = authHeader.startsWith(BEARER_PREFIX)
-    const token = isBearer ? authHeader.slice(BEARER_PREFIX.length) : undefined
+    const token = BEARER.exec(authHeader)?.[1]
 
-    if (token !== proxyAuth.token) {
-      // Never the header or token value: only whether the scheme was right.
+    if (token === undefined || !matchesToken(token, expected)) {
+      // Never the header or token value: only whether it was a Bearer header with a token
+      // (`bearerScheme` is false for `Bearer` with nothing after it, or no space before the token).
       authLogger.warn('Rejected {method} {path}: invalid proxy auth token', {
         method: context.req.method,
         path: context.req.path,
-        bearerScheme: isBearer
+        bearerScheme: token !== undefined
       })
       return context.json(
         authenticationError('Invalid proxy authentication token'),
@@ -207,6 +261,34 @@ export function disconnectMiddleware(): MiddlewareHandler<ProxyEnv> {
   }
 }
 
+/**
+ * Creates the middleware that records a chat request the proxy answers without calling a model
+ * as rejected, for the console (#214).
+ *
+ * @remarks
+ * Mounted on `POST /v1/chat/completions` ahead of the body size limit and proxy auth, so it sees
+ * their answers too. The chat route marks a request that reaches the dispatch (`chatDispatched`),
+ * which `active-requests.ts` follows from there; any other answer is recorded with its status and
+ * the model the request named, if the route read that far (`chatModel`). Nothing else from the
+ * request is kept.
+ *
+ * @returns the middleware
+ */
+export function rejectedChatMiddleware(): MiddlewareHandler<ProxyEnv> {
+  return async (context, next) => {
+    const startedAt = Date.now()
+    await next()
+    if (context.req.method !== 'POST' || context.get('chatDispatched') === true) return undefined
+    recordRejectedRequest({
+      requestId: context.get('requestId'),
+      model: context.get('chatModel'),
+      status: context.res.status,
+      startedAt
+    })
+    return undefined
+  }
+}
+
 /** A JSON media type: `application/json`, or a `+json` one such as `application/merge-patch+json`. */
 const JSON_MEDIA_TYPE = /^application\/([a-z-.]+\+)?json/i
 
@@ -239,38 +321,37 @@ export function jsonBodyMiddleware(): MiddlewareHandler<ProxyEnv> {
  * Creates the middleware that rejects an oversized request body with 413.
  *
  * @remarks
- * Only POST, PUT and PATCH requests are checked, and only by their `Content-Length` header: a
- * request without one is let through.
+ * Only POST, PUT and PATCH requests are checked. Hono's `bodyLimit` does the counting: a declared
+ * `Content-Length` over the limit is refused before any of the body is read, and a body without
+ * one (`Transfer-Encoding: chunked`) is counted as it arrives and refused once the count passes
+ * the limit, without reading the rest (#187). A streamed body within the limit is held in memory
+ * and handed on to the route, which would buffer it anyway to parse it.
  *
  * @param config - the server config; `maxBodySize` is the limit in bytes
  * @returns the middleware
  */
 export function bodySizeLimitMiddleware(config: ServerConfig): MiddlewareHandler<ProxyEnv> {
+  const { maxBodySize } = config
+  const limit = bodyLimit({
+    maxSize: maxBodySize,
+    onError: (context) => {
+      const { method, path } = context.req
+      httpLogger.warn(
+        'Rejected {method} {path}: body exceeds limit of {maxBodySize} bytes (Content-Length {contentLength})',
+        { method, path, maxBodySize, contentLength: context.req.header('content-length') ?? 'none' }
+      )
+      return context.json(
+        invalidRequest(`Request body too large. Maximum size: ${String(maxBodySize)} bytes`),
+        HTTP_PAYLOAD_TOO_LARGE
+      )
+    }
+  })
   return async (context, next) => {
     const method = context.req.method
     if (method !== 'POST' && method !== 'PUT' && method !== 'PATCH') {
       await next()
       return undefined
     }
-
-    const contentLength = context.req.header('content-length')
-    if (contentLength !== undefined) {
-      const length = Number.parseInt(contentLength, 10)
-      if (Number.isFinite(length) && length > config.maxBodySize) {
-        httpLogger.warn(
-          'Rejected {method} {path}: body of {contentLength} bytes exceeds limit of {maxBodySize}',
-          { method, path: context.req.path, contentLength: length, maxBodySize: config.maxBodySize }
-        )
-        return context.json(
-          invalidRequest(
-            `Request body too large. Maximum size: ${String(config.maxBodySize)} bytes`
-          ),
-          HTTP_PAYLOAD_TOO_LARGE
-        )
-      }
-    }
-
-    await next()
-    return undefined
+    return limit(context, next)
   }
 }

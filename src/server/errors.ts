@@ -8,22 +8,38 @@
  * Statuses the proxy answers with:
  * - 400: invalid JSON or request field, failed message conversion, context overflow, a request
  *   the provider refused as invalid (its 400 or 422)
- * - 401: proxy auth failure, no upstream credential for the model
+ * - 401: proxy auth failure, the provider refused the client's own key
+ *   (`X-Switchboard-Upstream-Api-Key`, `upstream_api_key_invalid`)
  * - 404: model not found, unsupported endpoint, any other route (`Invalid URL (<method> <path>)`)
  * - 413: request body over the size limit
  * - 422: unsupported or unknown request field, unsupported tool
- * - 429: upstream rate limit
+ * - 429: upstream rate limit or usage limit
  * - 500: anything thrown inside the proxy, an invalid model exposure config included
  *   (`internalError`, answered by `app.onError`)
- * - 502: upstream authentication failure (401, 403), any other upstream error
- * - 503: upstream unavailable (503) or overloaded (529), failed health check
+ * - 502: upstream refused pi's stored credential (401, 403), pi has no credential for the model's
+ *   provider (`upstream_credentials_missing`), any other upstream error
+ * - 503: upstream unavailable (503), overloaded (529) or out of capacity, failed health check
  * - 504: upstream timeout (408, 504, idle timeout)
  *
  * @packageDocumentation
  */
 
 import { type AssistantMessage, isContextOverflow } from '@earendil-works/pi-ai'
-import { isRecord } from '@proxy/utils/guards'
+import {
+  HTTP_BAD_GATEWAY,
+  HTTP_BAD_REQUEST,
+  HTTP_FORBIDDEN,
+  HTTP_GATEWAY_TIMEOUT,
+  HTTP_NOT_FOUND,
+  HTTP_OVERLOADED,
+  HTTP_PAYLOAD_TOO_LARGE,
+  HTTP_REQUEST_TIMEOUT,
+  HTTP_SERVICE_UNAVAILABLE,
+  HTTP_TOO_MANY_REQUESTS,
+  HTTP_UNAUTHORIZED,
+  HTTP_UNPROCESSABLE_ENTITY
+} from '@proxy/server/http-status'
+import { parseJsonOrUndefined } from '@proxy/utils/guards'
 import * as z from 'zod'
 
 /** OpenAI's error response body. Documents the response; never parsed. */
@@ -88,6 +104,22 @@ export function modelNotFound(modelId: string): OpenAIError {
 }
 
 /**
+ * Builds the `login_not_found` body for the `provider` field: no login by that ID serves an
+ * exposed model or is cooling down (#182).
+ *
+ * @param login - the login's provider ID the client named, quoted in the message
+ * @returns the error body
+ */
+export function loginNotFound(login: string): OpenAIError {
+  return makeError(
+    `No login '${login}' serves an exposed model or is cooling down`,
+    'invalid_request_error',
+    'provider',
+    'login_not_found'
+  )
+}
+
+/**
  * Builds an `unsupported_parameter` body.
  *
  * @param param - the unsupported request field
@@ -130,6 +162,17 @@ export function internalError(): OpenAIError {
 }
 
 /**
+ * Builds the body for usage that can't be read: stats are off, or the stats file won't open or
+ * read.
+ *
+ * @param message - why, without a path or the underlying error's text
+ * @returns the `server_error` body with code `stats_unavailable`
+ */
+export function statsUnavailable(message: string): OpenAIError {
+  return makeError(message, 'server_error', null, 'stats_unavailable')
+}
+
+/**
  * Builds a `server_error` body for an upstream failure.
  *
  * @param message - the fixed message the client sees; never the upstream message
@@ -141,7 +184,7 @@ function upstreamError(message: string, code?: string): OpenAIError {
 }
 
 /** The statuses an upstream failure is answered with. */
-export type UpstreamErrorStatus = 400 | 404 | 429 | 502 | 503 | 504
+export type UpstreamErrorStatus = 400 | 401 | 404 | 429 | 502 | 503 | 504
 
 /** An upstream failure as the client sees it: a status and a fixed body that quotes nothing. */
 export interface MappedUpstreamError {
@@ -151,32 +194,58 @@ export interface MappedUpstreamError {
 
 /** Upstream rate limit: 429 `rate_limit`. */
 const RATE_LIMITED: MappedUpstreamError = {
-  status: 429,
+  status: HTTP_TOO_MANY_REQUESTS,
   body: upstreamError('Upstream rate limit exceeded', 'rate_limit')
 }
 /** Upstream timeout: 504 `timeout`. */
 const TIMED_OUT: MappedUpstreamError = {
-  status: 504,
+  status: HTTP_GATEWAY_TIMEOUT,
   body: upstreamError('Upstream request timed out', 'timeout')
 }
-/** Upstream refused the proxy's credential: 502 `upstream_auth_error`. */
+/** Upstream refused pi's stored credential: 502 `upstream_auth_error`. */
 const AUTH_FAILED: MappedUpstreamError = {
-  status: 502,
+  status: HTTP_BAD_GATEWAY,
   body: upstreamError('Upstream authentication failed', 'upstream_auth_error')
+}
+/**
+ * Upstream refused the key the client sent in `X-Switchboard-Upstream-Api-Key` (#128): the
+ * client's own credential, so a 401 tells it to fix it. Fixed text: the provider's message can
+ * quote the key.
+ */
+const CLIENT_KEY_REJECTED: MappedUpstreamError = {
+  status: HTTP_UNAUTHORIZED,
+  body: makeError(
+    'The provider rejected the API key in X-Switchboard-Upstream-Api-Key.',
+    'authentication_error',
+    null,
+    'upstream_api_key_invalid'
+  )
+}
+/**
+ * pi has no usable credential for the model's provider (#128): the proxy's own setup is missing,
+ * which the client cannot fix, so it is a 502 like a refused stored credential, not the 401 a bad
+ * proxy token gets. Fixed text: pi's reason can quote a key command or an install path.
+ */
+export const CREDENTIALS_MISSING: MappedUpstreamError = {
+  status: HTTP_BAD_GATEWAY,
+  body: upstreamError(
+    "pi has no usable credential for the model's provider. Log in with pi on the proxy's host.",
+    'upstream_credentials_missing'
+  )
 }
 /** Upstream unavailable: 503 `provider_unavailable`. */
 const UNAVAILABLE: MappedUpstreamError = {
-  status: 503,
+  status: HTTP_SERVICE_UNAVAILABLE,
   body: upstreamError('Upstream provider is unavailable', 'provider_unavailable')
 }
 /** Upstream overloaded: 503 `provider_overloaded`. */
 const OVERLOADED: MappedUpstreamError = {
-  status: 503,
+  status: HTTP_SERVICE_UNAVAILABLE,
   body: upstreamError('Upstream provider is overloaded', 'provider_overloaded')
 }
 /** Any other upstream failure: 502 `upstream_error`. */
 const PROVIDER_FAILED: MappedUpstreamError = {
-  status: 502,
+  status: HTTP_BAD_GATEWAY,
   body: upstreamError('Upstream provider error')
 }
 /**
@@ -185,7 +254,7 @@ const PROVIDER_FAILED: MappedUpstreamError = {
  * counts and sometimes the request.
  */
 const CONTEXT_OVERFLOW: MappedUpstreamError = {
-  status: 400,
+  status: HTTP_BAD_REQUEST,
   body: makeError(
     "The messages exceed the model's context window. Shorten or summarize them and try again.",
     'invalid_request_error',
@@ -200,7 +269,7 @@ const CONTEXT_OVERFLOW: MappedUpstreamError = {
  * text: the provider's message can quote the request.
  */
 const REJECTED_AS_INVALID: MappedUpstreamError = {
-  status: 400,
+  status: HTTP_BAD_REQUEST,
   body: makeError(
     'The provider rejected the request as invalid. Check the fields this model accepts.',
     'invalid_request_error',
@@ -216,7 +285,7 @@ const REJECTED_AS_INVALID: MappedUpstreamError = {
  * and be retried. Fixed text: the request has one model, so `param` names it.
  */
 const MODEL_UNAVAILABLE: MappedUpstreamError = {
-  status: 404,
+  status: HTTP_NOT_FOUND,
   body: makeError(
     'The model is not available with the provider login the proxy uses. Choose another model.',
     'invalid_request_error',
@@ -225,30 +294,15 @@ const MODEL_UNAVAILABLE: MappedUpstreamError = {
   )
 }
 
-/** HTTP 400 Bad Request. */
-const HTTP_BAD_REQUEST = 400
-/** HTTP 401 Unauthorized. */
-const HTTP_UNAUTHORIZED = 401
-/** HTTP 403 Forbidden. */
-const HTTP_FORBIDDEN = 403
-/** HTTP 408 Request Timeout. */
-const HTTP_REQUEST_TIMEOUT = 408
-/** HTTP 413 Payload Too Large. */
-const HTTP_PAYLOAD_TOO_LARGE = 413
-/** HTTP 422 Unprocessable Entity. */
-const HTTP_UNPROCESSABLE_ENTITY = 422
-/** HTTP 429 Too Many Requests. */
-const HTTP_TOO_MANY_REQUESTS = 429
-/** HTTP 503 Service Unavailable. */
-const HTTP_SERVICE_UNAVAILABLE = 503
-/** HTTP 504 Gateway Timeout. */
-const HTTP_GATEWAY_TIMEOUT = 504
-/** Anthropic's "overloaded". */
-const HTTP_OVERLOADED = 529
 /** The first error status: error statuses span 400–599. */
 const FIRST_ERROR_STATUS = 400
 /** The first status past the error range. */
 const PAST_LAST_ERROR_STATUS = 600
+
+/** Google's error body, as its SDK puts it in a message: `{"error":{"code":429,…}}`, an error code. */
+const GoogleErrorBodySchema = z.object({
+  error: z.object({ code: z.number().min(FIRST_ERROR_STATUS).lt(PAST_LAST_ERROR_STATUS) })
+})
 
 /** Upstream HTTP statuses with their own answer; any other 4xx or 5xx is PROVIDER_FAILED. */
 const BY_STATUS: ReadonlyMap<number, MappedUpstreamError> = new Map([
@@ -286,17 +340,8 @@ const STATUS_POSITIONS: readonly RegExp[] = [
  */
 function googleBodyStatus(message: string): number | undefined {
   if (!message.startsWith('{')) return undefined
-  let parsed: unknown
-  try {
-    parsed = JSON.parse(message)
-  } catch {
-    return undefined
-  }
-  const errorBody = isRecord(parsed) ? parsed['error'] : undefined
-  const code = isRecord(errorBody) ? errorBody['code'] : undefined
-  return typeof code === 'number' && code >= FIRST_ERROR_STATUS && code < PAST_LAST_ERROR_STATUS
-    ? code
-    : undefined
+  const parsed = GoogleErrorBodySchema.safeParse(parseJsonOrUndefined(message))
+  return parsed.success ? parsed.data.error.code : undefined
 }
 
 /**
@@ -319,13 +364,27 @@ function upstreamStatusIn(message: string): number | undefined {
 
 /**
  * Wording that identifies a failure when the message carries no status: Bedrock, network
- * failures, and the proxy's own upstream idle timeout. Checked in this order.
+ * failures, the proxy's own upstream idle timeout, pi's Codex adapter, which throws a usage limit
+ * as "You have hit your ChatGPT usage limit" with no status (#185), and capacity messages.
+ * Checked in this order.
+ *
+ * @remarks
+ * The usage-limit pattern has no leading word boundary, so it also matches `usage_limit_reached` and
+ * `subscription_sharing_usage_limit_exceeded`; it ends where a letter would follow, so "usage
+ * limitations" is not one. The capacity wordings are the ones pi's own retry classifier treats as
+ * transient (`pi-ai/utils/retry`).
  */
 const BY_WORDING: readonly (readonly [RegExp, MappedUpstreamError])[] = [
-  [/\brate[\s_-]?limit|\btoo many requests\b|\bresource[\s_-]?exhausted\b/i, RATE_LIMITED],
+  [
+    /\brate[\s_-]?limit|\btoo many requests\b|\bresource[\s_-]?exhausted\b|usage[\s_-]?limits?(?![a-z])/i,
+    RATE_LIMITED
+  ],
   [/\btime[ds]?[\s_-]?out\b|\bETIMEDOUT\b/i, TIMED_OUT],
   [/\bunauthori[sz]ed\b/i, AUTH_FAILED],
-  [/\boverloaded\b/i, OVERLOADED],
+  [
+    /\boverloaded\b|\bmodel is at capacity\b|\bserver[\s_-]?busy\b|\bservers are currently busy\b|\bexperiencing high demand\b/i,
+    OVERLOADED
+  ],
   [/\bservice[\s_-]?unavailable\b/i, UNAVAILABLE]
 ]
 
@@ -396,4 +455,18 @@ export function mapFailedCall(message: AssistantMessage): MappedUpstreamError {
     return CONTEXT_OVERFLOW
   }
   return mapUpstreamError(new Error(errorText))
+}
+
+/**
+ * Answers a failure for a request that sent its own key in `X-Switchboard-Upstream-Api-Key`.
+ *
+ * @remarks
+ * A refused credential is then the client's key, so it gets 401 `upstream_api_key_invalid`
+ * instead of the 502 pi's stored credential gets (#128). Any other failure is unchanged.
+ *
+ * @param mapped - the failure as {@link mapUpstreamError} or {@link mapFailedCall} mapped it
+ * @returns the 401 for a refused credential, else `mapped`
+ */
+export function forClientKey(mapped: MappedUpstreamError): MappedUpstreamError {
+  return mapped.body.error.code === AUTH_FAILED.body.error.code ? CLIENT_KEY_REJECTED : mapped
 }

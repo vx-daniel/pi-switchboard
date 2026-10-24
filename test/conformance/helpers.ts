@@ -39,16 +39,17 @@ const TEST_MODEL_MATRIX: readonly TestModel[] = [
   { id: 'anthropic/claude-sonnet-4-5', category: 'mid' },
   { id: 'anthropic/claude-sonnet-4-6', category: 'reasoning' },
 
-  // Google Gemini: pi's `google` provider (API google-generative-ai). pi 1.3.0 has no
+  // Google Gemini: pi's `google` provider (API google-generative-ai). pi (1.3.0, 1.4.0) has no
   // `google-gemini-cli` provider, so the IDs that named it never resolved.
   { id: 'google/gemini-2.5-flash-lite', category: 'fast' },
   { id: 'google/gemini-2.5-flash', category: 'mid' },
   { id: 'google/gemini-2.5-pro', category: 'reasoning' },
 
-  // OpenAI / Codex
-  { id: 'openai-codex/gpt-5.4-mini', category: 'fast' },
-  { id: 'openai-codex/gpt-5.5', category: 'mid' },
-  { id: 'openai-codex/gpt-5.5', category: 'reasoning' }
+  // OpenAI / Codex: pi 1.4.0's catalog. gpt-6-luna is the cheapest, and was measured live on a
+  // ChatGPT login (PLAN "Cooldowns (#68)").
+  { id: 'openai-codex/gpt-6-luna', category: 'fast' },
+  { id: 'openai-codex/gpt-6-sol', category: 'mid' },
+  { id: 'openai-codex/gpt-6.1-sol', category: 'reasoning' }
 ]
 
 /** The matrix models pi has available, keyed by ID; filled once by {@link setup}. */

@@ -2,19 +2,24 @@
  * pi-switchboard entry point: runs the CLI (`src/cli.ts`), and says clearly when pi is missing.
  *
  * @remarks
- * pi's own packages, `@earendil-works/pi-ai` and `@earendil-works/pi-coding-agent`, are optional
- * dependencies (#165), so an install with `--omit=optional` or `--no-optional` leaves them out.
- * The CLI imports them statically, so without them it fails while loading, before any of its code
- * runs. Loading it here, dynamically, turns that one failure into a message naming the cause and
- * the fix, with exit status 1, instead of a stack trace. Any other failure is rethrown unchanged.
+ * pi's own packages, `@earendil-works/pi-ai`, `@earendil-works/pi-coding-agent` and
+ * `@earendil-works/pi-tui`, are optional dependencies (#165), so an install with `--omit=optional`
+ * or `--no-optional` leaves them out. The CLI imports the first two statically, and the console
+ * (`tui`, #61) all three, so without them it fails while loading, before any of its code runs.
+ * Loading it here, dynamically, turns that one failure into a message naming the cause and the
+ * fix, with exit status 1, instead of a stack trace. Any other failure is rethrown unchanged.
  *
  * @packageDocumentation
  */
 
 import { isRecord } from '@proxy/utils/guards'
 
-/** pi's packages the CLI cannot run without. */
-const PI_PACKAGES = ['@earendil-works/pi-ai', '@earendil-works/pi-coding-agent']
+/** pi's packages the CLI, or its console, cannot run without. */
+const PI_PACKAGES = [
+  '@earendil-works/pi-ai',
+  '@earendil-works/pi-coding-agent',
+  '@earendil-works/pi-tui'
+]
 
 /** How far down an error's `cause` chain to look. */
 const MAX_CAUSE_DEPTH = 5

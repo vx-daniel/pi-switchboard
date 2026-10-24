@@ -123,7 +123,15 @@ beforeAll(async () => {
     }),
     'silent': silent()
   })
-  agentDir = await loadFixtureAgentDir({ modelsJson: { providers: { mock: mock.provider() } } })
+  agentDir = await loadFixtureAgentDir({
+    modelsJson: {
+      providers: {
+        mock: mock.provider(),
+        // A key command that does not exist: pi has no credential for this provider.
+        keyless: { ...mock.provider(), apiKey: '!notarealsecret-missing-command' }
+      }
+    }
+  })
 })
 
 afterAll(async () => {
@@ -297,8 +305,26 @@ describe('responses validate against OpenAI schemas', () => {
       status: HTTP_PAYLOAD_TOO_LARGE
     },
     {
-      label: 'an upstream 401',
+      label: "an upstream 401 for pi's stored credential",
       send: () => chat(ask('upstream-401')),
+      status: HTTP_BAD_GATEWAY
+    },
+    {
+      label: "an upstream 401 for the client's own key",
+      send: () =>
+        testApp().request('/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Switchboard-Upstream-Api-Key': 'notarealsecret-client-key'
+          },
+          body: JSON.stringify(ask('upstream-401'))
+        }),
+      status: HTTP_UNAUTHORIZED
+    },
+    {
+      label: 'a provider pi has no credential for',
+      send: () => chat({ ...ask('text'), model: 'keyless/text' }),
       status: HTTP_BAD_GATEWAY
     },
     {

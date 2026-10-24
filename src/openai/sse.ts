@@ -19,12 +19,15 @@ import {
   type FinishReason,
   finishReasonSchema,
   mapFinishReason,
+  loginSchema,
+  reasoningEffortSchema,
   mapUsage,
   openAIUsageSchema,
   type ResponseRoute,
   routeFields
 } from '@proxy/openai/responses'
 import { mapFailedCall, type OpenAIError } from '@proxy/server/errors'
+import { unixSecondsNow } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** Logger for SSE encoding. */
@@ -83,6 +86,8 @@ export const sseChunkSchema = z
           .trim()
           .optional()
           .meta({ description: 'The alias the request named (#66).' }),
+        login: loginSchema,
+        reasoning_effort: reasoningEffortSchema,
         attempts: attemptsSchema
       })
       .optional()
@@ -116,9 +121,6 @@ export function encodeDone(): string {
   return 'data: [DONE]\n\n'
 }
 
-/** Milliseconds per second, to turn `Date.now()` into a Unix timestamp. */
-const MS_PER_SECOND = 1000
-
 /** The fields every chunk of one response shares. */
 interface ChunkMeta {
   readonly id: string
@@ -136,7 +138,7 @@ interface ChunkMeta {
  */
 function routeField(meta: ChunkMeta): Pick<SSEChunk, 'x_pi'> {
   const fields = routeFields(meta.route)
-  return fields.alias === undefined && fields.attempts === undefined ? {} : { x_pi: fields }
+  return Object.keys(fields).length === 0 ? {} : { x_pi: fields }
 }
 
 /** Mutable state of one stream while events are encoded. */
@@ -458,7 +460,7 @@ export async function* streamToSSE(
   const model = route.model
   const meta: ChunkMeta = {
     id: requestId,
-    created: Math.floor(Date.now() / MS_PER_SECOND),
+    created: unixSecondsNow(),
     model,
     route
   }

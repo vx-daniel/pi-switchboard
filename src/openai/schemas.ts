@@ -26,7 +26,7 @@ import * as z from 'zod'
  * exact end of a reusable prompt prefix. Forwarded where the API has a slot for it (OpenAI's own
  * chat completions and Responses); dropped, and logged, everywhere else (`src/pi/cache-breakpoints.ts`).
  */
-const promptCacheBreakpointSchema = z.object({ mode: z.literal('explicit') }).strict()
+export const promptCacheBreakpointSchema = z.object({ mode: z.literal('explicit') }).strict()
 
 /** A parsed `prompt_cache_breakpoint`. */
 export type PromptCacheBreakpoint = z.infer<typeof promptCacheBreakpointSchema>
@@ -229,7 +229,7 @@ const responseFormatSchema = z.discriminatedUnion('type', [
 ])
 
 /** Upper bound of `temperature`. */
-const MAX_TEMPERATURE = 2
+export const MAX_TEMPERATURE = 2
 /** Maximum number of `stop` sequences. */
 const MAX_STOP_SEQUENCES = 4
 /** Lower bound of `frequency_penalty` and `presence_penalty`. */
@@ -241,7 +241,7 @@ const MAX_PENALTY = 2
  * Longest `prompt_cache_key` accepted: pi-ai's `OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH` (1.3.0), which
  * its root entry point does not export.
  */
-const PROMPT_CACHE_KEY_MAX_LENGTH = 64
+export const PROMPT_CACHE_KEY_MAX_LENGTH = 64
 
 /** OpenAI's `reasoning_effort` values, lowest first (OpenAI's `ReasoningEffort` schema, #132). */
 export const REASONING_EFFORTS = [

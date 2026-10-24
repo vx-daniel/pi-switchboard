@@ -62,6 +62,7 @@ function makeExposed(overrides: Partial<ExposedModel> = {}): ExposedModel {
     canonicalId: 'anthropic/claude-sonnet-4-20250514',
     model: makeModel(),
     provider: 'anthropic',
+    login: 'anthropic',
     ...overrides
   }
 }

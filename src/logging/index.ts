@@ -20,6 +20,7 @@
  *   openai.schema      JSON Schema → TypeBox       openai.images      remote image fetches
  *   pi.registry        pi's model runtime          pi.complete        upstream calls
  *   sync.zed           Zed settings sync
+ *   stats              the stats store and recorder (src/stats/)
  *   extension          the pi extension's command handler (extensions/proxy/index.ts)
  *   extension.*        the pi extension's parts (process, settings, reports, zed-sync)
  *
@@ -47,12 +48,15 @@ import {
   jsonLinesFormatter,
   type Logger,
   type LoggerConfig,
+  isLogLevel,
   type LogLevel,
   type Sink,
+  type LogRecord,
   type TextFormatter
 } from '@logtape/logtape'
 import { getPrettyFormatter } from '@logtape/pretty'
 import { redactByField } from '@logtape/redaction'
+import { STORM } from '@proxy/tui/tokyonight-storm'
 import * as z from 'zod'
 
 /** The category every logger in this package sits under. */
@@ -139,16 +143,121 @@ export function resolveLogFormat(
 }
 
 /**
+ * Resolves the level to log at: the `--log-level` flag, then `PI_SWITCHBOARD_LOG_LEVEL`, then
+ * `fallback`.
+ *
+ * @remarks
+ * A value that names no level is skipped; the caller reports it. The config file's `logLevel` is
+ * not consulted here: this is the level for the lines written before the config has loaded.
+ *
+ * @param flagLevel - The `--log-level` value, or `undefined` when the flag is absent.
+ * @param envLevel - The `PI_SWITCHBOARD_LOG_LEVEL` value, or `undefined` when unset.
+ * @param fallback - The level when neither names one.
+ * @returns The first valid level.
+ */
+export function resolveLogLevel(
+  flagLevel: string | undefined,
+  envLevel: string | undefined,
+  fallback: LogLevel
+): LogLevel {
+  const chosen = [flagLevel, envLevel].find(
+    (candidate): candidate is LogLevel => candidate !== undefined && isLogLevel(candidate)
+  )
+  return chosen ?? fallback
+}
+
+/**
+ * Logs a line at `info` the first time its `key` is seen, and at `debug` every time after.
+ *
+ * @param key - what the line is about, such as a canonical model ID or an alias name
+ * @param message - the LogTape message template
+ * @param properties - the template's properties
+ */
+export type FirstTimeInfoLog = (
+  key: string,
+  message: string,
+  properties: Record<string, unknown>
+) => void
+
+/**
+ * Makes a logger function that writes at `info` the first time per key, and at `debug` after.
+ *
+ * @remarks
+ * For a listed drop or replacement (a temperature a provider ignores, a clamped or replaced
+ * `reasoning_effort`): worth one visible line per model or alias, not one per request. The keys
+ * seen live in the returned function, so a module-level one remembers them for the process.
+ *
+ * @param logger - the logger to write with
+ * @returns the function; see {@link FirstTimeInfoLog}
+ */
+export function firstTimeInfoLog(logger: Logger): FirstTimeInfoLog {
+  const seen = new Set<string>()
+  return (key, message, properties) => {
+    const firstTime = !seen.has(key)
+    seen.add(key)
+    if (firstTime) logger.info(message, properties)
+    else logger.debug(message, properties)
+  }
+}
+
+/**
+ * What a sink can format records in: a {@link LogFormat} the CLI's flags name, or `console`, the
+ * console's narrow pretty layout, which no flag selects (its log view only).
+ */
+export type SinkFormat = LogFormat | 'console'
+
+/**
+ * The pretty format for the console's log view (#61): the time only, a narrower category without
+ * the package's own root, so a line's message starts at column 42 and fits a narrow terminal.
+ */
+const consolePretty = getPrettyFormatter({
+  timestamp: 'time',
+  timeZone: null,
+  categoryWidth: 16,
+  categoryTruncate: 'middle',
+  value: 'bare',
+  wordWrap: false,
+  // The console's Tokyo Night Storm palette (`src/tui/tokyonight-storm.ts`), or none with NO_COLOR.
+  colors: process.env.NO_COLOR === undefined || process.env.NO_COLOR === '',
+  timestampColor: STORM.comment,
+  categoryColor: STORM.dim,
+  messageColor: null,
+  levelColors: {
+    trace: STORM.comment,
+    debug: STORM.purple,
+    info: STORM.blue,
+    warning: STORM.yellow,
+    error: STORM.red,
+    fatal: STORM.redStrong
+  }
+})
+
+/**
+ * Formats a record for the console's log view: {@link consolePretty}, with the category under the
+ * package's root (`server`, not `pi-switchboard·server`). A record on the root itself, or outside
+ * the package, keeps its category.
+ *
+ * @param record - The record.
+ * @returns The formatted line.
+ */
+function consoleFormatter(record: LogRecord): string {
+  const under = record.category[0] === ROOT_CATEGORY && record.category.length > 1
+  return consolePretty(under ? { ...record, category: record.category.slice(1) } : record)
+}
+
+/**
  * Returns the LogTape formatter for a format.
  *
  * @param format - The format to render records in.
- * @returns LogTape's JSON Lines formatter, or a pretty formatter in local time.
+ * @returns LogTape's JSON Lines formatter, the console's narrow layout, or a pretty formatter in
+ *   local time.
  */
-function formatterFor(format: LogFormat): TextFormatter {
+function formatterFor(format: SinkFormat): TextFormatter {
   // JSON keeps LogTape's UTC `@timestamp`: unambiguous for anything that parses or ships logs. It
   // also keeps LogTape's quoted string values in `message`, on purpose: some come from clients, and
   // the quotes keep a crafted one from passing for message text (PLAN "Observability", #159).
   if (format === 'json') return jsonLinesFormatter
+  if (format === 'console') return consoleFormatter
   // A person reads local time: `timeZone: null` is the system zone (the `TZ` variable in a
   // container), with the offset shown so a line is never ambiguous. `bare` prints strings without
   // quotes: a reader wants `GET /v1/models`, not `'GET'`.
@@ -189,7 +298,7 @@ function loggerConfigs(level: LogLevel, sink: string): LoggerConfig<string, stri
 /** Options for {@link configureLogging}. */
 export interface LoggingOptions {
   readonly level: LogLevel
-  readonly format: LogFormat
+  readonly format: SinkFormat
   /**
    * Where formatted lines go. Default: `process.stderr.write`, which Node performs synchronously
    * for a terminal or a file and asynchronously for a pipe (POSIX): a piped reader that stops
@@ -197,7 +306,7 @@ export interface LoggingOptions {
    *
    * @param line - One formatted log line, including its trailing newline.
    */
-  readonly write?: (line: string) => void
+  readonly write?: ((line: string) => void) | undefined
 }
 
 /**

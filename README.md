@@ -72,6 +72,42 @@ pi-switchboard
 pi-switchboard --version
 ```
 
+### The console: logs, logins and status at a terminal
+
+```bash
+pi-switchboard tui            # takes the same flags as pi-switchboard
+```
+
+`pi-switchboard tui` runs the proxy with a full-screen console. Quitting it (`q` or Ctrl+C) stops the proxy. It needs a terminal; from a script or a service, run `pi-switchboard` without `tui`. `←` `→` or `Tab` move between the views (`1` to `4` jump to one), and the footer lists the keys of the view you are on.
+
+- **Requests (`1`).** A table of every HTTP request the proxy answered or is answering, newest at the bottom: the time, the status (`···` while in flight), the method and path (without the query), for a chat request the model or alias it named and the model that served it, how long it took as a gauge and a time (`waiting…` or `streaming…` while it runs; red when the chat request failed, yellow from 4 s), the time to its first event, and the start of its request ID to find its lines in the raw log. The columns on the right drop on a narrow view. Health checks answered with a 2xx are left out, so a monitor's polls don't fill it. `r` switches to the **raw log**: the live log, redacted as on stderr, in a narrower pretty layout than the CLI's (the time only and a shorter category, so the message has room), a line wider than the terminal wrapped; `r` again goes back. Both follow new entries; the mouse wheel or `↑` `↓` `PgUp` `PgDn` scroll back, `End` follows again. The console keeps the last 5000 log lines, and the last 500 requests and, apart from them, the last 100 client errors (4xx), so a flood of unauthenticated requests can't push out the rest.
+- **Accounts (`2`).** A table of each login pi has a credential for: a status dot (red when its last verification failed, yellow while it is cooling down or below its [reserve](#quota)), the login, its label, account or API key, how many of its models are available, and the share used of each quota window it reports, with a gauge where the width allows (yellow from 70%, red from 90% or below its reserve); a narrow terminal keeps the numbers and drops the gauges. A row also notes `below reserve`, its soonest cooldown's time left (`⏸ 1m05s`) and its last verification (`✓ verified` or `✗` and why). Under the table, when there is room, the selected login in full: where pi found the credential, each window with the time to its reset, the share left against its reserve, each cooldown, and the actions `Enter` opens. `↑` `↓` select a login and `Enter` opens what you can do with it: verify the logins (which may refresh an account's token), log in again or enter a new API key, set a label, or log out. The last row, **+ Log in to a provider…**, opens pi's login list. `v` verifies every login from anywhere in the view.
+- **Stats (`3`).** A dashboard over the [stats file](#configuration) (#216), for today, the last week or all 30 days kept (`t`, `w`, `a`; the current window is the amber pill):
+  - **Tiles:** the window's headline numbers. Requests (and per hour), failed requests (and rejected ones), the average time (and the slowest), the average time to the first event, tokens out (and in), and cost (and each request's). A view under 110 columns shows the requests, failures, average time and cost. On a short screen the tiles go before the timeline gets under 3 rows of bars.
+  - **TIMELINE:** requests over the window, one bar per column, each bar as long as the window over the width (`8 min per bar` today, about `1h40m` for a week, in the panel's border). A bar's failed and rejected requests are stacked at its foot: red when any failed, yellow when they were only rejected.
+  - **MODELS:** each served model, busiest first: requests, failures, fallbacks taken, average and slowest time, average time to the first event, tokens in and out, and cost.
+  - **ALIASES:** the same numbers per [alias](#aliases), with requests that named a model directly as `direct`. An alias counts every model its fallback chain tried. Shown when a request in the window named an alias.
+  - **Errors line:** `✓` when nothing failed; otherwise the failed and rejected requests, then the failed attempts by failure class and the rejected requests by HTTP status. An attempt that failed before a fallback served the request shows here too.
+
+  It covers every proxy that writes to the same agent dir, and reads the file again every 5 seconds; the proxy writes it every 5 seconds. With stats off (`--no-stats`), or a file that can't be opened or read, the view shows the totals per alias and served model since the proxy started instead (#70), counted in memory, and says why.
+- **Models (`4`).** The exposed models as a matrix: one row per model, grouped by provider, with a dot under each reasoning effort it supports (`none` to `max`) and any cooldown (`cooling 3m00s rate_limit`). Beside it from 151 columns, under it otherwise, an **ALIASES** box with every [alias](#aliases): its targets, each target's effort, `fallbackOn`, and in red why the proxy leaves it or a target out (`target-not-exposed`, `shadows-model`, `effort-unsupported`). A long chain or diagnostic wraps onto more lines rather than being cut. A [family alias](#family-aliases-follow-the-newest-model) shows what it resolves to (`anthropic/claude-opus → claude-opus-5-5 (newest)`, or its pin beside the newest), and a newer model the exposure config hides. `↑` `↓` select a row and `Enter` acts on it: on an alias, a menu to rename it, pin a family alias to one of its models or let it follow the newest again, edit its targets and their efforts (add, set the effort, move up or down, remove, and pin or unpin a family target), set the failures it falls back on, or delete it; on a model, a new alias for it; on the last row, **+ New alias…**, a new alias for a model or a family. Targets are picked from the exposed models and efforts from the model's own list, and a name with whitespace, one taken by a model or another alias, or an empty one is refused with the reason. Every change is written to `proxy-config.json` at once and used by the next request, with no restart.
+- **Status strip.** The screen's first row: the name and version, a `● SERVING` badge, the address (`host:port`, without `http://`), whether proxy auth is on, how many models are exposed and available (`24/58 models exposed`), the uptime, open client connections and active cooldowns, and on the right the last half hour of chat requests as a sparkline with the rate per minute (averaged over the last five; `+` when the console's kept requests may miss some), and what today's requests cost (`$1.23 today`, from the stats file; not shown with stats off or a file that can't be read). A narrow terminal drops the counts from the end, then the sparkline, the rate and the cost, then the version, and keeps the address and the auth; an exposure-config or `models.json` error is never dropped.
+- **Screen.** The view sits in a frame. On a terminal of 30 rows or more the tabs are folders above it, the current one open into the frame; on a shorter one they sit in the frame's top border, the current one a pill. The right end of the tab row says a word about the view (`idle` or `2 in flight`, `4 logins · 0 cooldowns`, the Stats window, `24 models · 1 alias`); the right end of the bottom border notes its size (`12 lines`, `4 logins`, `24 models`). The footer shows keys as chips: the view's keys on the left, the keys that work everywhere on the right, `q quit (stops the proxy)` last and never dropped; a narrow footer drops the other global keys first, then the view's from the end.
+- **Sidebar.** On a terminal 100 columns or wider, four panels on the right show the proxy at a glance beside any view, redrawn every second; `s` hides it and shows it again. On a tall terminal the date and time stand over it, level with the tab labels:
+  - **QUOTA:** each login with its label (or its type and model count without one), a bar for each quota window it reports with the share used and the time to its reset (yellow from 70%, red from 90% or below its [reserve](#quota)), `no quota reported` when it reports none, and its cooldowns with the time left.
+  - **IN FLIGHT:** the chat requests in flight, oldest first: the model each is on, how long it has run, its alias (or `direct`), whether it is still waiting for the model or streaming, and its attempt when a fallback moved it on.
+  - **RECENT:** the last minute's requests with the average time and a stream's average time to its first event (rejected requests left out), its failures and rejected requests on a second line when there were any, then the latest finished requests: `✓` answered, `✗` failed, `↩` the client left, with the model and how long each took, and `⊘` rejected, with the status it got. A rejected request is a chat request the proxy answered without calling a model: a missing or wrong proxy token, a body over the limit, an invalid body, a model it does not expose, a provider pi has no credential for, or a remote image or message it could not use. Its model shows once the body passed validation, `-` before that.
+  - **SESSION:** requests, failed attempts and fallbacks, tokens and cost since the proxy started, counted in memory over every alias and served model (#70).
+
+  Under stress (a cooldown, a login below its reserve, or a request that failed or was rejected in the last minute) IN FLIGHT and RECENT come first, RECENT's title names the minute's failures, and a quiet login takes one row. On a short screen the blank rows between panels go first, then SESSION, then RECENT's list.
+  - **Under stress** (something cooling down, a login below its reserve, or a request that failed or was rejected in the last minute), ACTIVE and RECENT move above ACCOUNTS, RECENT's title names what went wrong in the minute (`RECENT · 2 failed`, or `RECENT · 3 rejected` when nothing failed), and a login with nothing to warn about (no cooldown, not below its reserve, every window under 70%) takes one row. The usual layout comes back once nothing has failed or been rejected for a minute and nothing is cooling down or below its reserve. On a short screen the blank rows between panels go first, then TRAFFIC, then RECENT's list of requests (its last-minute summary stays), then the bottom is cut.
+- **Log in (`n`) and log out (`x`) through pi.** `n` opens pi's own login list: every account and API key login pi offers, plus a second login for each provider you are already logged in to (`Anthropic 2`, see [Several logins per provider](#several-logins-per-provider)). The login runs on pi's own screens and pi stores the credential in its `auth.json`, exactly as `pi /login` does, and the proxy serves the provider's models at once, without a restart. A browser sign-in waits for the browser, or takes the pasted redirect URL when the browser is on another machine; `Ctrl+X` copies the sign-in URL and `Esc` cancels. `x` removes a credential pi stored; one from an environment variable or `models.json` stays.
+- **Proxy auth (`p`).** Turns [proxy authentication](#proxy-authentication) on or off without a restart, from any view. With auth off, generate a random token or type your own; with it on, show the token, replace it, or turn auth off. The change applies to the next request and is saved as `authToken` in `proxy-config.json`, so the proxy starts with it next time. A token from `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN` can be turned off only until the proxy restarts: the console leaves the config file alone, and the flag or variable sets the token again at the next start. The token shows only in the console's dialog, with **Copy it** to copy it; it is never logged.
+- **Clear cooldowns (`c`).** In the Accounts and Models views, ends every [cooldown](#cooldowns) at once, for a limit you know has lifted. To end one login's or one model's, use `DELETE /v1/switchboard/cooldowns`.
+- **Colors.** The console is in [Tokyo Night Storm](https://github.com/folke/tokyonight.nvim), and so are pi's login screens inside it. The header, the tab bar and the sidebar sit on a background of their own, and the current tab is a pill in the accent color. A terminal without true color gets the nearest of 256 colors; `NO_COLOR=1` turns colors off.
+
+Logins are only ever offered in this local console, never over HTTP.
+
 ### List available models
 
 ```bash
@@ -141,7 +177,10 @@ The stable routes are the first three rows. [`PLAN.md`](PLAN.md) "Stable surface
 | `GET /v1/models` | List exposed models (filtered by exposure mode, only those with configured credentials) |
 | `GET /v1/models/{model}` | Model details by public ID or canonical ID (supports URL-encoded IDs with `/`) |
 | `POST /v1/chat/completions` | Chat completions (streaming and non-streaming) |
+| `POST /v1/responses` | Off by default, experimental: OpenAI's Responses API, stateless ([below](#responses-api-experimental)) |
 | `GET /v1/switchboard/models` | Not OpenAI's: each exposed model's pi capabilities, such as its supported `reasoning_effort` values ([below](#discovering-available-models)) |
+| `GET /v1/switchboard/usage` | Not OpenAI's: usage over today, the last week or 30 days, per model and per alias, from the stats file ([below](#usage-over-http)) |
+| `DELETE /v1/switchboard/cooldowns` | Not OpenAI's: ends cooldowns early, all of them or one login's or model's ([Cooldowns](#cooldowns)) |
 | `GET /v1/switchboard/openapi.json` | Not OpenAI's: this API as an OpenAPI 3.1 document ([below](#api-documentation)) |
 | `GET /docs` | Off by default: Swagger UI for the document, to read the API and try requests ([below](#api-documentation)) |
 
@@ -153,6 +192,22 @@ Turn on `docsUi` (`--docs-ui`, `PI_SWITCHBOARD_DOCS_UI=true`, or the settings pa
 
 Neither route needs the proxy token, even with proxy auth on: a browser cannot send one to open a page. Both name routes and schemas only, never a model, provider or credential, and every route they describe still needs the token.
 
+### Usage over HTTP
+
+`GET /v1/switchboard/usage` (not part of OpenAI's API; proxy token, if set) answers what the console's Stats view shows, for a proxy run without the console, such as the Docker image. It reads the [stats file](#configuration), so it covers every proxy that writes to the same agent dir and survives restarts. Like the file, which the proxy writes every 5 seconds, an answer can be up to 5 seconds old: one window's answer is reused that long, so polling it costs one read.
+
+```bash
+curl -s "http://localhost:4141/v1/switchboard/usage?window=week" -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" | jq '.aliases'
+```
+
+- **`window`:** `today` (from midnight, the proxy's local time; the default), `week` (the last 7 days) or `all` (the 30 days the file keeps). Anything else is a `400`.
+- **`models` and `aliases`:** per served model and per alias, busiest first: `requests`, `failed`, `left` (the client went away), `average_ms`, `slowest_ms`, `average_first_event_ms`, `attempts`, `fallbacks`, `input_tokens`, `output_tokens`, `cache_tokens` and `cost_usd`. An alias counts every model its fallback chain tried; `alias: null` is the requests that named a model directly.
+- **`failures` and `rejected`:** failed attempts by failure class, and rejected requests by HTTP status.
+- **`timeline`:** requests per hour (`today`), per 6 hours (`week`) or per day (`all`), with failed and rejected ones; `bucket_minutes` says which.
+- **Stats off** (`--no-stats`), or a file that can't be read, answers `503` with code `stats_unavailable`, not empty numbers.
+
+Routes, counts, timings, tokens and cost only: never message content, a request's `user`, or a credential.
+
 ### Health checks
 
 Operational endpoints, outside the OpenAI-compatible `/v1` surface:
@@ -161,7 +216,7 @@ Operational endpoints, outside the OpenAI-compatible `/v1` surface:
 |---|---|---|
 | `GET /healthz` | Never | `200 {"status":"ok"}` once the proxy listens and pi's model runtime is loaded. No upstream calls: use it for container healthchecks and liveness probes. |
 | `GET /healthz/models` | Proxy token, if set | Available and exposed model counts, exposure modes, a `models.json` load error (a parse error says only where the file is not valid JSON, never what it says there), unresolved `enabledModels` patterns (`scopeDiagnostics`), aliases left out (`aliasDiagnostics`), and active cooldowns (`cooldowns`, [below](#cooldowns)). `503` when no model is exposed, the exposure config is invalid, or an alias is named like an exposed model; a cooldown does not fail it. |
-| `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …) and `availableModelCount`. `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
+| `GET /healthz/creds` | Proxy token, if set | Per provider with a credential: `type` (`oauth` or `api_key`), `source` (`stored`, `environment`, `models_json_key`, …), `availableModelCount`, and `quota`, the subscription's latest usage windows ([Quota](#quota)). `503` when no provider has one. Reads local state only; `?verify=true` also has pi resolve each credential now and adds `verified` and `error` per provider, `503` if any fails. |
 
 None of them returns a credential. `/healthz` proves the process is up, not that a provider will accept a request: `GET /healthz/creds?verify=true` is the closest check to that without spending a completion.
 
@@ -192,7 +247,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `strict` on function tools | Applied where pi marks the model strict-capable, in each API's own shape (OpenAI, Responses, Anthropic, …). Strict rewrites the schema: every property becomes required and optional ones nullable, so the model may send `null` for a field it would otherwise omit. Elsewhere, or when the schema is outside the provider's strict subset, the tool is sent without strict, with no error (see [PLAN.md](PLAN.md#strict-on-function-tools--strict-where-supported-44)) |
 | `tool_calls` in messages | Assistant tool call + tool result roundtrip |
 | `parallel_tool_calls` | Forwarded to OpenAI/Codex; translated to `disable_parallel_tool_use` for Anthropic |
-| `reasoning_effort` | Maps to pi's thinking level of the same name (`none` through `max`). `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`). An effort the model does not support is clamped with pi's `clampThinkingLevel`: the nearest supported level above it, else the nearest below. So `none` on a model whose reasoning cannot be turned off is its lowest level (not the provider's default), `xhigh` on a model with `max` but no `xhigh` is `max`, `max` on a model without it is its highest level, and any effort on a model without reasoning is off. A clamp is logged at `debug`; `GET /v1/switchboard/models` lists the efforts each model supports. For a custom `models.json` model with `reasoning: true`, `none` sends whatever its `thinkingLevelMap.off` says: nothing if unset, so set `off: "none"` (or `off: null` if reasoning cannot be turned off) when the endpoint reasons by default |
+| `reasoning_effort` | Maps to pi's thinking level of the same name (`none` through `max`). `none` turns reasoning off (Anthropic `thinking: disabled`, OpenAI `effort: none`). An effort the model does not support is clamped with pi's `clampThinkingLevel`: the nearest supported level above it, else the nearest below. So `none` on a model whose reasoning cannot be turned off is its lowest level (not the provider's default), `xhigh` on a model with `max` but no `xhigh` is `max`, `max` on a model without it is its highest level, and any effort on a model without reasoning is off. The response reports it as `x_pi.reasoning_effort: { "requested": "max", "applied": "xhigh" }`, in the body and in every stream chunk, whenever the request set `reasoning_effort` (the two are equal when nothing was clamped; after an alias's fallback, `applied` is for the model that answered). `applied` is the level the proxy asks pi for; pi's adapter may still translate it for the provider. The first clamp per model is logged at `info`, later ones at `debug`. `GET /v1/switchboard/models` lists the efforts each model supports. For a custom `models.json` model with `reasoning: true`, `none` sends whatever its `thinkingLevelMap.off` says: nothing if unset, so set `off: "none"` (or `off: null` if reasoning cannot be turned off) when the endpoint reasons by default |
 | `response_format` | `text`, `json_object`, and `json_schema` (OpenAI-compatible APIs only) |
 | `top_p` | Supported by OpenAI, Anthropic (native), and Google (translated to `topP`) |
 | `frequency_penalty` | OpenAI and Google only (translated to `frequencyPenalty`) |
@@ -205,6 +260,19 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `prompt_cache_breakpoint` on content parts | Accepted on text and image parts. Sent on to OpenAI's own API (chat completions and Responses at `api.openai.com`), where it marks the end of a reusable prompt prefix; dropped for every other provider (Codex sends the system prompt as a plain string, and other servers may refuse a field they don't know), and logged at `debug`. A model on `api.openai.com` that refuses it with a `400` (the ChatGPT-subscription models such as `gpt-6-luna`) gets the request once more without it, and from then on it is left out for that model until the proxy restarts, logged once at `info`. It only affects caching |
 
 **Not supported:** `n` (any value), `logprobs`, `top_logprobs`, `logit_bias`, and the deprecated `functions` / `function_call`, each rejected with `422`; `prompt_cache_retention` (deprecated by OpenAI) and `prompt_cache_options` (no pi equivalent), rejected as unknown with `422`; a value in an assistant message's `refusal`, `audio`, deprecated `function_call` or `annotations`, rejected with `422`; `name` on a `tool` message (OpenAI defines none there; the call a result answers names the tool), rejected as unknown with `422`; remote image URLs while the remote-images setting is off, rejected with `400`.
+
+### Responses API (experimental)
+
+`POST /v1/responses` answers OpenAI's Responses API, which newer clients use (the Agents SDK, `client.responses.create()`), for any exposed model. It is off until you turn on `responsesApi` (`--responses-api`, `PI_SWITCHBOARD_RESPONSES_API=true`); while off it answers 404 and says how. It is experimental: outside the [stable surface](PLAN.md#stable-surface) until it has had real use.
+
+It is **stateless**: nothing is stored, so a conversation is sent whole each time, as with chat completions. The request is translated into a chat request and runs exactly as one does: model resolution and aliases, fallback, logins, `X-Switchboard-Upstream-Api-Key`, the timeout, disconnects and errors are the same. Only the answer differs, a `response` object or `response.*` events.
+
+- **Input:** a string, or items: `message` (`user` with `input_text` and `input_image` parts, `system`, `developer`, and `assistant` with the `output_text` of an earlier response), `function_call`, `function_call_output` and `reasoning`. `instructions` becomes the system message.
+- **Settings:** function `tools`, `tool_choice`, `parallel_tool_calls`, `temperature`, `top_p`, `max_output_tokens`, `reasoning.effort` (clamped and reported in `x_pi.reasoning_effort` as on chat), `reasoning.summary` as `auto`, `text.format` (`text`, `json_object`, `json_schema`), `metadata`, `user`, `prompt_cache_key`, `stream`.
+- **Output:** `message`, `function_call` (its `call_id` is what you send back in `function_call_output`) and `reasoning` items in the order the model produced them, with `usage` and `x_pi` as on chat. A length stop is `status: "incomplete"`. Streamed: `response.created`, `response.in_progress`, each item's `added`, deltas and `done` events, then `response.completed`, `response.incomplete` or `response.failed`.
+- **Reasoning across turns:** with `include: ["reasoning.encrypted_content"]`, each `reasoning` item carries a token; send the items back in `input` and the model gets its reasoning back, the stateless loop Codex CLI runs. The token is base64url JSON, not encrypted by the proxy: anyone holding it can read the thinking text in it, in the clear, so treat it as you treat the response text, not as an opaque or safe-to-log blob. For OpenAI and Codex models it also carries OpenAI's own encrypted reasoning; for others (Claude) it carries pi's thinking block and its signature. A token is replayed only to the model that produced it, and one the proxy didn't write is refused with a 400. A `reasoning` item without a token is refused with a 400 that says to ask for `include`, as OpenAI refuses an echoed reasoning item it hasn't stored; so is reasoning that no message or function call follows.
+- **Refused by name (422):** state the proxy doesn't keep (`previous_response_id`, `conversation`, `background`, `prompt`, `store: true`; `store: false` is accepted), tools other than functions (web search, file search, code interpreter, …), any `include` but reasoning, and `top_logprobs`, `service_tier`, `truncation`, `max_tool_calls`, `context_management`, `moderation`, `access_programs`, `safety_identifier`, `prompt_cache_retention`, `prompt_cache_options`; `text.verbosity`, `reasoning.summary` other than `auto`, and `stream_options.include_obfuscation: true` are refused as unknown or invalid values. `detail` on an `input_image` is accepted and dropped, as `image_url.detail` is on chat.
+- **The other Responses operations** (`GET`/`DELETE /v1/responses/{id}`, `cancel`, `input_items`, `input_tokens`, `compact`) need stored responses, and answer 404 "not supported".
 
 ### Provider-aware field translation
 
@@ -241,7 +309,7 @@ Control which models appear in the API:
 | `scoped` (default) | Expose the models pi's global `enabledModels` setting selects (`/scoped-models` in pi, or `settings.json`), resolved as pi resolves them: exact `provider/id`, bare IDs, globs such as `anthropic/*` or `*sonnet*`, and `:level` suffixes. As in pi, a bare word also matches by substring of a model's ID or name (`opus` selects an Opus model), and a pattern several providers match exposes all of them (listed as `ambiguous`): write `provider/id` to pick one. With no `enabledModels`, every model with credentials, as `all`. Patterns that match nothing are listed in `/healthz/models`. pi's `--models` flag is per session, so it does not apply |
 | `custom` | Expose an explicit allowlist of canonical IDs (`customModels`), matched exactly |
 
-pi lists every model a provider offers, including some the login's plan cannot run: with a ChatGPT login, Codex refuses `gpt-5.5` and `gpt-5.3-codex-spark`, for example. Such a model answers `404` `model_not_found` ("not available with the provider login the proxy uses"), and the proxy logs the refusal as an error. To stop exposing it, select the models you can use in pi's `enabledModels` (`scoped`), or list them in `customModels` (`custom`).
+pi can list a model the login's plan cannot run: with a ChatGPT login, Codex refused `gpt-5.5` and `gpt-5.3-codex-spark`, which pi 1.4.0 dropped from its catalog for that reason. Such a model answers `404` `model_not_found` ("not available with the provider login the proxy uses"), and the proxy logs the refusal as an error. To stop exposing it, select the models you can use in pi's `enabledModels` (`scoped`), or list them in `customModels` (`custom`).
 
 ### Canonical model IDs
 
@@ -277,12 +345,14 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 | Setting | Env variable | Default | Description |
 |---|---|---|---|
 | Bind address | `PI_SWITCHBOARD_HOST` | `127.0.0.1` | Network interface (`127.0.0.1` = local only, `0.0.0.0` = all) (`--host`, `host` in the config file) |
-| Port | `PI_SWITCHBOARD_PORT` | `4141` | HTTP listen port (`--port`, `port`) |
+| Port | `PI_SWITCHBOARD_PORT` | `4141` | HTTP listen port, 1–65535 (`--port`, `port`) |
 | Auth token | `PI_SWITCHBOARD_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication (`--auth-token`, `authToken`) |
 | Remote images | `PI_SWITCHBOARD_REMOTE_IMAGES` | `false` | Fetch remote image URLs server-side and inline them as base64; off, they are rejected with `400`. The proxy then makes requests for its clients, so only public `http`/`https` hosts are allowed (see [Security defaults](#security-defaults)) (`--remote-images`, `remoteImages`) |
+| Responses API | `PI_SWITCHBOARD_RESPONSES_API` | `false` | Answer the experimental `POST /v1/responses` ([Responses API](#responses-api-experimental)) (`--responses-api`, `responsesApi`) |
 | Docs UI | `PI_SWITCHBOARD_DOCS_UI` | `false` | Serve Swagger UI at `/docs` ([API documentation](#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
-| Max body size | `PI_SWITCHBOARD_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
-| Upstream timeout | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds (`upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
+| Stats | `PI_SWITCHBOARD_STATS` | `true` | Keep per-minute traffic stats in `pi-switchboard-stats.sqlite` in pi's agent dir for the console's Stats view (#216): requests by model, outcome and status, their timings, attempts, failures by class, fallbacks, tokens and cost. Never message content, the request's `user`, or a credential; a rejected request's model name, which the client chose, is cut to 128 characters, and past 20 names a minute the rest count as `(other)`. Rows older than 30 days are deleted. A write that can't get the file's lock within 250 ms is dropped, so stats never stall requests. A file that can't be opened is a warning, and the proxy runs without stats (`--stats` / `--no-stats`, `stats`) |
+| Max body size | `PI_SWITCHBOARD_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes, `1048576`–`524288000` (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
+| Upstream timeout | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds, `5000`–`600000` (`--upstream-timeout` in seconds and `upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
 | Log level | `PI_SWITCHBOARD_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
 | Log format | `PI_SWITCHBOARD_LOG_FORMAT` | pretty on a terminal, `json` otherwise | `pretty` or `json` (also `--log-format`; no config-file key) |
 
@@ -296,7 +366,7 @@ The proxy logs with [LogTape](https://logtape.org) to stderr:
 
 Passing `/healthz` checks are logged at `debug`; a failed one stays at `info`.
 
-An invalid `--log-level` or `--log-format` stops the proxy from starting and lists the valid values. An invalid `PI_SWITCHBOARD_LOG_LEVEL` or `PI_SWITCHBOARD_LOG_FORMAT` is ignored with a warning, and an invalid `logLevel` in the config file falls back to `info`, so a bad value in either never keeps a background proxy from starting.
+An invalid flag stops the proxy from starting and lists the valid values: `--log-level` and `--log-format` name their options, and `--port`, `--max-body-size` and `--upstream-timeout` name their range (the same bounds the config file applies). An invalid env var is ignored with a warning: `PI_SWITCHBOARD_LOG_LEVEL` or `PI_SWITCHBOARD_LOG_FORMAT` naming no level or format, or `PI_SWITCHBOARD_PORT`, `PI_SWITCHBOARD_MAX_BODY_SIZE` or `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` not an integer within its bounds (digits only: `80abc` is not 80). An invalid `logLevel` in the config file falls back to `info`, and a number outside its range is clamped, so a bad value in the environment or the file never keeps a background proxy from starting.
 
 If proxy auth is off and the proxy binds to anything other than a loopback address, it logs a warning at startup: any client that can reach the port can use your provider credentials.
 
@@ -315,10 +385,13 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 | `customModels` | `[]` | Canonical model IDs for `custom` mode. An empty list exposes no model |
 | `providerPrefixes` | `{}` | Provider key -> custom prefix label overrides |
 | `aliases` | `{}` | Alias -> the canonical ID of an exposed model ([Aliases](#aliases)) |
+| `routing.reserve` | `{}` | Provider -> the share of each quota window, 0–1, that fallback chains keep free ([Quota](#quota)) |
+| `routing.logins.fallbackOn` | `["rate_limit"]` | The failures that move a request from one login of a model to the next ([Several logins per provider](#several-logins-per-provider)) |
+| `labels` | `{}` | Provider -> the label the console shows beside the login, in your words ([Several logins per provider](#several-logins-per-provider)) |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.
 
-A config file is never refused: an invalid value is replaced and the proxy starts anyway. A number outside its range is clamped to the nearest bound, a list or map keeps its valid entries, and anything else takes its default. One exception: an `authToken` that is not a string is not replaced by the default (which would turn auth off); the proxy refuses to start instead (see [Proxy authentication](#proxy-authentication)). `host` is trimmed; model IDs, prefix labels and `authToken` are used exactly as written, so a padded model ID matches no model rather than exposing one. One warning names the fields that were replaced, never their values, and it repeats only when that set of fields changes.
+A config file is never refused for its values: an invalid value is replaced and the proxy starts anyway. A number outside its range is clamped to the nearest bound, a list or map keeps its valid entries, and anything else takes its default. One exception: an `authToken` that is not a string is not replaced by the default (which would turn auth off); the proxy refuses to start instead (see [Proxy authentication](#proxy-authentication)). A file that exists but cannot be read or is not valid JSON refuses the same way unless a flag or `PI_SWITCHBOARD_AUTH_TOKEN` sets the token, since the file may hold one; a missing file starts with the defaults. `host` is trimmed; model IDs, prefix labels and `authToken` are used exactly as written, so a padded model ID matches no model rather than exposing one. One warning names the fields that were replaced, never their values, and it repeats only when that set of fields changes.
 
 ### Aliases
 
@@ -329,11 +402,11 @@ Most clients only let you pick a model name, so an alias is the routing control 
 ```
 
 - **Request it like a model.** `"model": "coding"` is answered by `anthropic/claude-opus-5-5`. The response's `model` is the target's canonical ID, so you see which model answered, and `x_pi.alias` is `coding`, in a non-streamed response and in every stream chunk. The request log line names the alias too.
-- **Listed beside the models.** `coding` appears in `GET /v1/models` (with the target's provider as `owned_by`), in `GET /v1/models/coding`, and in `GET /v1/switchboard/models` with the target's `reasoning_efforts`.
+- **Listed beside the models.** `coding` appears in `GET /v1/models` (with the target's provider as `owned_by`), in `GET /v1/models/coding`, and in `GET /v1/switchboard/models` with the target's `reasoning_efforts` (or the one effort the alias sets, [below](#reasoning-effort-per-alias)).
 - **Only while its target is exposed.** An alias never reaches a model the exposure config hides: leave the target out of `enabledModels` (or `customModels`) and the alias disappears too. `/healthz/models` then lists it as `target-not-exposed`.
 - **Never shadows a model.** An alias named like an exposed model's public or canonical ID is ignored, and the model keeps its name. `/healthz/models` answers `503` and lists it as `shadows-model`, and the proxy logs a warning. Rename the alias.
 - **Used as written.** Names and targets are not trimmed or normalized; a mistyped target matches no model. An entry with an empty name or target is dropped with the config warning.
-- **In pi,** `/proxy show` lists the aliases and any left out. Editing them in the settings panel can come later.
+- **Edited in the console.** `pi-switchboard tui`'s Models view (`4`) creates, edits and deletes aliases ([above](#the-console-logs-logins-and-status-at-a-terminal)). **In pi,** `/proxy show` lists the aliases and any left out; editing them in pi's settings panel can come later.
 
 #### Fallback chains
 
@@ -348,15 +421,15 @@ An alias can name several models, tried in order, and the failures that move to 
 
 | Class | Failure before the response starts |
 |---|---|
-| `rate_limit` | 429 |
-| `unavailable` | 503, or 529 overloaded |
+| `rate_limit` | 429, or a usage limit (a ChatGPT login's Codex limit) |
+| `unavailable` | 503, 529 overloaded, or a provider saying it is out of capacity |
 | `timeout` | 504, or the upstream idle timeout |
-| `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve) |
+| `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve: `502` `upstream_credentials_missing`) |
 | `refused` | The login can't run the model (`404 model_not_found`) |
 | `upstream_error` | Any other upstream failure, a network failure included |
 
 - **Never on the request's own fault, or once the answer has started.** A `400`, the client leaving, and a failure after a stream sent its first byte are answered as they are without a chain. After the last target, the client gets that target's failure.
-- **Visible.** The response's `model` is the model that answered. `x_pi.attempts` lists each model tried before it and why it failed (`[{ "model": "anthropic/claude-opus-5-5", "reason": "rate_limit" }]`), in a non-streamed response and in every stream chunk. Each hop is a warning in the log, naming the alias, the model, the class and the next model.
+- **Visible.** The response's `model` is the model that answered. `x_pi.attempts` lists each model tried before it and why it failed (`[{ "model": "anthropic/claude-opus-5-5", "reason": "rate_limit" }]`), in a non-streamed response and in every stream chunk. Each hop is a warning in the log, naming the alias, the model, the class and the next model. Each upstream call's log lines (`pi.complete`; the result line, with its tokens and cost, is at `debug`) carry the `alias` (`null` for a request that named a model) and the call's `attempt` number, so a log tool can add up usage by route.
 - **Exposed targets only.** A target the exposure config hides is skipped (and listed in `/healthz/models` as `target-not-exposed`). The alias is listed while one target is exposed, as the first exposed one.
 - **Targets as written.** A target listed twice is tried twice, which is a retry of the same model. `targets` needs at least one entry.
 - **Images go to a model that takes them.** An image request skips the chain's text-only models when another one accepts images.
@@ -364,16 +437,104 @@ An alias can name several models, tried in order, and the failures that move to 
 - **No opt-out per request.** To avoid a chain, name the model directly (its canonical ID); for a shorter chain, define another alias.
 - **Timeouts add up.** The upstream idle timeout applies to each attempt, so a three-model chain can wait up to three timeouts before failing.
 
+#### Reasoning effort per alias
+
+A team picks a model by job, and the job settles how hard it thinks as well: a reviewer is Opus at `high`, a builder Sonnet at `medium`. A target can set the effort it runs at, as `{ "model", "reasoningEffort" }`, alone or as an entry of `targets`:
+
+```json
+{ "aliases": {
+  "reviewer": { "model": "anthropic/claude-opus-5-5", "reasoningEffort": "high" },
+  "builder": { "model": "anthropic/claude-sonnet-5-5", "reasoningEffort": "medium" },
+  "builder-high": {
+    "targets": [
+      { "model": "anthropic/claude-opus-5-5", "reasoningEffort": "high" },
+      { "model": "anthropic/claude-sonnet-5-5", "reasoningEffort": "high" }
+    ],
+    "fallbackOn": ["rate_limit", "unavailable"]
+  }
+} }
+```
+
+- **The alias's effort wins.** A request naming `reviewer` runs Opus at `high`, whatever `reasoning_effort` it sent. Each target of a chain runs at its own effort, because effort ladders differ by model. A target written as a plain ID keeps the request's effort, clamped as for a model named directly.
+- **Reported.** The response carries `x_pi.reasoning_effort: { "requested": "low", "applied": "high" }`, in the body and every stream chunk; `requested` is `null` when the request sent none. Each `x_pi.attempts` entry carries the `reasoning_effort` its target set. The request log line adds `reasoningEffort` and `aliasEffort`, and replacing a different value the client sent is logged at `info` the first time per alias, then at `debug`.
+- **An effort the model doesn't support is a mistake in the config, not a clamp.** That target is left out: `/healthz/models` answers `503` and lists it as `effort-unsupported`, and the proxy logs a warning. A chain keeps its other targets, and the alias is dropped only when none is left. `GET /v1/switchboard/models` lists each model's supported efforts.
+- **Listed as fixed.** In `GET /v1/switchboard/models`, such an alias's `reasoning_efforts` is just its effort, and `reasoning_effort_fixed` is `true`.
+- **Names.** These examples use lowercase kebab-case; the config takes any name exactly as written.
+
+#### Family aliases: follow the newest model
+
+A plain alias names one model, so a new model means editing it. A family alias names a family instead, and the proxy follows its newest model:
+
+```json
+{ "aliases": {
+  "opus-latest": { "family": "anthropic/claude-opus" },
+  "codex-sol-latest": { "family": "openai-codex/sol", "reasoningEffort": "high" },
+  "opus-steady": { "family": "anthropic/claude-opus", "pin": "anthropic/claude-opus-5" }
+} }
+```
+
+- **Families.** A provider and a tier: `anthropic/claude-opus`, `anthropic/claude-sonnet`, `anthropic/claude-haiku`, `anthropic/claude-fable`, and `openai-codex/sol`, `luna`, `terra`, `astra`. You can't write a pattern; a family the proxy doesn't know is ignored, and `/healthz/models` answers `503` with `family-unknown`.
+- **Newest by the version in the ID.** pi's catalogue has no release dates, so the proxy reads the version from the model ID: `claude-opus-5-5` is newer than `claude-opus-5` and `claude-opus-4-8`; `gpt-6.1-sol` is newer than `gpt-6-sol`. A dated snapshot (`claude-opus-4-5-20251101`) is never picked over its undated ID. A model in the family whose version can't be read is never picked, and is listed in `/healthz/models` as `family-unparsed`.
+- **Among the exposed models only.** If the newest is hidden by the exposure config, the alias follows the newest exposed one, and `/healthz/models` names the hidden one (`newerHidden`). A family with nothing exposed is `target-not-exposed`.
+- **It moves by itself, loudly.** It is resolved on every request, so a catalogue update, a login or a logout moves it on the next request, with no restart. Each move is logged once at `warning`, with the old and the new model. `/healthz/models` lists what each family alias resolves to (`familyAliases`), and the console's Models view shows it.
+- **`pin` holds it** on one model of the family until you clear it (the console's **Pin to…** and **Follow newest**). A pinned alias never moves; while its pin is hidden or logged out, it is `target-not-exposed`, never the newest instead. A pin outside the family answers `503` with `pin-outside-family`.
+- **Like any alias otherwise.** The response's `model` is the model that answered and `x_pi.alias` the family alias. A family can set a `reasoningEffort` ([above](#reasoning-effort-per-alias)), checked against the model it resolves to, and can be one entry of a chain's `targets`.
+
 #### Cooldowns
 
 A provider that answers 429 is cooled down, so a chain stops calling it first on every request.
 
-- **What cools.** A `429` cools the whole provider: pi has one login per provider, and a subscription's limit covers the account. A `503` or `529` cools only that model.
-- **For how long.** As long as the failed response says: `retry-after-ms` or `retry-after`, a body field such as Codex's `resets_in_seconds` or `resets_at`, OpenAI's `x-ratelimit-reset-*` or Anthropic's `anthropic-ratelimit-*-reset` headers, or the message's own words ("try again in 20s"). There is no cap, so a weekly limit cools the provider until it resets. When the response gives no time, the cooldown grows: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each failure in a row. A stated time or a success starts it over. Google's API doesn't let the proxy read the response, so Google models always use the growing default.
+- **What cools.** A `429` cools the login that met it, every model it serves: a subscription's limit covers the account. A provider's other logins (`anthropic-2`, see [Several logins per provider](#several-logins-per-provider)) keep serving. A `503` or `529` cools only that model.
+- **For how long.** As long as the failed response says: `retry-after-ms` or `retry-after`, a body field such as Codex's `resets_in_seconds` or `resets_at`, OpenAI's `x-ratelimit-reset-*` or Anthropic's `anthropic-ratelimit-*-reset` headers, or the message's own words ("try again in 20s"). There is no cap, so a weekly limit cools the provider until it resets. When the response gives no time, the cooldown grows: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each failure in a row. A stated time or a success starts it over. Google's API doesn't let the proxy read the response, so Google models always use the growing default. The proxy calls Codex over SSE rather than pi's default WebSocket, so that it can read Codex's response; a Codex usage limit answers `429` `rate_limit` like any other provider's (#185).
 - **Who skips.** Only a chain whose `fallbackOn` names the class (`rate_limit` for a 429, `unavailable` for a 503) skips a cooling model. A request that names the model, or a chain that names neither, still calls it. When every model left in the chain is cooling, the one whose cooldown ends first is called.
 - **Visible.** A skipped model is listed in `x_pi.attempts` with `"skipped": true` and the reason; the log has a line for each cooldown that starts, ends or is skipped. `/healthz/models` lists the active ones (`scope`, `provider`, `model`, `reason`, `until`, `secondsLeft`, `source`), and `/v1/switchboard/models` gives each model's `cooldown` (`reason`, `scope`, `until` in Unix seconds), so a client can pick another model or wait.
 - **Ended early by a success.** A call to the provider or model that succeeds clears its cooldown, if the call was sent after the cooldown started. Cooldowns live in memory: a restart forgets them. A request that sends its own key (`X-Switchboard-Upstream-Api-Key`) neither starts nor clears one, as it isn't using the proxy's login.
+- **Ended early by you.** When you know a limit has lifted (you bought more, the account was reset) or a provider sent a wrong time, `DELETE /v1/switchboard/cooldowns` (proxy token, if set) ends cooldowns without a restart, and so does `c` in the console. With no query it ends all of them; `?provider=` names a login (`anthropic`, `anthropic-2`) and ends its 429 cooldown; `?model=` names a model, canonical or public ID, and ends its own 503/529 cooldown, not its login's. It answers with the cooldowns it ended, in the shape `/healthz/models` lists them, and a name that is neither exposed nor cooling down is a `404` (`login_not_found`, `model_not_found`). The next failure without a time waits 60 s again, and the log has a line for each cooldown ended.
+
+  ```bash
+  curl -s -X DELETE "http://localhost:4141/v1/switchboard/cooldowns?provider=anthropic-2" -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN"
+  ```
+
 - **No hidden retries.** pi calls each provider once per attempt (the provider SDKs' own retries are off), so a 429 reaches the proxy at once and the chain moves on without waiting.
+
+#### Quota
+
+Subscriptions report on every response how much of each usage window the account has used. The proxy keeps the latest report per provider and shows it on `/healthz/creds` and, per model, on `/v1/switchboard/models`. A client can check whether a model has room before starting a long run, without making a call.
+
+```json
+"quota": { "observed_at": 1792622040, "status": "allowed", "plan": null, "windows": [
+  { "name": "5h", "used": 0, "resets_at": 1792639800, "window_minutes": 300, "status": "allowed" },
+  { "name": "7d", "used": 0.47, "resets_at": 1792893600, "window_minutes": 10080, "status": "allowed" }] }
+```
+
+- **Who reports.** Anthropic subscriptions (`5h` and `7d` windows) and Codex's ChatGPT plans (`primary`, 5 hours, and `secondary`, 7 days). Google and API-key logins report nothing, and show `null`.
+- **`used`** is the share of the window used, from 0 to 1. A window that has reset since is left out, and a provider with nothing left to show is `null` until its next response.
+- **Only the shared login.** A request that sends its own key records nothing. Only the window fields, status and plan are kept, never an account or organization ID.
+- **Keep some in reserve.** A fallback chain can skip a provider before it runs out. Set the share of each window to keep free, per provider, in `proxy-config.json`:
+
+  ```json
+  { "routing": { "reserve": { "anthropic": 0.2, "openai-codex": 0.1 } } }
+  ```
+
+  - **The worse window decides.** With 20% reserved, Anthropic is skipped once either its 5-hour or its 7-day window has less than 20% left.
+  - **Between candidates only.** A request with one candidate is always sent. The candidates are an alias chain's models and a model's [logins](#several-logins-per-provider): with `{ "anthropic": 0.2 }`, a request for `claude-opus-5-5` goes to `anthropic-2` while `anthropic` has less than 20% left, even without an alias. A reserve is keyed by login, so each login can have its own.
+  - **Never skips them all.** When every remaining target is below its reserve, the one with the most left is called, so a reserve never fails a request by itself.
+  - **Needs a report.** A provider that has reported no quota yet, or never does (Google, API keys), is never skipped.
+  - **Visible.** A skip is listed in `x_pi.attempts` as `{ "model": "anthropic/claude-opus-5-5", "reason": "quota", "skipped": true }` and logged at info with the provider, the window and the share left. The console's Accounts view marks a provider `below reserve`.
+
+#### Several logins per provider
+
+pi stores one credential per provider, so a second subscription to the same service is a second login: `anthropic-2`. Nothing to configure. In the console, press `n`: every provider you are logged in to also offers its next login, `Anthropic 2`. Choose it, and pi's usual login runs for it. Use a different browser profile or a private window, or the sign-in will silently reuse the account you are already in (and nothing can tell two logins to one Anthropic account apart afterwards). After the login, the console asks for a label (`work`, `personal`; Enter skips): it is shown beside the login in the Accounts view and in the login and logout lists, and saved as `labels` in `proxy-config.json`, never in pi's store and never sent anywhere. **Set a label** in an account's menu changes it later; an empty answer removes it.
+
+- **One model, several logins.** `claude-opus-5-5` stays one model on `/v1/models`, owned by `anthropic`, whatever the number of logins; a login is never a model a client can name. The proxy picks the login: the first (`anthropic`), then `anthropic-2`, and so on, moving to the next on the failures `routing.logins.fallbackOn` names, a rate limit by default. Only those: with the default, an expired or missing credential on the first login is the answer even when the second is healthy; add `auth` to hand over on it too. The response says which login answered (`x_pi.login`, only when the model has more than one) and lists the logins tried before it in `x_pi.attempts`, each with its `login`; the log names them too. `/v1/switchboard/models` lists each model's `logins` with their cooldowns and quota. An [alias chain](#fallback-chains) tries each of its models under every login before moving to the next model; a class the alias names but `routing.logins.fallbackOn` does not skips the rest of a model's logins.
+
+  ```json
+  { "routing": { "logins": { "fallbackOn": ["rate_limit", "auth"] } } }
+  ```
+
+- **Kept apart everywhere else.** Each login has its own credential in pi's `auth.json`, and only that one: an environment key such as `ANTHROPIC_API_KEY` is the first login's, never `anthropic-2`'s; its own [cooldowns](#cooldowns) (a 429 cools the login; a 503 cools the model under every login), its own [quota](#quota) and `routing.reserve` entry, its own row in the Accounts view and on `/healthz/creds`, and its own line in the usage totals. A login exists while it has a credential: logging out (`x`) drops it, and the number is offered again. At startup the proxy registers every `{provider}-N` credential pi has stored, so a login survives a restart, and a login made through [pi-rotator](https://pi.dev/packages/pi-rotator) or [pi-multi-account](https://pi.dev/packages/pi-multi-account) (their `anthropic-account-2` form is read too) is served as well. pi's own `/login` does not know the login unless one of them registers it.
+- **Built-in providers only.** Only pi's built-in providers offer a next login; a `models.json` provider does not, because its key would be copied with it. A provider of your own whose name ends in a number (`local-2`) stays a provider and a model of its own, never a login of `local`; a stored `acme-account-2` credential for a provider pi doesn't build in is left alone with a warning. A `models.json` entry under a login's own ID (`anthropic-2`) applies to it, a `baseUrl` for instance; the base's entry does not.
+- **Sent as the base.** Requests go to the provider as the base's would, so provider rules pi keys by name (the `openai` ChatGPT sign-in, `github-copilot`'s headers) hold for every login. Moving between logins loses the provider's prompt cache. Whether several subscriptions may be used this way is between you and the provider.
 
 ### Discovering available models
 
@@ -396,12 +557,14 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
 | `context_window`, `max_output_tokens` | In tokens |
 | `cost` | USD per million tokens: `input` (uncached), `output`, `cache_read`, `cache_write`; `0` where pi has no price |
 | `cooldown` | `null`, or the cooldown the model is under after a 429 or 503: `reason`, `scope` (`provider` or `model`), `until` (Unix seconds) ([Cooldowns](#cooldowns)) |
+| `quota` | `null`, or its provider's latest usage windows ([Quota](#quota)) |
 
 ```json
 { "object": "list", "data": [{ "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
   "reasoning_efforts": ["none", "minimal", "low", "medium", "high"], "input": ["text", "image"],
   "context_window": 200000, "max_output_tokens": 64000,
-  "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null }] }
+  "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null,
+  "quota": null }] }
 ```
 
 docker-agent prices a model reached through a custom `base_url` only from a `cost` table in `team.yaml`, so a team can take these prices; without one it records usage but no cost. The path was `GET /v1/pi/models` before 0.1.0; the old path is gone.
@@ -417,6 +580,8 @@ curl http://localhost:4141/v1/chat/completions \
   -d '{"model": "openai/gpt-4o", "messages": [{"role": "user", "content": "Hi"}]}'
 ```
 
+If the provider rejects that key, the proxy answers `401` `authentication_error` with code `upstream_api_key_invalid` and a fixed message naming the header: the key is yours to fix. A rejected stored pi login stays `502` `upstream_auth_error`, as the client did nothing wrong.
+
 ### Proxy authentication
 
 Set `PI_SWITCHBOARD_AUTH_TOKEN` to require a bearer token for every request except the `GET /healthz` liveness check:
@@ -429,9 +594,15 @@ curl http://localhost:4141/v1/models \
   -H "Authorization: Bearer my-secret-token"
 ```
 
+The scheme is matched in any case (`Bearer`, `bearer`), with one or more spaces before the token, as [RFC 7235](https://www.rfc-editor.org/rfc/rfc7235#section-2.1) allows; the token itself must match exactly. It is compared in constant time, so how long a refusal takes says nothing about how much of a guessed token was right.
+
 The token can also live in the config file (`"authToken": "…"`); a flag or `PI_SWITCHBOARD_AUTH_TOKEN` wins over it, and `"authToken": ""` (the default) turns auth off. An `authToken` that is set but is not a string (`12345`, `true`, `null`, an object) does **not** turn auth off: the proxy refuses to start, logging why (naming the field, never its value) and exiting with status `1`, until the file is fixed or a token is set by flag or environment. `/proxy start` refuses too, with the reason. The settings panel and `/proxy show` say "invalid"; saving another setting from the panel keeps the file's value, and only a choice on the auth row (or `/proxy reset`) replaces it.
 
+In the console (`pi-switchboard tui`), `p` turns auth on with a generated or typed token, shows or replaces the token, or turns it off, without a restart ([The console](#the-console-logs-logins-and-status-at-a-terminal)).
+
 An empty override (`--auth-token ''` or `PI_SWITCHBOARD_AUTH_TOKEN=`) refuses to start the same way, naming the flag or variable. The config file's token is not used instead; unset the variable to use it. An empty `PI_SWITCHBOARD_AUTH_TOKEN` in pi's own environment reaches a proxy the extension starts, so `/proxy start` refuses then as well, unless a token is set in `/proxy config`.
+
+A `proxy-config.json` that exists but cannot be read or is not valid JSON also refuses to start when neither the flag nor `PI_SWITCHBOARD_AUTH_TOKEN` sets a token: the file may hold one the proxy cannot see, and starting on the defaults would turn it into auth off. The log names the file and the problem (`cannot be read (EACCES)`, `is not valid JSON`), never the file's contents. Fix or remove the file, or set a token by flag or environment; `/proxy start` refuses with the same reason. A missing file holds nothing and starts with the defaults.
 
 ### API compatibility
 
@@ -442,6 +613,17 @@ Coming from Anthropic's own OpenAI-compatible endpoint? [docs/reference/claude-o
 Upstream failures before a response starts get an HTTP status, streamed or not, as OpenAI answers them: `400` `context_length_exceeded` when the conversation is longer than the model's context window (agent clients compact on it), `400` `upstream_invalid_request` when the provider refused a field the request sent (its 400 or 422, such as `top_p` on Claude 4.7 and later; a 400 about the provider credential, such as Google's bad API key, is `502` `upstream_auth_error` instead), `429` `rate_limit`, `502`, `503`, `504` `timeout`, each with a fixed message that never quotes the provider. A stream that already started ends with an error event carrying the same body. See [Error mapping](PLAN.md#error-mapping).
 
 So a streaming response sends nothing, headers included, until the provider has accepted the request: as with OpenAI itself, the first byte takes the provider's own response time. A client or reverse proxy in front of the proxy needs a header timeout longer than that; the proxy's upstream timeout (`PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS`, 120 s) caps the wait.
+
+Credential answers (#128):
+
+| Situation | Answer |
+|---|---|
+| The proxy token is missing or wrong | `401` `authentication_error`, no code |
+| The provider rejected the key sent in `X-Switchboard-Upstream-Api-Key` | `401` `authentication_error`, code `upstream_api_key_invalid` |
+| The provider rejected pi's stored login | `502` `server_error`, code `upstream_auth_error` |
+| pi has no usable credential for the model's provider, and no key was sent | `502` `server_error`, code `upstream_credentials_missing`: log in with pi on the proxy's host |
+
+So a client that asks its user for a new key on `401` only does so when the key was its own. The last row is answered before any call, and an alias whose `fallbackOn` names `auth` moves past it.
 
 The proxy describes its own API as an OpenAPI document (see [API documentation](#api-documentation)). For what each field means, the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat/create) is the primary documentation, noting the supported subset listed in this README.
 
@@ -520,6 +702,27 @@ curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141
 - **Health.** The image's healthcheck asks `GET /healthz`, which needs no token, so the container is healthy before you log in. `GET /v1/models` with the token lists what the login can use.
 - **A number-5 login volume** (`j5-pi-openai-proxy_pi-auth`) works unchanged: same UID, same mount path. To keep it, declare it in `compose.yaml` as an `external` volume under that name.
 
+## Standalone binary
+
+Each GitHub release after 0.3.0 carries the proxy as one executable for Linux and macOS (x64 and arm64): `pi-switchboard-linux-x64`, `pi-switchboard-linux-arm64`, `pi-switchboard-darwin-x64`, `pi-switchboard-darwin-arm64`, and a `SHA256SUMS` file. It needs no Node and no pi install: pi is compiled in. Windows builds (`pi-switchboard-windows-x64.exe`, `pi-switchboard-windows-arm64.exe` and `SHA256SUMS-windows`) are added to a release by hand, so not every release has them. 0.3.0 and earlier have no binaries: their source predates it.
+
+```bash
+version=<version>   # a release after 0.3.0
+base="https://github.com/vx-daniel/pi-switchboard/releases/download/pi-switchboard-v$version"
+curl -LO "$base/pi-switchboard-linux-x64" -LO "$base/SHA256SUMS"
+sha256sum --check --ignore-missing SHA256SUMS   # macOS: shasum -a 256 --check --ignore-missing SHA256SUMS
+gh attestation verify pi-switchboard-linux-x64 --repo vx-daniel/pi-switchboard   # optional: built by this repo's release workflow
+chmod +x pi-switchboard-linux-x64
+./pi-switchboard-linux-x64 --port 4141
+```
+
+Every binary is run (`--version`) on its own platform (Linux and macOS, and Windows when it is built, on x64 and arm64) before the workflow uploads it, and each asset has a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) that `gh attestation verify` checks.
+
+- **macOS.** The binaries are not signed with a Developer ID, so Gatekeeper blocks the first run. After checking the checksum, remove the quarantine flag: `xattr -d com.apple.quarantine pi-switchboard-darwin-arm64`. Apple Silicon also needs a valid code signature. Bun writes an ad-hoc one when it compiles for macOS, and the release workflow runs the arm64 binary on macOS before uploading it, but if the shell only prints `killed` when you start it, the signature is missing or broken: sign it ad hoc yourself with `codesign --sign - ./pi-switchboard-darwin-arm64` (add `--force` to replace a broken one) and run it again.
+- **Windows.** Check the download in PowerShell with `Get-FileHash .\pi-switchboard-windows-x64.exe` against the line in `SHA256SUMS-windows`, then run `.\pi-switchboard-windows-x64.exe --port 4141`. The binaries are unsigned, so SmartScreen warns on the first run (**More info**, then **Run anyway**). Use the arm64 build on Windows on Arm.
+- **Logins come from pi's `auth.json`.** The binary reads the same `~/.pi/agent` (or `PI_CODING_AGENT_DIR`) as the npm package: log in with pi, or in the binary's own console, `./pi-switchboard-linux-x64 tui` ([The console](#the-console-logs-logins-and-status-at-a-terminal)).
+- **Same options.** Flags, `PI_SWITCHBOARD_*` variables and `proxy-config.json` work as in [Configuration](#configuration). The binary never reads a `.env` or `bunfig.toml` from the directory it starts in.
+
 ## Architecture
 
 ```text
@@ -549,7 +752,7 @@ curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141
 - **`@earendil-works/pi-ai`** — the types `Model`, `Usage`, `AssistantMessageEvent`, `JsonObject`
 - **`@earendil-works/pi-coding-agent`** — `ModelRuntime` (credentials, catalog and request auth; completions run through its `streamSimple()`, non-streaming ones read the stream's final message) and `SettingsManager`
 
-Requires Pi 1.x (`^1.3.0`). Pi 1.0 is the first release whose Anthropic client identifies as Claude Code 2.1.280, which Anthropic requires for Opus 5.5 and Fable 5.1; Pi 0.x identified as 2.1.75 and those models were refused.
+Requires Pi 1.x (`^1.4.0`). Pi 1.0 is the first release whose Anthropic client identifies as Claude Code 2.1.280, which Anthropic requires for Opus 5.5 and Fable 5.1; Pi 0.x identified as 2.1.75 and those models were refused.
 
 ## Security defaults
 
@@ -564,10 +767,10 @@ Requires Pi 1.x (`^1.3.0`). Pi 1.0 is the first release whose Anthropic client i
   - sends a plain GET: no client header, cookie or credential;
   - and a request may carry at most 8 remote images, of 15 MiB in all.
 
-  Images are fetched only after the provider credential is checked, so a request that would get `401` fetches nothing.
+  Images are fetched only after the provider credential is checked, so a request that would get `502` `upstream_credentials_missing` fetches nothing.
 
   A refused image fails the request with `400` at that part's `param`, with a fixed message that never quotes the remote server.
-- Request body size limited to 50 MB by default
+- Request body size limited to 50 MB by default, chunked uploads included
 - Upstream calls aborted after 120 seconds without any data from the provider
 - Secrets are never included in error responses
 - Client disconnects abort upstream work immediately
@@ -583,9 +786,11 @@ pnpm run check:all    # The gate: format, lint + type check, tests with coverage
 vp check --fix        # Format and apply lint fixes
 vp test               # Offline tests (unit + integration): no real login, no network beyond 127.0.0.1
 pnpm run test:live    # Live conformance tests against real providers: uses your pi login and quota
-pnpm run test:live:record  # Re-record the Anthropic replay fixtures (needs a login made for recording)
+pnpm run test:live:record [<api>/<scenario> ...]  # Re-record the Anthropic and Codex replay fixtures, or the ones named (needs a login made for recording)
 pnpm run openai-spec:update <commit>  # Re-pin OpenAI's OpenAPI spec subset to a full commit SHA
 vp pack               # Build for npm (ESM + .d.ts)
+pnpm run build:binary # Standalone binary for this machine (dist-bin/pi-switchboard); needs Bun
+pnpm run test:binary  # Build it, then run it against the fixtures (test/binary); needs Bun, not in the gate
 ```
 
 `check:all` (`scripts/gate.ts`) is the one definition of "green": the pre-commit hook, CI, and the release workflow all run it.
@@ -601,7 +806,8 @@ Offline tests run with pi pointed at an empty agent directory and credential env
 - **pnpm** — package manager, driven by `vp`
 - **Node.js** — runtime (`@hono/node-server`)
 - **commitlint** — conventional commits (`commit-msg` hook)
-- **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`)
+- **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`, plus the `binary` job, which builds and tests the standalone binary with Bun), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`, then the image, package and binaries)
+- **Bun** — build-only: compiles the standalone binary (`scripts/build-binary.ts`, `src/standalone/main.ts`); nothing else runs on it
 - **semantic-release** — automated versioning, GitHub releases and the changelog (npm publishing comes with [#59](https://github.com/vx-daniel/pi-switchboard/issues/59))
 
 ## Attribution

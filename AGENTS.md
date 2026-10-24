@@ -33,22 +33,23 @@ Treat these as stable unless the user explicitly changes direction:
 
 - The stable HTTP surface is the list in [`PLAN.md`](PLAN.md) "Stable surface" (today `GET /v1/models`, `GET /v1/models/{model}`, `POST /v1/chat/completions`). A route joins it only by the criteria in constitution principle I, recorded in that table; never add one silently.
 - Operational endpoints (`GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs`) sit outside that surface; see [`PLAN.md`](PLAN.md). None may return a credential.
-- Non-OpenAI capability data goes on `GET /v1/switchboard/models`, never on the standard model objects; non-standard routes live under `/v1/switchboard/`. See [`PLAN.md`](PLAN.md).
+- Non-OpenAI capability data goes on `GET /v1/switchboard/models`, never on the standard model objects; non-standard routes live under `/v1/switchboard/`. `DELETE /v1/switchboard/cooldowns` (#182) is the one route that writes state, and it writes only cooldowns: it calls no provider and changes no configuration (constitution principle I). See [`PLAN.md`](PLAN.md).
 - Only three paths skip proxy auth: `/healthz`, `GET /v1/switchboard/openapi.json` and the opt-in docs page `GET /docs`. The document and docs page name no model, provider or credential. The document describes every route the proxy serves (a test compares it with the route table); `openapi.json` at the repo root is the committed copy, and `vp test -u` rewrites it after a deliberate contract change.
 - Canonical internal model IDs use `provider/model-id`.
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.
 - Keep stable responses close to OpenAI's schema. If pi-specific metadata is exposed, namespace it under `x_pi`.
-- Reject unsupported parameters clearly, top level and inside messages and parts (their schemas are strict). Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (`temperature` on Codex and where pi leaves it out for Claude; passthrough fields a provider has no equivalent for; `prompt_cache_breakpoint` where the API has no slot for it or the model refuses it; `name` on messages and `image_url.detail`); any other needs an amendment.
-- Routing (aliases, fallback, cooldowns, quota; #66–#70) follows constitution principle VI: configured explicitly, never reaching a model the exposure config hides, and the serving model and login reported under `x_pi` and in the log.
+- Reject unsupported parameters clearly, top level and inside messages and parts (their schemas are strict). Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (`temperature` on Codex and where pi leaves it out for Claude; passthrough fields a provider has no equivalent for; `prompt_cache_breakpoint` where the API has no slot for it or the model refuses it; `name` on messages and `image_url.detail`; `reasoning_effort` replaced by an alias target's `reasoningEffort`, reported as `x_pi.reasoning_effort`); any other needs an amendment.
+- Routing (aliases, fallback, cooldowns, quota, a provider's logins; #66–#70, #227) follows constitution principle VI: configured explicitly, never reaching a model the exposure config hides, and the serving model and login reported under `x_pi` and in the log. A `{provider}-N` login is not a model (principle IV): its models are the base's, listed once, and the login is chosen by routing (`routing.logins.fallbackOn`, the one recorded default: `["rate_limit"]`).
 - Agentic mode is a "Later, not planned" idea. Do not build it under an OpenAI route.
 - Default network posture should remain local-first and safe by default.
+- pi runs every login and stores every credential. The proxy may present pi's own login flow (pi's screens driving `ModelRuntime.login`) in a local terminal only, never over HTTP or any other network surface (constitution Scope and principle III).
 
 For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of duplicating them here.
 
 ## Coding rules that matter in this repo
 
-- Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4 + TypeBox**.
+- Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4 + TypeBox**. Bun is a build tool for the standalone binary only; the binary's tests run in their own CI job, never in the gate or a hook.
 - Tests import from `vite-plus/test`, not `vitest` or `bun:test`.
 - Use import alias `@proxy/*` for `src/*`. Do **not** introduce relative imports across the source tree.
 - Use `import type` where required.

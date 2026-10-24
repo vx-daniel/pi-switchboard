@@ -19,10 +19,11 @@ import {
   type Model,
   type SimpleStreamOptions
 } from '@earendil-works/pi-ai'
-import { proxyLogger } from '@proxy/logging'
+import { firstTimeInfoLog, proxyLogger } from '@proxy/logging'
 import { supportedReasoningEfforts, thinkingLevelFor } from '@proxy/openai/reasoning-effort'
 import type { ChatCompletionRequest, ReasoningEffort } from '@proxy/openai/schemas'
 import { breakpointPatch, retryWithoutBreakpoints } from '@proxy/pi/cache-breakpoints'
+import { canonicalModelId } from '@proxy/pi/model-id'
 import {
   ANTHROPIC_APIS,
   collectPayloadFields,
@@ -30,11 +31,12 @@ import {
   passthroughStrategy,
   patchGooglePayload
 } from '@proxy/pi/payload-fields'
+import { observingFetch } from '@proxy/pi/quota'
 import { getRuntime } from '@proxy/pi/registry'
 import { capturingFetch, type FailedResponse } from '@proxy/pi/reset-time'
 import { upstreamTemperature } from '@proxy/pi/temperature'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
-import { isRecord } from '@proxy/utils/guards'
+import { errorMessage, isRecord } from '@proxy/utils/guards'
 
 /** Logger for upstream calls. */
 const completeLogger = proxyLogger('pi', 'complete')
@@ -58,6 +60,27 @@ export interface CompletionOptions {
    * time (#68). pi's `onResponse` only sees successes, so this goes through pi's `fetch` option.
    */
   readonly onFailedResponse?: ((response: FailedResponse) => void) | undefined
+  /** Which route and attempt the call is, for its upstream log lines (#70). */
+  readonly route?: UpstreamRoute | undefined
+  /**
+   * Receives each upstream call's final message once it ends, streamed or not, for the route's
+   * usage totals (#70). A call that refuses `prompt_cache_breakpoint` and is retried (#163) ends
+   * twice.
+   */
+  readonly onResult?: ((message: AssistantMessage) => void) | undefined
+  /** Receives every response's headers, for the quota they report (#69). */
+  readonly onResponseHeaders?: ((headers: Headers) => void) | undefined
+}
+
+/** The route an upstream call is an attempt of: what its log lines are grouped by (#70). */
+export interface UpstreamRoute {
+  /** The alias the request named, or `null` for a request that named a model. */
+  readonly alias: string | null
+  /**
+   * The attempt's number in the request's chain, from 1; cooldown skips and credential refusals
+   * before it count, as in `x_pi.attempts`.
+   */
+  readonly attempt: number
 }
 
 /**
@@ -78,13 +101,20 @@ function combineSignals(
 }
 
 /**
+ * Logs a clamped `reasoning_effort`: at info the first time per model (as `provider/id`) in this
+ * process (#175), then at debug, as dropped temperatures are.
+ */
+const logClampedEffort = firstTimeInfoLog(completeLogger)
+
+/**
  * Converts `reasoning_effort` to the thinking level `model` runs at (`thinkingLevelFor`).
  *
  * @remarks
  * pi has no "off" option: an absent `reasoning` is off. pi's adapters mostly clamp too, but
  * Anthropic's does not: without this, "none" on a model that always reasons would get the
  * provider's default effort (#41), and an unsupported level the adapter's own fallback (#43). A
- * clamped level is logged at debug.
+ * clamped level is logged at info the first time per model, then at debug; the client sees it in
+ * `x_pi.reasoning_effort`.
  *
  * @param model - the pi model
  * @param effort - the request's `reasoning_effort`
@@ -96,14 +126,15 @@ function reasoningLevel(
 ): SimpleStreamOptions['reasoning'] {
   const { level, clamped } = thinkingLevelFor(model, effort)
   if (clamped) {
-    completeLogger.debug(
+    logClampedEffort(
+      canonicalModelId(model),
       'Clamped reasoning_effort {reasoningEffort} to thinking level {thinkingLevel} for {modelId}',
-      () => ({
+      {
         reasoningEffort: effort,
         thinkingLevel: level,
         modelId: model.id,
         supportedEfforts: supportedReasoningEfforts(model)
-      })
+      }
     )
   }
   return level === 'off' ? undefined : level
@@ -165,10 +196,11 @@ function passthroughHook(
 }
 
 /**
- * Returns the `fetch` option that copies a failed response to `options.onFailedResponse` (#68).
+ * Returns the `fetch` option that copies a failed response to `options.onFailedResponse` (#68)
+ * and every response's headers to `options.onResponseHeaders` (#69).
  *
  * @param model - the pi model; pi's Google adapters refuse a custom fetch, so their 429s cool
- *   down for the default time instead
+ *   down for the default time instead, and they report no quota
  * @param options - the per-request options
  * @returns `{ fetch }`, or nothing to add
  */
@@ -176,9 +208,31 @@ function captureOptions(
   model: Model<Api>,
   options: CompletionOptions
 ): Pick<SimpleStreamOptions, 'fetch'> {
-  return options.onFailedResponse === undefined || isGoogleApi(model.api)
-    ? {}
-    : { fetch: capturingFetch(options.onFailedResponse) }
+  const { onFailedResponse, onResponseHeaders } = options
+  if (isGoogleApi(model.api)) return {}
+  let fetch: typeof globalThis.fetch | undefined
+  if (onFailedResponse !== undefined) fetch = capturingFetch(onFailedResponse)
+  if (onResponseHeaders !== undefined) {
+    fetch = observingFetch(onResponseHeaders, fetch ?? globalThis.fetch)
+  }
+  return fetch === undefined ? {} : { fetch }
+}
+
+/**
+ * Returns the transport option: SSE for Codex (#185).
+ *
+ * @remarks
+ * pi's Codex adapter tries a WebSocket first, and `fetch` sees nothing of it: a usage limit's
+ * reset time and Codex's quota headers never reach the proxy. Over SSE they do. Measured live on
+ * 2026-10-21 (`gpt-6-luna`): SSE was faster to the first event on short calls (median 954 ms vs
+ * 1,522 ms) and even at a 31k-token history (1,071 ms vs 1,049 ms), where the WebSocket sends
+ * only the new turns. PLAN "Cooldowns (#68)" has the numbers.
+ *
+ * @param model - the pi model
+ * @returns `{ transport: 'sse' }` for Codex, or nothing to add
+ */
+function transportOptions(model: Model<Api>): Pick<SimpleStreamOptions, 'transport'> {
+  return model.api === 'openai-codex-responses' ? { transport: 'sse' } : {}
 }
 
 /**
@@ -248,7 +302,8 @@ async function buildStreamOptions(
   const onPayload = passthroughHook(model, request)
   if (onPayload !== undefined) opts.onPayload = onPayload
 
-  return { ...opts, ...captureOptions(model, options) }
+  // Last, so nothing set above can put Codex back on the WebSocket (#185).
+  return { ...opts, ...captureOptions(model, options), ...transportOptions(model) }
 }
 
 /**
@@ -279,11 +334,12 @@ interface UpstreamCall {
 }
 
 /**
- * Returns the properties every upstream log line carries: where the call went and how long it has
- * run.
+ * Returns the properties every upstream log line carries: where the call went, the route it is an
+ * attempt of, and how long it has run.
  *
  * @param call - the upstream call
- * @returns provider, model ID, API, stream mode and duration so far in milliseconds
+ * @returns provider, model ID, API, stream mode, alias and attempt (when the caller named them) and
+ *   duration so far in milliseconds
  */
 function callProperties(call: UpstreamCall): Record<string, unknown> {
   return {
@@ -291,6 +347,8 @@ function callProperties(call: UpstreamCall): Record<string, unknown> {
     modelId: call.model.id,
     api: call.model.api,
     stream: call.stream,
+    alias: call.options.route?.alias,
+    attempt: call.options.route?.attempt,
     durationMs: Math.round(performance.now() - call.startedAt)
   }
 }
@@ -313,6 +371,8 @@ function logUpstreamStart(
     modelId: model.id,
     api: model.api,
     stream,
+    alias: options.route?.alias,
+    attempt: options.route?.attempt,
     messageCount: context.messages.length,
     toolCount: context.tools?.length ?? 0,
     reasoningEffort: request.reasoning_effort,
@@ -413,7 +473,7 @@ function logUpstreamThrow(call: UpstreamCall, error: unknown): void {
     abortCause: aborted ? abortCause(call.options.signal, call.opts.signal) : undefined,
     errorName: error instanceof Error ? error.name : typeof error
   }))
-  logUpstreamErrorDetail(error instanceof Error ? error.message : String(error))
+  logUpstreamErrorDetail(errorMessage(error))
 }
 
 /** What one upstream call needs: the model, pi's context, the OpenAI request and its options. */
@@ -422,6 +482,18 @@ interface UpstreamInput {
   readonly context: Context
   readonly request: ChatCompletionRequest
   readonly options: CompletionOptions
+}
+
+/**
+ * Handles an upstream call's end: logs its result and hands the final message to the caller's
+ * `onResult`, for the route's usage totals (#70).
+ *
+ * @param call - the upstream call
+ * @param message - the call's final assistant message
+ */
+function endUpstream(call: UpstreamCall, message: AssistantMessage): void {
+  logUpstreamResult(call, message)
+  call.options.onResult?.(message)
 }
 
 /**
@@ -479,7 +551,7 @@ async function openUpstream(
       ? eventStream
       : relayUpstreamActivity(eventStream, idle, options.signal, model)
   // Resolves with the final message once the stream ends with done or error; it never rejects.
-  void watched.result().then((message) => logUpstreamResult(call, message))
+  void watched.result().then((message) => endUpstream(call, message))
   return watched
 }
 

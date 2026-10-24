@@ -8,7 +8,9 @@
  *
  * The env vars were `PI_PROXY_*` before the rename to pi-switchboard (#65). The old names are not
  * read; one that is still set is warned about, and an old auth token refuses to start
- * ({@link UnusableProxyAuthError}), since ignoring it would quietly turn auth off.
+ * ({@link UnusableProxyAuthError}), since ignoring it would quietly turn auth off. So does a
+ * config file that exists but cannot be read or parsed when no flag or env var sets the token: the
+ * file may hold one.
  *
  * The JSON config file (`proxy-config.json` in `$PI_CODING_AGENT_DIR`, default `~/.pi/agent`) is
  * the shared config written by the pi extension's /proxy config panel. Env vars and CLI args
@@ -18,20 +20,32 @@
  */
 
 import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
-import type { AliasTarget, ModelExposureMode, PublicModelIdMode } from '@proxy/config/schema'
+import type {
+  AliasTarget,
+  ConfigFileProblem,
+  ModelExposureMode,
+  PublicModelIdMode
+} from '@proxy/config/schema'
 import {
   BYTES_PER_MB,
   configFileAuthTokenInvalid,
+  configFileProblem,
+  intBounds,
   loadConfigFromFile,
-  MS_PER_SECOND
+  MaxBodySizeBytesSchema,
+  parseIntText,
+  ProxyConfigSchema,
+  UpstreamTimeoutMsSchema
 } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { MS_PER_SECOND } from '@proxy/utils/time'
+import type * as z from 'zod'
 
 /** Logger for config resolution (`config` category). */
 const configLogger = proxyLogger('config')
 
 /** Where an override token came from: the flag wins over the env var. */
-type OverrideSource = '--auth-token' | 'PI_SWITCHBOARD_AUTH_TOKEN'
+export type OverrideSource = '--auth-token' | 'PI_SWITCHBOARD_AUTH_TOKEN'
 
 /** A token set by flag or env var, which wins over the config file's. */
 interface TokenOverride {
@@ -42,6 +56,9 @@ interface TokenOverride {
 /**
  * Why proxy auth is set but cannot be applied:
  * - `file-token-not-string`: `authToken` in proxy-config.json is not a string (#82);
+ * - `file-unusable`: proxy-config.json exists but cannot be read or is not valid JSON, and neither
+ *   the flag nor `PI_SWITCHBOARD_AUTH_TOKEN` sets a token. The file may hold a token the proxy
+ *   cannot see, so starting on the defaults could turn it into auth off;
  * - `empty-override`: `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN` is set but empty, a token
  *   nothing can match (#99). The file's token is not used instead: that would ignore what was set;
  * - `renamed-env-var`: the old `PI_PROXY_AUTH_TOKEN` is set and neither the flag nor
@@ -49,6 +66,7 @@ interface TokenOverride {
  */
 export type InvalidAuthCause =
   | { readonly cause: 'file-token-not-string' }
+  | { readonly cause: 'file-unusable'; readonly file: ConfigFileProblem }
   | { readonly cause: 'empty-override'; readonly source: OverrideSource }
   | { readonly cause: 'renamed-env-var' }
 
@@ -104,8 +122,9 @@ function tokenOverride(
  * @param override - the flag or env token, or `undefined` when neither is set
  * @param fileToken - The config file's (normalized) `authToken`; '' means off.
  * @returns `token` for a non-empty override or file token; else `off`.
- * @throws UnusableProxyAuthError for an empty override (#99), or a file `authToken` that is set
- *   but not a string (#82)
+ * @throws UnusableProxyAuthError for an empty override (#99), a config file that exists but
+ *   cannot be read or parsed with no override to stand in for its token, or a file `authToken`
+ *   that is set but not a string (#82)
  */
 function resolveProxyAuth(override: TokenOverride | undefined, fileToken: string): ProxyAuth {
   if (override !== undefined) {
@@ -113,6 +132,12 @@ function resolveProxyAuth(override: TokenOverride | undefined, fileToken: string
       throw new UnusableProxyAuthError({ cause: 'empty-override', source: override.source })
     }
     return { kind: 'token', token: override.value }
+  }
+  // With no override, the file is the only place a token can be: a file the proxy cannot read
+  // may hold one, and `fileToken` is then the repaired '' (auth off), not what the operator set.
+  const fileProblem = configFileProblem()
+  if (fileProblem !== undefined) {
+    throw new UnusableProxyAuthError({ cause: 'file-unusable', file: fileProblem })
   }
   if (configFileAuthTokenInvalid()) {
     throw new UnusableProxyAuthError({ cause: 'file-token-not-string' })
@@ -128,12 +153,21 @@ export interface ServerConfig {
   readonly port: number
   /** Whether and how requests must authenticate; see `ProxyAuth`. */
   readonly proxyAuth: ProxyAuth
+  /**
+   * The flag or env var that set the token, when one did; absent for the config file's token or
+   * auth off. The console says it applies again at the next start when auth is turned off.
+   */
+  readonly proxyAuthOverride?: OverrideSource
   /** Whether agentic mode is enabled. */
   readonly agenticEnabled: boolean
   /** Whether remote image URL fetching is enabled. */
   readonly remoteImagesEnabled: boolean
   /** Whether the Swagger UI docs page is served. */
   readonly docsUiEnabled: boolean
+  /** Whether the experimental Responses API (`POST /v1/responses`, #140) answers. */
+  readonly responsesApiEnabled: boolean
+  /** Whether per-minute traffic stats are kept in the stats file (#216). */
+  readonly statsEnabled: boolean
   /** Maximum request body size in bytes. */
   readonly maxBodySize: number
   /**
@@ -170,6 +204,8 @@ const RUNTIME_ENV_SUFFIXES = [
   'AUTH_TOKEN',
   'REMOTE_IMAGES',
   'DOCS_UI',
+  'RESPONSES_API',
+  'STATS',
   'MAX_BODY_SIZE',
   'UPSTREAM_TIMEOUT_MS',
   'AGENTIC',
@@ -219,22 +255,33 @@ function envLogLevel(raw: string | undefined, fallback: LogLevel): LogLevel {
 }
 
 /**
- * Parses a positive integer env var, warning and using `fallback` when it is not one.
+ * Parses an integer env var against the config file's bounds for the same setting, warning and
+ * using `fallback` when it is not one within them.
+ *
+ * @remarks
+ * Warn and fall back, never clamp: an invalid env var is ignored (CONSTITUTION principle II),
+ * where an invalid config-file value is repaired to the nearest bound.
  *
  * @param name - The env var's name, for the warning.
  * @param raw - The env var's value, or `undefined` when unset.
+ * @param schema - The bounds, in the env var's unit.
  * @param fallback - The value to use when `raw` is unset or invalid.
  * @returns The parsed integer, or `fallback`.
  */
-function parsePositiveInt(name: string, raw: string | undefined, fallback: number): number {
+function parseEnvInt(
+  name: string,
+  raw: string | undefined,
+  schema: z.ZodInt,
+  fallback: number
+): number {
   if (raw === undefined) return fallback
-  const parsed = Number.parseInt(raw, 10)
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    configLogger.warn('Ignoring {name}={value}: not a positive integer; using {fallback}', {
-      name,
-      value: raw,
-      fallback
-    })
+  const parsed = parseIntText(raw, schema)
+  if (parsed === undefined) {
+    const { min, max } = intBounds(schema)
+    configLogger.warn(
+      'Ignoring {name}={value}: not an integer from {min} to {max}; using {fallback}',
+      { name, value: raw, min, max, fallback }
+    )
     return fallback
   }
   return parsed
@@ -269,6 +316,8 @@ export interface CliOverrides {
   authToken?: string | undefined
   remoteImages?: boolean | undefined
   docsUi?: boolean | undefined
+  responsesApi?: boolean | undefined
+  stats?: boolean | undefined
   maxBodySizeMb?: number | undefined
   upstreamTimeoutSec?: number | undefined
   logLevel?: LogLevel | undefined
@@ -297,7 +346,13 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
 
   const host = cli.host ?? process.env.PI_SWITCHBOARD_HOST ?? file.host
   const port =
-    cli.port ?? parsePositiveInt('PI_SWITCHBOARD_PORT', process.env.PI_SWITCHBOARD_PORT, file.port)
+    cli.port ??
+    parseEnvInt(
+      'PI_SWITCHBOARD_PORT',
+      process.env.PI_SWITCHBOARD_PORT,
+      ProxyConfigSchema.shape.port,
+      file.port
+    )
 
   // Auth: CLI > env > file. A file token that is not a string, an override that is set but empty,
   // or a token left in the old env var refuses to start rather than run with auth off (#82, #99,
@@ -320,33 +375,53 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     cli.docsUi ??
     parseBoolean('PI_SWITCHBOARD_DOCS_UI', process.env.PI_SWITCHBOARD_DOCS_UI, file.docsUi)
 
+  const responsesApiEnabled =
+    cli.responsesApi ??
+    parseBoolean(
+      'PI_SWITCHBOARD_RESPONSES_API',
+      process.env.PI_SWITCHBOARD_RESPONSES_API,
+      file.responsesApi
+    )
+
+  const statsEnabled =
+    cli.stats ?? parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats)
+
   const maxBodySize =
     cli.maxBodySizeMb === undefined
-      ? parsePositiveInt(
+      ? parseEnvInt(
           'PI_SWITCHBOARD_MAX_BODY_SIZE',
           process.env.PI_SWITCHBOARD_MAX_BODY_SIZE,
+          MaxBodySizeBytesSchema,
           file.maxBodySizeMb * BYTES_PER_MB
         )
       : cli.maxBodySizeMb * BYTES_PER_MB
 
   const upstreamTimeoutMs =
     cli.upstreamTimeoutSec === undefined
-      ? parsePositiveInt(
+      ? parseEnvInt(
           'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
           process.env.PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS,
+          UpstreamTimeoutMsSchema,
           file.upstreamTimeoutSec * MS_PER_SECOND
         )
       : cli.upstreamTimeoutSec * MS_PER_SECOND
 
-  const agenticEnabled = process.env.PI_SWITCHBOARD_AGENTIC === 'true'
+  const agenticEnabled = parseBoolean(
+    'PI_SWITCHBOARD_AGENTIC',
+    process.env.PI_SWITCHBOARD_AGENTIC,
+    false
+  )
 
   return {
     host,
     port,
     proxyAuth,
+    ...(override === undefined ? {} : { proxyAuthOverride: override.source }),
     agenticEnabled,
     remoteImagesEnabled,
     docsUiEnabled,
+    responsesApiEnabled,
+    statsEnabled,
     maxBodySize,
     upstreamTimeoutMs,
     publicModelIdMode: file.publicModelIdMode,

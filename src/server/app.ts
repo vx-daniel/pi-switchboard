@@ -10,11 +10,13 @@ import { proxyLogger } from '@proxy/logging'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
 import { internalError, invalidRequest } from '@proxy/server/errors'
 import { createHealthRoutes } from '@proxy/server/health'
+import { requestLogMiddleware } from '@proxy/server/http-requests'
 import { HTTP_INTERNAL_SERVER_ERROR, HTTP_NOT_FOUND } from '@proxy/server/http-status'
 import {
   bodySizeLimitMiddleware,
   disconnectMiddleware,
   proxyAuthMiddleware,
+  rejectedChatMiddleware,
   renamedHeaderMiddleware,
   requestIdMiddleware
 } from '@proxy/server/middleware'
@@ -26,9 +28,10 @@ import {
   openAPIDocumentDescription,
   SWAGGER_UI_VERSION
 } from '@proxy/server/openapi'
+import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { createRoutes, type ExposureConfigReader, fileConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
-import { errorCode } from '@proxy/utils/guards'
+import { errorCode, errorMessage } from '@proxy/utils/guards'
 import { Hono } from 'hono'
 import { describeRoute, openAPIRouteHandler } from 'hono-openapi'
 import { HTTPException } from 'hono/http-exception'
@@ -56,18 +59,26 @@ const httpLogger = proxyLogger('server', 'http')
  *   file and pi's settings on each request ({@link fileConfigReader})
  * @param remoteImageFetch - how remote images are fetched when `remoteImagesEnabled` is on;
  *   `undefined` is the strict production policy. Only tests pass another, to reach a local server
+ * @param proxyAuth - the proxy auth the app applies, read on every request; by default one made
+ *   from `config.proxyAuth`. The console passes its own, to change auth without a restart
  * @returns the assembled app, ready to serve
  */
 export function createApp(
   config: ServerConfig,
   configReader?: ExposureConfigReader,
-  remoteImageFetch?: RemoteImageFetchOptions
+  remoteImageFetch?: RemoteImageFetchOptions,
+  proxyAuth: ProxyAuthSwitch = createProxyAuthSwitch(config.proxyAuth)
 ): Hono<ProxyEnv> {
   const app = new Hono<ProxyEnv>()
 
   // Global middleware
   app.use('*', requestIdMiddleware())
+  // After the request ID, which it reads; ahead of proxy auth, so a request it turns away is listed.
+  app.use('*', requestLogMiddleware())
   app.use('*', disconnectMiddleware())
+  // Ahead of the body size limit and proxy auth, so a chat request they turn away is recorded too.
+  app.use('/v1/chat/completions', rejectedChatMiddleware())
+  app.use('/v1/responses', rejectedChatMiddleware())
   app.use('*', bodySizeLimitMiddleware(config))
 
   // The OpenAPI document and the docs page, open like `/healthz`: registered before proxy auth.
@@ -93,13 +104,15 @@ export function createApp(
     )
   }
 
-  app.use('/v1/*', proxyAuthMiddleware(config))
+  const authMiddleware = proxyAuthMiddleware(proxyAuth)
+  app.use('/v1/*', authMiddleware)
   // The old upstream key header (#65), on the one route that reads the key, after proxy auth: an
   // unauthenticated caller gets the 401 first, and probes of the open paths are not affected.
   app.use('/v1/chat/completions', renamedHeaderMiddleware())
+  app.use('/v1/responses', renamedHeaderMiddleware())
   // `/healthz` itself stays open for liveness probes; its detail endpoints name providers and
   // models. Not `/healthz/*`: Hono's wildcard also matches the bare `/healthz`.
-  app.use('/healthz/:check{.+}', proxyAuthMiddleware(config))
+  app.use('/healthz/:check{.+}', authMiddleware)
 
   // Routes
   app.route('/', createHealthRoutes(configReader ?? fileConfigReader))
@@ -131,7 +144,7 @@ export function createApp(
       error: errorCode(error)
     })
     httpLogger.debug('Internal error detail: {detail}', {
-      detail: error instanceof Error ? error.message : String(error)
+      detail: errorMessage(error)
     })
     return context.json(internalError(), HTTP_INTERNAL_SERVER_ERROR)
   })
@@ -139,7 +152,7 @@ export function createApp(
   lifecycleLogger.debug(
     'App wired: proxy auth {authMode}, exposure config from {exposureSource}, docs UI {docsUi}',
     {
-      authMode: config.proxyAuth.kind,
+      authMode: proxyAuth.current().kind,
       exposureSource: configReader === undefined ? 'config file' : 'custom reader',
       docsUi: config.docsUiEnabled ? 'on' : 'off'
     }

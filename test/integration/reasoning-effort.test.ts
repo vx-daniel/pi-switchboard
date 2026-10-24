@@ -14,12 +14,13 @@ import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vit
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import {
   finishChunk,
+  httpError,
   type MockProvider,
   sse,
   startMockProvider,
   textChunks
 } from '../fixtures/mock-provider'
-import { jsonBody, testApp } from '../helpers'
+import { jsonBody, testApp, testConfig } from '../helpers'
 
 const MOCK_KEY = 'notarealsecret-mock-provider-key'
 /** pi's thinking budget for "minimal" on Anthropic budget-based models. */
@@ -43,7 +44,11 @@ beforeAll(async () => {
     'chat-undeclared-off': answer,
     'chat-plain': answer,
     'chat-xhigh': answer,
-    'claude-adaptive-max': answer
+    'claude-adaptive-max': answer,
+    'claude-log-clamp': answer,
+    'chat-limited': httpError(429, {
+      error: { message: 'Rate limit reached', type: 'rate_limit_error' }
+    })
   })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
@@ -54,6 +59,8 @@ beforeAll(async () => {
           apiKey: MOCK_KEY,
           models: [
             { id: 'claude-thinking', reasoning: true },
+            // Clamped by one test only: the clamp log's "first per model" is per process.
+            { id: 'claude-log-clamp', reasoning: true },
             { id: 'claude-always-thinking', reasoning: true, thinkingLevelMap: { off: null } },
             {
               id: 'claude-adaptive-max',
@@ -86,7 +93,8 @@ beforeAll(async () => {
             { id: 'chat-always-reasoning', reasoning: true, thinkingLevelMap: { off: null } },
             { id: 'chat-undeclared-off', reasoning: true },
             { id: 'chat-plain' },
-            { id: 'chat-xhigh', reasoning: true, thinkingLevelMap: { xhigh: 'xhigh' } }
+            { id: 'chat-xhigh', reasoning: true, thinkingLevelMap: { xhigh: 'xhigh' } },
+            { id: 'chat-limited', reasoning: true }
           ]
         }
       }
@@ -253,20 +261,21 @@ describe('an effort the model does not support is clamped (#43)', () => {
     expect(await sentField('completions/chat-xhigh', 'max', 'reasoning_effort')).toBe('xhigh')
   })
 
-  // Catches the clamp going unreported, or reported without what the client could have asked for.
-  test('the clamp is logged at debug, with the efforts the model supports', async () => {
-    await sentField('anthropic/claude-thinking', 'xhigh', 'thinking')
+  // Catches the clamp going unreported to the operator, or reported at info on every request: the
+  // first clamp per model is at info, later ones at debug, as dropped temperatures are (#175).
+  test('the first clamp per model is logged at info, later ones at debug', async () => {
+    await sentField('anthropic/claude-log-clamp', 'xhigh', 'thinking')
+    await sentField('anthropic/claude-log-clamp', 'xhigh', 'thinking')
 
+    const properties = expect.objectContaining({
+      reasoningEffort: 'xhigh',
+      thinkingLevel: 'high',
+      modelId: 'claude-log-clamp',
+      supportedEfforts: ['none', 'minimal', 'low', 'medium', 'high']
+    }) as unknown
     expect(clampRecords).toEqual([
-      {
-        level: 'DEBUG',
-        properties: expect.objectContaining({
-          reasoningEffort: 'xhigh',
-          thinkingLevel: 'high',
-          modelId: 'claude-thinking',
-          supportedEfforts: ['none', 'minimal', 'low', 'medium', 'high']
-        }) as unknown
-      }
+      { level: 'INFO', properties },
+      { level: 'DEBUG', properties }
     ])
   })
 
@@ -275,6 +284,137 @@ describe('an effort the model does not support is clamped (#43)', () => {
     await sentField('completions/chat-xhigh', 'xhigh', 'reasoning_effort')
 
     expect(clampRecords).toEqual([])
+  })
+})
+
+/**
+ * Asks `model` and returns the `x_pi` of the answer: the body's, or each stream chunk's.
+ *
+ * @param model - the public model ID to ask
+ * @param reasoningEffort - the `reasoning_effort` to send, or `undefined` to send none
+ * @param stream - whether to ask for a stream
+ * @returns every `x_pi` found, in order; `undefined` entries where a chunk or body had none
+ */
+async function answerXPi(
+  model: string,
+  reasoningEffort: string | undefined,
+  stream: boolean
+): Promise<unknown[]> {
+  const response = await testApp().request('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      stream,
+      ...(reasoningEffort === undefined ? {} : { reasoning_effort: reasoningEffort }),
+      messages: [{ role: 'user', content: 'Hi' }]
+    })
+  })
+  return xPiOf(await response.text(), stream)
+}
+
+/**
+ * Parses a response's `x_pi`: the body's, or each stream chunk's.
+ *
+ * @param text - the response body
+ * @param stream - whether it is a stream
+ * @returns every `x_pi` found, in order; `undefined` entries where a chunk or body had none
+ */
+function xPiOf(text: string, stream: boolean): unknown[] {
+  if (!stream) {
+    const body: unknown = JSON.parse(text)
+    return [isRecord(body) ? body['x_pi'] : undefined]
+  }
+  return text
+    .split('\n')
+    .filter((line) => line.startsWith('data: {'))
+    .map((line) => {
+      const chunk: unknown = JSON.parse(line.slice('data: '.length))
+      return isRecord(chunk) ? chunk['x_pi'] : undefined
+    })
+}
+
+describe('x_pi.reasoning_effort reports what the model ran at (#175)', () => {
+  // Catches a clamp the client can't see: a client running one effort across models must learn
+  // the level each one ran at, in the body and in every chunk of a stream.
+  test.each([
+    ['non-streamed', false],
+    ['streamed', true]
+  ])('%s: a clamped effort reports both values', async (_mode, stream) => {
+    const found = await answerXPi('completions/chat-xhigh', 'max', stream)
+
+    expect(found.length).toBeGreaterThan(0)
+    for (const fields of found) {
+      expect(fields).toMatchObject({ reasoning_effort: { requested: 'max', applied: 'xhigh' } })
+    }
+  })
+
+  // Catches the report only on clamps: a client checking it must not have to tell "no clamp" from
+  // "no report".
+  test('an effort the model supports reports the same value twice', async () => {
+    expect(await answerXPi('completions/chat-xhigh', 'xhigh', false)).toEqual([
+      expect.objectContaining({ reasoning_effort: { requested: 'xhigh', applied: 'xhigh' } })
+    ])
+  })
+
+  // Catches pi's level leaking into the report: a model without reasoning runs at pi's `off`,
+  // which OpenAI calls `none`.
+  test("a model without reasoning reports `none`, OpenAI's name for off", async () => {
+    expect(await answerXPi('completions/chat-plain', 'high', false)).toEqual([
+      expect.objectContaining({ reasoning_effort: { requested: 'high', applied: 'none' } })
+    ])
+  })
+
+  // Catches `none` reported as applied on a model that can't turn reasoning off (#41): it runs at
+  // its lowest level, and the client must see which.
+  test('`none` on a model that always reasons reports its lowest level', async () => {
+    expect(await answerXPi('completions/chat-always-reasoning', 'none', false)).toEqual([
+      expect.objectContaining({ reasoning_effort: { requested: 'none', applied: 'minimal' } })
+    ])
+  })
+
+  // Catches the report taken from the model the request asked for rather than the one that
+  // answered: `chat-limited` would clamp `xhigh` to `high`, `chat-xhigh` runs it as asked.
+  test.each([
+    ['non-streamed', false],
+    ['streamed', true]
+  ])('%s: after a fallback, the model that answered decides the report', async (_mode, stream) => {
+    const config = {
+      ...testConfig(),
+      aliases: {
+        chain: {
+          targets: ['completions/chat-limited', 'completions/chat-xhigh'],
+          fallbackOn: ['rate_limit' as const]
+        }
+      }
+    }
+    const response = await testApp(config).request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: 'chain',
+        stream,
+        reasoning_effort: 'xhigh',
+        messages: [{ role: 'user', content: 'Hi' }]
+      })
+    })
+
+    const found = xPiOf(await response.text(), stream)
+    expect(found.length).toBeGreaterThan(0)
+    for (const fields of found) {
+      expect(fields).toMatchObject({ reasoning_effort: { requested: 'xhigh', applied: 'xhigh' } })
+    }
+  })
+
+  // Catches the field on requests that never asked for an effort, which would change every
+  // response's shape.
+  test.each([
+    ['non-streamed', false],
+    ['streamed', true]
+  ])('%s: a request without reasoning_effort has no report', async (_mode, stream) => {
+    for (const fields of await answerXPi('completions/chat-xhigh', undefined, stream)) {
+      expect(isRecord(fields) && 'reasoning_effort' in fields).toBe(false)
+    }
   })
 })
 
