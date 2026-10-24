@@ -2026,8 +2026,9 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   with `q quit (stops the proxy)` fixed at the end; a narrow footer drops the other global keys
   from the front, then the view's keys from the end. The redesign follows the instrument-panel
   mock an open-design agent drew (`.local/index2.html`, local and not committed; the
-  screenshots are in the PR); this is its phase 1 (chrome). Later phases: the Accounts table,
-  plain-number Stats tiles, the Models effort matrix, and a Requests table over the log.
+  screenshots are in the PR), in five phases (#259–#263): this chrome, the Accounts table,
+  plain-number Stats tiles, the Models effort matrix, and the Requests table. What it left out on
+  purpose is in #264–#266.
 - **Ending cooldowns** (#182). `c` in the Accounts and Models views, the two that show cooldowns
   and list the key, ends every cooldown (`clearCooldownsFor({})`), as
   `DELETE /v1/switchboard/cooldowns` does with no query, then reads the status again. One login's
