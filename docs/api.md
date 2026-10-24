@@ -14,7 +14,7 @@ curl http://localhost:4141/v1/models | jq '.data[].id'
 curl http://localhost:4141/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "anthropic/claude-sonnet-4-20250514",
+    "model": "anthropic/claude-sonnet-5-5",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
@@ -37,7 +37,7 @@ Point any client that supports `OPENAI_API_BASE` (or equivalent) at `http://loca
 
 ```bash
 # Example: Aider
-OPENAI_API_BASE=http://localhost:4141/v1 aider --model anthropic/claude-sonnet-4-20250514
+OPENAI_API_BASE=http://localhost:4141/v1 aider --model anthropic/claude-sonnet-5-5
 
 # Example: Continue (in settings.json)
 # "apiBase": "http://localhost:4141/v1"
@@ -172,8 +172,8 @@ The proxy generates public model IDs based on a configurable ID mode:
 | Mode | Behavior | Example |
 |---|---|---|
 | `collision-prefixed` (default) | Raw model IDs; prefix only providers that share a model name | `gpt-4o` or `openai/gpt-4o` if `codex` also has `gpt-4o` |
-| `universal` | Raw model IDs only; rejects config if duplicates exist | `gpt-4o`, `claude-sonnet-4-20250514` |
-| `always-prefixed` | Always `<prefix>/<model-id>` | `openai/gpt-4o`, `anthropic/claude-sonnet-4-20250514` |
+| `universal` | Raw model IDs only; rejects config if duplicates exist | `gpt-4o`, `claude-sonnet-5-5` |
+| `always-prefixed` | Always `<prefix>/<model-id>` | `openai/gpt-4o`, `anthropic/claude-sonnet-5-5` |
 
 The `collision-prefixed` mode prefixes **all** models from providers that form a connected conflict group (not just the colliding model names).
 
@@ -194,11 +194,11 @@ pi can list a model the login's plan cannot run: with a ChatGPT login, Codex ref
 Internal canonical IDs use the `provider/model-id` format matching pi's registry:
 
 ```
-anthropic/claude-sonnet-4-20250514
+anthropic/claude-sonnet-5-5
 openai/gpt-4o
 google/gemini-2.5-pro
-xai/grok-3
-openrouter/anthropic/claude-sonnet-4-20250514
+xai/grok-4.7
+openrouter/anthropic/claude-sonnet-5.5
 ```
 
 Canonical IDs are accepted as backward-compatible fallback in requests, but only for models that are currently exposed. Hidden models cannot be reached by canonical ID.
@@ -286,4 +286,4 @@ Credential answers (#128):
 
 So a client that asks its user for a new key on `401` only does so when the key was its own. The last row is answered before any call, and an alias whose `fallbackOn` names `auth` moves past it.
 
-The proxy describes its own API as an OpenAPI document (see [API documentation](#api-documentation)). For what each field means, the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat/create) is the primary documentation, noting the supported subset listed in this README.
+The proxy describes its own API as an OpenAPI document (see [API documentation](#api-documentation)). For what each field means, the [OpenAI API reference](https://platform.openai.com/docs/api-reference/chat/create) is the primary documentation, noting the supported subset listed on this page.

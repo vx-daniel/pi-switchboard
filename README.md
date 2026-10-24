@@ -39,10 +39,10 @@ curl http://localhost:4141/v1/models | jq '.data[].id'
 
 curl http://localhost:4141/v1/chat/completions \
   -H "Content-Type: application/json" \
-  -d '{"model": "claude-sonnet-5-5", "messages": [{"role": "user", "content": "Hello!"}]}'
+  -d '{"model": "anthropic/claude-sonnet-5-5", "messages": [{"role": "user", "content": "Hello!"}]}'
 ```
 
-Use a model ID from the list. Without the console, `pi-switchboard` runs the proxy on its own.
+Use an ID from the list, or an exposed model's canonical `provider/model-id`. Without the console, `pi-switchboard` runs the proxy on its own.
 
 A fallback chain is a few lines of `proxy-config.json` in pi's agent directory:
 
