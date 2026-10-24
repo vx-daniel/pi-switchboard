@@ -21,7 +21,14 @@ import type { ProviderQuota, QuotaWindow } from '@proxy/pi/quota'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import type { ReserveSkip } from '@proxy/server/route-reserve'
 import { accountActions, clampSelection, LOGIN_ROW } from '@proxy/tui/navigation'
-import { compactDuration, FRAME_COLUMNS, gauge, panel, quotaColor } from '@proxy/tui/panel'
+import {
+  compactDuration,
+  firstShown,
+  FRAME_COLUMNS,
+  gauge,
+  panel,
+  quotaColor
+} from '@proxy/tui/panel'
 import { type ConsoleColor, highlight, paint, strong, tabAccent } from '@proxy/tui/theme'
 
 /** Widths of the table's fixed columns: login, label, kind, model count. */
@@ -414,19 +421,6 @@ function detailPane(selected: AccountFacts | undefined, width: number, now: numb
     return panel('LOG IN', [enter], width)
   }
   return panel(selected.account.provider, detailLines(selected, inner, now), width, selected.label)
-}
-
-/**
- * Picks the first table row shown, so the selected row stays on screen.
- *
- * @param selected - the selected row, the login row included
- * @param rows - the table's rows, the login row included
- * @param visible - how many of them fit
- * @returns the first row shown
- */
-function firstShown(selected: number, rows: number, visible: number): number {
-  if (rows <= visible) return 0
-  return Math.min(rows - visible, Math.max(0, selected - visible + 1))
 }
 
 /**

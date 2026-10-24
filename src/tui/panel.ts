@@ -109,6 +109,19 @@ export function latency(ms: number): string {
 }
 
 /**
+ * Picks the first row shown of a list that scrolls, so a chosen row stays on screen.
+ *
+ * @param chosen - the row to keep on screen, such as the selected one
+ * @param rows - the list's rows
+ * @param visible - how many of them fit
+ * @returns the first row shown
+ */
+export function firstShown(chosen: number, rows: number, visible: number): number {
+  if (rows <= visible) return 0
+  return Math.min(rows - visible, Math.max(0, chosen - visible + 1))
+}
+
+/**
  * Formats a cost in US dollars: `$1.23`, or with more places, `$0.0042`.
  *
  * @param amount - the cost, in US dollars
