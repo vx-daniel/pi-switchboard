@@ -47,7 +47,7 @@ import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
 import { listen } from '@proxy/server/startup'
 import type { StatsWindow } from '@proxy/stats/windows'
-import { accountRows } from '@proxy/tui/accounts-view'
+import { accountRows, accountsSnapshot, type AccountsView } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
 import { openSelectedModelsItem } from '@proxy/tui/console-models'
 import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
@@ -222,18 +222,28 @@ const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = 
 const NO_STATUS_SETTINGS: Pick<Status, 'reserve' | 'labels'> = { reserve: {}, labels: {} }
 
 /**
- * Renders the Accounts view from the console's state.
+ * Gathers what the Accounts view shows, now: the logins, the selected row, the labels, each
+ * login's quota report and reserve check, and the cooldowns.
  *
  * @param state - the console's state: the accounts, the selected row, and the status with the
- *   reserve per provider and the labels
- * @param height - rows available
- * @returns the rows
+ *   reserve per login and the labels
+ * @param now - the current time
+ * @returns the snapshot
  */
-function accountsViewRows(state: ConsoleState, height: number): string[] {
+function accountsView(state: ConsoleState, now: number): AccountsView {
   const { reserve, labels } = state.status ?? NO_STATUS_SETTINGS
-  return accountRows(
-    { accounts: state.accounts, selected: state.selected, reserve, labels },
-    height
+  return accountsSnapshot(
+    {
+      accounts: state.accounts,
+      selected: state.selected,
+      labels,
+      now,
+      cooldowns: activeCooldowns(now)
+    },
+    {
+      quota: (login) => providerQuota(login, now),
+      belowReserve: (login) => providerBelowReserve(login, reserve, now)
+    }
   )
 }
 
@@ -263,7 +273,7 @@ function viewRows(
 ): string[] {
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size)
-  if (state.view === 'accounts') return accountsViewRows(state, size.height)
+  if (state.view === 'accounts') return accountRows(accountsView(state, Date.now()), size)
   if (state.view === 'models') return modelsViewRows(state, size.height)
   return context.statsView.rows(state.statsWindow, size)
 }

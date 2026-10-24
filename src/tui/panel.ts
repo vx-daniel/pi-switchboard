@@ -6,7 +6,7 @@
  */
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
-import { paint, strong } from '@proxy/tui/theme'
+import { type ConsoleColor, paint, strong } from '@proxy/tui/theme'
 import { MS_PER_SECOND } from '@proxy/utils/time'
 
 /** Columns a panel's frame takes: `│ ` before the content and ` │` after. */
@@ -23,6 +23,12 @@ const PAD_DIGITS = 2
 const THOUSAND = 1000
 /** A million, for compact counts. */
 const MILLION = 1_000_000
+/** Share used from which a quota window shows as nearly spent, then as spent. */
+export const USED_LEVELS = { warn: 0.7, high: 0.9 } as const
+/** A gauge cell's eighths, from one eighth filled to full. */
+const EIGHTHS_LEFT = ['▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'] as const
+/** Eighths in a gauge cell. */
+const EIGHTHS = EIGHTHS_LEFT.length
 
 /**
  * Frames a panel: a titled top border, each line between side borders, a bottom border.
@@ -40,7 +46,12 @@ export function panel(
   extra = ''
 ): string[] {
   const inner = Math.max(1, width - FRAME_COLUMNS)
-  const label = `${strong(paint('accent', ` ${title}`))}${extra === '' ? '' : paint('dim', ` ${extra}`)} `
+  const fullLabel = `${strong(paint('accent', ` ${title}`))}${extra === '' ? '' : paint('dim', ` ${extra}`)} `
+  // The corners and the border's first `─` around the title: a longer title is cut with `…`, so
+  // the top border is never wider than the panel (a long login and its label, #260 review).
+  const labelRoom = Math.max(0, width - CORNER_COLUMNS - 1)
+  const label =
+    visibleWidth(fullLabel) > labelRoom ? truncateToWidth(fullLabel, labelRoom, '…') : fullLabel
   const rest = Math.max(0, width - CORNER_COLUMNS - 1 - visibleWidth(label))
   const top = `${paint('border', '╭─')}${label}${paint('border', `${'─'.repeat(rest)}╮`)}`
   const body = lines.map(
@@ -105,4 +116,37 @@ export function compactCount(value: number): string {
   if (value < THOUSAND) return String(value)
   const [scaled, unit] = value < MILLION ? [value / THOUSAND, 'K'] : [value / MILLION, 'M']
   return `${scaled.toFixed(1).replace(/\.0$/, '')}${unit}`
+}
+
+/**
+ * Picks a quota window's color by how much of it is used: green, yellow from
+ * {@link USED_LEVELS}`.warn`, red from `.high` or when the login is below its reserve.
+ *
+ * @param used - the share used, from 0 to 1
+ * @param belowReserve - whether the login is below its reserve, which is shown as spent
+ * @returns the role to color it with
+ */
+export function quotaColor(used: number, belowReserve: boolean): ConsoleColor {
+  if (belowReserve || used >= USED_LEVELS.high) return 'error'
+  return used >= USED_LEVELS.warn ? 'warning' : 'success'
+}
+
+/**
+ * Draws a share as a gauge in eighths of a cell, the rest a track in the border's color. A share
+ * above zero shows at least one eighth, so a little used never reads as none.
+ *
+ * @param share - the share, from 0 to 1 (outside that, clamped)
+ * @param cells - the gauge's columns
+ * @param color - the filled part's color
+ * @returns the gauge, exactly `cells` columns
+ */
+export function gauge(share: number, cells: number, color: ConsoleColor): string {
+  const clamped = Math.min(1, Math.max(0, share))
+  const units = clamped > 0 ? Math.max(1, Math.round(clamped * cells * EIGHTHS)) : 0
+  const full = Math.floor(units / EIGHTHS)
+  const part = units % EIGHTHS
+  const partial = part === 0 ? '' : (EIGHTHS_LEFT[part - 1] ?? '')
+  const filled = `${'█'.repeat(full)}${partial}`
+  const track = '░'.repeat(Math.max(0, cells - full - (part === 0 ? 0 : 1)))
+  return `${paint(color, filled)}${paint('border', track)}`
 }

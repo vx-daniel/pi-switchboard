@@ -28,10 +28,12 @@ import {
   FRAME_COLUMNS,
   latency,
   panel,
-  spread
+  quotaColor,
+  spread,
+  USED_LEVELS
 } from '@proxy/tui/panel'
 import { fitLabel, sum } from '@proxy/tui/stats-view'
-import { type ConsoleColor, paint, strong, tabAccent } from '@proxy/tui/theme'
+import { paint, strong, tabAccent } from '@proxy/tui/theme'
 
 /** The narrowest terminal that shows the sidebar; narrower, the view takes the whole width. */
 const MIN_TERMINAL_WIDTH = 100
@@ -43,8 +45,6 @@ const SIDEBAR_WIDTH = { least: 34, most: 48 } as const
 const BAR_CELLS = 8
 /** Columns a window's time to reset takes (` ↻` and up to `59m59s`), so the bars line up. */
 const RESET_COLUMNS = 8
-/** Share used from which a window shows as nearly spent, then as spent. */
-const USED_LEVELS = { warn: 0.7, high: 0.9 } as const
 /** Requests in flight listed before the rest are summed up as `+N more`. */
 const MAX_ACTIVE_LISTED = 6
 /** Finished requests listed in the RECENT panel, newest first. */
@@ -108,18 +108,6 @@ export function sidebarWidth(terminalWidth: number): number | undefined {
 }
 
 /**
- * Picks a window's color by how much of it is used.
- *
- * @param used - the share used, from 0 to 1
- * @param belowReserve - whether the provider is below its reserve, which is shown as spent
- * @returns the role to color it with
- */
-function usedColor(used: number, belowReserve: boolean): ConsoleColor {
-  if (belowReserve || used >= USED_LEVELS.high) return 'error'
-  return used >= USED_LEVELS.warn ? 'warning' : 'success'
-}
-
-/**
  * Renders one quota window: its name, a bar, the share used and the time to its reset.
  *
  * @param window - the window
@@ -136,7 +124,7 @@ function windowLine(
 ): string {
   const used = Math.min(1, Math.max(0, window.used))
   const filled = Math.round(used * BAR_CELLS)
-  const color = usedColor(used, account.belowReserve)
+  const color = quotaColor(used, account.belowReserve)
   // The unused part in the border's color, so an empty window reads as a track, not a block.
   const bar = `${paint(color, '█'.repeat(filled))}${paint('border', '░'.repeat(BAR_CELLS - filled))}`
   const percent = paint(color, `${String(Math.round(used * PERCENT))}%`.padStart('100%'.length))
