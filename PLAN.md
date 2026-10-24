@@ -2092,9 +2092,14 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   busy timeout) on every redraw. Panels, label-value lines and compact numbers are shared with the
   sidebar (`panel.ts`).
 - **Models** (`models-view.ts`, `console-models.ts`, `aliases.ts`; #230). The exposed models
-  (public ID, provider, the efforts each supports, any cooldown), then every configured alias with
-  its targets, each target's effort, `fallbackOn`, and its diagnostics in red, then **+ New
-  alias…**. The selection moves over every row, scrolling to keep it on screen: `Enter` on a model
+  as a matrix, grouped by provider in the order they first appear: a dot under each of
+  `REASONING_EFFORTS` the model runs at as asked (`supportedReasoningEfforts`), then any cooldown
+  (the time left, `3m00s`, and the reason when it fits). Then an ALIASES box, beside the matrix
+  from 151 columns and under it otherwise: every configured alias with its targets, each target's effort,
+  `fallbackOn`, and its diagnostics in red, wrapped onto more lines rather than cut, then **+ New
+  alias…**. The selection order is the matrix's (`modelsItems` walks the same provider groups),
+  so `Enter` acts on the row marked. The matrix and the box each scroll to keep the selection on
+  screen; a view under ten rows shows only the part with the selection. `Enter` on a model
   starts an alias for it, on an alias opens its menu (rename; targets and efforts: add, set the
   effort, move up or down, remove; fall back on, a checkbox list over the failure classes;
   delete), and on the last row starts a new alias. A target is picked from the exposed models and

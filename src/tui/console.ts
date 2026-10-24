@@ -246,11 +246,16 @@ function accountsView(state: ConsoleState, now: number): AccountsView {
  * Renders the Models view from the console's state.
  *
  * @param state - the console's state: the last exposure and aliases read, and the selected row
- * @param height - rows available
+ * @param size - the space available
+ * @param size.height - rows
+ * @param size.width - columns
  * @returns the rows
  */
-function modelsViewRows(state: ConsoleState, height: number): string[] {
-  return modelsRows({ ...modelsViewData(state.status), selected: state.modelsSelected }, height)
+function modelsViewRows(
+  state: ConsoleState,
+  size: { readonly height: number; readonly width: number }
+): string[] {
+  return modelsRows({ ...modelsViewData(state.status), selected: state.modelsSelected }, size)
 }
 
 /**
@@ -269,7 +274,7 @@ function viewRows(
   const { state, logs } = context
   if (state.view === 'logs') return logViewRows(state.logView, logs, size)
   if (state.view === 'accounts') return accountRows(accountsView(state, Date.now()), size)
-  if (state.view === 'models') return modelsViewRows(state, size.height)
+  if (state.view === 'models') return modelsViewRows(state, size)
   return context.statsView.rows(state.statsWindow, size)
 }
 
