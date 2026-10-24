@@ -6,7 +6,7 @@
  * @packageDocumentation
  */
 
-import { truncateToWidth } from '@earendil-works/pi-tui'
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import { framedView } from '@proxy/tui/frame'
 import type { ConsoleLayout } from '@proxy/tui/layout'
 import { footerLine, type View } from '@proxy/tui/navigation'
@@ -76,8 +76,9 @@ export function clockLabel(now: number): string {
 function sidebarColumn(input: ScreenInput, width: number): string[] {
   const panels = input.sidebar ?? []
   if (!input.layout.folderTabs) return [...panels]
-  const clock = clockLabel(input.now)
-  const clockRow = truncateToWidth(clock, width, '', false).padStart(width)
+  const clock = truncateToWidth(clockLabel(input.now), width, '', false)
+  // By visible width: the clock carries colour codes, which `padStart` would count as columns.
+  const clockRow = `${' '.repeat(Math.max(0, width - visibleWidth(clock)))}${clock}`
   return ['', truncateToWidth(clockRow, width, '', true), ...panels]
 }
 

@@ -7,7 +7,13 @@ import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import { consoleLayout } from '@proxy/tui/layout'
 import { clockLabel, consoleScreen, type ScreenInput } from '@proxy/tui/screen'
 import { SPARKLINE_MINUTES } from '@proxy/tui/status-strip'
-import { describe, expect, test } from 'vite-plus/test'
+import { installConsoleTheme } from '@proxy/tui/theme'
+import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
+
+/** Where pi keeps its global theme. */
+const PI_THEME_KEY = Symbol.for('@earendil-works/pi-coding-agent:theme')
+/** pi's global theme before a test, put back after it: other test files share the process. */
+const piThemeBefore: unknown = Reflect.get(globalThis, PI_THEME_KEY)
 
 /** A fixed clock. */
 const NOW = Date.UTC(2026, 9, 23, 19, 2, 29)
@@ -85,6 +91,39 @@ describe('consoleScreen', () => {
     )
 
     expect(rows[1]?.endsWith('╭─ QUOTA ─╮'.padEnd(42))).toBe(true)
+  })
+})
+
+describe('consoleScreen with colours on', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs()
+    // No console theme for the next test, and pi's theme as it was.
+    installConsoleTheme('1')
+    Reflect.set(globalThis, PI_THEME_KEY, piThemeBefore)
+  })
+
+  // Catches padding measured by string length instead of visible width: the colour codes count
+  // as columns, so the clock was left where it started instead of right-aligned, and a row could
+  // come out short or long only on a real terminal (the other tests run without colours).
+  test('fills the terminal exactly, the clock right-aligned over the sidebar', () => {
+    // The test runner sets NO_COLOR=1; the console's own theme needs it empty.
+    vi.stubEnv('NO_COLOR', '')
+    installConsoleTheme()
+    for (const [columns, rows] of [
+      [80, 24],
+      [140, 40],
+      [160, 50]
+    ] as const) {
+      const rendered = consoleScreen(screen({ columns, rows }))
+
+      expect(rendered.some((row) => row !== stripTerminalSequences(row))).toBe(true)
+      expect(rendered).toHaveLength(rows)
+      for (const row of rendered) expect(visibleWidth(row)).toBe(columns)
+    }
+    const tall = consoleScreen(screen({ columns: 140, rows: 40 })).map((row) =>
+      stripTerminalSequences(row)
+    )
+    expect(tall[2]?.endsWith(stripTerminalSequences(clockLabel(NOW)))).toBe(true)
   })
 })
 

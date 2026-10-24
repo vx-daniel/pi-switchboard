@@ -51,6 +51,7 @@ import { accountRows } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
 import { openSelectedModelsItem } from '@proxy/tui/console-models'
 import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
+import { exposedModelsLabel } from '@proxy/tui/frame'
 import { consoleLayout, type ConsoleLayout } from '@proxy/tui/layout'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 import { type LogViewport, logViewRows, scrollLogView, wheelLogView } from '@proxy/tui/log-view'
@@ -191,16 +192,6 @@ function stripInput(context: ConsoleContext, now: number): StatusStripInput {
 }
 
 /**
- * Counts the models the last status read exposes.
- *
- * @param state - the console's state
- * @returns the count; none before the first read
- */
-function exposedModelCount(state: ConsoleState): number {
-  return state.status?.exposure?.models.length ?? 0
-}
-
-/**
  * What the right end of the tab row says about each view: what is in flight on Logs, the logins
  * and cooldowns on Accounts, the window on Stats, the models and aliases on Models.
  */
@@ -212,25 +203,19 @@ const TAB_CONTEXT: Readonly<Record<View, (state: ConsoleState) => string>> = {
   accounts: (state) =>
     `${String(state.accounts.length)} logins · ${String(state.status?.cooldowns ?? 0)} cooldowns`,
   stats: (state) => WINDOW_LABELS[state.statsWindow],
-  models: (state) => {
-    const aliases = Object.keys(state.status?.aliases ?? {}).length
-    const noun = aliases === 1 ? 'alias' : 'aliases'
-    return `${String(exposedModelCount(state))} models · ${String(aliases)} ${noun}`
-  }
+  models: (state) =>
+    exposedModelsLabel(state.status?.exposed, Object.keys(state.status?.aliases ?? {}).length)
 }
 
 /**
- * Notes the current view's size at the right end of the frame's bottom border.
- *
- * @param context - the console
- * @returns the text, or `''` for a view with nothing to note
+ * What the right end of the frame's bottom border notes about each view: how many log lines,
+ * logins or exposed models it holds. Stats notes nothing.
  */
-function frameNote(context: ConsoleContext): string {
-  const { state, logs } = context
-  if (state.view === 'logs') return `${String(logs.dropped() + logs.lines().length)} lines`
-  if (state.view === 'accounts') return `${String(state.accounts.length)} logins`
-  if (state.view === 'models') return `${String(exposedModelCount(state))} models`
-  return ''
+const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
+  logs: ({ logs }) => `${String(logs.dropped() + logs.lines().length)} lines`,
+  accounts: ({ state }) => `${String(state.accounts.length)} logins`,
+  stats: () => '',
+  models: ({ state }) => exposedModelsLabel(state.status?.exposed)
 }
 
 /** What the Accounts view takes from the status before the first read: no reserve, no labels. */
@@ -332,7 +317,7 @@ function screenRows(context: ConsoleContext, layout: ConsoleLayout): string[] {
     now,
     strip: stripInput(context, now),
     context: TAB_CONTEXT[context.state.view](context.state),
-    note: frameNote(context),
+    note: FRAME_NOTE[context.state.view](context),
     body: viewRows(context, { height: layout.viewHeight, width: layout.viewWidth }),
     sidebar
   })

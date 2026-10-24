@@ -37,6 +37,23 @@ const CORNERS = 2
 /** Columns kept clear between a row's left part and the text at its right end. */
 const RIGHT_END_GAP = 2
 
+/**
+ * Says how many models are exposed, for the Models tab's context and note: from the same field
+ * the status strip shows, so the two never disagree.
+ *
+ * @param exposed - the exposed model count, the exposure config's error, or `undefined` before
+ *   the first status read
+ * @param aliases - how many aliases are configured, to follow the count; `undefined` for none
+ * @returns `24 models · 1 alias`, `24 models`, `exposure config error`, or `''`
+ */
+export function exposedModelsLabel(exposed: number | string | undefined, aliases?: number): string {
+  if (typeof exposed === 'string') return 'exposure config error'
+  if (exposed === undefined) return ''
+  const models = `${String(exposed)} models`
+  if (aliases === undefined) return models
+  return `${models} · ${String(aliases)} ${aliases === 1 ? 'alias' : 'aliases'}`
+}
+
 /** What the frame shows besides the view. */
 export interface FrameInput {
   readonly view: View

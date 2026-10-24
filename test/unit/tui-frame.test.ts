@@ -5,7 +5,7 @@
  */
 
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
-import { type FrameInput, framedView } from '@proxy/tui/frame'
+import { exposedModelsLabel, type FrameInput, framedView } from '@proxy/tui/frame'
 import { consoleLayout } from '@proxy/tui/layout'
 import { VIEWS } from '@proxy/tui/navigation'
 import { describe, expect, test } from 'vite-plus/test'
@@ -118,5 +118,19 @@ describe('framedView', () => {
 
     expect(rows[0]).toMatch(/^╭─ 1 Logs ─ 2 Accounts ─+╮$/)
     expect(rows[0]).not.toContain('Stats')
+  })
+})
+
+describe('exposedModelsLabel', () => {
+  // Catches the Models tab saying `0 models` while the status strip shows an exposure-config
+  // error (two sources for one count), or a count before the first status read.
+  test.each([
+    ['a count with aliases', 24, 1, '24 models · 1 alias'],
+    ['a count with several aliases', 24, 3, '24 models · 3 aliases'],
+    ['a count alone, for the note', 24, undefined, '24 models'],
+    ['the exposure config’s error', 'bad config', 2, 'exposure config error'],
+    ['nothing before the first read', undefined, 0, '']
+  ])('%s', (_label, exposed, aliases, expected) => {
+    expect(exposedModelsLabel(exposed, aliases)).toBe(expected)
   })
 })
