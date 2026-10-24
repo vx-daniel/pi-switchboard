@@ -149,9 +149,9 @@ const INT_FLAGS: readonly IntFlag[] = [
 ]
 
 /**
- * Checks the flags that take a closed set of values, so a typo fails the start with a message
- * naming the valid values (CONSTITUTION principle II), never a stack trace or a proxy that
- * quietly ignored the flag.
+ * Checks the flags that take a closed set or range of values, so a typo fails the start with a
+ * message naming the valid values or the range (CONSTITUTION principle II), never a stack trace
+ * or a proxy that quietly ignored the flag.
  *
  * @param args - The parsed CLI flags.
  * @returns The error message for the first unusable flag, or `undefined`.

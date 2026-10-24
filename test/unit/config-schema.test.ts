@@ -11,7 +11,14 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 
 import { resetSync } from '@logtape/logtape'
-import { DEFAULT_CONFIG, getConfigPath, normalizeConfig } from '@proxy/config/schema'
+import {
+  DEFAULT_CONFIG,
+  getConfigPath,
+  intBounds,
+  normalizeConfig,
+  parseIntText,
+  ProxyConfigSchema
+} from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -500,5 +507,39 @@ describe('getConfigPath', () => {
     vi.stubEnv('HOME', undefined)
 
     expect(getConfigPath()).toBe(join(homedir(), ...under, 'proxy-config.json'))
+  })
+})
+
+describe('parseIntText', () => {
+  const fields = ProxyConfigSchema.shape
+  const cases = [
+    ['port', fields.port],
+    ['maxBodySizeMb', fields.maxBodySizeMb],
+    ['upstreamTimeoutSec', fields.upstreamTimeoutSec]
+  ] as const
+
+  // Catches an off-by-one at either bound of a field's schema: the env vars and the CLI flags are
+  // held to exactly the file's range, inclusive.
+  test.each(cases)('%s: both bounds are accepted and one past each is not', (_name, schema) => {
+    const { min, max } = intBounds(schema)
+
+    expect(parseIntText(String(min), schema)).toBe(min)
+    expect(parseIntText(String(max), schema)).toBe(max)
+    expect(parseIntText(String(min - 1), schema)).toBeUndefined()
+    expect(parseIntText(String(max + 1), schema)).toBeUndefined()
+  })
+
+  // Catches whitespace around a value (a shell's `PORT=" 8080 "`) being refused, and the lenient
+  // forms `Number.parseInt` and `Number` would read being accepted.
+  test.each([
+    [' 8080 ', 8080],
+    ['8080\n', 8080],
+    ['80abc', undefined],
+    ['0x1F90', undefined],
+    ['8e3', undefined],
+    ['-1', undefined],
+    ['', undefined]
+  ])('%j parses as %s', (text, expected) => {
+    expect(parseIntText(text, ProxyConfigSchema.shape.port)).toBe(expected)
   })
 })
