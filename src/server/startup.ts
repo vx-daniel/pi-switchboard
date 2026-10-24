@@ -11,7 +11,7 @@
 
 import type { ServerType } from '@hono/node-server'
 import { serve } from '@hono/node-server'
-import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
+import { getLogLevels, isLogLevel } from '@logtape/logtape'
 import {
   type CliOverrides,
   type InvalidAuthCause,
@@ -31,6 +31,7 @@ import {
   isLogFormat,
   LOG_FORMATS,
   proxyLogger,
+  resolveLogLevel,
   type SinkFormat
 } from '@proxy/logging'
 import { getAvailableModels } from '@proxy/pi/registry'
@@ -287,10 +288,11 @@ export interface LogOutput {
  */
 export function loadConfigWithLogging(args: CliArgs, output: LogOutput): ServerConfig | undefined {
   const { format, write } = output
-  const earlyLogLevel =
-    [args['log-level'], process.env.PI_SWITCHBOARD_LOG_LEVEL].find(
-      (candidate): candidate is LogLevel => candidate !== undefined && isLogLevel(candidate)
-    ) ?? 'info'
+  const earlyLogLevel = resolveLogLevel(
+    args['log-level'],
+    process.env.PI_SWITCHBOARD_LOG_LEVEL,
+    'info'
+  )
   configureLogging({ level: earlyLogLevel, format, write })
 
   let config: ServerConfig

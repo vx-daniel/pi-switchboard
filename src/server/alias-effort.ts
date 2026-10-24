@@ -5,7 +5,7 @@
  * @packageDocumentation
  */
 
-import { proxyLogger } from '@proxy/logging'
+import { firstTimeInfoLog, proxyLogger } from '@proxy/logging'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { type EffortReport, effortReport } from '@proxy/openai/reasoning-effort'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
@@ -14,10 +14,10 @@ import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 const chatLogger = proxyLogger('server', 'chat')
 
 /**
- * Aliases a replaced client `reasoning_effort` has been logged for in this process; each is
- * logged at info once (#230), as dropped temperatures are per model.
+ * Logs a replaced client `reasoning_effort`: at info the first time per alias in this process
+ * (#230), then at debug, as dropped temperatures are per model.
  */
-const aliasesWithReplacedEffort = new Set<string>()
+const logReplacedEffort = firstTimeInfoLog(chatLogger)
 
 /**
  * Gives a candidate the request with its alias target's effort, when the target sets one (#230).
@@ -43,18 +43,11 @@ export function withAliasEffort(
   const requested = request.reasoning_effort
   if (requested !== undefined && requested !== forced) {
     const name = alias ?? candidate.canonicalId
-    const firstForAlias = !aliasesWithReplacedEffort.has(name)
-    aliasesWithReplacedEffort.add(name)
-    const message =
-      'Alias {alias} runs {model} at reasoning_effort {aliasEffort}, not the requested {reasoningEffort}'
-    const properties = {
-      alias: name,
-      model: candidate.canonicalId,
-      aliasEffort: forced,
-      reasoningEffort: requested
-    }
-    if (firstForAlias) chatLogger.info(message, properties)
-    else chatLogger.debug(message, properties)
+    logReplacedEffort(
+      name,
+      'Alias {alias} runs {model} at reasoning_effort {aliasEffort}, not the requested {reasoningEffort}',
+      { alias: name, model: candidate.canonicalId, aliasEffort: forced, reasoningEffort: requested }
+    )
   }
   return { ...request, reasoning_effort: forced }
 }

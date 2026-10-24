@@ -48,6 +48,7 @@ import {
   jsonLinesFormatter,
   type Logger,
   type LoggerConfig,
+  isLogLevel,
   type LogLevel,
   type Sink,
   type LogRecord,
@@ -139,6 +140,64 @@ export function resolveLogFormat(
     (candidate): candidate is LogFormat => candidate !== undefined && isLogFormat(candidate)
   )
   return chosen ?? fallback()
+}
+
+/**
+ * Resolves the level to log at: the `--log-level` flag, then `PI_SWITCHBOARD_LOG_LEVEL`, then
+ * `fallback`.
+ *
+ * @remarks
+ * A value that names no level is skipped; the caller reports it. The config file's `logLevel` is
+ * not consulted here: this is the level for the lines written before the config has loaded.
+ *
+ * @param flagLevel - The `--log-level` value, or `undefined` when the flag is absent.
+ * @param envLevel - The `PI_SWITCHBOARD_LOG_LEVEL` value, or `undefined` when unset.
+ * @param fallback - The level when neither names one.
+ * @returns The first valid level.
+ */
+export function resolveLogLevel(
+  flagLevel: string | undefined,
+  envLevel: string | undefined,
+  fallback: LogLevel
+): LogLevel {
+  const chosen = [flagLevel, envLevel].find(
+    (candidate): candidate is LogLevel => candidate !== undefined && isLogLevel(candidate)
+  )
+  return chosen ?? fallback
+}
+
+/**
+ * Logs a line at `info` the first time its `key` is seen, and at `debug` every time after.
+ *
+ * @param key - what the line is about, such as a canonical model ID or an alias name
+ * @param message - the LogTape message template
+ * @param properties - the template's properties
+ */
+export type FirstTimeInfoLog = (
+  key: string,
+  message: string,
+  properties: Record<string, unknown>
+) => void
+
+/**
+ * Makes a logger function that writes at `info` the first time per key, and at `debug` after.
+ *
+ * @remarks
+ * For a listed drop or replacement (a temperature a provider ignores, a clamped or replaced
+ * `reasoning_effort`): worth one visible line per model or alias, not one per request. The keys
+ * seen live in the returned function, so a module-level one remembers them for the process.
+ *
+ * @param logger - the logger to write with
+ * @returns the function; see {@link FirstTimeInfoLog}
+ */
+export function firstTimeInfoLog(logger: Logger): FirstTimeInfoLog {
+  const seen = new Set<string>()
+  return (key, message, properties) => {
+    const firstTime = !seen.has(key)
+    seen.add(key)
+    if (firstTime) logger.info(message, properties)
+    else logger.debug(message, properties)
+  }
 }
 
 /**

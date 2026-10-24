@@ -16,17 +16,17 @@
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
-import { proxyLogger } from '@proxy/logging'
+import { firstTimeInfoLog, proxyLogger } from '@proxy/logging'
 import { canonicalModelId } from '@proxy/pi/model-id'
 
 /** Logger for upstream calls. */
 const completeLogger = proxyLogger('pi', 'complete')
 
 /**
- * Models, as `provider/id`, a dropped temperature has been logged for in this process; each is
- * logged at info once. Two providers can serve the same model ID.
+ * Logs a dropped temperature: at info the first time per model (as `provider/id`, since two
+ * providers can serve the same model ID) in this process, then at debug.
  */
-const modelsWithDroppedTemperature = new Set<string>()
+const logDropped = firstTimeInfoLog(completeLogger)
 
 /**
  * Says whether `model` is on the Anthropic Messages API, narrowing its `compat` to Anthropic's.
@@ -72,13 +72,12 @@ function anthropicTemperatureDropReason(model: Model<Api>, thinking: boolean): s
  * @param reason - why it does not reach the provider
  */
 function logDroppedTemperature(model: Model<Api>, temperature: number, reason: string): void {
-  const key = canonicalModelId(model)
-  const firstForModel = !modelsWithDroppedTemperature.has(key)
-  modelsWithDroppedTemperature.add(key)
-  const dropped = 'Dropped temperature {temperature} for {modelId}: {reason}'
-  const properties = { temperature, modelId: model.id, api: model.api, reason }
-  if (firstForModel) completeLogger.info(dropped, properties)
-  else completeLogger.debug(dropped, properties)
+  logDropped(canonicalModelId(model), 'Dropped temperature {temperature} for {modelId}: {reason}', {
+    temperature,
+    modelId: model.id,
+    api: model.api,
+    reason
+  })
 }
 
 /**
