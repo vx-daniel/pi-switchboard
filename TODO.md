@@ -410,7 +410,8 @@ since the rename; each issue holds the detailed checklist.
 - [ ] The pi package on npmjs, so installing needs no token (later, by choice)
 - [x] Docker image (#60): built from source, published to Docker Hub and GHCR on each release
       (amd64, arm64)
-- [ ] Standalone binary (#61)
+- [x] Standalone binary (#61); a manual check of a real login's token refresh inside the binary is
+      still open there
   - [x] Bun-compiled binary for linux/darwin x64/arm64, tested in CI, uploaded to each release
         with `SHA256SUMS` (ported from #86)
   - [x] Opt-in `pi-switchboard tui` console: logs, status, accounts, and logins through pi's own

@@ -1,6 +1,6 @@
 # pi-switchboard
 
-A local OpenAI-compatible HTTP API built on [pi](https://github.com/badlogic/pi-mono)'s SDK. Routes requests through pi's multi-provider model registry and credential management, exposing a single `http://localhost:4141/v1/...` endpoint that any OpenAI-compatible client can connect to. It started as [`pi-openai-proxy`](#attribution).
+A local OpenAI-compatible HTTP API built on [pi](https://github.com/earendil-works/pi)'s SDK. Routes requests through pi's multi-provider model registry and credential management, exposing a single `http://localhost:4141/v1/...` endpoint that any OpenAI-compatible client can connect to. It started as [`pi-openai-proxy`](#attribution).
 
 ## Why
 
@@ -10,13 +10,20 @@ A local OpenAI-compatible HTTP API built on [pi](https://github.com/badlogic/pi-
 - **Streaming** — full SSE streaming with token usage and cost tracking
 - **Strict validation** — unsupported parameters are rejected clearly, not silently ignored, and every response is checked against OpenAI's published spec
 
-Where it's going (see [`ROADMAP.md`](ROADMAP.md)): routing across your pi logins — aliases, fallback chains, cooldowns and quota awareness (#66–#70) — and more of OpenAI's API, starting with the Responses API (#140). It stays OpenAI-compatible on the client side; it doesn't run logins of its own, keep conversation state, or speak other vendors' client protocols.
+On top of that it routes across your pi logins: aliases, fallback chains, cooldowns, quota awareness and several logins per provider (#66–#70, #227), with a terminal console to watch and manage it. More of OpenAI's API comes next: the Responses API is in, experimental and off by default (#140). See [`ROADMAP.md`](ROADMAP.md). It stays OpenAI-compatible on the client side; it doesn't run logins of its own, keep conversation state, or speak other vendors' client protocols.
 
 ## Prerequisites
 
-1. [pi](https://github.com/badlogic/pi-mono) must be installed
-2. At least one provider must be configured via `pi /login`
-3. [Node.js](https://nodejs.org) >= 24 (the same runtime pi uses)
+What else you need depends on how you install it:
+
+| Install | Needs |
+|---|---|
+| [Standalone binary](#standalone-binary) | Nothing: pi is compiled in |
+| [Docker image](#docker) | Docker; pi is in the image |
+| [npm CLI](#installation) | [Node.js](https://nodejs.org) >= 24, the runtime pi uses; pi's packages come with it |
+| [pi package](#pi-integration) | Node.js >= 24 and [pi](https://github.com/earendil-works/pi) |
+
+Every way needs at least one provider login, stored where pi keeps them: `pi /login`, or `n` in the proxy's own console (`pi-switchboard tui`, [below](#the-console-logs-logins-and-status-at-a-terminal)). With Docker, you log in through pi inside the container ([Docker](#docker)).
 
 ## Installation
 
@@ -100,7 +107,6 @@ pi-switchboard tui            # takes the same flags as pi-switchboard
   - **SESSION:** requests, failed attempts and fallbacks, tokens and cost since the proxy started, counted in memory over every alias and served model (#70).
 
   Under stress (a cooldown, a login below its reserve, or a request that failed or was rejected in the last minute) IN FLIGHT and RECENT come first, RECENT's title names the minute's failures, and a quiet login takes one row. On a short screen the blank rows between panels go first, then SESSION, then RECENT's list.
-  - **Under stress** (something cooling down, a login below its reserve, or a request that failed or was rejected in the last minute), ACTIVE and RECENT move above ACCOUNTS, RECENT's title names what went wrong in the minute (`RECENT · 2 failed`, or `RECENT · 3 rejected` when nothing failed), and a login with nothing to warn about (no cooldown, not below its reserve, every window under 70%) takes one row. The usual layout comes back once nothing has failed or been rejected for a minute and nothing is cooling down or below its reserve. On a short screen the blank rows between panels go first, then TRAFFIC, then RECENT's list of requests (its last-minute summary stays), then the bottom is cut.
 - **Log in (`n`) and log out (`x`) through pi.** `n` opens pi's own login list: every account and API key login pi offers, plus a second login for each provider you are already logged in to (`Anthropic 2`, see [Several logins per provider](#several-logins-per-provider)). The login runs on pi's own screens and pi stores the credential in its `auth.json`, exactly as `pi /login` does, and the proxy serves the provider's models at once, without a restart. A browser sign-in waits for the browser, or takes the pasted redirect URL when the browser is on another machine; `Ctrl+X` copies the sign-in URL and `Esc` cancels. `x` removes a credential pi stored; one from an environment variable or `models.json` stays.
 - **Proxy auth (`p`).** Turns [proxy authentication](#proxy-authentication) on or off without a restart, from any view. With auth off, generate a random token or type your own; with it on, show the token, replace it, or turn auth off. The change applies to the next request and is saved as `authToken` in `proxy-config.json`, so the proxy starts with it next time. A token from `--auth-token` or `PI_SWITCHBOARD_AUTH_TOKEN` can be turned off only until the proxy restarts: the console leaves the config file alone, and the flag or variable sets the token again at the next start. The token shows only in the console's dialog, with **Copy it** to copy it; it is never logged.
 - **Clear cooldowns (`c`).** In the Accounts and Models views, ends every [cooldown](#cooldowns) at once, for a limit you know has lifted. To end one login's or one model's, use `DELETE /v1/switchboard/cooldowns`.
@@ -700,7 +706,7 @@ curl -H "Authorization: Bearer $PI_SWITCHBOARD_AUTH_TOKEN" http://127.0.0.1:4141
 - **Settings.** `proxy-config.json` in the volume works as on the host. Compose passes `PI_SWITCHBOARD_LOG_LEVEL`, `PI_SWITCHBOARD_LOG_FORMAT`, `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` and `TZ` to the container only when they are set, so the file's values apply otherwise.
 - **Hardening, in `compose.yaml`:** the proxy runs as UID 1000, with a read-only root filesystem, `/tmp` as tmpfs, all capabilities dropped and `no-new-privileges`. The volume is the only place it writes.
 - **Health.** The image's healthcheck asks `GET /healthz`, which needs no token, so the container is healthy before you log in. `GET /v1/models` with the token lists what the login can use.
-- **A number-5 login volume** (`j5-pi-openai-proxy_pi-auth`) works unchanged: same UID, same mount path. To keep it, declare it in `compose.yaml` as an `external` volume under that name.
+- **An existing login volume** from an earlier deployment works unchanged when it was mounted at the same path for the same UID: declare it in `compose.yaml` as an `external` volume under its name.
 
 ## Standalone binary
 
@@ -808,7 +814,7 @@ Offline tests run with pi pointed at an empty agent directory and credential env
 - **commitlint** — conventional commits (`commit-msg` hook)
 - **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`, plus the `binary` job, which builds and tests the standalone binary with Bun), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`, then the image, package and binaries)
 - **Bun** — build-only: compiles the standalone binary (`scripts/build-binary.ts`, `src/standalone/main.ts`); nothing else runs on it
-- **semantic-release** — automated versioning, GitHub releases and the changelog (npm publishing comes with [#59](https://github.com/vx-daniel/pi-switchboard/issues/59))
+- **semantic-release** — automated versioning, GitHub releases and the changelog; the release workflow then publishes the image, the pi package on GitHub Packages and the binaries (npmjs is [#59](https://github.com/vx-daniel/pi-switchboard/issues/59))
 
 ## Attribution
 
@@ -818,9 +824,9 @@ Model exposure, public IDs and strict request validation come from the original.
 - moved to pi 1.x and its `ModelRuntime`;
 - added health checks, opt-in remote images and checks against OpenAI's published spec;
 - added the OpenAPI document and docs page;
-- moved to the Vite+ toolchain.
-
-Next is the multi-login routing it is now named for (#66–#70).
+- moved to the Vite+ toolchain;
+- added the multi-login routing it is now named for: aliases, fallback chains, cooldowns, quota and several logins per provider (#66–#70, #227);
+- added the terminal console, usage stats, standalone binaries and the experimental Responses API.
 
 Versions restart at 0.1.0 under the new name. The original's `v4.x` tags remain in the history.
 
