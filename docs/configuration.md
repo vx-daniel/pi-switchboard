@@ -22,7 +22,7 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | Install | Agent directory |
 |---|---|
 | npm CLI, pi package, standalone binary | `~/.pi/agent`, or `PI_CODING_AGENT_DIR` |
-| Docker | `/home/node/.pi/agent`, in the `pi-agent` volume ([Docker](install.md#docker)) |
+| Docker | `/home/node/.pi/agent`, in the `pi-agent` volume ([Docker](docker.md)) |
 
 | File | Whose | What it holds |
 |---|---|---|
