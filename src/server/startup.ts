@@ -202,7 +202,8 @@ function copyPlainFlags(args: CliArgs, cli: CliOverrides): void {
 }
 
 /**
- * Builds CLI overrides from parsed args.
+ * Builds CLI overrides from parsed args: the settings the flags set, which win over the
+ * environment and the config file. The console reads them to say which settings a flag holds.
  *
  * @remarks
  * {@link invalidFlag} has refused any value outside its bounds before this runs, so an integer
@@ -211,7 +212,7 @@ function copyPlainFlags(args: CliArgs, cli: CliOverrides): void {
  * @param args - The parsed CLI flags.
  * @returns The overrides for {@link loadConfig}.
  */
-function buildCliOverrides(args: CliArgs): CliOverrides {
+export function buildCliOverrides(args: CliArgs): CliOverrides {
   const cli: CliOverrides = {}
   copyPlainFlags(args, cli)
   for (const { flag, key, schema } of INT_FLAGS) {
@@ -273,6 +274,24 @@ export interface LogOutput {
 }
 
 /**
+ * Loads the config with the flags given, as logging already stands: the console's restart reads
+ * the saved settings again this way, and applies the log level only once the new server listens.
+ *
+ * @param args - The parsed CLI flags.
+ * @returns The config; `undefined` when proxy auth is set but cannot be applied, which is logged.
+ * @throws whatever loading the config throws, other than {@link UnusableProxyAuthError}
+ */
+export function reloadConfig(args: CliArgs): ServerConfig | undefined {
+  try {
+    return loadConfig(buildCliOverrides(args))
+  } catch (error) {
+    if (!(error instanceof UnusableProxyAuthError)) throw error
+    logUnusableProxyAuth(error.invalid)
+    return undefined
+  }
+}
+
+/**
  * Configures logging, then loads the config.
  *
  * @remarks
@@ -295,14 +314,8 @@ export function loadConfigWithLogging(args: CliArgs, output: LogOutput): ServerC
   )
   configureLogging({ level: earlyLogLevel, format, write })
 
-  let config: ServerConfig
-  try {
-    config = loadConfig(buildCliOverrides(args))
-  } catch (error) {
-    if (!(error instanceof UnusableProxyAuthError)) throw error
-    logUnusableProxyAuth(error.invalid)
-    return undefined
-  }
+  const config = reloadConfig(args)
+  if (config === undefined) return undefined
   configureLogging({ level: config.logLevel, format, write })
   const envFormat = process.env.PI_SWITCHBOARD_LOG_FORMAT
   if (envFormat !== undefined && !isLogFormat(envFormat)) {
@@ -356,13 +369,14 @@ export function logEffectiveConfig(config: ServerConfig): void {
 }
 
 /**
- * Starts the HTTP server and waits until it listens. The model runtime must be initialized
- * (`initRegistry`).
+ * Starts the HTTP server and waits until it listens, without recording stats. The model runtime
+ * must be initialized (`initRegistry`).
  *
  * @remarks
  * A port in use or an address that cannot be bound rejects here, before the caller goes on (the
  * console takes over the terminal only after this), instead of surfacing later as an uncaught
- * `error` event.
+ * `error` event. The console records stats itself, so a restart can hand the recorder from one
+ * server to the next without both counting the same requests (#288).
  *
  * @param config - the resolved server config
  * @param proxyAuth - the proxy auth the server applies; by default one made from
@@ -370,7 +384,7 @@ export function logEffectiveConfig(config: ServerConfig): void {
  * @returns the listening server
  * @throws Error when the server cannot listen, such as `EADDRINUSE`
  */
-export async function listen(
+export async function openServer(
   config: ServerConfig,
   proxyAuth?: ProxyAuthSwitch
 ): Promise<ServerType> {
@@ -394,6 +408,18 @@ export async function listen(
     modelCount: getAvailableModels().length,
     logLevel: config.logLevel
   })
+  return server
+}
+
+/**
+ * Starts the HTTP server ({@link openServer}) and, with stats on, records them until it closes.
+ *
+ * @param config - the resolved server config
+ * @returns the listening server
+ * @throws Error when the server cannot listen, such as `EADDRINUSE`
+ */
+export async function listen(config: ServerConfig): Promise<ServerType> {
+  const server = await openServer(config)
   // Written until the server closes, or the process exits without closing it.
   const stopStats = config.statsEnabled ? recordStatsToFile() : undefined
   if (stopStats !== undefined) server.once('close', stopStats)
