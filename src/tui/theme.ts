@@ -149,9 +149,10 @@ export function badge(text: string): string {
 }
 
 /**
- * Marks a badge that warns (#287): bold warning text on the pending background, or bold error text
- * on the error background. The text must say what is wrong by itself, since `NO_COLOR` leaves it
- * plain.
+ * Marks a badge that warns (#287): a solid block of the warning or error color with the text
+ * knocked out of it, bold, so it stands out of the strip's amber accents rather than among them.
+ * Inverted with pi-tui's `styleText`, as {@link activeTab} is. The text must say what is wrong by
+ * itself, since `NO_COLOR` leaves it plain.
  *
  * @param level - how serious: `warning` or `error`
  * @param text - the badge's text, with its own padding
@@ -159,8 +160,7 @@ export function badge(text: string): string {
  */
 export function alertBadge(level: 'warning' | 'error', text: string): string {
   if (active === undefined) return text
-  const background = level === 'error' ? 'toolErrorBg' : 'toolPendingBg'
-  return active.bg(background, strong(active.fg(level, text)))
+  return styleText(strong(active.fg(level, text)), { inverse: true }, active.getColorMode())
 }
 
 /**

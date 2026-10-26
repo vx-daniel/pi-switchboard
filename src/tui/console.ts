@@ -72,7 +72,7 @@ import {
   stepView,
   type View
 } from '@proxy/tui/navigation'
-import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
+import { openAuthMenu, openAuthOffPrompt } from '@proxy/tui/proxy-auth-menu'
 import {
   type ConsoleServer,
   type ConsoleStartup,
@@ -647,6 +647,8 @@ export async function runConsole(
     tui.setFocus(root)
     tui.start()
     await context.refresh()
+    // Started with proxy auth off: say so in a popup that offers to set a token (#287).
+    inBackground(openAuthOffPrompt(tui, context.config, proxyAuth), 'Auth')
     await end.stopped
   } finally {
     tui.stop()

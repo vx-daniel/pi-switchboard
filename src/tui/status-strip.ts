@@ -197,17 +197,16 @@ function statusBadge(input: StatusStripInput): string {
 
 /**
  * Renders the row the screen shows under the strip while proxy auth is off and the proxy listens
- * beyond this machine (#287): the address and the key first, so a narrow terminal cuts the
- * explanation rather than them.
+ * beyond this machine (#287): a solid error-colored bar across the screen, the address and the key
+ * first, so a narrow terminal cuts the explanation rather than them.
  *
  * @param address - `host:port`, without the scheme
  * @param width - the terminal's columns
  * @returns the row, `width` columns
  */
 export function authOffRow(address: string, width: number): string {
-  const head = strong(`⚠ Proxy auth is off on ${address}`)
-  const text = `${head} · p sets a token · anyone who can reach it can use your logins`
-  return truncateToWidth(paint('error', ` ${text}`), width, '…', true)
+  const text = ` ⚠ Proxy auth is off on ${address} · p sets a token · anyone who can reach it can use your logins`
+  return alertBadge('error', truncateToWidth(text, width, '…', true))
 }
 
 /**
