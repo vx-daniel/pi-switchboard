@@ -1,4 +1,9 @@
-import { compareVersions, KNOWN_FAMILIES, scanFamily } from '@proxy/openai/model-families'
+import {
+  compareVersions,
+  familiesIn,
+  latestAliasName,
+  scanFamily
+} from '@proxy/openai/model-families'
 import { describe, expect, test } from 'vite-plus/test'
 
 /** pi-ai 1.3.0's Anthropic catalogue, as canonical IDs. */
@@ -87,8 +92,35 @@ describe('model families', () => {
     expect(scanFamily('anthropic/claude-opus-5', ANTHROPIC)).toBeUndefined()
     expect(scanFamily('openai/gpt', CODEX)).toBeUndefined()
     expect(scanFamily('claude-opus', ANTHROPIC)).toBeUndefined()
-    expect(KNOWN_FAMILIES).toContain('anthropic/claude-sonnet')
-    expect(KNOWN_FAMILIES).toContain('openai-codex/luna')
+  })
+
+  // Catches a family list fixed in the code, so a new tier in pi's catalogue (`claude-mythos-1`)
+  // gets no `-latest` alias; a family read from an ID without a tier (`gpt-5.5`) or from another
+  // provider; or a hyphenated tier split (`gpt-5.3-codex-spark` is `codex-spark`, not `spark`).
+  test("the families are read from the catalogue's IDs, each with its -latest alias", () => {
+    const catalogue = [
+      ...ANTHROPIC,
+      ...CODEX,
+      'anthropic/claude-mythos-1',
+      'github-copilot/gpt-6-sol'
+    ]
+
+    expect(familiesIn(catalogue)).toEqual([
+      'anthropic/claude-fable',
+      'anthropic/claude-haiku',
+      'anthropic/claude-mythos',
+      'anthropic/claude-opus',
+      'anthropic/claude-sonnet',
+      'openai-codex/astra',
+      'openai-codex/codex-spark',
+      'openai-codex/luna',
+      'openai-codex/sol',
+      'openai-codex/terra'
+    ])
+    expect(scanFamily('openai-codex/spark', CODEX)?.all).toEqual([])
+    expect(latestAliasName('anthropic/claude-opus')).toBe('opus-latest')
+    expect(latestAliasName('openai-codex/codex-spark')).toBe('codex-spark-latest')
+    expect(latestAliasName('openai/gpt')).toBeUndefined()
   })
 
   // Catches a missing number not counting as 0, which would put `5` above `5.0.1` or call them

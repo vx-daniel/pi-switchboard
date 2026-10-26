@@ -86,12 +86,14 @@ const HALVES = 2
 /** Rows the ALIASES box's frame takes. */
 const BOX_BORDER_ROWS = 2
 
-/** What the Models view lists: the exposed models and the configured aliases. */
+/** What the Models view lists: the exposed models, the configured and the built-in aliases. */
 export interface ModelsData {
   /** The exposed models, in list order. */
   readonly models: readonly ExposedModel[]
-  /** The configured aliases, as the config holds them, exposed or not. */
+  /** The configured aliases, as the config holds them, exposed or not, then the built-in ones. */
   readonly aliases: Readonly<Record<string, AliasTarget>>
+  /** The built-in `-latest` aliases among {@link aliases} (#231); absent for none. */
+  readonly builtIn?: readonly string[]
   /** Why aliases or their targets are left out. */
   readonly diagnostics: readonly AliasDiagnostic[]
   /** What each family target resolves to now (#231). */
@@ -124,12 +126,16 @@ export interface ModelsStatus {
  *   exposure config is invalid; nothing before the first read
  */
 export function modelsViewData(status: ModelsStatus | undefined): ModelsData {
-  const exposed = status?.exposed
+  if (status === undefined) return { models: [], aliases: {}, diagnostics: [], families: [] }
+  const { exposure, exposed } = status
+  const latest = exposure?.latestAliases ?? {}
   return {
-    models: status?.exposure?.models ?? [],
-    aliases: status?.aliases ?? {},
-    diagnostics: status?.exposure?.aliasDiagnostics ?? [],
-    families: status?.exposure?.familyResolutions ?? [],
+    models: exposure?.models ?? [],
+    // A configured alias replaces a built-in one of its name, so the two never share a name.
+    aliases: { ...status.aliases, ...latest },
+    builtIn: Object.keys(latest),
+    diagnostics: exposure?.aliasDiagnostics ?? [],
+    families: exposure?.familyResolutions ?? [],
     ...(typeof exposed === 'string' ? { unavailable: exposed } : {})
   }
 }
@@ -137,7 +143,13 @@ export function modelsViewData(status: ModelsStatus | undefined): ModelsData {
 /** What a selected item is. */
 export type ModelsItem =
   | { readonly kind: 'model'; readonly model: ExposedModel }
-  | { readonly kind: 'alias'; readonly name: string; readonly target: AliasTarget }
+  | {
+      readonly kind: 'alias'
+      readonly name: string
+      readonly target: AliasTarget
+      /** A built-in `-latest` alias, which only a configured alias of its name changes. */
+      readonly builtIn: boolean
+    }
   | { readonly kind: 'new' }
 
 /** The exposed models of one provider, in list order. */
@@ -170,14 +182,17 @@ function providerGroups(models: readonly ExposedModel[]): ProviderGroup[] {
  * @param view - the models and the aliases
  * @returns every item
  */
-export function modelsItems(view: Pick<ModelsData, 'models' | 'aliases'>): readonly ModelsItem[] {
+export function modelsItems(
+  view: Pick<ModelsData, 'models' | 'aliases' | 'builtIn'>
+): readonly ModelsItem[] {
   const models = providerGroups(view.models).flatMap((group) => group.models)
   return [
     ...models.map((model): ModelsItem => ({ kind: 'model', model })),
     ...Object.entries(view.aliases).map(([name, target]): ModelsItem => ({
       kind: 'alias',
       name,
-      target
+      target,
+      builtIn: view.builtIn?.includes(name) === true
     })),
     { kind: 'new' }
   ]
@@ -301,16 +316,22 @@ function targetCell(target: AliasModel, resolution: FamilyResolution | undefined
  * @param alias.name - its name
  * @param alias.target - what it names
  * @param alias.selected - whether it is the selected row
+ * @param alias.builtIn - whether it is a built-in `-latest` alias, marked as such
  * @param families - what the family targets resolve to now
  * @param width - the box's content columns
  * @returns the alias's lines, the first with its selection mark
  */
 function aliasLines(
-  alias: { readonly name: string; readonly target: AliasTarget; readonly selected: boolean },
+  alias: {
+    readonly name: string
+    readonly target: AliasTarget
+    readonly selected: boolean
+    readonly builtIn: boolean
+  },
   families: readonly FamilyResolution[],
   width: number
 ): string[] {
-  const { name, target, selected } = alias
+  const { name, target, selected, builtIn } = alias
   const targets = aliasModels(target)
     .map((aliasTarget, position) =>
       targetCell(
@@ -322,8 +343,9 @@ function aliasLines(
   const fallback = isAliasChain(target)
     ? paint('dim', `  on ${aliasFallbackOn(target).join(', ') || 'nothing'}`)
     : ''
+  const mark = builtIn ? paint('dim', '  built in') : ''
   const wrapped = wrapTextWithAnsi(
-    `${targets}${fallback}`,
+    `${targets}${fallback}${mark}`,
     Math.max(1, width - ALIAS_TARGETS_COLUMN)
   )
   const [first = '', ...rest] = wrapped
@@ -417,7 +439,8 @@ function aliasPart(view: ModelsView, width: number): ViewPart {
   for (const [aliasName, target] of Object.entries(view.aliases)) {
     if (position === view.selected) selectedLine = lines.length
     const selected = position === view.selected
-    lines.push(...aliasLines({ name: aliasName, target, selected }, view.families, width))
+    const builtIn = view.builtIn?.includes(aliasName) === true
+    lines.push(...aliasLines({ name: aliasName, target, selected, builtIn }, view.families, width))
     for (const diagnostic of view.diagnostics.filter(({ alias }) => alias === aliasName)) {
       lines.push(...diagnosticLines(diagnostic, width))
     }

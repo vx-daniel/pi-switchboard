@@ -297,6 +297,37 @@ describe('the console Models view', () => {
     ])
   })
 
+  // Catches a built-in alias that looks configured: Enter on it only pins it, so its row says so.
+  test('marks a built-in -latest alias', () => {
+    const family = 'anthropic/claude-sonnet'
+    const rows = rendered(
+      {
+        models: [],
+        aliases: { 'sonnet-latest': { family } },
+        builtIn: ['sonnet-latest'],
+        diagnostics: [],
+        families: [
+          {
+            alias: 'sonnet-latest',
+            position: 0,
+            family,
+            pin: null,
+            resolved: 'anthropic/claude-sonnet-5-5',
+            newest: 'anthropic/claude-sonnet-5-5',
+            newerHidden: null
+          }
+        ],
+        selected: 0
+      },
+      20,
+      120
+    )
+
+    expect(boxLines(rows)[1]).toMatch(
+      /^› sonnet-latest +anthropic\/claude-sonnet → claude-sonnet-5-5 \(newest\) {2}built in$/u
+    )
+  })
+
   // Catches a long chain, its fallback classes or a diagnostic cut with `…` in a narrow box: they
   // say what the alias serves and why a target is left out, so they wrap instead.
   test('wraps a long chain and its diagnostic inside a narrow box, cutting nothing', () => {

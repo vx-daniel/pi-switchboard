@@ -508,6 +508,25 @@ describe('the console alias editor', () => {
     })
   })
 
+  // Catches a built-in alias offering Rename or Delete (it has no config entry to change), or a pin
+  // that doesn't save an alias of its name replacing it.
+  test('a built-in -latest alias is listed without config, and Pin to… saves one replacing it', async () => {
+    const listed = modelsItems(
+      modelsViewData({ exposure: await exposure(), aliases: {}, exposed: 0 })
+    ).find((row) => row.kind === 'alias' && row.name === 'opus-latest')
+
+    const seen = await enterOn(aliasRow('opus-latest'), ['Pin to…', 'anthropic/claude-opus-5'])
+    const answer = await ask('opus-latest')
+
+    expect(listed).toMatchObject({ builtIn: true, target: { family: 'anthropic/claude-opus' } })
+    expect(seen.options[0]).toEqual(['Pin to…'])
+    expect(loadConfigFromFile().aliases).toEqual({
+      'opus-latest': { family: 'anthropic/claude-opus', pin: 'anthropic/claude-opus-5' }
+    })
+    expect((await exposure()).latestAliases).not.toHaveProperty('opus-latest')
+    expect(answer.upstream).toEqual([['claude-opus-5', undefined]])
+  })
+
   // Catches the effort menu doing nothing without a word on a family with no exposed model: the
   // operator must learn why the effort didn't change.
   test('a family with nothing exposed keeps its effort, and says why', async () => {

@@ -253,7 +253,10 @@ describe('family aliases follow the newest exposed model (#231)', () => {
     expect(resolved(before, 'opus-moves')?.['canonicalId']).toBe('anthropic/claude-opus-5')
     expect(resolved(added, 'opus-moves')?.['canonicalId']).toBe('anthropic/claude-opus-5-5')
     expect(resolved(removed, 'opus-moves')?.['canonicalId']).toBe('anthropic/claude-opus-5')
-    const moves = lines.filter((line) => line.includes('now follows'))
+    // The built-in opus-latest follows the same family and moves too; this test's alias is its own.
+    const moves = lines.filter(
+      (line) => line.includes('now follows') && line.includes('opus-moves')
+    )
     expect(moves).toHaveLength(2)
     expect(moves[0]).toContain('"model":"anthropic/claude-opus-5-5"')
     expect(moves[0]).toContain('"previousModel":"anthropic/claude-opus-5"')
@@ -273,7 +276,7 @@ describe('family aliases follow the newest exposed model (#231)', () => {
 
     exposeCatalogue(sonnetOnly, alias)
     exposeCatalogue([...OPUS, NEWER_OPUS], alias)
-    const moves = lines.filter((line) => line.includes('now follows'))
+    const moves = lines.filter((line) => line.includes('now follows') && line.includes('opus-gap'))
     expect(moves).toHaveLength(1)
     expect(moves[0]).toContain('"previousModel":"anthropic/claude-opus-5"')
   })
@@ -287,7 +290,7 @@ describe('family aliases follow the newest exposed model (#231)', () => {
     )
 
     expect(resolved(exposure, 'opus-hidden')?.['canonicalId']).toBe('anthropic/claude-opus-5')
-    expect(exposure.familyResolutions).toEqual([
+    expect(exposure.familyResolutions.filter(({ alias }) => alias === 'opus-hidden')).toEqual([
       {
         alias: 'opus-hidden',
         position: 0,
@@ -324,7 +327,8 @@ describe('family aliases follow the newest exposed model (#231)', () => {
       'opus-odd': { family: 'anthropic/claude-opus', pin: 'github-copilot/claude-opus-6' }
     })
 
-    expect(exposure.aliases).toEqual([])
+    // Only the built-in opus-latest: neither configured alias is exposed.
+    expect(exposure.aliases.map(({ alias }) => alias)).toEqual(['opus-latest'])
     expect(exposure.aliasDiagnostics.map(({ code, target }) => ({ code, target }))).toEqual([
       { code: 'family-unknown', target: 'openai/gpt' },
       { code: 'pin-outside-family', target: 'github-copilot/claude-opus-6' }
@@ -347,5 +351,56 @@ describe('family aliases follow the newest exposed model (#231)', () => {
     expect(exposure.aliasDiagnostics).toEqual([
       expect.objectContaining({ code: 'target-not-exposed', target: 'anthropic/claude-sonnet' })
     ])
+  })
+})
+
+describe('the built-in -latest aliases (#231)', () => {
+  // Catches a built-in alias that needs config, one per family missing, or one for a family with
+  // no exposed model (Codex without a login).
+  test('one for each family with an exposed model, after the configured aliases', () => {
+    const exposure = exposeCatalogue(
+      [...OPUS, makeModel('anthropic', 'claude-sonnet-5'), makeModel('openai-codex', 'gpt-6-sol')],
+      { opus: 'anthropic/claude-opus-5' },
+      ['anthropic/claude-opus-4-8', 'anthropic/claude-opus-5', 'anthropic/claude-sonnet-5']
+    )
+
+    expect(exposure.aliases.map(({ alias, canonicalId }) => [alias, canonicalId])).toEqual([
+      ['opus', 'anthropic/claude-opus-5'],
+      ['opus-latest', 'anthropic/claude-opus-5'],
+      ['sonnet-latest', 'anthropic/claude-sonnet-5']
+    ])
+    expect(exposure.latestAliases).toEqual({
+      'opus-latest': { family: 'anthropic/claude-opus' },
+      'sonnet-latest': { family: 'anthropic/claude-sonnet' }
+    })
+    expect(exposure.aliasDiagnostics).toEqual([])
+  })
+
+  // Catches a built-in alias listed twice or overriding the operator's own alias of its name, or
+  // taking a name an exposed model has.
+  test('gives way to a configured alias of its name, and to a model named like it', () => {
+    const configured = exposeCatalogue(OPUS, { 'opus-latest': 'anthropic/claude-opus-4-8' })
+    const named = exposeCatalogue([...OPUS, makeModel('custom', 'opus-latest')], {}, [
+      'anthropic/claude-opus-5',
+      'custom/opus-latest'
+    ])
+
+    expect(configured.aliases.map(({ alias, canonicalId }) => [alias, canonicalId])).toEqual([
+      ['opus-latest', 'anthropic/claude-opus-4-8']
+    ])
+    expect(configured.latestAliases).toEqual({})
+    expect(named.byPublicId.get('opus-latest')?.canonicalId).toBe('custom/opus-latest')
+    expect(named.latestAliases).toEqual({})
+    expect(named.aliasDiagnostics).toEqual([])
+  })
+
+  // Catches a built-in alias for a family it could never serve: only a dated snapshot exposed
+  // would list it and report it as not exposed.
+  test('none for a family whose only exposed member is a dated snapshot', () => {
+    const exposure = exposeCatalogue([makeModel('anthropic', 'claude-haiku-4-5-20251001')], {})
+
+    expect(exposure.latestAliases).toEqual({})
+    expect(exposure.aliases).toEqual([])
+    expect(exposure.aliasDiagnostics).toEqual([])
   })
 })
