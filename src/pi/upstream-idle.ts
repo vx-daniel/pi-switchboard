@@ -121,9 +121,30 @@ function observe(
 /** What the relay needs to know about the model: enough to name it in a failure. */
 type RelayedModel = Pick<Model<Api>, 'api' | 'provider' | 'id'>
 
+/** Stands in the race in {@link relayUpstreamActivity} for a result the provider never gave. */
+const NO_RESULT = Symbol('no result')
+
 /**
- * Builds the final message for a relay whose upstream stream threw. pi's streams are not meant to
- * throw; this covers one that does.
+ * Reads the result a provider ended its stream with, once the stream has ended.
+ *
+ * @remarks
+ * pi's `end(result)` settles `result()` only when given a result, and before the stream's
+ * iteration finishes, so here it is settled already or never will be (#248). An already settled
+ * result wins a race with an already settled stand-in.
+ *
+ * @param upstream - pi's event stream, its iteration finished without a done or error event
+ * @returns the result
+ * @throws Error when the provider ended the stream with no result
+ */
+async function endedResult(upstream: AssistantMessageEventStream): Promise<AssistantMessage> {
+  const result = await Promise.race([upstream.result(), Promise.resolve(NO_RESULT)])
+  if (result === NO_RESULT) throw new Error('Upstream stream ended with no final event or result')
+  return result
+}
+
+/**
+ * Builds the final message for a relay whose upstream stream threw, or ended with neither a final
+ * event nor a result (#248). pi's streams are not meant to do either; this covers one that does.
  *
  * @param model - the model to name in the message
  * @returns an empty assistant message with `stopReason` `error` and a fixed error text
@@ -159,8 +180,8 @@ function relayFailure(model: RelayedModel): AssistantMessage {
  * Only pi's public stream API is used (async iteration, `createAssistantMessageEventStream`). The
  * relay reads as fast as the provider writes, whatever the client does with the relayed stream
  * (both queue without limit), so a client that reads slowly cannot make an active upstream look
- * idle. If reading the upstream stream throws, the relayed stream ends with an error event rather
- * than never settling.
+ * idle. If reading the upstream stream throws, or the provider ends it with neither a final event
+ * nor a result (#248), the relayed stream ends with an error event rather than never settling.
  *
  * @param upstream - pi's event stream for the call
  * @param idle - the call's idle timeout; disposed when the relay ends
@@ -183,8 +204,8 @@ export function relayUpstreamActivity(
       relayed.push(event)
     }
     // A done or error event already settled the relayed stream. Otherwise the provider ended the
-    // stream without one: pass on whatever result it ended with.
-    if (!terminated) relayed.end(await upstream.result())
+    // stream without one: pass on whatever result it ended with, or fail without one.
+    if (!terminated) relayed.end(await endedResult(upstream))
   }
   relay()
     .catch((error: unknown) => {
