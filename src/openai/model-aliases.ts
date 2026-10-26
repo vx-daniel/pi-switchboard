@@ -286,6 +286,8 @@ export function latestAliases(
   const latest: Record<string, FamilyTarget> = {}
   for (const family of familiesIn(exposedIds)) {
     const name = latestAliasName(family)
+    // Two families named alike (no two rules do today) keep the first in family order: the name
+    // stays one alias, never a choice made per request.
     if (name === undefined || Object.hasOwn(configured, name) || Object.hasOwn(latest, name)) {
       continue
     }

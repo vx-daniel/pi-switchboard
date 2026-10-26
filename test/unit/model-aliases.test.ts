@@ -394,13 +394,33 @@ describe('the built-in -latest aliases (#231)', () => {
     expect(named.aliasDiagnostics).toEqual([])
   })
 
-  // Catches a built-in alias for a family it could never serve: only a dated snapshot exposed
-  // would list it and report it as not exposed.
-  test('none for a family whose only exposed member is a dated snapshot', () => {
-    const exposure = exposeCatalogue([makeModel('anthropic', 'claude-haiku-4-5-20251001')], {})
+  // Catches a built-in alias for a family it could never serve: only a dated snapshot or an ID
+  // without a readable version exposed would list it and report it as not exposed.
+  test('none for a family whose only exposed members are snapshots or unreadable IDs', () => {
+    const exposure = exposeCatalogue(
+      [
+        makeModel('anthropic', 'claude-haiku-4-5-20251001'),
+        makeModel('anthropic', 'claude-opus-next')
+      ],
+      {}
+    )
 
     expect(exposure.latestAliases).toEqual({})
     expect(exposure.aliases).toEqual([])
     expect(exposure.aliasDiagnostics).toEqual([])
+  })
+
+  // Catches two families that name the same alias both listed, or the one listed chosen anew on
+  // each computation (clients would be billed on a coin toss).
+  test('two families naming one alias: the first in family order keeps it', () => {
+    const exposure = exposeCatalogue(
+      [makeModel('openai-codex', 'gpt-6-opus'), makeModel('anthropic', 'claude-opus-5')],
+      {}
+    )
+
+    expect(exposure.latestAliases).toEqual({ 'opus-latest': { family: 'anthropic/claude-opus' } })
+    expect(exposure.aliases.map(({ alias, canonicalId }) => [alias, canonicalId])).toEqual([
+      ['opus-latest', 'anthropic/claude-opus-5']
+    ])
   })
 })

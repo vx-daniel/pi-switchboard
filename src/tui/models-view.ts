@@ -497,7 +497,6 @@ interface SideBox {
  * @returns the boxes, top first
  */
 function sideBoxes(view: ModelsView, width: number): readonly SideBox[] {
-  const latest = latestPart(view, width - FRAME_COLUMNS)
   const aliases: SideBox = {
     title: 'ALIASES',
     count: Object.keys(view.aliases).length,
@@ -505,6 +504,7 @@ function sideBoxes(view: ModelsView, width: number): readonly SideBox[] {
   }
   const latestCount = Object.keys(view.latest ?? {}).length
   if (latestCount === 0) return [aliases]
+  const latest = latestPart(view, width - FRAME_COLUMNS)
   return [aliases, { title: 'LATEST', count: latestCount, part: latest }]
 }
 
