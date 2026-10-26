@@ -53,14 +53,15 @@ function rendered(view: ModelsView, height: number, width = STACKED): string[] {
 }
 
 /**
- * Reads the ALIASES box's content off the plain rows of a stacked view: the rows between its
- * borders, without them.
+ * Reads a box's content off the plain rows of a stacked view: the rows between its borders,
+ * without them.
  *
  * @param rows - the plain rows
+ * @param title - the box's title
  * @returns the box's lines, without trailing spaces
  */
-function boxLines(rows: readonly string[]): string[] {
-  const top = rows.findIndex((row) => row.startsWith('╭─ ALIASES'))
+function boxLines(rows: readonly string[], title = 'ALIASES'): string[] {
+  const top = rows.findIndex((row) => row.startsWith(`╭─ ${title}`))
   const bottom = rows.findIndex((row, rowIndex) => rowIndex > top && row.startsWith('╰'))
   return rows.slice(top + 1, bottom).map((row) => row.slice(2, -1).trimEnd())
 }
@@ -295,6 +296,78 @@ describe('the console Models view', () => {
         /^ {2}opus-steady +anthropic\/claude-opus pinned: claude-opus-5 · newest: claude-opus-5-5$/u
       ) as unknown
     ])
+  })
+
+  // Catches the built-in aliases mixed in with the operator's (which are theirs and which the
+  // system's must be plain), the new-alias row pushed under them, or the selection skipping them.
+  test('the built-in -latest aliases have their own LATEST box, after ALIASES', () => {
+    const family = 'anthropic/claude-sonnet'
+    const view: ModelsView = {
+      models: [exposed('m0')],
+      aliases: { reviewer: 'alpha/m0' },
+      latest: { 'sonnet-latest': { family } },
+      diagnostics: [],
+      families: [
+        {
+          alias: 'sonnet-latest',
+          position: 0,
+          family,
+          pin: null,
+          resolved: 'anthropic/claude-sonnet-5-5',
+          newest: 'anthropic/claude-sonnet-5-5',
+          newerHidden: null
+        }
+      ],
+      selected: 3
+    }
+    const rows = rendered(view, 30, 120)
+
+    expect(modelsItems(view).map((listed) => listed.kind)).toEqual([
+      'model',
+      'alias',
+      'new',
+      'latest'
+    ])
+    expect(rows).toContainEqual(expect.stringMatching(/^╭─ ALIASES 1 ─/u))
+    expect(rows).toContainEqual(expect.stringMatching(/^╭─ LATEST 1 ─/u))
+    expect(boxLines(rows)).toEqual([
+      expect.stringMatching(/^ {2}alias +targets$/u),
+      expect.stringMatching(/^ {2}reviewer +alpha\/m0$/u),
+      '  + New alias…'
+    ])
+    expect(boxLines(rows, 'LATEST')).toEqual([
+      expect.stringMatching(/^ {2}alias +family$/u),
+      expect.stringMatching(
+        /^› sonnet-latest +anthropic\/claude-sonnet → claude-sonnet-5-5 \(newest\)$/u
+      )
+    ])
+  })
+
+  // Catches a selected built-in alias squeezed off a short screen by the ALIASES box above it.
+  test('a short view keeps a selected built-in alias on screen', () => {
+    const latest = Object.fromEntries(
+      Array.from({ length: 6 }, (_, position) => [
+        `tier${String(position)}-latest`,
+        { family: `anthropic/claude-tier${String(position)}` }
+      ])
+    )
+    const aliases = Object.fromEntries(
+      Array.from({ length: 6 }, (_, position) => [`mine${String(position)}`, 'alpha/m0'])
+    )
+    const view: ModelsView = {
+      models: [exposed('m0')],
+      aliases,
+      latest,
+      diagnostics: [],
+      families: [],
+      // The last built-in alias: after the model, six aliases and the new-alias row.
+      selected: 13
+    }
+
+    const rows = rendered(view, 14, SIDE_BY_SIDE)
+
+    expect(rows).toHaveLength(14)
+    expect(rows).toContainEqual(expect.stringMatching(/› tier5-latest /u))
   })
 
   // Catches a long chain, its fallback classes or a diagnostic cut with `…` in a narrow box: they

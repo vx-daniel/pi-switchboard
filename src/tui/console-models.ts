@@ -21,7 +21,7 @@ import {
   targetSummary
 } from '@proxy/config/schema'
 import type { ModelExposureResult } from '@proxy/openai/model-exposure'
-import { KNOWN_FAMILIES, scanFamily } from '@proxy/openai/model-families'
+import { familiesIn, scanFamily } from '@proxy/openai/model-families'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import type { ReasoningEffort } from '@proxy/openai/schemas'
 import {
@@ -221,7 +221,7 @@ function familyModel(editor: AliasEditor, target: FamilyTarget): string | undefi
  * @returns the family target, or `undefined` when cancelled or none has an exposed member
  */
 async function pickFamilyTarget(editor: AliasEditor): Promise<FamilyTarget | undefined> {
-  const families = KNOWN_FAMILIES.filter((family) => familyMembers(editor, family).length > 0)
+  const families = familiesIn(editor.exposure.byCanonicalId.keys())
   if (families.length === 0) {
     await notify(editor, 'No model family has an exposed model.')
     return undefined
@@ -502,13 +502,35 @@ const ALIAS_ACTIONS: Readonly<
 }
 
 /**
- * Runs what Enter does on a Models view row: an alias's menu, or a new alias (for the row's
- * model, on a model's row).
+ * Runs what Enter does on a built-in `-latest` alias (#231): it has no config entry to rename or
+ * delete, so its one action pins it, saving an alias of its name that replaces it.
+ *
+ * @param editor - the editor
+ * @param name - the alias
+ * @param target - the family it follows
+ */
+async function pinBuiltIn(editor: AliasEditor, name: string, target: AliasTarget): Promise<void> {
+  const draft = draftOf(target)
+  const choice = await editor.screens.select(`Alias ${name} (built in: follows the newest)`, [
+    PIN_TO
+  ])
+  if (choice !== PIN_TO) return
+  const next = await TARGET_ACTIONS[PIN_TO]?.(editor, draft.models, 0)
+  if (next !== undefined) await save(editor, name, { ...draft, models: next }, { creating: true })
+}
+
+/**
+ * Runs what Enter does on a Models view row: an alias's menu, a built-in alias's pin, or a new
+ * alias (for the row's model, on a model's row).
  *
  * @param editor - the editor
  * @param item - the selected row
  */
 export async function runModelsItem(editor: AliasEditor, item: ModelsItem): Promise<void> {
+  if (item.kind === 'latest') {
+    await pinBuiltIn(editor, item.name, item.target)
+    return
+  }
   if (item.kind !== 'alias') {
     await newAlias(editor, item.kind === 'model' ? item.model.canonicalId : undefined)
     return

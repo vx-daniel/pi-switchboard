@@ -77,21 +77,28 @@ A team picks a model by job, and the job settles how hard it thinks as well: a r
 
 ## Family aliases: follow the newest model
 
-A plain alias names one model, so a new model means editing it. A family alias names a family instead, and the proxy follows its newest model:
+A plain alias names one model, so a new model means editing it. A family alias names a family instead, and the proxy follows its newest model. Every family your exposed models belong to has one built in, with no config: `opus-latest`, `sonnet-latest`, `haiku-latest`, `fable-latest`, `sol-latest`, `luna-latest` and so on, listed in `GET /v1/models` after your own aliases.
+
+```
+$ curl -s localhost:4141/v1/chat/completions -d '{"model":"opus-latest","messages":[…]}'
+{ "model": "anthropic/claude-opus-5-5", …, "x_pi": { "alias": "opus-latest" } }
+```
+
+Write one yourself for another name, an effort, or a pin; one named like a built-in alias replaces it:
 
 ```json
 { "aliases": {
-  "opus-latest": { "family": "anthropic/claude-opus" },
-  "codex-sol-latest": { "family": "openai-codex/sol", "reasoningEffort": "high" },
+  "codex-sol-high": { "family": "openai-codex/sol", "reasoningEffort": "high" },
   "opus-steady": { "family": "anthropic/claude-opus", "pin": "anthropic/claude-opus-5" }
 } }
 ```
 
-- **Families.** A provider and a tier: `anthropic/claude-opus`, `anthropic/claude-sonnet`, `anthropic/claude-haiku`, `anthropic/claude-fable`, and `openai-codex/sol`, `luna`, `terra`, `astra`. You can't write a pattern; a family the proxy doesn't know is ignored, and `/healthz/models` answers `503` with `family-unknown`.
+- **Families are read from the model IDs.** A provider and a tier: Anthropic's `claude-{tier}-{version}` (`anthropic/claude-opus`, `anthropic/claude-sonnet`, …) and Codex's `gpt-{version}-{tier}` (`openai-codex/sol`, `openai-codex/luna`, …). A tier new to pi's catalogue is a family, with its `-latest` alias, as soon as pi lists it. You can't write a pattern. A provider the proxy has no rule for (only Anthropic and OpenAI Codex have one), a tier not written like that provider's, or one none of its models names while you're logged in to it (a typo such as `anthropic/claude-opsu`) is ignored, and `/healthz/models` answers `503` with `family-unknown`. Without a login to the provider the tier can't be checked, and the alias is only `target-not-exposed`.
+- **Built-in aliases.** One for each family with an exposed model it can pick, so a provider you have no login for adds none. One named like an exposed model gives way to the model. To change one (another effort, a pin), add an alias of its name; deleting yours brings the built-in one back.
 - **Newest by the version in the ID.** pi's catalogue has no release dates, so the proxy reads the version from the model ID: `claude-opus-5-5` is newer than `claude-opus-5` and `claude-opus-4-8`; `gpt-6.1-sol` is newer than `gpt-6-sol`. A dated snapshot (`claude-opus-4-5-20251101`) is never picked over its undated ID. A model in the family whose version can't be read is never picked, and is listed in `/healthz/models` as `family-unparsed`.
 - **Among the exposed models only.** If the newest is hidden by the exposure config, the alias follows the newest exposed one, and `/healthz/models` names the hidden one (`newerHidden`). A family with nothing exposed is `target-not-exposed`.
 - **It moves by itself, loudly.** It is resolved on every request, so a catalogue update, a login or a logout moves it on the next request, with no restart. Each move is logged once at `warning`, with the old and the new model. `/healthz/models` lists what each family alias resolves to (`familyAliases`), and the console's Models view shows it.
-- **`pin` holds it** on one model of the family until you clear it (the console's **Pin to…** and **Follow newest**). A pinned alias never moves; while its pin is hidden or logged out, it is `target-not-exposed`, never the newest instead. A pin outside the family answers `503` with `pin-outside-family`.
+- **`pin` holds it** on one model of the family until you clear it (the console's **Pin to…** and **Follow newest**; on a built-in alias, **Pin to…** saves an alias of its name). A pinned alias never moves; while its pin is hidden or logged out, it is `target-not-exposed`, never the newest instead. A pin outside the family answers `503` with `pin-outside-family`.
 - **Like any alias otherwise.** The response's `model` is the model that answered and `x_pi.alias` the family alias. A family can set a `reasoningEffort` ([above](#reasoning-effort-per-alias)), checked against the model it resolves to, and can be one entry of a chain's `targets`.
 
 ## Cooldowns

@@ -44,15 +44,23 @@ const RIGHT_END_GAP = 2
  *
  * @param exposed - the exposed model count, the exposure config's error, or `undefined` before
  *   the first status read
- * @param aliases - how many aliases are configured, to follow the count; `undefined` for none
- * @returns `24 models · 1 alias`, `24 models`, `exposure config error`, or `''`
+ * @param aliases - to follow the count: how many aliases are configured and how many are built
+ *   in (#231); `undefined` for neither
+ * @param aliases.configured - the configured aliases
+ * @param aliases.latest - the built-in `-latest` aliases, left out when there are none
+ * @returns `24 models · 1 alias · 8 latest`, `24 models`, `exposure config error`, or `''`
  */
-export function exposedModelsLabel(exposed: number | string | undefined, aliases?: number): string {
+export function exposedModelsLabel(
+  exposed: number | string | undefined,
+  aliases?: { readonly configured: number; readonly latest: number }
+): string {
   if (typeof exposed === 'string') return 'exposure config error'
   if (exposed === undefined) return ''
   const models = `${String(exposed)} models`
   if (aliases === undefined) return models
-  return `${models} · ${String(aliases)} ${aliases === 1 ? 'alias' : 'aliases'}`
+  const { configured, latest } = aliases
+  const counted = `${models} · ${String(configured)} ${configured === 1 ? 'alias' : 'aliases'}`
+  return latest === 0 ? counted : `${counted} · ${String(latest)} latest`
 }
 
 /** What the frame shows besides the view. */

@@ -33,6 +33,7 @@ import type { Api, Model } from '@earendil-works/pi-ai'
 import type {
   AliasTarget,
   FailureClass,
+  FamilyTarget,
   ModelExposureMode,
   PublicModelIdMode
 } from '@proxy/config/schema'
@@ -41,7 +42,8 @@ import type { ThinkingLevelsOf } from '@proxy/openai/effort-levels'
 import {
   type AliasDiagnostic,
   exposeAliases,
-  type FamilyResolution
+  type FamilyResolution,
+  latestAliases
 } from '@proxy/openai/model-aliases'
 import { groupLogins } from '@proxy/openai/model-logins'
 import type { ReasoningEffort } from '@proxy/openai/schemas'
@@ -133,6 +135,8 @@ export interface ModelExposureResult {
   readonly aliasDiagnostics: readonly AliasDiagnostic[]
   /** What each family alias target resolves to now (#231). */
   readonly familyResolutions: readonly FamilyResolution[]
+  /** The built-in `-latest` aliases computed with this exposure, by name (#231). */
+  readonly latestAliases: Readonly<Record<string, FamilyTarget>>
 }
 
 /** A failed exposure computation: a config conflict that makes public IDs ambiguous. */
@@ -598,12 +602,17 @@ export function computeModelExposure(
     }
   )
 
-  const aliased = exposeAliases(config.aliases, {
-    byPublicId,
-    byCanonicalId,
-    availableIds: groups.map(({ primary }) => canonicalModelId(primary)),
-    thinkingLevels
-  })
+  // The built-in `-latest` aliases come after the configured ones, which replace one of their name.
+  const latest = latestAliases(config.aliases, { byPublicId, byCanonicalId })
+  const aliased = exposeAliases(
+    { ...config.aliases, ...latest },
+    {
+      byPublicId,
+      byCanonicalId,
+      availableIds: groups.map(({ primary }) => canonicalModelId(primary)),
+      thinkingLevels
+    }
+  )
   return {
     ok: true,
     models,
@@ -613,7 +622,8 @@ export function computeModelExposure(
     aliases: aliased.aliases,
     byAlias: aliased.byAlias,
     aliasDiagnostics: aliased.diagnostics,
-    familyResolutions: aliased.families
+    familyResolutions: aliased.families,
+    latestAliases: latest
   }
 }
 

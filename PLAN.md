@@ -425,17 +425,29 @@ choice for that name, so it replaces the request's (a principle I exception, con
 ### Family aliases (#231)
 
 An alias target may be `{ family, pin?, reasoningEffort? }`: the family's newest exposed model, or
-`pin` while it is set (`FamilyTargetSchema`, `src/config/schema.ts`). The operator opts in per alias;
-nothing is built in (principle VI).
+`pin` while it is set (`FamilyTargetSchema`, `src/config/schema.ts`). Every family the exposed
+models name also has a built-in `-latest` alias (principle VI's second recorded default).
 
-- **Newest** (`src/openai/model-families.ts`, `scanFamily`). pi's catalogue has no release date
-  (#176), so the version is read from the model ID by one rule per provider: Anthropic
-  `claude-{tier}-{major}[-{minor}]` (tiers `claude-opus`, `claude-sonnet`, `claude-haiku`,
-  `claude-fable`; a `-YYYYMMDD` snapshot is a member a pin may name, never the newest), Codex
-  `gpt-{version}-{tier}` (tiers `sol`, `luna`, `terra`, `astra`, a dotted version). A family is
-  `provider/tier`, never a pattern; one no rule knows is `family-unknown`. A member the rule can't
-  read is never picked and is `family-unparsed`. Versions compare number by number, a missing
-  number counting as 0. Moving to release dates later changes only `scanFamily`, no config.
+- **Families are read from the IDs** (`src/openai/model-families.ts`). One rule per provider says
+  how its IDs name a tier: Anthropic `claude-{tier}-{major}[-{minor}]` (`claude-opus`,
+  `claude-sonnet`, …; a `-YYYYMMDD` snapshot is a member a pin may name, never the newest), Codex
+  `gpt-{version}-{tier}` (`sol`, `luna`, `codex-spark`, …, a dotted version). `familiesIn` lists
+  the families a set of IDs names, so a new tier in pi's catalogue is a family with no code change.
+  A family is `provider/tier`, never a pattern; a provider with no rule, a tier not written as the
+  provider's tiers are, or a tier none of a logged-in provider's available models names (a typo,
+  or a family pi dropped) is `family-unknown`. With no login to the provider the tier can't be
+  checked, and the family is only `target-not-exposed`. A member the rule can't read is never
+  picked and is `family-unparsed`.
+- **Newest** (`scanFamily`). pi's catalogue has no release date (#176), so the version is read
+  from the model ID. Versions compare number by number, a missing number counting as 0. Moving to
+  release dates later changes only `scanFamily`, no config.
+- **Built-in `-latest` aliases** (`latestAliases`, `src/openai/model-aliases.ts`). Computed with
+  the exposure: one per family among the exposed models with a member it can pick, named by the
+  rule (`opus-latest` for `anthropic/claude-opus`, `sol-latest` for `openai-codex/sol`), a
+  `{ family }` target listed after the configured aliases. A configured alias of its name replaces
+  it, and it gives way to an exposed model of its name, so a built-in alias never produces
+  `shadows-model`. A family with nothing exposed, or only dated snapshots, has none, so a provider
+  with no login adds no diagnostic. `ModelExposureResult.latestAliases` names them.
 - **Resolution** runs inside `exposeAliases`, so on every request (and on each `/healthz/models`
   and console read): logins, logouts and catalogue refreshes move the alias with no restart. It
   resolves among the exposed models only (principle IV); the newest available member, when newer
@@ -456,7 +468,11 @@ nothing is built in (principle VI).
 - **Console.** The Models view shows each family target's resolution, pin and hidden newer model;
   the alias menu of a single family target adds **Pin to…** (the family's exposed members) and
   **Follow newest**, the targets menu offers both for a family target in a chain, and **+ New
-  alias…** asks for a model or a family. Each saves through `saveConfigToFile`.
+  alias…** asks for a model or a family (the families the exposed models name). Each saves
+  through `saveConfigToFile`. The built-in aliases have their own **LATEST** box under ALIASES
+  (`ModelsItem` kind `latest`, after the new-alias row), so the operator's and the built-in ones
+  never mix; Enter on one offers only **Pin to…**, which saves a configured alias of its name,
+  replacing it. The tab counts them apart (`24 models · 1 alias · 8 latest`).
 
 ### Cooldowns (#68)
 

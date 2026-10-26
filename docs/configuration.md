@@ -89,7 +89,7 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
   "aliases": {
     "quick": "anthropic/claude-haiku-5-5",
     "reviewer": { "model": "anthropic/claude-opus-5-5", "reasoningEffort": "high" },
-    "opus-latest": { "family": "anthropic/claude-opus" },
+    "sonnet-high": { "family": "anthropic/claude-sonnet", "reasoningEffort": "high" },
     "coding": {
       "targets": ["anthropic/claude-opus-5-5", "openai-codex/gpt-6-sol"],
       "fallbackOn": ["rate_limit", "unavailable", "timeout"]

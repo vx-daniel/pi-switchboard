@@ -199,8 +199,13 @@ const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext) => string>> =
   accounts: ({ state }) =>
     `${String(state.accounts.length)} logins · ${String(state.status?.cooldowns ?? 0)} cooldowns`,
   stats: ({ state }) => STATS_WINDOW_KEYS[state.statsWindow][1],
-  models: ({ state }) =>
-    exposedModelsLabel(state.status?.exposed, Object.keys(state.status?.aliases ?? {}).length),
+  models: ({ state }) => {
+    const { aliases, latest } = modelsViewData(state.status)
+    return exposedModelsLabel(state.status?.exposed, {
+      configured: Object.keys(aliases).length,
+      latest: Object.keys(latest ?? {}).length
+    })
+  },
   settings: settingsContext
 }
 

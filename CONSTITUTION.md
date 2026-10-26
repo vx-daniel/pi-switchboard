@@ -1,24 +1,26 @@
 <!--
 Sync Impact Report
-Version change: 3.9.0 → 3.10.0 (MINOR)
-Rationale: semantic-release was carried over from the fork and pulled about 1,900 lockfile lines
-of release-only dependencies, the source of 29 Dependabot alerts (two critical), for one release
-every few days by one maintainer. Releases are now cut by hand: the maintainer runs the release
-workflow on `main` with the version. Merging `dev` into `main` no longer releases by itself.
-MINOR: materially changed guidance in principle V (how a release happens and why the commit type
-matters); no principle added or removed.
+Version change: 3.10.0 → 3.11.0 (MINOR)
+Rationale: a family alias (#231) had to be written into `proxy-config.json` before `opus-latest`
+existed, which defeated its point: naming "the newest Opus" without editing anything when a new
+model arrives. Every family the exposed models name now has a built-in `-latest` alias, computed
+with the exposure. Principle VI's "configured explicitly" gains this second recorded default, and
+keeps what makes it safe: it reaches exposed models only, a move is logged at warning, the
+response names the model and the alias, and a configured alias of its name replaces it.
+MINOR: materially changed guidance in principle VI (a second recorded default); no principle
+added or removed.
 Modified sections:
-- V. Release Hygiene and Traceability: the commit type matters because the maintainer picks each
-  release's version from it, not because semantic-release derives it; a release is a manual run
-  of the release workflow on `main`
+- VI. Routing Transparency: the built-in `-latest` family aliases, beside
+  `routing.logins.fallbackOn`, as the recorded defaults a request with no routing configured can
+  meet
 Templates requiring updates:
-- ✅ AGENTS.md: the git workflow's `main` rule and the CI list
-- ✅ PLAN.md: "Tooling and type safety" (CI, Releases)
-- ✅ CONTRIBUTING.md: "Releasing"; README.md: links the releases, not `CHANGELOG.md`
-- ✅ CHANGELOG.md: frozen at 0.4.0, points to GitHub Releases
+- ✅ AGENTS.md: the routing bullet under "Core constraints"
+- ✅ PLAN.md: aliases and family aliases
+- ✅ docs/routing.md: family aliases; docs/console.md: the Models view
 Follow-up TODOs:
 - None.
 
+3.10.0 (2026-10-26): releases are cut by hand on `main` (principle V); semantic-release is gone.
 3.9.0 (2026-10-23): principle III's exception names a `proxy-config.json` that exists but cannot
 be read or parsed, with no override token: it refuses to start, where it used to turn auth off.
 
@@ -161,7 +163,7 @@ Rationale: the proxy's public contract is documentation-heavy. If behavior chang
 Routing (aliases, fallback chains, cooldowns, quota awareness, a provider's logins; #66–#70, #227) MUST be configured explicitly and MUST be visible to the client and the operator:
 - A request is only ever routed to models the exposure config exposes; an alias or fallback never reaches a hidden model (principle IV). Every login of an exposed model's provider may serve it.
 - A response says which model and login served it, under `x_pi` (`model`, and `x_pi.login` when the model has more than one login), and the log records every hop (the requested model, each model and login tried, and why it moved on), by name, never credential.
-- A request with no routing configured behaves exactly as without routing: the model it names, or an error. The one recorded default is `routing.logins.fallbackOn: ["rate_limit"]`: a second login to a provider serves a rate-limited model's request without further configuration, which is why a second login exists.
+- A request with no routing configured behaves exactly as without routing: the model it names, or an error. Two defaults are recorded. `routing.logins.fallbackOn: ["rate_limit"]`: a second login to a provider serves a rate-limited model's request without further configuration, which is why a second login exists. And the built-in `-latest` aliases (#231): each family the exposed models name (`anthropic/claude-opus`) has one (`opus-latest`) that follows its newest exposed model, so a client can name "the newest Opus" without config; it is listed and resolved like a configured family alias, its moves are logged at warning, and a configured alias of its name replaces it.
 - Fallback only follows failures the configuration names (for example a rate limit or an outage), never a client error such as an invalid request. A request that names a model never moves to another model; it moves to another login of the same provider only on the classes `routing.logins.fallbackOn` names, or past a login below the share its `routing.reserve` entry keeps free.
 
 Rationale: routing changes which model and account a client is billed on. Doing that silently would break the predictability principle I protects and the trust the operator places in the exposure config.
@@ -206,4 +208,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.10.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-26
+**Version**: 3.11.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-26
