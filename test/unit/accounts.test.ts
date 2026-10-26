@@ -335,6 +335,55 @@ describe('registerStoredAccounts', () => {
     expect(ids()).toEqual(['anthropic'])
   })
 
+  // Catches the failure reason carrying the error's message (which quotes a path under the user's
+  // home) instead of its code or name, or a timeout or abort of the listing read as an empty store
+  // (#252): the reason is `code` when the error has one, else its name, else `unknown`.
+  test.each([
+    [
+      'an error with a code',
+      Object.assign(new Error('EACCES: permission denied, open /home/alice/.pi/agent/auth.json'), {
+        code: 'EACCES'
+      }),
+      'EACCES'
+    ],
+    [
+      'an error without a code',
+      new SyntaxError('Unexpected token in /home/alice/.pi/agent/auth.json'),
+      'SyntaxError'
+    ],
+    [
+      'a timeout of the signal',
+      new DOMException('timed out reading /home/alice/.pi/agent/auth.json', 'TimeoutError'),
+      'TimeoutError'
+    ],
+    ['a rejection that is no error', '/home/alice/.pi/agent/auth.json', 'unknown']
+  ])('reports %s by its code or name, never its message', async (_label, failure, reason) => {
+    const { runtime } = fakeRuntime([], ['anthropic'])
+    runtime.listCredentials = () => Promise.reject(failure)
+
+    const result = await registerStoredAccounts(runtime, new AbortController().signal)
+
+    expect(result).toEqual({ listed: false, reason })
+  })
+
+  // Catches the abort signal being ignored: a listing that honours an already-aborted signal (as
+  // pi's store does) must come back as a failed listing, not as `[]` or a thrown error that stops
+  // the proxy from starting.
+  test('a listing cut short by the signal is a failed listing', async () => {
+    const { runtime, ids } = fakeRuntime(['anthropic-2'], ['anthropic'])
+    runtime.listCredentials = ({ signal } = {}) => {
+      signal?.throwIfAborted()
+      return Promise.resolve([{ providerId: 'anthropic-2', type: 'api_key' as const }])
+    }
+    const timedOut = AbortSignal.abort(new DOMException('listing took too long', 'TimeoutError'))
+
+    await expect(registerStoredAccounts(runtime, timedOut)).resolves.toEqual({
+      listed: false,
+      reason: 'TimeoutError'
+    })
+    expect(ids()).toEqual(['anthropic'])
+  })
+
   // Catches an empty store reported as a failed listing (the field on /healthz/creds would cry
   // wolf for every install with a single login).
   test('an empty store is listed, with no accounts', async () => {
