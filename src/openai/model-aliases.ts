@@ -312,8 +312,35 @@ interface TargetPlace {
 }
 
 /**
- * Scans a family among the exposed and the available models, reporting a family no rule knows
- * and each member whose version can't be read.
+ * Says why a family names nothing the proxy can follow, if it doesn't.
+ *
+ * @param family - the family, `provider/tier`
+ * @param available - its members among the available models, or `undefined` for a family no rule
+ *   knows
+ * @param availableIds - every available model's canonical ID
+ * @returns the reason, or `undefined` for a family the proxy can follow
+ */
+function unknownFamilyReason(
+  family: string,
+  available: FamilyScan | undefined,
+  availableIds: readonly string[]
+): string | undefined {
+  if (available === undefined) {
+    return 'which is not a family the proxy knows (provider/tier, such as anthropic/claude-opus)'
+  }
+  const provider = family.slice(0, family.indexOf('/'))
+  // A tier none of a logged-in provider's models names is a typo or a family pi dropped. With no
+  // login to the provider, the tier can't be checked: it is only not exposed.
+  const listed = availableIds.some((canonicalId) => canonicalId.startsWith(`${provider}/`))
+  if (available.all.length > 0 || !listed) {
+    return undefined
+  }
+  return `which none of ${provider}'s models names (a typo, or a family pi no longer lists)`
+}
+
+/**
+ * Scans a family among the exposed and the available models, reporting a family no rule knows or
+ * none of its provider's models names, and each member whose version can't be read.
  *
  * @param alias - the alias
  * @param family - the family it follows
@@ -329,12 +356,13 @@ function scanBoth(
 ): { readonly exposed: FamilyScan; readonly available: FamilyScan } | undefined {
   const exposed = scanFamily(family, lookup.byCanonicalId.keys())
   const available = scanFamily(family, lookup.availableIds)
-  if (exposed === undefined || available === undefined) {
+  const unknown = unknownFamilyReason(family, available, lookup.availableIds)
+  if (exposed === undefined || available === undefined || unknown !== undefined) {
     diagnostics.push({
       code: 'family-unknown',
       alias,
       target: family,
-      message: `Alias "${alias}" follows "${family}", which is not a family the proxy knows (provider/tier, such as anthropic/claude-opus).`
+      message: `Alias "${alias}" follows "${family}", ${unknown ?? 'which is not a family the proxy knows'}.`
     })
     return undefined
   }

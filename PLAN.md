@@ -433,9 +433,11 @@ models name also has a built-in `-latest` alias (principle VI's second recorded 
   `claude-sonnet`, …; a `-YYYYMMDD` snapshot is a member a pin may name, never the newest), Codex
   `gpt-{version}-{tier}` (`sol`, `luna`, `codex-spark`, …, a dotted version). `familiesIn` lists
   the families a set of IDs names, so a new tier in pi's catalogue is a family with no code change.
-  A family is `provider/tier`, never a pattern; a provider with no rule, or a tier not written as
-  the provider's tiers are, is `family-unknown`. A member the rule can't read is never picked and
-  is `family-unparsed`.
+  A family is `provider/tier`, never a pattern; a provider with no rule, a tier not written as the
+  provider's tiers are, or a tier none of a logged-in provider's available models names (a typo,
+  or a family pi dropped) is `family-unknown`. With no login to the provider the tier can't be
+  checked, and the family is only `target-not-exposed`. A member the rule can't read is never
+  picked and is `family-unparsed`.
 - **Newest** (`scanFamily`). pi's catalogue has no release date (#176), so the version is read
   from the model ID. Versions compare number by number, a missing number counting as 0. Moving to
   release dates later changes only `scanFamily`, no config.

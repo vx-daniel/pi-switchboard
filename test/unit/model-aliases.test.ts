@@ -320,6 +320,22 @@ describe('family aliases follow the newest exposed model (#231)', () => {
     ])
   })
 
+  // Catches a mistyped tier passing the health check: with tiers read from the IDs, a tier none of
+  // a logged-in provider's models names must still be a configuration error, while a real tier of
+  // a provider with no login is only not exposed.
+  test('a tier none of the logged-in provider’s models names is unknown', () => {
+    const exposure = exposeCatalogue(OPUS, {
+      'opus-typo': { family: 'anthropic/claude-opsu' },
+      'sol-latest-mine': { family: 'openai-codex/sol' }
+    })
+
+    expect(exposure.aliasDiagnostics.map(({ code, target }) => ({ code, target }))).toEqual([
+      { code: 'family-unknown', target: 'anthropic/claude-opsu' },
+      { code: 'target-not-exposed', target: 'openai-codex/sol' }
+    ])
+    expect(exposure.aliasDiagnostics[0]?.message).toContain("none of anthropic's models names")
+  })
+
   // Catches a family no rule knows resolved by guessing, or a pin outside its family accepted.
   test('an unknown family and a pin outside the family are configuration errors', () => {
     const exposure = exposeCatalogue(OPUS, {
@@ -338,12 +354,17 @@ describe('family aliases follow the newest exposed model (#231)', () => {
   // Catches a family target in a chain resolved once for the whole chain, or the chain dropped
   // when its family has nothing exposed.
   test('a family can be one target of a chain', () => {
-    const exposure = exposeCatalogue(OPUS, {
-      'opus-chain': {
-        targets: [{ family: 'anthropic/claude-sonnet' }, { family: 'anthropic/claude-opus' }],
-        fallbackOn: ['rate_limit']
-      }
-    })
+    // Sonnet is in the catalogue but hidden: the family has nothing exposed, and is known.
+    const exposure = exposeCatalogue(
+      [...OPUS, makeModel('anthropic', 'claude-sonnet-5')],
+      {
+        'opus-chain': {
+          targets: [{ family: 'anthropic/claude-sonnet' }, { family: 'anthropic/claude-opus' }],
+          fallbackOn: ['rate_limit']
+        }
+      },
+      ['anthropic/claude-opus-4-8', 'anthropic/claude-opus-5']
+    )
 
     expect(
       exposure.byAlias.get('opus-chain')?.route?.candidates.map(({ canonicalId }) => canonicalId)
