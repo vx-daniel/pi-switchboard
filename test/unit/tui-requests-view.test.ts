@@ -32,6 +32,7 @@ const START = new Date(2026, 9, 24, 18, 54, 49).getTime()
  */
 function http(sequence: number, fields: Partial<HttpRequest> = {}): HttpRequest {
   return {
+    kind: 'request',
     sequence,
     // The ID column shows the first six characters after `piproxy-`: here, the place in the order.
     requestId: `piproxy-${String(sequence).padStart(6, '0')}${'a'.repeat(18)}`,

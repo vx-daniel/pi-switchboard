@@ -45,6 +45,8 @@ const httpRequestsLogger = proxyLogger('server', 'http')
 
 /** One HTTP request, in flight or answered. */
 export interface HttpRequest {
+  /** Tells a request from a lifecycle event among the console table's rows (#266). */
+  readonly kind: 'request'
   /** Its place in the order the requests arrived: a view pinned to one stays on it. */
   readonly sequence: number
   /** The proxy's request ID (`X-Request-Id`). */
@@ -105,6 +107,7 @@ export function beginHttpRequest(
   const path = start.path.length > PATH_KEPT ? `${start.path.slice(0, PATH_KEPT)}…` : start.path
   inFlight.set(sequence, {
     ...start,
+    kind: 'request',
     path,
     sequence,
     startedAt: now,

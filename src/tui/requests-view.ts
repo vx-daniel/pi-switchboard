@@ -307,7 +307,7 @@ export type TableEntry = HttpRequest | ConsoleEvent
  * @returns whether it is an event
  */
 function isEvent(entry: TableEntry): entry is ConsoleEvent {
-  return 'kind' in entry
+  return entry.kind === 'event'
 }
 
 /**
