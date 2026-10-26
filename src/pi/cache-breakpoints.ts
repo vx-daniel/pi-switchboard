@@ -26,6 +26,8 @@ import type { Api, AssistantMessage, Model } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import type { OpenAIMessage, PromptCacheBreakpoint } from '@proxy/openai/schemas'
 import { canonicalModelId } from '@proxy/pi/model-id'
+import { splitUpstreamError } from '@proxy/pi/upstream-error'
+import { HTTP_BAD_REQUEST } from '@proxy/server/http-status'
 import { isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
 
 /** Logger for upstream payload handling. */
@@ -49,12 +51,6 @@ const MESSAGE_FIELD_BY_API: ReadonlyMap<string, 'messages' | 'input'> = new Map(
  * file its own copy, so within a file each test that triggers a refusal uses its own model ID.
  */
 const modelsRefusingBreakpoints = new Set<string>()
-
-/**
- * The start of an upstream 400 as pi's OpenAI adapters word it, the JSON error body after it:
- * `400: {…}` (chat completions) and `OpenAI API error (400): {…}` (Responses).
- */
-const BAD_REQUEST_PREFIX = /^(?:400: |[^\n(]{1,80} \(400\): )/
 
 /** The separator the proxy joins instruction text with (`convertMessages`). */
 const INSTRUCTION_SEPARATOR = '\n\n'
@@ -157,16 +153,17 @@ function messageField(model: Model<Api>): 'messages' | 'input' | undefined {
 }
 
 /**
- * Reads which request field an upstream 400 names, from the JSON body pi puts after the status.
+ * Reads which request field an upstream 400 names, from the JSON body after the status
+ * (`splitUpstreamError` knows pi's wording).
  *
  * @param errorMessage - the failed call's error message, as pi's OpenAI adapters word it
  * @returns the body's `param` (also under `error`, as some bodies nest it), or `undefined` when the
  *   message is not a 400 with a JSON body
  */
 function badRequestParam(errorMessage: string): unknown {
-  const prefix = BAD_REQUEST_PREFIX.exec(errorMessage)?.[0]
-  if (prefix === undefined) return undefined
-  const body = parseJsonOrUndefined(errorMessage.slice(prefix.length))
+  const upstream = splitUpstreamError(errorMessage)
+  if (upstream.status !== HTTP_BAD_REQUEST) return undefined
+  const body = parseJsonOrUndefined(upstream.body)
   if (!isRecord(body)) return undefined
   return isRecord(body['error']) ? body['error']['param'] : body['param']
 }

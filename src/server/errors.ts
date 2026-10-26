@@ -25,6 +25,7 @@
  */
 
 import { type AssistantMessage, isContextOverflow } from '@earendil-works/pi-ai'
+import { splitUpstreamError } from '@proxy/pi/upstream-error'
 import {
   HTTP_BAD_GATEWAY,
   HTTP_BAD_REQUEST,
@@ -318,21 +319,6 @@ const BY_STATUS: ReadonlyMap<number, MappedUpstreamError> = new Map([
 ])
 
 /**
- * Where pi 1.3.0 puts the provider's HTTP status in an error message:
- * - leading, followed by what only a status is followed by: pi's `429: {…}`, the Anthropic SDK's
- *   `429 {…}`, the OpenAI SDK's `429 "Too Many Requests"` (a text body) and `429 status code (no
- *   body)`. A message that merely starts with a number (`429 tokens over…`) does not match;
- * - after a label, from `formatProviderError` with a prefix (Responses, Azure) and Mistral:
- *   `OpenAI API error (429): …`;
- * - Google's SDK mid-stream: `got status: 429. {…}`.
- */
-const STATUS_POSITIONS: readonly RegExp[] = [
-  /^([45]\d\d)(?::\s| [{"]| status code\b)/,
-  /^[^\n(]{1,80} \(([45]\d\d)\):/,
-  /^got status: ([45]\d\d)\b/
-]
-
-/**
  * Reads the status as Google's SDK reports it: the error body itself, `{"error":{"code":429,…}}`.
  *
  * @param message - the upstream error message
@@ -348,18 +334,15 @@ function googleBodyStatus(message: string): number | undefined {
  * Reads the provider's HTTP status from an upstream error message.
  *
  * @remarks
- * Only the positions pi's messages put it in count ({@link STATUS_POSITIONS}, then Google's JSON
- * body), never a number elsewhere in the text (a token count, an ID, a quoted request).
+ * Only the positions pi's messages put it in count (the prefixes `splitUpstreamError` knows, then
+ * Google's JSON body), never a number elsewhere in the text (a token count, an ID, a quoted
+ * request).
  *
  * @param message - the upstream error message
  * @returns the status, or `undefined` when the message reports none
  */
 function upstreamStatusIn(message: string): number | undefined {
-  for (const position of STATUS_POSITIONS) {
-    const found = position.exec(message)?.[1]
-    if (found !== undefined) return Number(found)
-  }
-  return googleBodyStatus(message)
+  return splitUpstreamError(message).status ?? googleBodyStatus(message)
 }
 
 /**
