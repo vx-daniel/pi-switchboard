@@ -14,7 +14,6 @@
 import {
   type AliasModel,
   type AliasTarget,
-  type FailureClass,
   FailureClassSchema,
   type FamilyTarget,
   isFamilyTarget,
@@ -35,7 +34,7 @@ import {
 } from '@proxy/tui/aliases'
 import type { ConsoleContext } from '@proxy/tui/console'
 import { inBackground } from '@proxy/tui/console-accounts'
-import { askLine, pickLabel } from '@proxy/tui/dialogs'
+import { askLine, pickLabel, tickList } from '@proxy/tui/dialogs'
 import { modelsItemAt, type ModelsItem, modelsViewData } from '@proxy/tui/models-view'
 
 /** The effort option that keeps the request's own `reasoning_effort`. */
@@ -454,19 +453,15 @@ async function editTargets(editor: AliasEditor, name: string, start: AliasDraft)
  * @param start - the alias as it was when the menu opened
  */
 async function editFallbackOn(editor: AliasEditor, name: string, start: AliasDraft): Promise<void> {
-  const classes = FailureClassSchema.options
-  const chosen = new Set<FailureClass>(start.fallbackOn)
-  for (;;) {
-    const rows = classes.map((failure) => `[${chosen.has(failure) ? 'x' : ' '}] ${failure}`)
-    const choice = await editor.screens.select(`Fall back from ${name} on`, [...rows, DONE])
-    if (choice === undefined) return
-    if (choice === DONE) break
-    const failure = classes[rows.indexOf(choice)]
-    if (failure !== undefined && !chosen.delete(failure)) chosen.add(failure)
+  const fallbackOn = await tickList(
+    editor.screens,
+    `Fall back from ${name} on`,
+    FailureClassSchema.options,
+    start.fallbackOn
+  )
+  if (fallbackOn !== undefined) {
+    await save(editor, name, { ...start, fallbackOn }, { previousName: name })
   }
-  // In the schema's order, whatever order they were ticked in.
-  const fallbackOn = classes.filter((failure) => chosen.has(failure))
-  await save(editor, name, { ...start, fallbackOn }, { previousName: name })
 }
 
 /**

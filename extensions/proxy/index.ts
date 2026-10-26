@@ -98,8 +98,9 @@ const SUBCOMMAND_HANDLERS: Record<string, SubcommandHandler> = {
   },
   'reset': (state, context) => {
     state.config = { ...DEFAULT_CONFIG }
-    // A reset is an explicit choice: it may replace an invalid authToken with the default, off (#82).
-    saveConfigToFile(state.config, { replaceInvalidAuthToken: true })
+    // A reset is an explicit choice: it may replace an invalid authToken with the default, off
+    // (#82), and a file that can't be read or parsed with the defaults (#288).
+    saveConfigToFile(state.config, { replaceInvalidAuthToken: true, replaceUnusableFile: true })
     extensionLogger.info('Proxy settings reset to defaults and saved to {configPath}', {
       configPath: getConfigPath()
     })

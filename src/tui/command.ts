@@ -5,15 +5,19 @@
  * @packageDocumentation
  */
 
+import { configureLogging, type LoggingOptions } from '@proxy/logging'
 import {
+  buildCliOverrides,
   type CliArgs,
   invalidFlag,
   loadConfigWithLogging,
   logEffectiveConfig,
+  reloadConfig,
   SERVER_ARGS
 } from '@proxy/server/startup'
 import { runConsole } from '@proxy/tui/console'
 import { createLogBuffer } from '@proxy/tui/log-buffer'
+import { settingOverrides } from '@proxy/tui/settings-view'
 import { defineCommand } from 'citty'
 
 /** The most log lines the console keeps for its log view. */
@@ -53,10 +57,11 @@ export const tuiCommand = defineCommand({
     }
 
     const logs = createLogBuffer(LOG_LINES_KEPT)
-    const config = loadConfigWithLogging(args, {
+    const output: Omit<LoggingOptions, 'level'> = {
       format: 'console',
       write: (line) => logs.append(line)
-    })
+    }
+    const config = loadConfigWithLogging(args, output)
     // Proxy auth set but unusable: the reason was logged to the buffer, which nothing shows yet.
     if (config === undefined) {
       process.stderr.write(`${logs.lines().join('\n')}\n`)
@@ -66,7 +71,11 @@ export const tuiCommand = defineCommand({
     logEffectiveConfig(config)
     // The console has restored the terminal and closed the server by the time it settles or
     // throws; open keep-alive connections and pi's timers would keep the process up, so it exits.
-    const failure = await runConsole(config, logs).then(
+    const failure = await runConsole(config, logs, {
+      overrides: settingOverrides(buildCliOverrides(args), process.env),
+      reload: () => reloadConfig(args),
+      logAt: (level) => configureLogging({ ...output, level })
+    }).then(
       () => undefined,
       (error: unknown) =>
         error instanceof Error ? error : new Error('The console failed', { cause: error })

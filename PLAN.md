@@ -2040,6 +2040,28 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   and list the key, ends every cooldown (`clearCooldownsFor({})`), as
   `DELETE /v1/switchboard/cooldowns` does with no query, then reads the status again. One login's
   or one model's is ended through the route.
+- **Settings and restart** (#288; `settings-view.ts`, `console-settings.ts`, `proxy-server.ts`).
+  View `5` lists every `proxy-config.json` setting a standalone proxy uses (not `aliases` and
+  `labels`, which the Models and Accounts views edit, nor the pi package's `lifetime` and `zed`)
+  by when a change applies: the ones `fileConfigReader` reads per request, and proxy auth through
+  the `ProxyAuthSwitch`, apply to the next request; the rest are read into `ServerConfig` at
+  startup and apply on a restart. A row shows the saved value, the running value while a restart
+  is due, and the flag or env var that wins over the file (`buildCliOverrides` and the env, read
+  once at start). Each editor checks the value against the schema's bounds and saves the whole
+  file with `saveConfigToFile`, never with `replaceInvalidAuthToken` (#82). `saveConfigToFile`
+  itself refuses to write over a file that can't be read or parsed (it loaded as the defaults, so
+  any save would replace what it holds, a token included); only `/proxy reset` passes
+  `replaceUnusableFile`. The view shows such a file's problem over the list. `r` restarts the HTTP
+  server in the process: the config is reloaded with the start's flags (`reloadConfig`, which
+  leaves logging as it is), the new server is bound before the old one closes on a new address
+  (a failed bind keeps the old one, its config, auth and recorder), and on the same address the
+  old listener closes, then the new config binds it or, failing that, the old one binds it again;
+  if neither can, nothing listens and the console stops with the reason. Requests in flight
+  finish on the old server. Stats are recorded from process-wide events, so `listen`'s
+  stop-on-close would have two recorders count the same requests during the handover: the console
+  starts the server with `openServer` and moves the recorder itself, one at a time. The log level
+  and the Stats view follow the new config once it listens. A frame too narrow for five tabs
+  drops the last ones but never the current view's.
 - **Sidebar** (`sidebar.ts`). On a terminal at least 100 columns wide, the right 30% (34 to 48
   columns) shows four panels beside the frame, from its top border to its bottom border, with the
   date and time over them on a tall terminal; `s` hides and shows it. QUOTA (each login with its

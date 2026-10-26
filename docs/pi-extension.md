@@ -29,4 +29,4 @@ pi install npm:@vx-daniel/pi-switchboard
 
 ## Settings panel
 
-`/proxy` (or `/proxy config`) opens an interactive settings panel where you can configure proxy auth, lifetime (detached or session), bind address, port, remote images, body size limit, upstream timeout, log level, model ID format, exposure mode, the `custom` model selection, and Zed sync. Changes are saved to `~/.pi/agent/proxy-config.json` immediately. Restart the proxy to apply changes.
+`/proxy` (or `/proxy config`) opens an interactive settings panel where you can configure proxy auth, lifetime (detached or session), bind address, port, remote images, body size limit, upstream timeout, log level, model ID format, exposure mode, the `custom` model selection, and Zed sync. Changes are saved to `~/.pi/agent/proxy-config.json` immediately. Restart the proxy to apply changes. A `proxy-config.json` that can't be read or isn't valid JSON is never saved over: the panel doesn't open and says why, until the file is fixed or removed, or `/proxy reset` replaces it with the defaults.

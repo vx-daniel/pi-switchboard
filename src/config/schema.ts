@@ -885,13 +885,20 @@ export function configFileAuthTokenInvalid(): boolean {
   return invalidAuthToken(rawConfigFile()) !== undefined
 }
 
-/** How `saveConfigToFile` treats an `authToken` the file has but that is not a string (#82). */
+/** How `saveConfigToFile` treats a file it would write over. */
 export interface SaveConfigOptions {
   /**
-   * Replace it with the config's value. Only for an explicit choice (disabling auth, a reset):
-   * otherwise the repaired '' would be written, and '' means auth off.
+   * Replace an `authToken` the file has that is not a string (#82) with the config's value. Only
+   * for an explicit choice (disabling auth, a reset): otherwise the repaired '' would be written,
+   * and '' means auth off.
    */
   readonly replaceInvalidAuthToken?: boolean
+  /**
+   * Write over a file that exists but can't be read or isn't valid JSON (#288). Only for a reset:
+   * such a file loads as the defaults, so any other save would replace what it holds, a token
+   * included, with them.
+   */
+  readonly replaceUnusableFile?: boolean
 }
 
 /**
@@ -899,14 +906,24 @@ export interface SaveConfigOptions {
  *
  * @remarks
  * A failure is logged as a warning, not thrown. An `authToken` in the file that is not a string is
- * kept when the config's token is '' unless `options.replaceInvalidAuthToken` is set (#82).
+ * kept when the config's token is '' unless `options.replaceInvalidAuthToken` is set (#82). A file
+ * that exists but can't be read or parsed is not written over unless `options.replaceUnusableFile`
+ * is set: the config came from the defaults it loads as, not from the file (#288).
  *
  * @param config - The config to write.
- * @param options - How to treat an invalid `authToken` already in the file.
+ * @param options - How to treat an invalid `authToken` or an unusable file already there.
  * @returns whether the file was written
  */
 export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions = {}): boolean {
   const configPath = getConfigPath()
+  const problem = configFileProblem()
+  if (problem !== undefined && options.replaceUnusableFile !== true) {
+    configLogger.warn('Not saving to {path}: it {problem}; fix or remove it first', {
+      path: configPath,
+      problem: describeConfigFileProblem(problem)
+    })
+    return false
+  }
   const normalized = normalizeConfig(config)
   // A config loaded from a file with an invalid authToken carries the repaired ''. Writing it would
   // turn auth off for good, so the file's value stays until the user chooses (#82).

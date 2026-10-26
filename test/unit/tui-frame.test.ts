@@ -69,9 +69,11 @@ describe('framedView', () => {
   test('folder tabs: the current one opens into the frame, the others stand closed on it', () => {
     const rows = plain(frame({ columns: 100, rows: 40 }, { view: 'accounts' }))
 
-    expect(rows[0]).toMatch(/^ {2}╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ *$/)
-    expect(rows[1]).toMatch(/^ {2}│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 4 Models │ +idle *$/)
-    expect(rows[2]).toMatch(/^╭─┴─+┴─┘ {12}└─┴─+┴─┴─+┴─+╮$/)
+    expect(rows[0]).toMatch(/^ {2}╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ *$/)
+    expect(rows[1]).toMatch(
+      /^ {2}│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 4 Models │ │ 5 Settings │ +idle *$/
+    )
+    expect(rows[2]).toMatch(/^╭─┴─+┴─┘ {12}└─┴─+┴─┴─+┴─┴─+┴─+╮$/)
   })
 
   // Catches the tabs in the border on a short terminal losing a digit, the current one unmarked,
@@ -79,7 +81,18 @@ describe('framedView', () => {
   test('compact tabs sit in the top border with the context at its right end', () => {
     const rows = plain(frame({ columns: 80, rows: 24 }, { view: 'stats', context: 'today' }))
 
-    expect(rows[0]).toMatch(/^╭─ 1 Requests ─ 2 Accounts ─ 3 Stats ─ 4 Models ─+ today ─╮$/)
+    expect(rows[0]).toMatch(
+      /^╭─ 1 Requests ─ 2 Accounts ─ 3 Stats ─ 4 Models ─ 5 Settings ─+ today ─╮$/
+    )
+  })
+
+  // Catches the current view's tab left out when the row has no room for every tab (the sidebar
+  // narrows the frame), so nothing shows which view is open.
+  test("keeps the current view's tab when the row has no room for every tab", () => {
+    const rows = plain(frame({ columns: 66, rows: 40 }, { view: 'settings' }))
+
+    expect(rows[1]).toMatch(/│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 5 Settings │/)
+    expect(rows[1]).not.toContain('Models')
   })
 
   // Catches the view's rows unpadded or uncut inside the borders, or a short body leaving the

@@ -19,15 +19,10 @@ import {
   matchesKey,
   ProcessTerminal,
   truncateToWidth,
-  TuiAltScreen,
-  KeybindingsManager,
-  setKeybindings,
-  TUI_KEYBINDINGS
+  TuiAltScreen
 } from '@earendil-works/pi-tui'
-import type { ServerType } from '@hono/node-server'
 import type { ServerConfig } from '@proxy/config/env'
-import type { AliasTarget, LoginLabels, Reserve } from '@proxy/config/schema'
-import { computeModelExposure, type ModelExposureResult } from '@proxy/openai/model-exposure'
+import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns, clearCooldownsFor } from '@proxy/pi/cooldowns'
 import { providerQuota } from '@proxy/pi/quota'
 import {
@@ -46,29 +41,49 @@ import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
-import { listen } from '@proxy/server/startup'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { accountRows, accountsSnapshot, type AccountsView } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
 import { openSelectedModelsItem } from '@proxy/tui/console-models'
+import {
+  currentSettingRows,
+  openRestart,
+  openSelectedSetting,
+  settingsContext
+} from '@proxy/tui/console-settings'
+import {
+  configFileStatus,
+  type ConsoleState,
+  initialState,
+  type Status
+} from '@proxy/tui/console-state'
+import { consoleStop, listenForStops } from '@proxy/tui/console-stops'
 import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
 import { exposedModelsLabel } from '@proxy/tui/frame'
 import { consoleLayout, type ConsoleLayout } from '@proxy/tui/layout'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
-import { type LogViewport, logViewRows, scrollLogView, wheelLines } from '@proxy/tui/log-view'
-import { loginLabels } from '@proxy/tui/login'
+import { logViewRows, scrollLogView, wheelLines } from '@proxy/tui/log-view'
 import { modelsItems, modelsRows, modelsViewData } from '@proxy/tui/models-view'
-import { moveSelection, STATS_WINDOW_KEYS, stepView, type View } from '@proxy/tui/navigation'
+import {
+  installKeybindings,
+  moveSelection,
+  STATS_WINDOW_KEYS,
+  stepView,
+  type View
+} from '@proxy/tui/navigation'
 import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
 import {
-  chatsById,
-  requestsRows,
-  type RequestsViewport,
-  scrollRequestsView
-} from '@proxy/tui/requests-view'
+  type ConsoleServer,
+  type ConsoleStartup,
+  createRestart,
+  type RestartReport,
+  startConsoleServer
+} from '@proxy/tui/proxy-server'
+import { chatsById, requestsRows, scrollRequestsView } from '@proxy/tui/requests-view'
 import { consoleScreen } from '@proxy/tui/screen'
+import { SETTING_KEYS, settingsViewRows } from '@proxy/tui/settings-view'
 import { type SidebarInput, sidebarRows } from '@proxy/tui/sidebar'
-import { createRefresh, type RefreshState } from '@proxy/tui/status-refresh'
+import { createRefresh } from '@proxy/tui/status-refresh'
 import { requestsPerMinute, type StatusStripInput } from '@proxy/tui/status-strip'
 import { captureWrites } from '@proxy/tui/stderr-capture'
 import { installConsoleTheme } from '@proxy/tui/theme'
@@ -81,46 +96,9 @@ const STATUS_REFRESH_MS = 5000
 const TICK_MS = 1000
 /** Lines a page key scrolls the raw log or the Requests table by. */
 const PAGE_LINES = 10
-/** What the status line shows; read every few seconds, never the credentials themselves. */
-interface Status {
-  readonly available: number
-  /** Exposed model count, or the exposure config's error. */
-  readonly exposed: number | string
-  readonly cooldowns: number
-  readonly modelsJsonError: string | undefined
-  /** The quota reserve per provider (`routing.reserve`), to mark a provider below it. */
-  readonly reserve: Reserve
-  /** Provider -> the label the operator gave the login (`labels`). */
-  readonly labels: LoginLabels
-  /** The exposure the Models view lists and the alias editor checks names against (#230). */
-  readonly exposure: ModelExposureResult | undefined
-  /** The configured aliases, exposed or not. */
-  readonly aliases: Readonly<Record<string, AliasTarget>>
-}
-
-/** The console's state, which every render reads. */
-interface ConsoleState extends RefreshState<Status> {
-  view: View
-  /** Whether the first view shows the raw log rather than the Requests table (`r`). */
-  logRaw: boolean
-  /** Where the raw log is: following new lines, or pinned to the lines on screen. */
-  logView: LogViewport
-  /** Where the Requests table is: following new requests, or pinned to the ones on screen. */
-  requestsView: RequestsViewport
-  /** The selected row of the accounts view; the row after the accounts opens the login. */
-  selected: number
-  /** The selected row of the Models view: a model, an alias, or the new-alias row (#230). */
-  modelsSelected: number
-  /** Open client connections, counted every tick; `undefined` before the first count. */
-  connections: number | undefined
-  /** Whether the operator hid the sidebar (`s`). */
-  sidebarHidden: boolean
-  /** The window the Stats dashboard shows. */
-  statsWindow: StatsWindow
-}
-
 /** What the key handlers and the login flow need. */
 export interface ConsoleContext {
+  /** The config the server runs with now; a restart replaces it. */
   readonly config: ServerConfig
   readonly logs: LogBuffer
   readonly tui: TuiAltScreen
@@ -131,18 +109,27 @@ export interface ConsoleContext {
   readonly proxyAuth: ProxyAuthSwitch
   /** The Stats view: the dashboard, or the totals since the proxy started without stats. */
   readonly statsView: StatsView
+  /** What the console was started with. */
+  readonly startup: ConsoleStartup
   /**
    * Reads the status and accounts again, then redraws.
    *
    * @param verify - whether to resolve each credential now, which may refresh an OAuth token
    */
   refresh(verify?: boolean): Promise<void>
+  /**
+   * Restarts the server with the saved settings, without leaving the console (#288).
+   *
+   * @returns what the restart did
+   */
+  restart(): Promise<RestartReport>
   /** Stops the console and the proxy. */
   quit(): void
 }
 
 /**
- * Reads the status line's data: available and exposed models, cooldowns, the models.json error.
+ * Reads the status line's data: available and exposed models, cooldowns, the models.json error,
+ * and the config file as the Settings view and the login labels need it.
  *
  * @returns the status
  */
@@ -156,9 +143,9 @@ async function readStatus(): Promise<Status> {
     cooldowns: activeCooldowns().length,
     modelsJsonError: getModelsJsonError(),
     reserve: config.reserve ?? {},
-    labels: loginLabels(),
     exposure: exposure.ok ? exposure : undefined,
-    aliases: config.aliases
+    aliases: config.aliases,
+    ...configFileStatus()
   }
 }
 
@@ -198,24 +185,26 @@ function stripInput(context: ConsoleContext, now: number): StatusStripInput {
 
 /**
  * What the right end of the tab row says about each view: what is in flight on Requests, the logins
- * and cooldowns on Accounts, the window on Stats, the models and aliases on Models.
+ * and cooldowns on Accounts, the window on Stats, the models and aliases on Models, and on Settings
+ * whether a restart is due.
  */
-const TAB_CONTEXT: Readonly<Record<View, (state: ConsoleState) => string>> = {
+const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext) => string>> = {
   logs: () => {
     const inFlight = activeRequests().length
     return inFlight === 0 ? 'idle' : `${String(inFlight)} in flight`
   },
-  accounts: (state) =>
+  accounts: ({ state }) =>
     `${String(state.accounts.length)} logins · ${String(state.status?.cooldowns ?? 0)} cooldowns`,
-  stats: (state) => STATS_WINDOW_KEYS[state.statsWindow][1],
-  models: (state) =>
-    exposedModelsLabel(state.status?.exposed, Object.keys(state.status?.aliases ?? {}).length)
+  stats: ({ state }) => STATS_WINDOW_KEYS[state.statsWindow][1],
+  models: ({ state }) =>
+    exposedModelsLabel(state.status?.exposed, Object.keys(state.status?.aliases ?? {}).length),
+  settings: settingsContext
 }
 
 /**
  * What the right end of the frame's bottom border notes about each view: how many log lines,
- * logins or exposed models it holds, and on Stats how long the stats file keeps its history (nothing
- * while the view shows the totals instead).
+ * logins or exposed models it holds, on Stats how long the stats file keeps its history (nothing
+ * while the view shows the totals instead), and on Settings the file they are saved to.
  */
 const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
   logs: ({ logs, state }) =>
@@ -224,7 +213,8 @@ const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = 
       : `${String(httpRequests().length)} requests`,
   accounts: ({ state }) => `${String(state.accounts.length)} logins`,
   stats: ({ statsView }) => statsView.frameNote(),
-  models: ({ state }) => exposedModelsLabel(state.status?.exposed)
+  models: ({ state }) => exposedModelsLabel(state.status?.exposed),
+  settings: () => 'proxy-config.json'
 }
 
 /** What the Accounts view takes from the status before the first read: no reserve, no labels. */
@@ -308,24 +298,25 @@ function scrollLogs(context: ConsoleContext, lines: number): void {
   else state.requestsView = scrollRequestsView(state.requestsView, httpRequests(), lines)
 }
 
-/**
- * Renders the current view's body.
- *
- * @param context - the console
- * @param size - the space available
- * @param size.height - rows
- * @param size.width - columns
- * @returns the body's rows
- */
-function viewRows(
-  context: ConsoleContext,
-  size: { readonly height: number; readonly width: number }
-): string[] {
-  const { state, logs } = context
-  if (state.view === 'logs') return logsRows(state, logs, size)
-  if (state.view === 'accounts') return accountRows(accountsView(state, Date.now()), size)
-  if (state.view === 'models') return modelsViewRows(state, size)
-  return context.statsView.rows(state.statsWindow, size)
+/** The space a view's body has: rows and columns. */
+interface ViewSize {
+  readonly height: number
+  readonly width: number
+}
+
+/** How each view renders its body, from the console and the space it has. */
+const VIEW_ROWS: Readonly<Record<View, (context: ConsoleContext, size: ViewSize) => string[]>> = {
+  logs: ({ state, logs }, size) => logsRows(state, logs, size),
+  accounts: ({ state }, size) => accountRows(accountsView(state, Date.now()), size),
+  stats: ({ state, statsView }, size) => statsView.rows(state.statsWindow, size),
+  models: ({ state }, size) => modelsViewRows(state, size),
+  settings: (context, size) =>
+    settingsViewRows(
+      currentSettingRows(context),
+      context.state.settingsSelected,
+      size,
+      context.state.status?.fileProblem
+    )
 }
 
 /**
@@ -376,9 +367,12 @@ function screenRows(context: ConsoleContext, layout: ConsoleLayout): string[] {
     layout,
     now,
     strip: stripInput(context, now),
-    context: TAB_CONTEXT[context.state.view](context.state),
+    context: TAB_CONTEXT[context.state.view](context),
     note: FRAME_NOTE[context.state.view](context),
-    body: viewRows(context, { height: layout.viewHeight, width: layout.viewWidth }),
+    body: VIEW_ROWS[context.state.view](context, {
+      height: layout.viewHeight,
+      width: layout.viewWidth
+    }),
     sidebar
   })
 }
@@ -432,17 +426,21 @@ function moveModelsSelection(state: ConsoleState, step: number): number {
 }
 
 /**
- * Moves within the current view: scrolls the logs, or moves the selection in the accounts.
- *
- * @param context - the console
- * @param step - lines or rows to move: positive moves down
+ * How `↑` `↓` and the page keys move within each view: scroll the logs, or move the selection in
+ * the accounts, the models or the settings; nothing on Stats.
  */
-function moveWithin(context: ConsoleContext, step: number): void {
-  const { state } = context
-  if (state.view === 'logs') scrollLogs(context, -step)
-  else if (state.view === 'accounts') {
+const MOVES: Readonly<Record<View, (context: ConsoleContext, step: number) => void>> = {
+  logs: (context, step) => scrollLogs(context, -step),
+  accounts: ({ state }, step) => {
     state.selected = moveSelection(state.selected, state.accounts.length, step)
-  } else if (state.view === 'models') state.modelsSelected = moveModelsSelection(state, step)
+  },
+  stats: () => undefined,
+  models: ({ state }, step) => {
+    state.modelsSelected = moveModelsSelection(state, step)
+  },
+  settings: ({ state }, step) => {
+    state.settingsSelected = moveSelection(state.settingsSelected, SETTING_KEYS.length - 1, step)
+  }
 }
 
 /**
@@ -470,6 +468,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['2', () => (state.view = 'accounts')],
     ['3', () => (state.view = 'stats')],
     ['4', () => (state.view = 'models')],
+    ['5', () => (state.view = 'settings')],
     [Key.tab, () => (state.view = stepView(state.view, 1))],
     [Key.right, () => (state.view = stepView(state.view, 1))],
     [Key.shift('tab'), () => (state.view = stepView(state.view, -1))],
@@ -479,6 +478,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
       () => {
         if (state.view === 'accounts') openSelected(context)
         else if (state.view === 'models') openSelectedModelsItem(context)
+        else if (state.view === 'settings') openSelectedSetting(context)
       }
     ],
     ['n', () => openLogin(context)],
@@ -490,10 +490,10 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
     ['t', pickWindow('today')],
     ['w', pickWindow('week')],
     ['a', pickWindow('all')],
-    [Key.up, () => moveWithin(context, -1)],
-    [Key.down, () => moveWithin(context, 1)],
-    [Key.pageUp, () => moveWithin(context, -PAGE_LINES)],
-    [Key.pageDown, () => moveWithin(context, PAGE_LINES)],
+    [Key.up, () => MOVES[state.view](context, -1)],
+    [Key.down, () => MOVES[state.view](context, 1)],
+    [Key.pageUp, () => MOVES[state.view](context, -PAGE_LINES)],
+    [Key.pageDown, () => MOVES[state.view](context, PAGE_LINES)],
     [
       Key.end,
       () => {
@@ -501,28 +501,15 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
         state.requestsView = undefined
       }
     ],
-    // The Requests table or the raw log, on the first view, where the footer lists the key.
+    // The Requests table or the raw log on the first view; a server restart on Settings (#288).
     [
       'r',
       () => {
         if (state.view === 'logs') state.logRaw = !state.logRaw
+        else if (state.view === 'settings') openRestart(context)
       }
     ]
   ]
-}
-
-/**
- * Creates a promise and the function that resolves it, in the executor form the project's ES2023
- * lib allows (`Promise.withResolvers` is ES2024).
- *
- * @returns the promise and its resolver
- */
-function settleable(): { promise: Promise<void>; settle: () => void } {
-  let settle: () => void = () => undefined
-  const promise = new Promise<void>((resolve) => {
-    settle = resolve
-  })
-  return { promise, settle }
 }
 
 /**
@@ -532,10 +519,11 @@ function settleable(): { promise: Promise<void>; settle: () => void } {
  * writes sent to the raw log.
  *
  * @param context - the console
- * @param server - the proxy's server, whose open connections the sidebar shows
+ * @param server - the proxy's server, whose open connections the sidebar shows; read each tick,
+ *   since a restart replaces it
  * @returns a function that stops them all
  */
-function startUpdates(context: ConsoleContext, server: ServerType): () => void {
+function startUpdates(context: ConsoleContext, server: ConsoleServer): () => void {
   const redraw = (): void => context.tui.requestRender()
   const unsubscribeLogs = context.logs.onChange(redraw)
   const unsubscribeTotals = onRouteTotalsChange(redraw)
@@ -546,7 +534,7 @@ function startUpdates(context: ConsoleContext, server: ServerType): () => void {
     STATUS_REFRESH_MS
   )
   const ticker = setInterval(() => {
-    server.getConnections((error, count) => {
+    server.server().getConnections((error, count) => {
       if (error === null) context.state.connections = count
       redraw()
     })
@@ -564,25 +552,6 @@ function startUpdates(context: ConsoleContext, server: ServerType): () => void {
 }
 
 /**
- * Ends the console on `SIGTERM`, `SIGHUP` or an uncaught exception, until the returned function is
- * called.
- *
- * @param stop - ends the console on a signal
- * @param crashed - ends the console on an uncaught exception, which it reports
- * @returns a function that removes the handlers
- */
-function listenForStops(stop: () => void, crashed: (error: unknown) => void): () => void {
-  process.on('uncaughtException', crashed)
-  process.once('SIGTERM', stop)
-  process.once('SIGHUP', stop)
-  return () => {
-    process.off('uncaughtException', crashed)
-    process.off('SIGTERM', stop)
-    process.off('SIGHUP', stop)
-  }
-}
-
-/**
  * Runs the console until the operator quits or the process is told to stop: starts the server,
  * draws the screen, and stops both on the way out.
  *
@@ -594,61 +563,53 @@ function listenForStops(stop: () => void, crashed: (error: unknown) => void): ()
  *
  * @param config - the resolved server config
  * @param logs - the buffer LogTape already writes to
+ * @param startup - the overrides, and how to reload the config and set the log level, for restarts
  * @throws whatever stopped the console other than a quit or a signal
  */
-export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise<void> {
+export async function runConsole(
+  config: ServerConfig,
+  logs: LogBuffer,
+  startup: ConsoleStartup
+): Promise<void> {
   installConsoleTheme()
-  // pi's login dialog copies its sign-in URL on pi's own `app.message.copy` key, Ctrl+X in pi;
-  // without a binding its hint names no key. The console has no other pi app keys. The screen's
-  // own viewport scrolling takes PgUp and PgDn before any component; the console's view always
-  // fits the screen, so they go to the raw log instead.
-  setKeybindings(
-    new KeybindingsManager({
-      ...TUI_KEYBINDINGS,
-      'tui.altScreen.pageUp': { defaultKeys: [] },
-      'tui.altScreen.pageDown': { defaultKeys: [] },
-      'app.message.copy': { defaultKeys: 'ctrl+x', description: 'Copy the sign-in URL' }
-    })
-  )
+  installKeybindings()
   await initRegistry()
   const proxyAuth = createProxyAuthSwitch(config.proxyAuth)
-  const server = await listen(config, proxyAuth)
+  const server = await startConsoleServer(config, proxyAuth)
   const terminal = new ProcessTerminal()
   // `auto` moves further on a fast wheel spin, for terminals that send one event per notch.
   const tui = new TuiAltScreen(terminal, undefined, undefined, { wheelScrollLines: 'auto' })
-  const stopped = settleable()
-  let crash: unknown
-  const crashed = (error: unknown): void => {
-    crash ??= error
-    stopped.settle()
-  }
-  const state: ConsoleState = {
-    view: 'logs',
-    logRaw: false,
-    logView: undefined,
-    requestsView: undefined,
-    status: undefined,
-    accounts: [],
-    verification: new Map(),
-    credentialChanges: new Map(),
-    selected: 0,
-    modelsSelected: 0,
-    connections: undefined,
-    sidebarHidden: false,
-    statsWindow: 'today'
-  }
+  const end = consoleStop()
+  const state = initialState()
+  const stats = { view: openStatsView(config.statsEnabled) }
+  const refresh = createRefresh(
+    state,
+    { status: readStatus, accounts: getCredentialStatuses },
+    () => tui.requestRender()
+  )
   const context: ConsoleContext = {
-    config,
+    get config() {
+      return server.config()
+    },
     logs,
     tui,
     state,
     startedAt: Date.now(),
     proxyAuth,
-    statsView: openStatsView(config.statsEnabled),
-    refresh: createRefresh(state, { status: readStatus, accounts: getCredentialStatuses }, () =>
-      tui.requestRender()
-    ),
-    quit: stopped.settle
+    get statsView() {
+      return stats.view
+    },
+    startup,
+    refresh,
+    restart: createRestart({
+      server,
+      startup,
+      stats,
+      openStats: openStatsView,
+      crashed: end.crashed,
+      refresh: () => refresh()
+    }),
+    quit: end.stop
   }
   const actions = keyActions(context)
   const root = createRootView(context, terminal, (data) => {
@@ -656,23 +617,20 @@ export async function runConsole(config: ServerConfig, logs: LogBuffer): Promise
     tui.requestRender()
   })
   const stopUpdates = startUpdates(context, server)
-  const stopListening = listenForStops(stopped.settle, crashed)
+  const stopListening = listenForStops(end)
 
   try {
     tui.addChild(root)
     tui.setFocus(root)
     tui.start()
     await context.refresh()
-    await stopped.promise
+    await end.stopped
   } finally {
     tui.stop()
     stopUpdates()
     stopListening()
     server.close()
-    context.statsView.close()
+    stats.view.close()
   }
-  if (crash instanceof Error) throw crash
-  if (crash !== undefined) {
-    throw new Error('The console stopped on a thrown value', { cause: crash })
-  }
+  end.rethrow()
 }
