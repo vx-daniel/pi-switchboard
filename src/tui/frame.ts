@@ -21,7 +21,8 @@ const VIEW_LABELS: Readonly<Record<View, string>> = {
   logs: 'Requests',
   accounts: 'Accounts',
   stats: 'Stats',
-  models: 'Models'
+  models: 'Models',
+  settings: 'Settings'
 }
 
 /** The frame's left corner is a corner: the first tab starts this many columns in. */
@@ -73,22 +74,42 @@ interface TabSpan {
 }
 
 /**
- * Places the tabs on the row, left to right, leaving out those the row has no room for.
+ * Places tabs on the row, left to right, each keeping its view's digit.
  *
- * @param mainWidth - the frame's columns
+ * @param views - the tabs to place, in tab order
  * @param padding - the columns each tab adds around its label
  * @returns the tabs placed
  */
-function placeTabs(mainWidth: number, padding: number): TabSpan[] {
+function layOutTabs(views: readonly View[], padding: number): TabSpan[] {
   const spans: TabSpan[] = []
   let column = FIRST_TAB_COLUMN
-  for (const [tabIndex, view] of VIEWS.entries()) {
+  for (const view of views) {
     const width = VIEW_LABELS[view].length + padding
-    if (column + width > mainWidth - CORNERS) break
-    spans.push({ view, index: tabIndex, start: column, width })
+    spans.push({ view, index: VIEWS.indexOf(view), start: column, width })
     column += width + TAB_GAP
   }
   return spans
+}
+
+/**
+ * Places the tabs on the row, leaving out those the row has no room for: the last ones first, but
+ * never the current view's, so the frame always shows where you are.
+ *
+ * @param mainWidth - the frame's columns
+ * @param padding - the columns each tab adds around its label
+ * @param current - the view shown
+ * @returns the tabs placed
+ */
+function placeTabs(mainWidth: number, padding: number, current: View): TabSpan[] {
+  const shown: View[] = [...VIEWS]
+  for (;;) {
+    const spans = layOutTabs(shown, padding)
+    const last = spans.at(-1)
+    if (last === undefined || last.start + last.width <= mainWidth - CORNERS) return spans
+    const dropped = shown.findLastIndex((view) => view !== current)
+    if (dropped === -1) return []
+    shown.splice(dropped, 1)
+  }
 }
 
 /**
@@ -169,7 +190,7 @@ function folderTabRows(input: FrameInput): string[] {
   const { mainWidth } = input.layout
   let edges = ''
   let labels = ''
-  for (const tab of placeTabs(mainWidth, FOLDER_TAB_PADDING)) {
+  for (const tab of placeTabs(mainWidth, FOLDER_TAB_PADDING, input.view)) {
     const current = tab.view === input.view
     const edge = current ? tabAccent : border
     const gap = ' '.repeat(tab.start - visibleWidth(edges))
@@ -192,7 +213,7 @@ function folderFrameTop(input: FrameInput): string {
   const { mainWidth } = input.layout
   let left = ''
   let column = 1
-  for (const tab of placeTabs(mainWidth, FOLDER_TAB_PADDING)) {
+  for (const tab of placeTabs(mainWidth, FOLDER_TAB_PADDING, input.view)) {
     left += border('─'.repeat(tab.start - column))
     const inside = tab.width - CORNERS
     left +=
@@ -214,7 +235,7 @@ function folderFrameTop(input: FrameInput): string {
 function compactFrameTop(input: FrameInput): string {
   const { mainWidth } = input.layout
   let left = border('─'.repeat(FIRST_TAB_COLUMN - 1))
-  for (const tab of placeTabs(mainWidth, COMPACT_TAB_PADDING)) {
+  for (const tab of placeTabs(mainWidth, COMPACT_TAB_PADDING, input.view)) {
     const digit = String(tab.index + 1)
     const label = VIEW_LABELS[tab.view]
     left +=

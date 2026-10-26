@@ -11,7 +11,7 @@ import { STATS_KEPT_DAYS, STATS_WINDOWS, type StatsWindow } from '@proxy/stats/w
 import { keycap, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */
-export const VIEWS = ['logs', 'accounts', 'stats', 'models'] as const
+export const VIEWS = ['logs', 'accounts', 'stats', 'models', 'settings'] as const
 
 /** One of the console's views. */
 export type View = (typeof VIEWS)[number]
@@ -114,11 +114,16 @@ const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
     ['↑↓', 'select'],
     ['↵', 'edit or add an alias'],
     ['c', 'clear cooldowns']
+  ],
+  settings: [
+    ['↑↓', 'select'],
+    ['↵', 'change'],
+    ['r', 'restart the server']
   ]
 }
 /** The keys that work on every view, besides quitting; a narrow footer drops them from the front. */
 const GLOBAL_KEYS: readonly KeyHint[] = [
-  ['1-4 ←→', 'views'],
+  ['1-5 ←→', 'views'],
   ['p', 'proxy auth']
 ]
 /** Quitting stops the proxy: the one key the footer always shows, at its right end. */
