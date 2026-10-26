@@ -37,6 +37,11 @@ function scripted(picks: (string | undefined)[], typed: (string | undefined)[] =
       options.push(labels)
       return Promise.resolve(picks.shift())
     },
+    warn: (title, labels) => {
+      titles.push(`[warn] ${title}`)
+      options.push(labels)
+      return Promise.resolve(picks.shift())
+    },
     input: (title) => {
       titles.push(title)
       return Promise.resolve(typed.shift())
@@ -190,7 +195,8 @@ describe('the auth-off popup (#287)', () => {
 
     await runAuthOffPrompt(proxy, script.screens, save)
 
-    expect(script.titles[0]).toContain('Proxy auth is off on 127.0.0.1:4141')
+    // `[warn]`: the console's red alert panel, not the plain selector.
+    expect(script.titles[0]).toMatch(/^\[warn\] ⚠ Proxy auth is off on 127\.0\.0\.1:4141/)
     expect(script.titles[0]).toContain('a web page you open')
     expect(script.options[0]).toEqual([
       'Generate a token',

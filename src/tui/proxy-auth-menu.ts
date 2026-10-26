@@ -24,7 +24,7 @@ import { getConfigPath, loadConfigFromFile, saveConfigToFile } from '@proxy/conf
 import { proxyLogger } from '@proxy/logging'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { isLoopbackHost } from '@proxy/server/startup'
-import { askLine, pickLabel } from '@proxy/tui/dialogs'
+import { askLine, pickAlert, pickLabel } from '@proxy/tui/dialogs'
 import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for proxy auth decisions. */
@@ -43,6 +43,14 @@ export interface AuthScreens {
    * @returns the chosen label, or `undefined` when cancelled
    */
   select(title: string, options: readonly string[]): Promise<string | undefined>
+  /**
+   * Shows a choice as a warning that must not be missed: the console's red alert panel.
+   *
+   * @param title - the warning and the question
+   * @param options - the options' labels
+   * @returns the chosen label, or `undefined` when cancelled
+   */
+  warn(title: string, options: readonly string[]): Promise<string | undefined>
   /**
    * Asks for a line of text.
    *
@@ -325,7 +333,7 @@ export async function runAuthOffPrompt(
   const who = isLoopbackHost(target.host)
     ? 'any program on this machine, and a web page you open, can use your provider logins through it'
     : 'anyone who can reach it can use your provider logins'
-  const choice = await screens.select(
+  const choice = await screens.warn(
     `⚠ Proxy auth is off on ${target.address}: ${who}. Set a token now?`,
     [ACTIONS.generate, ACTIONS.enter, ACTIONS.keepOff]
   )
@@ -356,6 +364,7 @@ function consoleAuth(
     },
     screens: {
       select: (title, labels) => pickLabel(tui, title, labels),
+      warn: (title, labels) => pickAlert(tui, title, labels),
       input: (title) => askLine(tui, title),
       copy: copyToClipboard
     }

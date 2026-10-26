@@ -18,7 +18,7 @@ import {
   Text,
   type TuiAltScreen
 } from '@earendil-works/pi-tui'
-import { paint, strong } from '@proxy/tui/theme'
+import { ALERT_FRAME_COLUMNS, alertPanel, paint, strong } from '@proxy/tui/theme'
 
 /** Rows the tick list shows before it scrolls. */
 const TICK_LIST_ROWS = 15
@@ -73,6 +73,45 @@ export function pickLabel(
   title: string,
   labels: readonly string[]
 ): Promise<string | undefined> {
+  return pick(tui, title, labels, (selector) => selector)
+}
+
+/**
+ * Shows pi's selector in a red alert panel ({@link alertPanel}) and waits for a choice: for a
+ * warning that must not be missed, such as proxy auth off (#287).
+ *
+ * @param tui - the screen
+ * @param title - the warning and the question
+ * @param labels - the options
+ * @returns the chosen label, or `undefined` when cancelled
+ */
+export function pickAlert(
+  tui: TuiAltScreen,
+  title: string,
+  labels: readonly string[]
+): Promise<string | undefined> {
+  return pick(tui, title, labels, (selector) => ({
+    render: (width) => alertPanel(selector.render(Math.max(1, width - ALERT_FRAME_COLUMNS)), width),
+    invalidate: () => selector.invalidate(),
+    handleInput: (data) => selector.handleInput(data)
+  }))
+}
+
+/**
+ * Shows pi's selector, as `frame` draws it, and waits for a choice.
+ *
+ * @param tui - the screen
+ * @param title - the question
+ * @param labels - the options
+ * @param frame - wraps the selector in the component shown
+ * @returns the chosen label, or `undefined` when cancelled
+ */
+function pick(
+  tui: TuiAltScreen,
+  title: string,
+  labels: readonly string[],
+  frame: (selector: ExtensionSelectorComponent) => Component
+): Promise<string | undefined> {
   return new Promise((resolve) => {
     const selector = new ExtensionSelectorComponent(
       title,
@@ -86,7 +125,7 @@ export function pickLabel(
         resolve(undefined)
       }
     )
-    const handle = showDialog(tui, selector)
+    const handle = showDialog(tui, frame(selector))
   })
 }
 
