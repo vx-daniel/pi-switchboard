@@ -1,21 +1,23 @@
 name: Binary
 
-# Cross-compiles the standalone binary (#61) and runs each target on a native runner. Two sets:
+# Builds the standalone binary (#61) and runs each target on a native runner. Two sets:
 #
 # - unix (the default): linux-x64, linux-arm64, darwin-x64 and darwin-arm64
-#   (`scripts/build-binary.ts --all`), with SHA256SUMS. The macOS binaries are unsigned.
-# - windows: windows-x64 and windows-arm64 (`--windows`), with SHA256SUMS-windows. The full binary
-#   test suite also runs on a Windows runner, since only the binary tests show the compiled binary
-#   works there. The binaries are unsigned.
+#   (`scripts/build-binary.ts --all`), with SHA256SUMS, cross-compiled on one Linux runner. The
+#   macOS binaries are unsigned.
+# - windows: windows-x64 and windows-arm64 (`--windows`), with SHA256SUMS-windows, compiled on a
+#   Windows runner: Bun sets an executable's icon (`--windows-icon`) only when it compiles on
+#   Windows. The full binary test suite also runs on a Windows runner, since only the binary tests
+#   show the compiled binary works there. The binaries are unsigned.
 #
 # The release workflow calls it once per set for each new release, in parallel. Each set keeps its
 # files in its own artifact (`binaries-<set>`): the two calls share the release run, where one
 # artifact name can be uploaded only once.
 #
 # With a tag, it uploads the set's files and checksum file to that tag's GitHub release, with a
-# build provenance attestation. One Linux runner builds every target. A tag from before the binary
-# existed (0.3.0 and earlier, with no scripts/build-binary.ts) fails at once: its tree cannot build
-# one. Run by hand with the tag to finish or redo a release's binaries.
+# build provenance attestation. A tag from before the binary existed (0.3.0 and earlier, with no
+# scripts/build-binary.ts) fails at once: its tree cannot build one. Run by hand with the tag to
+# finish or redo a release's binaries.
 #
 # Run by hand with no tag, it builds and smoke-tests the branch it runs on, every target on its
 # own platform, and uploads nothing: the way to check this workflow before a release. The branch
@@ -63,7 +65,11 @@ concurrency:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.platforms == 'windows' && 'windows-latest' || 'ubuntu-latest' }}
+    # bash on the Windows runner too (Git Bash), so every step is one script.
+    defaults:
+      run:
+        shell: bash
     env:
       TAG: ${{ inputs.tag }}
       PLATFORMS: ${{ inputs.platforms || 'unix' }}
@@ -159,13 +165,13 @@ jobs:
         with:
           bun-version: 1.4.3
 
-      # The release's tree is tested as a binary before it is cross-compiled: the host build runs
-      # against the fixtures (test/binary). The windows set runs these tests on Windows instead.
+      # The release's tree is tested as a binary before the set is compiled: the host build runs
+      # against the fixtures (test/binary). The windows set runs these tests in `test-windows`.
       - name: Test the binary
         if: env.PLATFORMS == 'unix'
         run: pnpm run test:binary
 
-      - name: Cross-compile every target of the set
+      - name: Compile every target of the set
         run: node scripts/build-binary.ts ${{ steps.plan.outputs.flag }}
 
       - name: Keep the binaries for the next jobs
@@ -178,8 +184,8 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-  # The binary test suite on Windows, against the cross-compiled x64 file the release gets (not a
-  # rebuild), so the suite checks the bytes that ship. arm64 gets the `--version` smoke only.
+  # The binary test suite on Windows, against the x64 file the release gets (not a rebuild), so
+  # the suite checks the bytes that ship. arm64 gets the `--version` smoke only.
   test-windows:
     if: inputs.platforms == 'windows'
     needs: build
