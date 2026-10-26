@@ -646,9 +646,10 @@ export async function runConsole(
     tui.addChild(root)
     tui.setFocus(root)
     tui.start()
-    await context.refresh()
-    // Started with proxy auth off: say so in a popup that offers to set a token (#287).
+    // Started with proxy auth off: say so in a popup that offers to set a token (#287). Shown in
+    // this same turn, before any key is read, so `p` can't open its menu underneath it.
     inBackground(openAuthOffPrompt(tui, context.config, proxyAuth), 'Auth')
+    await context.refresh()
     await end.stopped
   } finally {
     tui.stop()
