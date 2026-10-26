@@ -9,6 +9,8 @@ import { Container, type SettingItem, SettingsList, Text } from '@earendil-works
 import { getLogLevels, isLogLevel } from '@logtape/logtape'
 import {
   configFileAuthTokenInvalid,
+  configFileProblem,
+  describeConfigFileProblem,
   getConfigPath,
   isModelExposureMode,
   isPublicModelIdMode,
@@ -492,7 +494,8 @@ export function applySetting(state: ProxyState, id: string, value: string): stri
 
 /**
  * Opens the settings panel as an overlay; each change is applied, saved and followed by Zed
- * auto-sync.
+ * auto-sync. A config file that can't be read or parsed is not opened: it would show the defaults
+ * it loads as, and no change could be saved over it (#288).
  *
  * @param state - the extension state; its config is reloaded from the file first
  * @param context - the command context, used for the overlay and notifications
@@ -501,6 +504,14 @@ export async function openSettingsPanel(
   state: ProxyState,
   context: ExtensionCommandContext
 ): Promise<void> {
+  const problem = configFileProblem()
+  if (problem !== undefined) {
+    context.ui.notify(
+      `proxy-config.json ${describeConfigFileProblem(problem)}: fix or remove it, or run /proxy reset. Nothing is saved over it until then.`,
+      'warning'
+    )
+    return
+  }
   state.config = loadConfigFromFile()
 
   await context.ui.custom<undefined>(

@@ -139,6 +139,8 @@ export async function startConsoleServer(
     const opened = await tryOpen(next)
     if (!opened.ok) return kept(next, opened.error)
     takeOver(opened.server, next)
+    // Stops accepting; requests in flight finish on it, a long stream included, however long it
+    // runs. That is intended: a restart never cuts a client's answer off.
     previous.close()
     return { kind: 'restarted' }
   }
@@ -205,7 +207,9 @@ function kept(next: ServerConfig, failure: unknown): RestartOutcome {
  */
 async function closeListener(server: ServerType): Promise<void> {
   server.close()
-  // `close` stops accepting at once; the socket's handle is released on the next turn of the loop.
+  // `close` stops accepting at once, and on Linux the socket's handle is released by the next turn
+  // of the loop. Where it takes longer, binding again fails with EADDRINUSE and `rebind` binds the
+  // old config again, so the proxy keeps running as it was rather than failing outright.
   await new Promise<void>((resolve) => {
     setImmediate(resolve)
   })

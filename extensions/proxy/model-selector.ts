@@ -195,13 +195,21 @@ export function buildModelSelectorSubmenu(
     Math.min(items.length + MODEL_SELECTOR_EXTRA_ROWS, MODEL_SELECTOR_MAX_ROWS),
     getSettingsListTheme(),
     (id: string, newValue: string) => {
-      if (newValue === 'true') {
+      const ticked = newValue === 'true'
+      const customModels = ticked
+        ? [...selected, id]
+        : [...selected].filter((modelId) => modelId !== id)
+      // A file that can't be read or parsed is not saved over (#288; saveConfigToFile logs why):
+      // the tick is undone, so the list keeps showing what the file holds.
+      if (!saveConfigToFile({ ...state.config, customModels })) {
+        list.updateValue(id, ticked ? 'false' : 'true')
+        return
+      }
+      if (ticked) {
         selected.add(id)
       } else {
         selected.delete(id)
       }
-      state.config = { ...state.config, customModels: [...selected] }
-      saveConfigToFile(state.config)
       state.config = loadConfigFromFile()
       settingsLogger.info('Custom model {modelId} {action}; {selectedCount} selected', {
         modelId: id,

@@ -193,6 +193,32 @@ describe('/proxy with models on two providers', () => {
     )
   })
 
+  // Catches the settings panel opening over a config file that is not valid JSON: it would show
+  // the defaults the file loads as, and every change would silently fail to save (#288).
+  test('config refuses to open over a file that is not valid JSON, and says how out', async () => {
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{"port": 51')
+
+    expect(await runProxy('config', true)).toEqual([
+      {
+        message:
+          'proxy-config.json is not valid JSON: fix or remove it, or run /proxy reset. Nothing is saved over it until then.',
+        level: 'warning'
+      }
+    ])
+  })
+
+  // Catches `/proxy reset`, the one way out the panel names, unable to replace such a file now
+  // that every other save refuses to (#288).
+  test('reset replaces a file that is not valid JSON with the defaults', async () => {
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{"port": 51')
+
+    await runProxy('reset')
+
+    expect(JSON.parse(readFileSync(join(agentDir.path, 'proxy-config.json'), 'utf-8'))).toEqual(
+      DEFAULT_CONFIG
+    )
+  })
+
   // Catches `/proxy models` being routed to the wrong report.
   test('models lists the exposed models', async () => {
     expect(await runProxy('models')).toEqual([
