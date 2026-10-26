@@ -859,16 +859,16 @@ export function describeConfigFileProblem(file: ConfigFileProblem): string {
 }
 
 /**
- * Picks out an `authToken` that is set but is not a string (`null` included).
+ * Picks out an `authToken` that is set but is not a string (`null` included), by the schema's
+ * own field, so the two never disagree (#254).
  *
  * @param raw - The parsed config file.
  * @returns The invalid value, boxed, or `undefined` when it is absent or a string.
  */
 function invalidAuthToken(raw: unknown): { readonly value: unknown } | undefined {
-  if (!isRecord(raw) || raw['authToken'] === undefined || typeof raw['authToken'] === 'string') {
-    return undefined
-  }
-  return { value: raw['authToken'] }
+  const value = isRecord(raw) ? raw['authToken'] : undefined
+  const parsed = ProxyConfigSchema.shape.authToken.optional().safeParse(value)
+  return parsed.success ? undefined : { value }
 }
 
 /**
