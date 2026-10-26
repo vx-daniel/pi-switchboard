@@ -5,6 +5,7 @@
 
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import type { ActiveRequest, FinishedRequest } from '@proxy/server/active-requests'
+import type { ConsoleEvent } from '@proxy/server/console-events'
 import type { HttpRequest } from '@proxy/server/http-requests'
 import { gauge } from '@proxy/tui/panel'
 import {
@@ -13,7 +14,8 @@ import {
   type RequestsData,
   requestsRows,
   type RequestsViewport,
-  scrollRequestsView
+  scrollRequestsView,
+  tableEntries
 } from '@proxy/tui/requests-view'
 import { installConsoleTheme } from '@proxy/tui/theme'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
@@ -77,6 +79,22 @@ function finishedChat(
 }
 
 /**
+ * Builds a lifecycle event.
+ *
+ * @param sequence - its place in the order shared with the requests
+ * @param text - what happened
+ * @param level - how much it matters
+ * @returns the event
+ */
+function event(
+  sequence: number,
+  text: string,
+  level: ConsoleEvent['level'] = 'info'
+): ConsoleEvent {
+  return { sequence, at: START, level, text }
+}
+
+/**
  * Renders the table as plain text.
  *
  * @param requests - the HTTP requests, oldest first
@@ -84,21 +102,24 @@ function finishedChat(
  * @param size - the space available
  * @param size.height - rows
  * @param size.width - columns
- * @param view - where the view is
+ * @param options - where the view is, and the lifecycle events among the requests (none by default)
+ * @param options.view - where the view is
+ * @param options.events - the lifecycle events
  * @returns the rows, without colour codes or trailing spaces
  */
 function plainRows(
   requests: readonly HttpRequest[],
   chats: readonly ChatRequest[],
   size: { height: number; width: number },
-  view?: RequestsViewport
+  options: { view?: RequestsViewport; events?: readonly ConsoleEvent[] } = {}
 ): string[] {
   const data: RequestsData = {
     requests,
+    events: options.events ?? [],
     chats: new Map(chats.map((chat) => [chat.requestId, chat])),
     now: START + 2500
   }
-  return requestsRows(view, data, size).map((row) => stripTerminalSequences(row).trimEnd())
+  return requestsRows(options.view, data, size).map((row) => stripTerminalSequences(row).trimEnd())
 }
 
 describe('requestsRows', () => {
@@ -125,6 +146,7 @@ describe('requestsRows', () => {
       const { requests, chats } = mixed()
       const data = {
         requests,
+        events: [event(10, 'Listening on http://127.0.0.1:4141 with 58 models', 'warning')],
         chats: new Map(chats.map((chat) => [chat.requestId, chat])),
         now: START
       }
@@ -177,7 +199,23 @@ describe('requestsRows', () => {
     const rows = plainRows(requests, chats, { height: 6, width: 120 })
 
     expect(rows[3]).toMatch(/ 200 .*coding .*streaming… +2\.5s {2}1st 900ms/u)
-    expect(rows[4]).toMatch(/ ··· .*alpha\/model-one +waiting… +2\.5s {2}1st —/u)
+    expect(rows[4]).toMatch(/ {2}[⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏] {2}.*alpha\/model-one +waiting… +2\.5s {2}1st —/u)
+  })
+
+  // Catches the in-flight mark frozen: it moves on with the console's one-second redraw.
+  test('a request in flight shows a spinner that moves on each second', () => {
+    const waiting = http(0, { status: undefined, endedAt: undefined })
+    const at = (now: number): string =>
+      stripTerminalSequences(
+        requestsRows(
+          undefined,
+          { requests: [waiting], events: [], chats: new Map(), now },
+          { height: 3, width: 80 }
+        )[1] ?? ''
+      )
+
+    expect(at(START)).not.toBe(at(START + 1000))
+    expect(at(START)).toBe(at(START + 999 - (START % 1000)))
   })
 
   describe('with colors on', () => {
@@ -208,7 +246,7 @@ describe('requestsRows', () => {
       ])
       const [, failed = '', slow = ''] = requestsRows(
         undefined,
-        { requests: [failedRequest, slowRequest], chats, now: START },
+        { requests: [failedRequest, slowRequest], events: [], chats, now: START },
         { height: 5, width: 120 }
       )
 
@@ -221,6 +259,46 @@ describe('requestsRows', () => {
   // Catches an empty table that looks broken.
   test('says so before the first request', () => {
     expect(plainRows([], [], { height: 5, width: 80 })[1]).toBe('No requests yet.')
+  })
+
+  // Catches lifecycle events lost, out of order with the requests, drawn like a request, or
+  // without the time they happened (#266).
+  test('shows lifecycle events among the requests, in their order, as divider rows', () => {
+    const rows = plainRows(
+      [http(1), http(3)],
+      [],
+      { height: 6, width: 80 },
+      {
+        events: [
+          event(0, 'Listening on http://127.0.0.1:4141 with 58 models'),
+          event(2, 'Stats are off: could not open /tmp/stats.sqlite', 'warning')
+        ]
+      }
+    )
+
+    expect(rows[1]).toMatch(
+      /^18:54:49 {2}◇ Listening on http:\/\/127\.0\.0\.1:4141 with 58 models ┄+$/u
+    )
+    expect(rows[2]).toMatch(/^18:54:49 +200 +GET +\/v1\/models/u)
+    expect(rows[3]).toMatch(
+      /^18:54:49 {2}◆ Stats are off: could not open \/tmp\/stats\.sqlite ┄+$/u
+    )
+    expect(rows[4]).toMatch(/ 200 /u)
+  })
+
+  // Catches the events hidden until the first request, when they say what the proxy is doing.
+  test('shows the events before the first request, then says no request came yet', () => {
+    const rows = plainRows(
+      [],
+      [],
+      { height: 5, width: 80 },
+      {
+        events: [event(0, 'Listening on http://127.0.0.1:4141 with 58 models')]
+      }
+    )
+
+    expect(rows[1]).toContain('◇ Listening on')
+    expect(rows[2]).toBe('No requests yet.')
   })
 })
 
@@ -236,8 +314,8 @@ describe('scrolling the Requests table', () => {
     const more = [...requests, http(10), http(11)]
 
     expect(shownIds(plainRows(requests, [], size))).toEqual(['007', '008', '009'])
-    expect(shownIds(plainRows(requests, [], size, pinned))).toEqual(['005', '006', '007'])
-    expect(shownIds(plainRows(more, [], size, pinned))).toEqual(['005', '006', '007'])
+    expect(shownIds(plainRows(requests, [], size, { view: pinned }))).toEqual(['005', '006', '007'])
+    expect(shownIds(plainRows(more, [], size, { view: pinned }))).toEqual(['005', '006', '007'])
   })
 
   // Catches scrolling down never reaching the newest again, or scrolling up past the oldest.
@@ -248,11 +326,29 @@ describe('scrolling the Requests table', () => {
     expect(scrollRequestsView(up, requests, 100)).toEqual({ last: 0 })
   })
 
+  // Catches events skipped by scrolling, or a view pinned to an event sliding as rows arrive.
+  test('scrolls over the events as rows, and stays pinned to one', () => {
+    const spaced = requests.map((request) => ({ ...request, sequence: request.sequence * 10 }))
+    const restarting = [event(45, 'Restarting on 127.0.0.1:4142')]
+    const pinned = scrollRequestsView(undefined, tableEntries(spaced, restarting), 5)
+    const more = [...spaced, http(100), http(110)]
+
+    expect(pinned).toEqual({ last: 45 })
+    const shown = plainRows(
+      more,
+      [],
+      { height: 4, width: 160 },
+      { view: pinned, events: restarting }
+    )
+    expect(shown[3]).toContain('◇ Restarting on 127.0.0.1:4142')
+    expect(shown[2]).toMatch(/#000004$/u)
+  })
+
   // Catches a pinned view jumping to the top, or failing, when its request was dropped from the
   // bounded list.
   test('a view pinned to a dropped request stays on the one before it', () => {
     const withGap = requests.filter((request) => request.sequence !== 6)
-    const shown = plainRows(withGap, [], { height: 4, width: 160 }, { last: 6 })
+    const shown = plainRows(withGap, [], { height: 4, width: 160 }, { view: { last: 6 } })
 
     expect(shownIds(shown)).toEqual(['003', '004', '005'])
   })

@@ -35,6 +35,7 @@ import type { Provider, ProviderAuth } from '@earendil-works/pi-ai'
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for account registration. */
@@ -248,6 +249,7 @@ export function registerAccountProvider(runtime: AccountRuntime, providerId: str
     provider: providerId,
     base: slot.base
   })
+  recordConsoleEvent(`Registered ${providerId} as a login of ${slot.base}`)
   return true
 }
 
@@ -262,6 +264,7 @@ export function unregisterAccountProvider(runtime: AccountRuntime, providerId: s
   if (runtime.getRegisteredNativeProvider(providerId) === undefined) return
   runtime.unregisterProvider(providerId)
   accountsLogger.info('Dropped {provider}: logged out', { provider: providerId })
+  recordConsoleEvent(`Dropped ${providerId}: logged out`)
 }
 
 /** A provider's login slot. */

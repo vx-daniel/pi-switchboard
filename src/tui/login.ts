@@ -27,6 +27,7 @@ import {
   registerAccountProvider,
   unregisterAccountProvider
 } from '@proxy/pi/accounts'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 
 /** One entry of pi's login provider selector. */
 export type LoginOption = ConstructorParameters<typeof OAuthSelectorComponent>[1][number]
@@ -316,6 +317,7 @@ export async function runLogin(
     throw error
   }
   loginLogger.info('Logged in to {provider} ({type})', { provider: providerId, type })
+  recordConsoleEvent(`Logged in to ${providerId} (${type})`)
   const refreshed = await runtime.refresh({
     providers: [providerId],
     signal: AbortSignal.timeout(CATALOG_REFRESH_MS)
@@ -347,6 +349,7 @@ export async function runLogout(
 ): Promise<void> {
   await runtime.logout(providerId, { signal })
   loginLogger.info('Logged out of {provider}', { provider: providerId })
+  recordConsoleEvent(`Logged out of ${providerId}`)
   unregisterAccountProvider(runtime, providerId)
   if (loginLabels()[providerId] !== undefined) saveLoginLabel(providerId, '')
 }

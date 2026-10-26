@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { piAgentDir } from '@proxy/config/agent-dir'
 import { proxyLogger } from '@proxy/logging'
 import { type FinishedRequest, onActiveRequestsChange } from '@proxy/server/active-requests'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 import { onRouteTotalsChange, type RouteEvent } from '@proxy/server/route-totals'
 import { openStatsStore } from '@proxy/stats/store'
 import type {
@@ -299,6 +300,7 @@ export function recordStatsToFile(): (() => void) | undefined {
       path,
       reason: errorMessage(error)
     })
+    recordConsoleEvent(`Stats are off: could not open ${path}`, 'warning')
     return undefined
   }
   const stopRecorder = startStatsRecorder(store)
@@ -308,5 +310,6 @@ export function recordStatsToFile(): (() => void) | undefined {
   }
   process.once('exit', stop)
   statsLogger.info('Recording stats to {path}', { path })
+  recordConsoleEvent(`Recording stats to ${path}`)
   return stop
 }
