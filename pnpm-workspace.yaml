@@ -5,13 +5,16 @@ allowBuilds:
   esbuild: true
   lefthook: set this to true or false
 catalog:
-  vite: npm:@voidzero-dev/vite-plus-core@1.2.0
-  vite-plus: 1.2.0
-  # Must equal the Vitest version vite-plus bundles (5.0.4 in vite-plus 1.2.0): bump the two together. A
+  vite: npm:@voidzero-dev/vite-plus-core@1.4.0
+  vite-plus: 1.4.0
+  # Must equal the Vitest version vite-plus bundles (5.0.5 in vite-plus 1.4.0): bump the two together. A
   # mismatch fails the gate's coverage run (#83).
-  '@vitest/coverage-v8': 5.0.4
+  '@vitest/coverage-v8': 5.0.5
 overrides:
   vite@*: 'catalog:'
+  # @earendil-works/pi-coding-agent pins undici 8.10.2 exactly; 8.12.2 fixes its security advisories.
+  # Drop once pi-coding-agent requires >= 8.12.2.
+  undici@>=8 <8.12.2: ^8.12.2
 peerDependencyRules:
   allowAny:
     - vite
