@@ -26,6 +26,8 @@ export type ConsoleEventLevel = 'info' | 'warning' | 'error'
 
 /** One lifecycle event. */
 export interface ConsoleEvent {
+  /** Tells an event from a request among the table's rows. */
+  readonly kind: 'event'
   /** Its place in the order shared with the requests. */
   readonly sequence: number
   /** When it happened, in milliseconds since the epoch. */
@@ -66,7 +68,7 @@ export function recordConsoleEvent(
   level: ConsoleEventLevel = 'info',
   now: number = Date.now()
 ): void {
-  events.push({ sequence: takeSequence(), at: now, level, text })
+  events.push({ kind: 'event', sequence: takeSequence(), at: now, level, text })
   if (events.length > EVENTS_KEPT) events.shift()
   for (const listener of listeners) {
     try {

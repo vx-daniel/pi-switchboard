@@ -263,8 +263,9 @@ export function unregisterAccountProvider(runtime: AccountRuntime, providerId: s
   if (parseAccountProviderId(providerId) === undefined) return
   if (runtime.getRegisteredNativeProvider(providerId) === undefined) return
   runtime.unregisterProvider(providerId)
+  // No console event: the console's logout says "Logged out of …" itself, and a login that failed
+  // drops its slot here too, where "logged out" would not be true (#266).
   accountsLogger.info('Dropped {provider}: logged out', { provider: providerId })
-  recordConsoleEvent(`Dropped ${providerId}: logged out`)
 }
 
 /** A provider's login slot. */

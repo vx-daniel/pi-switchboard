@@ -91,7 +91,7 @@ function event(
   text: string,
   level: ConsoleEvent['level'] = 'info'
 ): ConsoleEvent {
-  return { sequence, at: START, level, text }
+  return { kind: 'event', sequence, at: START, level, text }
 }
 
 /**
