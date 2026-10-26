@@ -467,8 +467,10 @@ models name also has a built-in `-latest` alias (principle VI's second recorded 
   the alias menu of a single family target adds **Pin to…** (the family's exposed members) and
   **Follow newest**, the targets menu offers both for a family target in a chain, and **+ New
   alias…** asks for a model or a family (the families the exposed models name). Each saves
-  through `saveConfigToFile`. A built-in alias is marked `built in` after the configured ones; its
-  menu has only **Pin to…**, which saves a configured alias of its name, replacing it.
+  through `saveConfigToFile`. The built-in aliases have their own **LATEST** box under ALIASES
+  (`ModelsItem` kind `latest`, after the new-alias row), so the operator's and the built-in ones
+  never mix; Enter on one offers only **Pin to…**, which saves a configured alias of its name,
+  replacing it. The tab counts them apart (`24 models · 1 alias · 8 latest`).
 
 ### Cooldowns (#68)
 

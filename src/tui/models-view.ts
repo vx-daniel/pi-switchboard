@@ -1,14 +1,15 @@
 /**
  * The console's Models view (#230): the exposed models as a matrix of the reasoning efforts each
- * supports, grouped by provider, and an ALIASES box with every configured alias, its targets,
- * efforts, `fallbackOn`, what each family target resolves to (#231) and any diagnostic, then the
- * row that adds an alias.
+ * supports, grouped by provider; an ALIASES box with every configured alias, its targets, efforts,
+ * `fallbackOn`, what each family target resolves to (#231) and any diagnostic, then the row that
+ * adds an alias; and a LATEST box with the built-in `-latest` aliases, apart from the operator's.
  *
  * @remarks
  * The selection moves over every row: Enter on a model starts a new alias for it, on an alias
- * opens its menu, and on the last row starts a new alias. The matrix and the box each scroll to
- * keep the selection on screen, since a login can expose more models than the screen has rows.
- * The box sits beside the matrix on a wide view, under it otherwise.
+ * opens its menu, on the new-alias row starts a new alias, and on a built-in alias offers to pin
+ * it. The matrix and the boxes each scroll to keep the selection on screen, since a login can
+ * expose more models than the screen has rows. The boxes sit beside the matrix on a wide view,
+ * under it otherwise, ALIASES above LATEST.
  *
  * @packageDocumentation
  */
@@ -19,6 +20,7 @@ import {
   type AliasTarget,
   aliasFallbackOn,
   aliasModels,
+  type FamilyTarget,
   isAliasChain,
   isFamilyTarget
 } from '@proxy/config/schema'
@@ -83,17 +85,17 @@ const PART_LEAST_ROWS = 5
 const STACKED_LEAST_ROWS = PART_LEAST_ROWS + PART_LEAST_ROWS
 /** Halves of a cell's spare columns: one before a centred text, one after. */
 const HALVES = 2
-/** Rows the ALIASES box's frame takes. */
+/** Rows a box's frame takes. */
 const BOX_BORDER_ROWS = 2
 
 /** What the Models view lists: the exposed models, the configured and the built-in aliases. */
 export interface ModelsData {
   /** The exposed models, in list order. */
   readonly models: readonly ExposedModel[]
-  /** The configured aliases, as the config holds them, exposed or not, then the built-in ones. */
+  /** The configured aliases, as the config holds them, exposed or not. */
   readonly aliases: Readonly<Record<string, AliasTarget>>
-  /** The built-in `-latest` aliases among {@link aliases} (#231); absent for none. */
-  readonly builtIn?: readonly string[]
+  /** The built-in `-latest` aliases (#231), in the LATEST box; absent for none. */
+  readonly latest?: Readonly<Record<string, FamilyTarget>>
   /** Why aliases or their targets are left out. */
   readonly diagnostics: readonly AliasDiagnostic[]
   /** What each family target resolves to now (#231). */
@@ -104,7 +106,7 @@ export interface ModelsData {
 
 /** What the Models view shows. */
 export interface ModelsView extends ModelsData {
-  /** The selected item: a model, then an alias, then the new-alias row. */
+  /** The selected item: a model, an alias, the new-alias row, then a built-in alias. */
   readonly selected: number
 }
 
@@ -128,12 +130,10 @@ export interface ModelsStatus {
 export function modelsViewData(status: ModelsStatus | undefined): ModelsData {
   if (status === undefined) return { models: [], aliases: {}, diagnostics: [], families: [] }
   const { exposure, exposed } = status
-  const latest = exposure?.latestAliases ?? {}
   return {
     models: exposure?.models ?? [],
-    // A configured alias replaces a built-in one of its name, so the two never share a name.
-    aliases: { ...status.aliases, ...latest },
-    builtIn: Object.keys(latest),
+    aliases: status.aliases,
+    latest: exposure?.latestAliases ?? {},
     diagnostics: exposure?.aliasDiagnostics ?? [],
     families: exposure?.familyResolutions ?? [],
     ...(typeof exposed === 'string' ? { unavailable: exposed } : {})
@@ -143,14 +143,10 @@ export function modelsViewData(status: ModelsStatus | undefined): ModelsData {
 /** What a selected item is. */
 export type ModelsItem =
   | { readonly kind: 'model'; readonly model: ExposedModel }
-  | {
-      readonly kind: 'alias'
-      readonly name: string
-      readonly target: AliasTarget
-      /** A built-in `-latest` alias, which only a configured alias of its name changes. */
-      readonly builtIn: boolean
-    }
+  | { readonly kind: 'alias'; readonly name: string; readonly target: AliasTarget }
   | { readonly kind: 'new' }
+  /** A built-in `-latest` alias, which only a configured alias of its name changes. */
+  | { readonly kind: 'latest'; readonly name: string; readonly target: FamilyTarget }
 
 /** The exposed models of one provider, in list order. */
 interface ProviderGroup {
@@ -176,14 +172,14 @@ function providerGroups(models: readonly ExposedModel[]): ProviderGroup[] {
 }
 
 /**
- * Lists the view's selectable items in order: the models by provider, the aliases, then the
- * new-alias row.
+ * Lists the view's selectable items in order: the models by provider, the aliases, the new-alias
+ * row, then the built-in aliases.
  *
  * @param view - the models and the aliases
  * @returns every item
  */
 export function modelsItems(
-  view: Pick<ModelsData, 'models' | 'aliases' | 'builtIn'>
+  view: Pick<ModelsData, 'models' | 'aliases' | 'latest'>
 ): readonly ModelsItem[] {
   const models = providerGroups(view.models).flatMap((group) => group.models)
   return [
@@ -191,10 +187,14 @@ export function modelsItems(
     ...Object.entries(view.aliases).map(([name, target]): ModelsItem => ({
       kind: 'alias',
       name,
-      target,
-      builtIn: view.builtIn?.includes(name) === true
+      target
     })),
-    { kind: 'new' }
+    { kind: 'new' },
+    ...Object.entries(view.latest ?? {}).map(([name, target]): ModelsItem => ({
+      kind: 'latest',
+      name,
+      target
+    }))
   ]
 }
 
@@ -203,7 +203,7 @@ export function modelsItems(
  *
  * @param data - the models and the aliases
  * @param selected - the selected row, which may be past the list's end after a delete
- * @returns the item; the new-alias row when the selection is past the end
+ * @returns the item; the last one when the selection is past the end
  */
 export function modelsItemAt(data: ModelsData, selected: number): ModelsItem {
   const items = modelsItems(data)
@@ -316,22 +316,16 @@ function targetCell(target: AliasModel, resolution: FamilyResolution | undefined
  * @param alias.name - its name
  * @param alias.target - what it names
  * @param alias.selected - whether it is the selected row
- * @param alias.builtIn - whether it is a built-in `-latest` alias, marked as such
  * @param families - what the family targets resolve to now
  * @param width - the box's content columns
  * @returns the alias's lines, the first with its selection mark
  */
 function aliasLines(
-  alias: {
-    readonly name: string
-    readonly target: AliasTarget
-    readonly selected: boolean
-    readonly builtIn: boolean
-  },
+  alias: { readonly name: string; readonly target: AliasTarget; readonly selected: boolean },
   families: readonly FamilyResolution[],
   width: number
 ): string[] {
-  const { name, target, selected, builtIn } = alias
+  const { name, target, selected } = alias
   const targets = aliasModels(target)
     .map((aliasTarget, position) =>
       targetCell(
@@ -343,9 +337,8 @@ function aliasLines(
   const fallback = isAliasChain(target)
     ? paint('dim', `  on ${aliasFallbackOn(target).join(', ') || 'nothing'}`)
     : ''
-  const mark = builtIn ? paint('dim', '  built in') : ''
   const wrapped = wrapTextWithAnsi(
-    `${targets}${fallback}${mark}`,
+    `${targets}${fallback}`,
     Math.max(1, width - ALIAS_TARGETS_COLUMN)
   )
   const [first = '', ...rest] = wrapped
@@ -424,8 +417,36 @@ function matrixPart(view: ModelsView, columns: MatrixColumns, now: number): View
 }
 
 /**
- * Lays out the ALIASES box's content: a heading, each alias with its diagnostics under it, then
- * the new-alias row.
+ * Renders a run of aliases, each with its diagnostics under it.
+ *
+ * @param entries - the aliases, by name
+ * @param first - the first one's place among the view's items
+ * @param view - the diagnostics, the family resolutions and the selection
+ * @param width - the box's content columns
+ * @returns the lines, and the selected alias's line when it is one of them
+ */
+function aliasEntryLines(
+  entries: readonly (readonly [string, AliasTarget])[],
+  first: number,
+  view: ModelsView,
+  width: number
+): { readonly lines: string[]; readonly selectedLine: number | undefined } {
+  const lines: string[] = []
+  let selectedLine: number | undefined
+  for (const [offset, [aliasName, target]] of entries.entries()) {
+    const selected = first + offset === view.selected
+    if (selected) selectedLine = lines.length
+    lines.push(...aliasLines({ name: aliasName, target, selected }, view.families, width))
+    for (const diagnostic of view.diagnostics.filter(({ alias }) => alias === aliasName)) {
+      lines.push(...diagnosticLines(diagnostic, width))
+    }
+  }
+  return { lines, selectedLine }
+}
+
+/**
+ * Lays out the ALIASES box's content: a heading, each configured alias with its diagnostics
+ * under it, then the new-alias row.
  *
  * @param view - the models, the aliases with their diagnostics, and the selection
  * @param width - the box's content columns
@@ -433,22 +454,122 @@ function matrixPart(view: ModelsView, columns: MatrixColumns, now: number): View
  */
 function aliasPart(view: ModelsView, width: number): ViewPart {
   const heading = paint('dim', `  ${'alias'.padEnd(ALIAS_NAME_COLUMNS)} targets`)
-  const lines: string[] = []
-  let selectedLine: number | undefined
-  let position = view.models.length
-  for (const [aliasName, target] of Object.entries(view.aliases)) {
-    if (position === view.selected) selectedLine = lines.length
-    const selected = position === view.selected
-    const builtIn = view.builtIn?.includes(aliasName) === true
-    lines.push(...aliasLines({ name: aliasName, target, selected, builtIn }, view.families, width))
-    for (const diagnostic of view.diagnostics.filter(({ alias }) => alias === aliasName)) {
-      lines.push(...diagnosticLines(diagnostic, width))
-    }
-    position += 1
+  const entries = Object.entries(view.aliases)
+  const { lines, selectedLine } = aliasEntryLines(entries, view.models.length, view, width)
+  const onNew = view.models.length + entries.length === view.selected
+  return {
+    heading: [heading],
+    lines: [...lines, selectable(NEW_ALIAS_ROW, onNew)],
+    selectedLine: onNew ? lines.length : selectedLine
   }
-  if (position === view.selected) selectedLine = lines.length
-  lines.push(selectable(NEW_ALIAS_ROW, position === view.selected))
-  return { heading: [heading], lines, selectedLine }
+}
+
+/**
+ * Lays out the LATEST box's content: a heading, then each built-in `-latest` alias with what its
+ * family resolves to.
+ *
+ * @param view - the models, the aliases, and the selection
+ * @param width - the box's content columns
+ * @returns the box's lines, without its frame; none without built-in aliases
+ */
+function latestPart(view: ModelsView, width: number): ViewPart {
+  const heading = paint('dim', `  ${'alias'.padEnd(ALIAS_NAME_COLUMNS)} family`)
+  // After the models, the configured aliases and the new-alias row.
+  const first = view.models.length + Object.keys(view.aliases).length + 1
+  return {
+    heading: [heading],
+    ...aliasEntryLines(Object.entries(view.latest ?? {}), first, view, width)
+  }
+}
+
+/** One of the boxes beside or under the matrix: its title, count and content. */
+interface SideBox {
+  readonly title: string
+  readonly count: number
+  readonly part: ViewPart
+}
+
+/**
+ * Lays out the boxes: ALIASES, then LATEST while there is a built-in alias.
+ *
+ * @param view - what the view shows
+ * @param width - the boxes' columns, their frames included
+ * @returns the boxes, top first
+ */
+function sideBoxes(view: ModelsView, width: number): readonly SideBox[] {
+  const latest = latestPart(view, width - FRAME_COLUMNS)
+  const aliases: SideBox = {
+    title: 'ALIASES',
+    count: Object.keys(view.aliases).length,
+    part: aliasPart(view, width - FRAME_COLUMNS)
+  }
+  const latestCount = Object.keys(view.latest ?? {}).length
+  if (latestCount === 0) return [aliases]
+  return [aliases, { title: 'LATEST', count: latestCount, part: latest }]
+}
+
+/**
+ * Counts the rows a box wants: its heading, every line, and its frame.
+ *
+ * @param box - the box
+ * @returns the rows
+ */
+function boxWanted(box: SideBox): number {
+  return box.part.heading.length + box.part.lines.length + BOX_BORDER_ROWS
+}
+
+/**
+ * Shares a height among stacked boxes. Each gets what it wants when they fit; otherwise the
+ * focused one takes what the others leave while each keeps {@link PART_LEAST_ROWS}, and the others
+ * share the rest, top first.
+ *
+ * @param wanted - the rows each box wants, top first
+ * @param focus - the box with the selection, or the first
+ * @param height - the rows for all of them
+ * @returns each box's rows
+ */
+function boxHeights(wanted: readonly number[], focus: number, height: number): number[] {
+  if (wanted.reduce((total, rows) => total + rows, 0) <= height) return [...wanted]
+  const othersLeast = wanted.reduce(
+    (total, rows, place) => (place === focus ? total : total + Math.min(rows, PART_LEAST_ROWS)),
+    0
+  )
+  const focused = Math.min(wanted[focus] ?? 0, Math.max(0, height - othersLeast))
+  let left = height - focused
+  return wanted.map((rows, place) => {
+    if (place === focus) return focused
+    const given = Math.min(rows, left)
+    left -= given
+    return given
+  })
+}
+
+/**
+ * Stacks the boxes in a height, the one with the selection (the first, when none has it) given
+ * the room when they don't all fit; each scrolls to keep its selected line on screen.
+ *
+ * @param boxes - the boxes, top first
+ * @param size - the rows and columns for them
+ * @param size.height - rows
+ * @param size.width - columns
+ * @returns the rows
+ */
+function stackedBoxes(
+  boxes: readonly SideBox[],
+  size: { readonly height: number; readonly width: number }
+): string[] {
+  const focus = Math.max(
+    0,
+    boxes.findIndex((box) => box.part.selectedLine !== undefined)
+  )
+  const heights = boxHeights(boxes.map(boxWanted), focus, size.height)
+  return boxes.flatMap((box, place) => {
+    const height = heights[place] ?? 0
+    // A frame with no room inside says nothing: the box gives its rows up.
+    if (height <= BOX_BORDER_ROWS) return []
+    const content = scrolled(box.part, height - BOX_BORDER_ROWS)
+    return panel(box.title, content, size.width, String(box.count)).slice(0, height)
+  })
 }
 
 /**
@@ -462,25 +583,6 @@ function scrolled(part: ViewPart, height: number): string[] {
   const room = Math.max(0, height - part.heading.length)
   const first = firstShown(part.selectedLine ?? 0, part.lines.length, room)
   return [...part.heading, ...part.lines.slice(first, first + room)].slice(0, Math.max(0, height))
-}
-
-/**
- * Frames the ALIASES box around its scrolled content.
- *
- * @param part - the box's content
- * @param aliasCount - the configured aliases, for the title
- * @param size - the box's rows and columns, its frame included
- * @param size.height - rows
- * @param size.width - columns
- * @returns the box's rows
- */
-function aliasBox(
-  part: ViewPart,
-  aliasCount: number,
-  size: { readonly height: number; readonly width: number }
-): string[] {
-  const content = scrolled(part, size.height - BOX_BORDER_ROWS)
-  return panel('ALIASES', content, size.width, String(aliasCount)).slice(0, size.height)
 }
 
 /**
@@ -542,15 +644,7 @@ function sideBySideRows(
     size.width - PANE_GAP - ALIAS_BOX_LEAST_WIDTH
   )
   const boxWidth = size.width - matrixWidth - PANE_GAP
-  const aliases = aliasPart(view, boxWidth - FRAME_COLUMNS)
-  const boxHeight = Math.min(
-    size.height,
-    aliases.heading.length + aliases.lines.length + BOX_BORDER_ROWS
-  )
-  const box = aliasBox(aliases, Object.keys(view.aliases).length, {
-    height: boxHeight,
-    width: boxWidth
-  })
+  const box = stackedBoxes(sideBoxes(view, boxWidth), { height: size.height, width: boxWidth })
   const columns = {
     name: NAME_COLUMNS.most,
     cooldown: cooldownRoom(matrixWidth, NAME_COLUMNS.most)
@@ -564,9 +658,9 @@ function sideBySideRows(
 }
 
 /**
- * Puts the box under the matrix. When both don't fit, each keeps {@link PART_LEAST_ROWS} and the
- * box gives up the rest to the matrix; on a screen too short for both, only the part with the
- * selection shows.
+ * Puts the boxes under the matrix. When they don't all fit, each keeps {@link PART_LEAST_ROWS} and
+ * the boxes give up the rest to the matrix; on a screen too short for both, only the part with
+ * the selection shows.
  *
  * @param view - what the view shows
  * @param size - the view's rows and columns
@@ -586,10 +680,9 @@ function stackedRows(
   )
   const columns = { name: nameColumns, cooldown: cooldownRoom(size.width, nameColumns) }
   const matrix = matrixPart(view, columns, now)
-  const aliases = aliasPart(view, size.width - FRAME_COLUMNS)
-  const aliasCount = Object.keys(view.aliases).length
-  const boxWanted = aliases.heading.length + aliases.lines.length + BOX_BORDER_ROWS
-  let boxHeight = Math.min(boxWanted, Math.max(PART_LEAST_ROWS, size.height - PART_LEAST_ROWS))
+  const boxes = sideBoxes(view, size.width)
+  const boxesWanted = boxes.reduce((total, box) => total + boxWanted(box), 0)
+  let boxHeight = Math.min(boxesWanted, Math.max(PART_LEAST_ROWS, size.height - PART_LEAST_ROWS))
   if (size.height < STACKED_LEAST_ROWS) {
     // Too short for both: the part with the selection takes the screen.
     boxHeight = matrix.selectedLine === undefined ? size.height : 0
@@ -600,9 +693,7 @@ function stackedRows(
   )
   const rows = [
     ...scrolled(matrix, matrixHeight),
-    ...(boxHeight === 0
-      ? []
-      : aliasBox(aliases, aliasCount, { height: boxHeight, width: size.width }))
+    ...stackedBoxes(boxes, { height: boxHeight, width: size.width })
   ]
   return rows.map((row) => fitted(row, size.width))
 }

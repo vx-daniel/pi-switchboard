@@ -520,19 +520,19 @@ async function pinBuiltIn(editor: AliasEditor, name: string, target: AliasTarget
 }
 
 /**
- * Runs what Enter does on a Models view row: an alias's menu, or a new alias (for the row's
- * model, on a model's row).
+ * Runs what Enter does on a Models view row: an alias's menu, a built-in alias's pin, or a new
+ * alias (for the row's model, on a model's row).
  *
  * @param editor - the editor
  * @param item - the selected row
  */
 export async function runModelsItem(editor: AliasEditor, item: ModelsItem): Promise<void> {
-  if (item.kind !== 'alias') {
-    await newAlias(editor, item.kind === 'model' ? item.model.canonicalId : undefined)
+  if (item.kind === 'latest') {
+    await pinBuiltIn(editor, item.name, item.target)
     return
   }
-  if (item.builtIn) {
-    await pinBuiltIn(editor, item.name, item.target)
+  if (item.kind !== 'alias') {
+    await newAlias(editor, item.kind === 'model' ? item.model.canonicalId : undefined)
     return
   }
   const draft = draftOf(item.target)

@@ -136,13 +136,20 @@ describe('framedView', () => {
 
 describe('exposedModelsLabel', () => {
   // Catches the Models tab saying `0 models` while the status strip shows an exposure-config
-  // error (two sources for one count), or a count before the first status read.
+  // error (two sources for one count), a count before the first status read, or the built-in
+  // aliases counted as the operator's (#231).
   test.each([
-    ['a count with aliases', 24, 1, '24 models · 1 alias'],
-    ['a count with several aliases', 24, 3, '24 models · 3 aliases'],
+    ['a count with aliases', 24, { configured: 1, latest: 0 }, '24 models · 1 alias'],
+    ['a count with several aliases', 24, { configured: 3, latest: 0 }, '24 models · 3 aliases'],
+    ['built-in aliases apart', 24, { configured: 1, latest: 8 }, '24 models · 1 alias · 8 latest'],
     ['a count alone, for the note', 24, undefined, '24 models'],
-    ['the exposure config’s error', 'bad config', 2, 'exposure config error'],
-    ['nothing before the first read', undefined, 0, '']
+    [
+      'the exposure config’s error',
+      'bad config',
+      { configured: 2, latest: 0 },
+      'exposure config error'
+    ],
+    ['nothing before the first read', undefined, { configured: 0, latest: 0 }, '']
   ])('%s', (_label, exposed, aliases, expected) => {
     expect(exposedModelsLabel(exposed, aliases)).toBe(expected)
   })
