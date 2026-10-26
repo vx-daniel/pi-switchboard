@@ -234,7 +234,7 @@ describe('logging flags', () => {
 
 describe('--version and --help', () => {
   // Catches the version missing (citty exits 1 with "No version specified", #168) or taken from
-  // anywhere but package.json, which semantic-release bumps in each release commit.
+  // anywhere but package.json, which the release workflow bumps in each release commit.
   test.each(['--version', '-v'])('%s prints the package version and exits 0', async (flag) => {
     const printed: string[] = []
     vi.spyOn(console, 'log').mockImplementation((...parts: unknown[]) => {
