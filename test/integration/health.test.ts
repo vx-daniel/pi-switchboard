@@ -163,6 +163,7 @@ describe('/healthz/creds', () => {
       expect(await jsonBody(response)).toEqual({
         status: 'unavailable',
         verified: false,
+        loginsRegistered: true,
         providers: []
       })
     } finally {

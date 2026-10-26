@@ -313,17 +313,36 @@ describe('registerStoredAccounts', () => {
 
     const registered = await registerStoredAccounts(runtime, new AbortController().signal)
 
-    expect(registered).toEqual(['anthropic-3', 'openai-codex-account-2'])
+    expect(registered).toEqual({
+      listed: true,
+      accounts: ['anthropic-3', 'openai-codex-account-2']
+    })
     expect(ids()).toEqual(['anthropic', 'openai-codex', 'anthropic-3', 'openai-codex-account-2'])
   })
 
   // Catches a store that cannot be listed keeping the proxy from starting: before slots existed,
   // startup never read the store here, so a failure registers nothing and the proxy runs on.
-  test('registers nothing when the store cannot be listed', async () => {
+  // The result says the listing failed, with the error's name and not its message (which can
+  // quote a path), so a failure is not read as "no extra logins" (#252).
+  test('registers nothing and says so when the store cannot be listed', async () => {
     const { runtime, ids } = fakeRuntime([], ['anthropic'])
     runtime.listCredentials = () => Promise.reject(new Error('auth.json: EACCES'))
 
-    await expect(registerStoredAccounts(runtime, new AbortController().signal)).resolves.toEqual([])
+    await expect(registerStoredAccounts(runtime, new AbortController().signal)).resolves.toEqual({
+      listed: false,
+      reason: 'Error'
+    })
     expect(ids()).toEqual(['anthropic'])
+  })
+
+  // Catches an empty store reported as a failed listing (the field on /healthz/creds would cry
+  // wolf for every install with a single login).
+  test('an empty store is listed, with no accounts', async () => {
+    const { runtime } = fakeRuntime([], ['anthropic'])
+
+    await expect(registerStoredAccounts(runtime, new AbortController().signal)).resolves.toEqual({
+      listed: true,
+      accounts: []
+    })
   })
 })

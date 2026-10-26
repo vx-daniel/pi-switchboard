@@ -24,6 +24,11 @@ const registryLogger = proxyLogger('pi', 'registry')
 let runtime: ModelRuntime | undefined
 /** pi's settings manager for the process's working directory; set by {@link initRegistry}. */
 let settingsManager: SettingsManager | undefined
+/**
+ * Why `{provider}-N` logins were not registered at startup, or `undefined` when they were (or
+ * there were none); set by {@link initRegistry}.
+ */
+let loginListingFailure: string | undefined
 
 /**
  * Outcome of resolving request auth for a model: usable, or why not. `error` is already
@@ -94,7 +99,8 @@ const CREDENTIAL_LIST_TIMEOUT_MS = 15_000
  *
  * @remarks
  * Every `{provider}-N` credential in pi's store gets its provider registered (#227) before
- * the availability snapshot is taken.
+ * the availability snapshot is taken. A store that cannot be listed is not retried; see
+ * {@link getLoginRegistration}.
  *
  * @returns the models.json error ({@link describeModelsJsonError}), or `undefined` on success
  */
@@ -110,11 +116,14 @@ export async function initRegistry(): Promise<string | undefined> {
       path: splitModelsJsonError(rawError).path
     })
   }
-  const accounts = await registerStoredAccounts(
+  const stored = await registerStoredAccounts(
     runtime,
     AbortSignal.timeout(CREDENTIAL_LIST_TIMEOUT_MS)
   )
-  if (accounts.length > 0) {
+  // Nothing re-runs the listing after startup (the availability snapshot is taken once, below), so
+  // a failed one stands until restart; `/healthz/creds` says so rather than reading as "no logins".
+  loginListingFailure = stored.listed ? undefined : stored.reason
+  if (stored.listed && stored.accounts.length > 0) {
     // A registered provider is only provisionally available until the next availability pass;
     // this one settles it, from the stored credentials alone, before the snapshot is read. Should
     // it fail, the proxy starts anyway: the provisional entries stand until the next pass.
@@ -132,6 +141,25 @@ export async function initRegistry(): Promise<string | undefined> {
     modelsJsonLoaded: loadError === undefined
   })
   return loadError
+}
+
+/**
+ * Says whether the startup registration of `{provider}-N` logins was skipped because pi's
+ * credential store could not be listed.
+ *
+ * @remarks
+ * Not the same as having no such login. The listing is not retried, so a failure stands until the
+ * proxy restarts.
+ *
+ * @returns `registered: true`, or `registered: false` with the failure's code or name (never its
+ *   message, which can quote a path)
+ */
+export function getLoginRegistration():
+  | { registered: true }
+  | { registered: false; reason: string } {
+  return loginListingFailure === undefined
+    ? { registered: true }
+    : { registered: false, reason: loginListingFailure }
 }
 
 /**
