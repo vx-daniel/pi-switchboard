@@ -1834,11 +1834,16 @@ release workflow, never in `check:all` or the pre-commit hook.
 - **Targets.** `node scripts/build-binary.ts` builds the host's `dist-bin/pi-switchboard`
   (`pi-switchboard.exe` on Windows); `--all` cross-compiles `pi-switchboard-<os>-<arch>` for
   linux-x64, linux-arm64, darwin-x64 and darwin-arm64 on one Linux machine, with
-  `dist-bin/SHA256SUMS`; `--windows` cross-compiles `pi-switchboard-windows-x64.exe` and
-  `-windows-arm64.exe`, with `dist-bin/SHA256SUMS-windows`. The macOS and Windows binaries are
+  `dist-bin/SHA256SUMS`; `--windows`, on Windows only, builds `pi-switchboard-windows-x64.exe`
+  and `-windows-arm64.exe`, with `dist-bin/SHA256SUMS-windows`. The macOS and Windows binaries are
   unsigned.
-- **Windows.** `binary.yml` with `platforms: windows` builds the Windows set, runs
-  the binary test suite on `windows-latest` against the cross-compiled
+- **Icon.** A Windows binary carries `assets/pi-switchboard.ico` (`--windows-icon`), made from
+  `assets/pi-switchboard-icon.png`. Bun sets an icon only when it compiles on Windows, so the
+  Windows set is built on a Windows runner. ELF and Mach-O executables have no icon; neither does
+  a container image (OCI defines no icon field, and Docker Hub takes a repository logo only from
+  verified publishers), so the image's Docker Hub overview shows the README header instead.
+- **Windows.** `binary.yml` with `platforms: windows` builds the Windows set on `windows-latest`,
+  runs the binary test suite there against the
   `pi-switchboard-windows-x64.exe` the release gets (`PI_SWITCHBOARD_BINARY` names it, so the
   suite tests the shipped file, not a rebuild), runs `--version` on `windows-latest` and
   `windows-11-arm`, and with a tag uploads the two `.exe` files and `SHA256SUMS-windows` to that
@@ -1861,7 +1866,7 @@ release workflow, never in `check:all` or the pre-commit hook.
   and the gate never need Bun. CI runs it in the `binary` job (Bun 1.4.3, `oven-sh/setup-bun`), on
   the same triggers as `gate`.
 - **Release assets.** The release workflow's `binary` job calls `binary.yml` with each new release
-  tag. Its `build` job checks the tag out, runs `test:binary` and cross-compiles every target.
+  tag. Its `build` job checks the tag out, runs `test:binary` and compiles every target.
   Its `smoke` matrix then runs each binary's `--version` on a native runner (ubuntu x64,
   `ubuntu-24.04-arm`, `macos-14` for arm64, `macos-15-intel` for x64, since `macos-13` is
   retired), so the darwin and arm64 binaries are run before release, not only built. Its `release`

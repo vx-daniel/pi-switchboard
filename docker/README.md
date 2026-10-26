@@ -1,5 +1,7 @@
 # pi-switchboard
 
+![pi-switchboard: one API, every model](https://raw.githubusercontent.com/vx-daniel/pi-switchboard/main/assets/pi-switchboard-header.png)
+
 **One OpenAI-compatible endpoint for every model your [pi](https://github.com/earendil-works/pi) logins can reach, with routing that falls back, cools down and keeps your quota in view.**
 
 Point any OpenAI client at the container's `/v1`, and pi-switchboard sends each request through pi to Anthropic, OpenAI, Google, Bedrock, Mistral, xAI, OpenRouter and the rest, with the logins you made in it, subscriptions included. Source, docs and releases: [github.com/vx-daniel/pi-switchboard](https://github.com/vx-daniel/pi-switchboard).

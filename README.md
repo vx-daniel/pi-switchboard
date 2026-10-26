@@ -1,5 +1,7 @@
 # pi-switchboard
 
+![pi-switchboard: one API, every model](assets/pi-switchboard-header.png)
+
 **One OpenAI-compatible endpoint for every model your [pi](https://github.com/earendil-works/pi) logins can reach, with routing that falls back, cools down and keeps your quota in view.**
 
 Point any OpenAI client at `http://localhost:4141/v1` (Aider, Continue, Open WebUI, the OpenAI SDKs, agent frameworks), and pi-switchboard sends each request through pi to Anthropic, OpenAI, Google, Bedrock, Mistral, xAI, OpenRouter and the rest, with the logins you already have, subscriptions included.
