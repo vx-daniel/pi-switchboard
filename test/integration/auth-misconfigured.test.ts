@@ -240,13 +240,16 @@ describe('the pre-rename PI_PROXY_AUTH_TOKEN (#65)', () => {
 describe('saving the config keeps an invalid authToken', () => {
   // Catches the second fail-open path: a config loaded from the broken file carries the repaired
   // '', so saving any other setting (the settings panel, the model selector) would write '' and
-  // turn auth off for good.
-  test('saving another setting writes the invalid value back', () => {
-    writeProxyConfig({ authToken: 12345, port: 4141 })
+  // turn auth off for good. `null` is the case a check of "set" by `undefined` alone lets through.
+  test.each([
+    ['a number', 12345],
+    ['null', null]
+  ])('saving another setting writes the invalid value back: %s', (_label, authToken) => {
+    writeProxyConfig({ authToken, port: 4141 })
 
     saveConfigToFile({ ...loadConfigFromFile(), port: 5151 })
 
-    expect(proxyConfigOnDisk()).toEqual({ ...DEFAULT_CONFIG, port: 5151, authToken: 12345 })
+    expect(proxyConfigOnDisk()).toEqual({ ...DEFAULT_CONFIG, port: 5151, authToken })
   })
 
   // Catches the explicit choices (disabling auth, a reset) being unable to clear it.
