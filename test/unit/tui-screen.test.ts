@@ -6,7 +6,7 @@
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import { consoleLayout } from '@proxy/tui/layout'
 import { clockLabel, consoleScreen, type ScreenInput } from '@proxy/tui/screen'
-import { SPARKLINE_MINUTES } from '@proxy/tui/status-strip'
+import { SPARKLINE_MINUTES, statusStrip } from '@proxy/tui/status-strip'
 import { installConsoleTheme } from '@proxy/tui/theme'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -23,10 +23,15 @@ const NOW = Date.UTC(2026, 9, 23, 19, 2, 29)
  *
  * @param size - the terminal's columns and rows
  * @param sidebarHidden - whether the sidebar is hidden
+ * @param authOffAt - the address for the auth-off alert row (#287); none when omitted
  * @returns the input, with a one-row view and a two-row sidebar
  */
-function screen(size: { columns: number; rows: number }, sidebarHidden = false): ScreenInput {
-  const layout = consoleLayout(size, sidebarHidden)
+function screen(
+  size: { columns: number; rows: number },
+  sidebarHidden = false,
+  authOffAt?: string
+): ScreenInput {
+  const layout = consoleLayout(size, sidebarHidden, authOffAt !== undefined)
   return {
     view: 'logs',
     layout,
@@ -35,6 +40,7 @@ function screen(size: { columns: number; rows: number }, sidebarHidden = false):
       version: '0.3.0',
       address: '127.0.0.1:4141',
       proxyAuth: 'off',
+      beyondLoopback: authOffAt !== undefined,
       exposed: 24,
       available: 58,
       uptimeMs: 60_000,
@@ -51,7 +57,8 @@ function screen(size: { columns: number; rows: number }, sidebarHidden = false):
     sidebar:
       layout.sidebarWidth === undefined
         ? undefined
-        : ['╭─ QUOTA ─╮'.padEnd(layout.sidebarWidth), '╰─────────╯'.padEnd(layout.sidebarWidth)]
+        : ['╭─ QUOTA ─╮'.padEnd(layout.sidebarWidth), '╰─────────╯'.padEnd(layout.sidebarWidth)],
+    authOffAt
   }
 }
 
@@ -68,10 +75,12 @@ describe('consoleScreen', () => {
     [160, 50]
   ])('fills a %d×%d terminal exactly', (columns, rows) => {
     for (const sidebarHidden of [false, true]) {
-      const rendered = consoleScreen(screen({ columns, rows }, sidebarHidden))
+      for (const authOffAt of [undefined, '0.0.0.0:4141']) {
+        const rendered = consoleScreen(screen({ columns, rows }, sidebarHidden, authOffAt))
 
-      expect(rendered).toHaveLength(rows)
-      for (const row of rendered) expect(visibleWidth(row)).toBe(columns)
+        expect(rendered).toHaveLength(rows)
+        for (const row of rendered) expect(visibleWidth(row)).toBe(columns)
+      }
     }
   })
 
@@ -92,6 +101,21 @@ describe('consoleScreen', () => {
     )
 
     expect(rows[1]?.endsWith('╭─ QUOTA ─╮'.padEnd(42))).toBe(true)
+  })
+
+  // Catches the auth-off alert beyond loopback missing, drawn over a row of the frame rather than
+  // in one of its own, or cut on a narrow terminal before the address and the key that fixes it.
+  test('auth off beyond loopback has a row of its own under the strip, address and key first', () => {
+    const narrow = consoleScreen(screen({ columns: 60, rows: 16 }, false, '0.0.0.0:4141')).map(
+      (row) => stripTerminalSequences(row)
+    )
+    const plainRows = consoleScreen(screen({ columns: 60, rows: 16 })).map((row) =>
+      stripTerminalSequences(row)
+    )
+
+    expect(narrow[1]).toMatch(/^ ⚠ Proxy auth is off on 0\.0\.0\.0:4141 · p sets a token/)
+    expect(narrow[2]).toBe(plainRows[1])
+    expect(narrow.at(-1)).toBe(plainRows.at(-1))
   })
 })
 
@@ -125,6 +149,18 @@ describe('consoleScreen with colours on', () => {
       stripTerminalSequences(row)
     )
     expect(tall[2]?.endsWith(stripTerminalSequences(clockLabel(NOW)))).toBe(true)
+  })
+
+  // Catches auth off drawn the same on loopback as beyond it, where anyone on the network can use
+  // the logins and it must read as an error.
+  test('auth off is colored differently beyond loopback', () => {
+    vi.stubEnv('NO_COLOR', '')
+    installConsoleTheme()
+    const strip = (beyondLoopback: boolean): string =>
+      statusStrip({ ...screen({ columns: 120, rows: 30 }).strip, beyondLoopback }, 120)
+
+    expect(stripTerminalSequences(strip(true))).toBe(stripTerminalSequences(strip(false)))
+    expect(strip(true)).not.toBe(strip(false))
   })
 })
 

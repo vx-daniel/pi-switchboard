@@ -11,7 +11,7 @@ import { framedView } from '@proxy/tui/frame'
 import type { ConsoleLayout } from '@proxy/tui/layout'
 import { footerLine, type View } from '@proxy/tui/navigation'
 import { besideSidebar } from '@proxy/tui/sidebar'
-import { type StatusStripInput, statusStrip } from '@proxy/tui/status-strip'
+import { authOffRow, type StatusStripInput, statusStrip } from '@proxy/tui/status-strip'
 import { chrome, paint, strong } from '@proxy/tui/theme'
 
 /** Weekday names for the clock. */
@@ -49,6 +49,11 @@ export interface ScreenInput {
   readonly body: readonly string[]
   /** The sidebar's rows, rendered for `layout.sidebarWidth` by `layout.frameRows`; none when hidden. */
   readonly sidebar: readonly string[] | undefined
+  /**
+   * The address while proxy auth is off and the proxy listens beyond loopback, for the alert row
+   * under the strip (#287); `undefined` otherwise. `layout.alertRow` keeps the row for it.
+   */
+  readonly authOffAt?: string | undefined
 }
 
 /**
@@ -93,8 +98,8 @@ function sidebarColumn(input: ScreenInput, width: number): string[] {
 }
 
 /**
- * Renders the screen: the strip, the framed view (with the sidebar beside it when shown), the
- * footer.
+ * Renders the screen: the strip, the alert row when the layout keeps one, the framed view (with
+ * the sidebar beside it when shown), the footer.
  *
  * @param input - the screen's input
  * @returns the rows, as many as the terminal has and each as wide
@@ -109,8 +114,13 @@ export function consoleScreen(input: ScreenInput): string[] {
     layout.sidebarWidth === undefined
       ? framed
       : besideSidebar(framed, sidebarColumn(input, layout.sidebarWidth), layout.mainWidth)
+  const alert =
+    layout.alertRow && input.authOffAt !== undefined
+      ? [authOffRow(input.authOffAt, layout.columns)]
+      : []
   const rows = [
     chrome(statusStrip(input.strip, layout.columns), layout.columns),
+    ...alert,
     ...middle,
     footerLine(input.view, { width: layout.columns, sidebarFits: layout.sidebarFits })
   ]

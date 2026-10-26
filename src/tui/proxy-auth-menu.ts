@@ -24,7 +24,7 @@ import { getConfigPath, loadConfigFromFile, saveConfigToFile } from '@proxy/conf
 import { proxyLogger } from '@proxy/logging'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { isLoopbackHost } from '@proxy/server/startup'
-import { askLine, pickLabel } from '@proxy/tui/dialogs'
+import { askLine, pickAlert, pickLabel } from '@proxy/tui/dialogs'
 import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for proxy auth decisions. */
@@ -43,6 +43,14 @@ export interface AuthScreens {
    * @returns the chosen label, or `undefined` when cancelled
    */
   select(title: string, options: readonly string[]): Promise<string | undefined>
+  /**
+   * Shows a choice as a warning that must not be missed: the console's red alert panel.
+   *
+   * @param title - the warning and the question
+   * @param options - the options' labels
+   * @returns the chosen label, or `undefined` when cancelled
+   */
+  warn(title: string, options: readonly string[]): Promise<string | undefined>
   /**
    * Asks for a line of text.
    *
@@ -96,7 +104,8 @@ const ACTIONS = {
   enterNew: 'Enter a new token',
   show: 'Show the token',
   off: 'Turn auth off',
-  offForSession: 'Turn auth off until the proxy restarts'
+  offForSession: 'Turn auth off until the proxy restarts',
+  keepOff: 'Keep auth off for now'
 } as const
 
 /** Labels of the dialog that shows a token. */
@@ -307,6 +316,78 @@ async function enter(
 }
 
 /**
+ * Asks, while proxy auth is off, whether to set a token now (#287): the popup the console opens
+ * when it starts with auth off. It says who can use the proxy, and offers the menu's own ways to
+ * set a token, or to keep auth off; cancelling keeps it off too. With auth on it shows nothing.
+ *
+ * @param target - the proxy
+ * @param screens - the dialogs
+ * @param save - writes the config file's token; by default {@link saveAuthToken}
+ */
+export async function runAuthOffPrompt(
+  target: AuthTarget,
+  screens: AuthScreens,
+  save: (token: string) => boolean = saveAuthToken
+): Promise<void> {
+  if (target.proxyAuth.current().kind !== 'off') return
+  const who = isLoopbackHost(target.host)
+    ? 'any program on this machine, and a web page you open, can use your provider logins through it'
+    : 'anyone who can reach it can use your provider logins'
+  const choice = await screens.warn(
+    `⚠ Proxy auth is off on ${target.address}: ${who}. Set a token now?`,
+    [ACTIONS.generate, ACTIONS.enter, ACTIONS.keepOff]
+  )
+  if (choice === ACTIONS.generate) await generate(target, screens, save)
+  else if (choice === ACTIONS.enter) await enter(target, screens, save)
+}
+
+/**
+ * Builds the menu's proxy and pi's dialogs for the console.
+ *
+ * @param tui - the screen
+ * @param config - the server config: where the startup token came from, and the address
+ * @param proxyAuth - the server's proxy auth
+ * @returns the proxy and the dialogs
+ */
+function consoleAuth(
+  tui: TuiAltScreen,
+  config: ServerConfig,
+  proxyAuth: ProxyAuthSwitch
+): { target: AuthTarget; screens: AuthScreens } {
+  return {
+    target: {
+      proxyAuth,
+      override: config.proxyAuthOverride,
+      overrideToken: config.proxyAuth.kind === 'token' ? config.proxyAuth.token : undefined,
+      host: config.host,
+      address: `${config.host}:${String(config.port)}`
+    },
+    screens: {
+      select: (title, labels) => pickLabel(tui, title, labels),
+      warn: (title, labels) => pickAlert(tui, title, labels),
+      input: (title) => askLine(tui, title),
+      copy: copyToClipboard
+    }
+  }
+}
+
+/**
+ * Opens the auth-off popup ({@link runAuthOffPrompt}) on pi's dialogs.
+ *
+ * @param tui - the screen
+ * @param config - the server config
+ * @param proxyAuth - the server's proxy auth
+ */
+export async function openAuthOffPrompt(
+  tui: TuiAltScreen,
+  config: ServerConfig,
+  proxyAuth: ProxyAuthSwitch
+): Promise<void> {
+  const { target, screens } = consoleAuth(tui, config, proxyAuth)
+  await runAuthOffPrompt(target, screens)
+}
+
+/**
  * Opens the proxy auth menu (`p`) on pi's dialogs.
  *
  * @param tui - the screen
@@ -318,18 +399,6 @@ export async function openAuthMenu(
   config: ServerConfig,
   proxyAuth: ProxyAuthSwitch
 ): Promise<void> {
-  await runAuthMenu(
-    {
-      proxyAuth,
-      override: config.proxyAuthOverride,
-      overrideToken: config.proxyAuth.kind === 'token' ? config.proxyAuth.token : undefined,
-      host: config.host,
-      address: `${config.host}:${String(config.port)}`
-    },
-    {
-      select: (title, labels) => pickLabel(tui, title, labels),
-      input: (title) => askLine(tui, title),
-      copy: copyToClipboard
-    }
-  )
+  const { target, screens } = consoleAuth(tui, config, proxyAuth)
+  await runAuthMenu(target, screens)
 }

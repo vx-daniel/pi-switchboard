@@ -41,6 +41,7 @@ import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
+import { isLoopbackHost } from '@proxy/server/startup'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { accountRows, accountsSnapshot, type AccountsView } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
@@ -71,7 +72,7 @@ import {
   stepView,
   type View
 } from '@proxy/tui/navigation'
-import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
+import { openAuthMenu, openAuthOffPrompt } from '@proxy/tui/proxy-auth-menu'
 import {
   type ConsoleServer,
   type ConsoleStartup,
@@ -175,6 +176,7 @@ function stripInput(context: ConsoleContext, now: number): StatusStripInput {
     version: packageJson.version,
     address: `${config.host}:${String(config.port)}`,
     proxyAuth: context.proxyAuth.current().kind,
+    beyondLoopback: !isLoopbackHost(config.host),
     uptimeMs: now - context.startedAt,
     connections: state.connections,
     perMinute: traffic.perMinute,
@@ -349,14 +351,32 @@ function sidebarInput(context: ConsoleContext): SidebarInput {
 }
 
 /**
- * Renders the screen for a layout: the strip, the framed view with the sidebar beside it, and the
- * footer.
+ * Names where the proxy listens while proxy auth is off and it listens beyond loopback, for the
+ * alert row (#287). Read on every render, so `p` and a restart change it at once.
+ *
+ * @param context - the console: the auth applied now and the config running
+ * @returns `host:port`, or `undefined` while there is nothing to alert
+ */
+function authOffAt(context: ConsoleContext): string | undefined {
+  const { host, port } = context.config
+  if (context.proxyAuth.current().kind !== 'off' || isLoopbackHost(host)) return undefined
+  return `${host}:${String(port)}`
+}
+
+/**
+ * Renders the screen for a layout: the strip, the alert row, the framed view with the sidebar
+ * beside it, and the footer.
  *
  * @param context - the console
  * @param layout - where everything goes
+ * @param alertAt - the address for the alert row, or `undefined` for none
  * @returns the rows
  */
-function screenRows(context: ConsoleContext, layout: ConsoleLayout): string[] {
+function screenRows(
+  context: ConsoleContext,
+  layout: ConsoleLayout,
+  alertAt: string | undefined
+): string[] {
   const now = Date.now()
   const sidebar =
     layout.sidebarWidth === undefined
@@ -373,7 +393,8 @@ function screenRows(context: ConsoleContext, layout: ConsoleLayout): string[] {
       height: layout.viewHeight,
       width: layout.viewWidth
     }),
-    sidebar
+    sidebar,
+    authOffAt: alertAt
   })
 }
 
@@ -393,11 +414,13 @@ function createRootView(
 ): Component {
   return {
     render(width) {
+      const alertAt = authOffAt(context)
       const layout = consoleLayout(
         { columns: width, rows: terminal.rows },
-        context.state.sidebarHidden
+        context.state.sidebarHidden,
+        alertAt !== undefined
       )
-      return screenRows(context, layout).map((row) => truncateToWidth(row, width))
+      return screenRows(context, layout, alertAt).map((row) => truncateToWidth(row, width))
     },
     handleInput,
     handleMouse(event) {
@@ -623,6 +646,9 @@ export async function runConsole(
     tui.addChild(root)
     tui.setFocus(root)
     tui.start()
+    // Started with proxy auth off: say so in a popup that offers to set a token (#287). Shown in
+    // this same turn, before any key is read, so `p` can't open its menu underneath it.
+    inBackground(openAuthOffPrompt(tui, context.config, proxyAuth), 'Auth')
     await context.refresh()
     await end.stopped
   } finally {
