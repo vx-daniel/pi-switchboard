@@ -5,7 +5,13 @@
  * @packageDocumentation
  */
 
-import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
+import {
+  KeybindingsManager,
+  setKeybindings,
+  TUI_KEYBINDINGS,
+  truncateToWidth,
+  visibleWidth
+} from '@earendil-works/pi-tui'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import { STATS_KEPT_DAYS, STATS_WINDOWS, type StatsWindow } from '@proxy/stats/windows'
 import { keycap, paint } from '@proxy/tui/theme'
@@ -174,4 +180,24 @@ export function footerLine(
   const right = rightText()
   const gap = Math.max(1, size.width - visibleWidth(leftText) - visibleWidth(right))
   return truncateToWidth(`${leftText}${' '.repeat(gap)}${right}`, size.width, '', true)
+}
+
+/**
+ * Sets the console's keys in pi's keybindings.
+ *
+ * @remarks
+ * pi's login dialog copies its sign-in URL on pi's own `app.message.copy` key, Ctrl+X in pi;
+ * without a binding its hint names no key. The console has no other pi app keys. The screen's own
+ * viewport scrolling takes PgUp and PgDn before any component; the console's view always fits the
+ * screen, so they go to the raw log instead.
+ */
+export function installKeybindings(): void {
+  setKeybindings(
+    new KeybindingsManager({
+      ...TUI_KEYBINDINGS,
+      'tui.altScreen.pageUp': { defaultKeys: [] },
+      'tui.altScreen.pageDown': { defaultKeys: [] },
+      'app.message.copy': { defaultKeys: 'ctrl+x', description: 'Copy the sign-in URL' }
+    })
+  )
 }

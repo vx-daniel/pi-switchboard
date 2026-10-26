@@ -15,6 +15,8 @@
 import { getLogLevels } from '@logtape/logtape'
 import {
   FailureClassSchema,
+  configFileProblem,
+  describeConfigFileProblem,
   getConfigPath,
   intBounds,
   isModelExposureMode,
@@ -539,7 +541,8 @@ async function afterRestartOnlySave(editor: SettingsEditor, key: SettingKey): Pr
 
 /**
  * Runs what Enter does on a setting: asks for its new value, saves it, and for a setting read at
- * startup offers to restart the server.
+ * startup offers to restart the server. A config file that can't be read or parsed is not edited:
+ * it loads as the defaults, and saving would replace what it holds with them (#288).
  *
  * @param editor - the editor
  * @param key - the setting
@@ -548,6 +551,14 @@ export async function runSetting(editor: SettingsEditor, key: SettingKey): Promi
   if (key === 'authToken') {
     await editor.openAuth()
     await editor.refresh()
+    return
+  }
+  const problem = configFileProblem()
+  if (problem !== undefined) {
+    await notify(
+      editor,
+      `proxy-config.json ${describeConfigFileProblem(problem)}: fix or remove it first; nothing is saved over it.`
+    )
     return
   }
   const file = loadConfigFromFile()

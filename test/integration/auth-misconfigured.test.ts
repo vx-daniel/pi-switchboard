@@ -280,6 +280,36 @@ describe('saving the config keeps an invalid authToken', () => {
   })
 })
 
+describe('saving the config never writes over a file that cannot be used (#288)', () => {
+  const BROKEN = '{"authToken": "notarealsecret-file-token", "port": 51'
+
+  // Catches a save (the console's settings, aliases or labels, the settings panel) writing the
+  // defaults the broken file loads as over it: the token it holds would be lost, and the next
+  // start or console restart would run with auth off.
+  test('a save leaves a file that is not valid JSON as it is', () => {
+    const path = join(agentDir.path, 'proxy-config.json')
+    writeFileSync(path, BROKEN)
+
+    const written = saveConfigToFile({ ...loadConfigFromFile(), port: 5151 })
+
+    expect(written).toBe(false)
+    expect(readFileSync(path, 'utf8')).toBe(BROKEN)
+  })
+
+  // Catches `/proxy reset`, the explicit way out, unable to replace the broken file.
+  test('a reset writes over it', () => {
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), BROKEN)
+
+    const written = saveConfigToFile(DEFAULT_CONFIG, {
+      replaceInvalidAuthToken: true,
+      replaceUnusableFile: true
+    })
+
+    expect(written).toBe(true)
+    expect(proxyConfigOnDisk()).toEqual(DEFAULT_CONFIG)
+  })
+})
+
 describe('where the token came from', () => {
   // Catches the console misjudging a flag or env token as the file's: turning it off would then be
   // saved, yet come back at the next start, or the file's token treated as the flag's.

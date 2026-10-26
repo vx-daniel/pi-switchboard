@@ -19,21 +19,10 @@ import {
   matchesKey,
   ProcessTerminal,
   truncateToWidth,
-  TuiAltScreen,
-  KeybindingsManager,
-  setKeybindings,
-  TUI_KEYBINDINGS
+  TuiAltScreen
 } from '@earendil-works/pi-tui'
 import type { ServerConfig } from '@proxy/config/env'
-import {
-  type AliasTarget,
-  configFileAuthTokenInvalid,
-  loadConfigFromFile,
-  type LoginLabels,
-  type ProxyConfig,
-  type Reserve
-} from '@proxy/config/schema'
-import { computeModelExposure, type ModelExposureResult } from '@proxy/openai/model-exposure'
+import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns, clearCooldownsFor } from '@proxy/pi/cooldowns'
 import { providerQuota } from '@proxy/pi/quota'
 import {
@@ -62,14 +51,26 @@ import {
   openSelectedSetting,
   settingsContext
 } from '@proxy/tui/console-settings'
+import {
+  configFileStatus,
+  type ConsoleState,
+  initialState,
+  type Status
+} from '@proxy/tui/console-state'
 import { consoleStop, listenForStops } from '@proxy/tui/console-stops'
 import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
 import { exposedModelsLabel } from '@proxy/tui/frame'
 import { consoleLayout, type ConsoleLayout } from '@proxy/tui/layout'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
-import { type LogViewport, logViewRows, scrollLogView, wheelLines } from '@proxy/tui/log-view'
+import { logViewRows, scrollLogView, wheelLines } from '@proxy/tui/log-view'
 import { modelsItems, modelsRows, modelsViewData } from '@proxy/tui/models-view'
-import { moveSelection, STATS_WINDOW_KEYS, stepView, type View } from '@proxy/tui/navigation'
+import {
+  installKeybindings,
+  moveSelection,
+  STATS_WINDOW_KEYS,
+  stepView,
+  type View
+} from '@proxy/tui/navigation'
 import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
 import {
   type ConsoleServer,
@@ -78,16 +79,11 @@ import {
   type RestartReport,
   startConsoleServer
 } from '@proxy/tui/proxy-server'
-import {
-  chatsById,
-  requestsRows,
-  type RequestsViewport,
-  scrollRequestsView
-} from '@proxy/tui/requests-view'
+import { chatsById, requestsRows, scrollRequestsView } from '@proxy/tui/requests-view'
 import { consoleScreen } from '@proxy/tui/screen'
 import { SETTING_KEYS, settingsViewRows } from '@proxy/tui/settings-view'
 import { type SidebarInput, sidebarRows } from '@proxy/tui/sidebar'
-import { createRefresh, type RefreshState } from '@proxy/tui/status-refresh'
+import { createRefresh } from '@proxy/tui/status-refresh'
 import { requestsPerMinute, type StatusStripInput } from '@proxy/tui/status-strip'
 import { captureWrites } from '@proxy/tui/stderr-capture'
 import { installConsoleTheme } from '@proxy/tui/theme'
@@ -100,50 +96,6 @@ const STATUS_REFRESH_MS = 5000
 const TICK_MS = 1000
 /** Lines a page key scrolls the raw log or the Requests table by. */
 const PAGE_LINES = 10
-/** What the status line shows; read every few seconds, never the credentials themselves. */
-interface Status {
-  readonly available: number
-  /** Exposed model count, or the exposure config's error. */
-  readonly exposed: number | string
-  readonly cooldowns: number
-  readonly modelsJsonError: string | undefined
-  /** The quota reserve per provider (`routing.reserve`), to mark a provider below it. */
-  readonly reserve: Reserve
-  /** Provider -> the label the operator gave the login (`labels`). */
-  readonly labels: LoginLabels
-  /** The exposure the Models view lists and the alias editor checks names against (#230). */
-  readonly exposure: ModelExposureResult | undefined
-  /** The configured aliases, exposed or not. */
-  readonly aliases: Readonly<Record<string, AliasTarget>>
-  /** The config file, as the Settings view shows it (#288). */
-  readonly file: ProxyConfig
-  /** Whether the file's `authToken` is not a string (#82). */
-  readonly authInvalid: boolean
-}
-
-/** The console's state, which every render reads. */
-interface ConsoleState extends RefreshState<Status> {
-  view: View
-  /** Whether the first view shows the raw log rather than the Requests table (`r`). */
-  logRaw: boolean
-  /** Where the raw log is: following new lines, or pinned to the lines on screen. */
-  logView: LogViewport
-  /** Where the Requests table is: following new requests, or pinned to the ones on screen. */
-  requestsView: RequestsViewport
-  /** The selected row of the accounts view; the row after the accounts opens the login. */
-  selected: number
-  /** The selected row of the Models view: a model, an alias, or the new-alias row (#230). */
-  modelsSelected: number
-  /** The selected setting of the Settings view (#288). */
-  settingsSelected: number
-  /** Open client connections, counted every tick; `undefined` before the first count. */
-  connections: number | undefined
-  /** Whether the operator hid the sidebar (`s`). */
-  sidebarHidden: boolean
-  /** The window the Stats dashboard shows. */
-  statsWindow: StatsWindow
-}
-
 /** What the key handlers and the login flow need. */
 export interface ConsoleContext {
   /** The config the server runs with now; a restart replaces it. */
@@ -185,18 +137,15 @@ async function readStatus(): Promise<Status> {
   const available = getAvailableModels()
   const config = await fileConfigReader()
   const exposure = computeModelExposure(available, config, getSupportedThinkingLevels)
-  const file = loadConfigFromFile()
   return {
     available: available.length,
     exposed: exposure.ok ? exposure.models.length : exposure.message,
     cooldowns: activeCooldowns().length,
     modelsJsonError: getModelsJsonError(),
     reserve: config.reserve ?? {},
-    labels: file.labels,
     exposure: exposure.ok ? exposure : undefined,
     aliases: config.aliases,
-    file,
-    authInvalid: configFileAuthTokenInvalid()
+    ...configFileStatus()
   }
 }
 
@@ -362,7 +311,12 @@ const VIEW_ROWS: Readonly<Record<View, (context: ConsoleContext, size: ViewSize)
   stats: ({ state, statsView }, size) => statsView.rows(state.statsWindow, size),
   models: ({ state }, size) => modelsViewRows(state, size),
   settings: (context, size) =>
-    settingsViewRows(currentSettingRows(context), context.state.settingsSelected, size)
+    settingsViewRows(
+      currentSettingRows(context),
+      context.state.settingsSelected,
+      size,
+      context.state.status?.fileProblem
+    )
 }
 
 /**
@@ -594,50 +548,6 @@ function startUpdates(context: ConsoleContext, server: ConsoleServer): () => voi
     unsubscribeActive()
     unsubscribeHttp()
     restoreStderr()
-  }
-}
-
-/**
- * Sets the console's keys in pi's keybindings.
- *
- * @remarks
- * pi's login dialog copies its sign-in URL on pi's own `app.message.copy` key, Ctrl+X in pi;
- * without a binding its hint names no key. The console has no other pi app keys. The screen's own
- * viewport scrolling takes PgUp and PgDn before any component; the console's view always fits the
- * screen, so they go to the raw log instead.
- */
-function installKeybindings(): void {
-  setKeybindings(
-    new KeybindingsManager({
-      ...TUI_KEYBINDINGS,
-      'tui.altScreen.pageUp': { defaultKeys: [] },
-      'tui.altScreen.pageDown': { defaultKeys: [] },
-      'app.message.copy': { defaultKeys: 'ctrl+x', description: 'Copy the sign-in URL' }
-    })
-  )
-}
-
-/**
- * Makes the console's state as it opens: the first view, nothing read or selected yet.
- *
- * @returns the state
- */
-function initialState(): ConsoleState {
-  return {
-    view: 'logs',
-    logRaw: false,
-    logView: undefined,
-    requestsView: undefined,
-    status: undefined,
-    accounts: [],
-    verification: new Map(),
-    credentialChanges: new Map(),
-    selected: 0,
-    modelsSelected: 0,
-    settingsSelected: 0,
-    connections: undefined,
-    sidebarHidden: false,
-    statsWindow: 'today'
   }
 }
 

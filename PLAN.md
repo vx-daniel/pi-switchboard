@@ -2048,7 +2048,10 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   startup and apply on a restart. A row shows the saved value, the running value while a restart
   is due, and the flag or env var that wins over the file (`buildCliOverrides` and the env, read
   once at start). Each editor checks the value against the schema's bounds and saves the whole
-  file with `saveConfigToFile`, never with `replaceInvalidAuthToken` (#82). `r` restarts the HTTP
+  file with `saveConfigToFile`, never with `replaceInvalidAuthToken` (#82). `saveConfigToFile`
+  itself refuses to write over a file that can't be read or parsed (it loaded as the defaults, so
+  any save would replace what it holds, a token included); only `/proxy reset` passes
+  `replaceUnusableFile`. The view shows such a file's problem over the list. `r` restarts the HTTP
   server in the process: the config is reloaded with the start's flags (`reloadConfig`, which
   leaves logging as it is), the new server is bound before the old one closes on a new address
   (a failed bind keeps the old one, its config, auth and recorder), and on the same address the

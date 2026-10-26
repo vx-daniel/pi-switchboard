@@ -457,32 +457,52 @@ function listLines(
 }
 
 /**
- * Renders the Settings view: the settings by group, scrolled to keep the selected one on screen,
- * and its help under them.
+ * Says, over the list, that the config file can't be used: the view shows the defaults it loads
+ * as, and nothing is saved over it (#288).
+ *
+ * @param problem - why the file can't be used, or `undefined` when it can
+ * @param width - the view's columns
+ * @returns the banner and a blank row, or nothing
+ */
+function problemBanner(problem: string | undefined, width: number): string[] {
+  if (problem === undefined) return []
+  const text = `proxy-config.json ${problem}: these are the defaults it loads as, and nothing is saved over it until it is fixed or removed.`
+  return [...wrapTextWithAnsi(paint('error', text), width), '']
+}
+
+/**
+ * Renders the Settings view: a banner when the config file can't be used, the settings by group,
+ * scrolled to keep the selected one on screen, and its help under them.
  *
  * @param rows - the settings ({@link settingRows})
  * @param selected - the selected setting's index
  * @param size - the space available
  * @param size.height - rows
  * @param size.width - columns
+ * @param problem - why the config file can't be used (`is not valid JSON`); `undefined` when it can
  * @returns the view's rows
  */
 export function settingsViewRows(
   rows: readonly SettingRow[],
   selected: number,
-  size: { readonly height: number; readonly width: number }
+  size: { readonly height: number; readonly width: number },
+  problem?: string
 ): string[] {
   const { width, height } = size
+  const banner = problemBanner(problem, width)
   const chosen = rows[selected]
   const help =
     chosen === undefined ? [] : wrapTextWithAnsi(paint('dim', SPECS[chosen.key].help), width)
   const helpRows = help.length === 0 ? 0 : Math.min(help.length + 1, HELP_ROWS + 1)
-  const visible = Math.max(1, height - helpRows)
+  const visible = Math.max(1, height - helpRows - banner.length)
   const { lines, selectedLine } = listLines(rows, selected, width)
   const first = firstShown(selectedLine, lines.length, visible)
-  const shown = lines.slice(first, first + visible)
+  const shown = [...banner, ...lines.slice(first, first + visible)]
   if (helpRows === 0) return shown
-  const padding = Array.from({ length: Math.max(0, visible - shown.length) }, () => '')
+  const padding = Array.from(
+    { length: Math.max(0, visible + banner.length - shown.length) },
+    () => ''
+  )
   return [...shown, ...padding, '', ...help.slice(0, helpRows - 1)].map((row) =>
     visibleWidth(row) > width ? truncateToWidth(row, width) : row
   )

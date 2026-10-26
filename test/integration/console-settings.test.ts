@@ -243,6 +243,21 @@ describe('runSetting', () => {
     expect(savedConfig()).toMatchObject({ authToken: 12_345, docsUi: true })
   })
 
+  // Catches an edit of a file that is not valid JSON asking for a value, then writing the defaults
+  // it loads as over it, losing what it held (a token included) (#288).
+  test('refuses to edit a file that is not valid JSON, saying why, and leaves it as it is', async () => {
+    const path = join(agentDir, 'proxy-config.json')
+    writeFileSync(path, '{"port": 51')
+    const { editor, asked } = scripted(['OK'])
+
+    await runSetting(editor, 'port')
+
+    expect(asked).toEqual([
+      'proxy-config.json is not valid JSON: fix or remove it first; nothing is saved over it.'
+    ])
+    expect(readFileSync(path, 'utf8')).toBe('{"port": 51')
+  })
+
   // Catches a restart that kept the old server reported as done, leaving the operator to believe
   // the saved settings run.
   test('says why when the restart keeps the proxy as it was', async () => {
