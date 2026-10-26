@@ -130,7 +130,9 @@ const NO_RESULT = Symbol('no result')
  * @remarks
  * pi's `end(result)` settles `result()` only when given a result, and before the stream's
  * iteration finishes, so here it is settled already or never will be (#248). An already settled
- * result wins a race with an already settled stand-in.
+ * result wins a race with an already settled stand-in, as long as `result()` returns the settled
+ * promise itself; the relay test "passes on a result the provider ended with, without a done
+ * event" runs against pi's own stream and fails if a pi upgrade changes that.
  *
  * @param upstream - pi's event stream, its iteration finished without a done or error event
  * @returns the result
