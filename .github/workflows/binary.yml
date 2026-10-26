@@ -3,17 +3,19 @@ name: Binary
 # Cross-compiles the standalone binary (#61) and runs each target on a native runner. Two sets:
 #
 # - unix (the default): linux-x64, linux-arm64, darwin-x64 and darwin-arm64
-#   (`scripts/build-binary.ts --all`), with SHA256SUMS. The release workflow calls it for each new
-#   release. The macOS binaries are unsigned.
-# - windows: windows-x64 and windows-arm64 (`--windows`), with SHA256SUMS-windows. Run by hand
-#   only, to save Actions minutes: the release workflow never builds it. The full binary test
-#   suite also runs on a Windows runner, since only the binary tests show the compiled binary
+#   (`scripts/build-binary.ts --all`), with SHA256SUMS. The macOS binaries are unsigned.
+# - windows: windows-x64 and windows-arm64 (`--windows`), with SHA256SUMS-windows. The full binary
+#   test suite also runs on a Windows runner, since only the binary tests show the compiled binary
 #   works there. The binaries are unsigned.
+#
+# The release workflow calls it once per set for each new release, in parallel. Each set keeps its
+# files in its own artifact (`binaries-<set>`): the two calls share the release run, where one
+# artifact name can be uploaded only once.
 #
 # With a tag, it uploads the set's files and checksum file to that tag's GitHub release, with a
 # build provenance attestation. One Linux runner builds every target. A tag from before the binary
 # existed (0.3.0 and earlier, with no scripts/build-binary.ts) fails at once: its tree cannot build
-# one. Run by hand with the tag to finish or redo a release's binaries, or to add Windows ones.
+# one. Run by hand with the tag to finish or redo a release's binaries.
 #
 # Run by hand with no tag, it builds and smoke-tests the branch it runs on, every target on its
 # own platform, and uploads nothing: the way to check this workflow before a release. The branch
@@ -29,6 +31,11 @@ on:
       tag:
         description: The release tag to build, such as pi-switchboard-v0.1.0
         required: true
+        type: string
+      platforms:
+        description: Which binaries to build, unix or windows
+        required: false
+        default: unix
         type: string
   workflow_dispatch:
     inputs:
@@ -164,7 +171,7 @@ jobs:
       - name: Keep the binaries for the next jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: binaries
+          name: binaries-${{ inputs.platforms || 'unix' }}
           path: |
             dist-bin/pi-switchboard-*
             dist-bin/SHA256SUMS*
@@ -195,7 +202,7 @@ jobs:
       - name: Download the binaries
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: binaries
+          name: binaries-${{ inputs.platforms || 'unix' }}
           path: release-binaries
 
       # `vp test` directly: `pnpm run test:binary` builds first, and its `VAR=1 command` form does
@@ -222,7 +229,7 @@ jobs:
       - name: Download the binaries
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: binaries
+          name: binaries-${{ inputs.platforms || 'unix' }}
 
       # bash on every runner, Windows included (Git Bash), so the check is one script.
       - name: Run --version
@@ -259,7 +266,7 @@ jobs:
       - name: Download the binaries
         uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
-          name: binaries
+          name: binaries-${{ inputs.platforms || 'unix' }}
 
       - name: Check the binaries against their checksum file
         run: sha256sum --check "$SUMS"

@@ -73,9 +73,9 @@ Strict tooling through [Vite+](https://viteplus.dev), configured in `vite.config
 
 ### Stable surface
 
-The routes covered by constitution principle I, the one list of them (AGENTS.md and README link
-here). Each one meets principle I's criteria: an OpenAI-defined route, checked against the pinned
-spec, described in `openapi.json`, documented in README and here.
+The routes covered by constitution principle I, the one list of them (AGENTS.md and
+`docs/api.md` link here). Each one meets principle I's criteria: an OpenAI-defined route, checked
+against the pinned spec, described in `openapi.json`, documented in `docs/api.md` and here.
 
 | Route | Since | Decision |
 |---|---|---|
@@ -1643,7 +1643,7 @@ model is not available with the provider login the proxy uses. Choose another mo
 OpenAI's answer for a model an account cannot use, and agent clients move on to another model on
 it; a 502 read as an outage and was retried. The wording is Codex's own and could change: if it
 does, the refusal is a 502 again. The route logs it as an error, as the operator can fix it by
-hiding the model (README, "Exposure modes"). Live, Codex refuses before pi's first event, so a
+hiding the model (`docs/api.md`, "Exposure modes"). Live, Codex refuses before pi's first event, so a
 stream gets the 404 too; a stream that has started gets the same body as its error event.
 
 A streaming request is not answered until pi's first event. pi's adapters emit `start` only once the
@@ -1773,7 +1773,7 @@ share it widely. npmjs comes later, by choice.
   whose package is missing.
 - **Installing needs a token.** GitHub Packages requires a classic personal access token with
   `read:packages` to install any package, public ones included, unlike GHCR. Every user sets the
-  `@vx-daniel` scope and the token in `~/.npmrc` once (README, "Installation").
+  `@vx-daniel` scope and the token in `~/.npmrc` once (`docs/install.md`, "Installation").
 - **Ruled out, tested with pi 1.3.0:**
   - `pi install git:github.com/vx-daniel/pi-switchboard` clones `dev` and runs
     `npm install --omit=dev`. `dist/` is not in git, and `prepare` needs the dev dependencies,
@@ -1837,13 +1837,15 @@ release workflow, never in `check:all` or the pre-commit hook.
   `dist-bin/SHA256SUMS`; `--windows` cross-compiles `pi-switchboard-windows-x64.exe` and
   `-windows-arm64.exe`, with `dist-bin/SHA256SUMS-windows`. The macOS and Windows binaries are
   unsigned.
-- **Windows, by hand only.** `binary.yml` with `platforms: windows` builds the Windows set, runs
+- **Windows.** `binary.yml` with `platforms: windows` builds the Windows set, runs
   the binary test suite on `windows-latest` against the cross-compiled
   `pi-switchboard-windows-x64.exe` the release gets (`PI_SWITCHBOARD_BINARY` names it, so the
   suite tests the shipped file, not a rebuild), runs `--version` on `windows-latest` and
   `windows-11-arm`, and with a tag uploads the two `.exe` files and `SHA256SUMS-windows` to that
-  release, attested like the others. The release workflow never runs it, to save Actions minutes:
-  a release gets Windows binaries when someone runs it with the release's tag. The test suite
+  release, attested like the others. The release workflow runs both sets for each release, at once
+  (`binary` and `binary-windows`), each set's files in its own artifact (`binaries-unix`,
+  `binaries-windows`): the two calls share the release run, where an artifact name can be uploaded
+  only once. Until 0.4.0 the Windows set was run by hand after the release. The test suite
   starts the binary with `USERPROFILE` and `SystemRoot` as well as `HOME`
   (`test/fixtures/platform-env.ts`): Windows takes the home from `USERPROFILE`, and a process
   without `SystemRoot` cannot open sockets.

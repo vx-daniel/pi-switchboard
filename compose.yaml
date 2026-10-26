@@ -1,4 +1,4 @@
-# pi-switchboard in a container (#60). README.md, "Docker", has the steps: build or pull, log in
+# pi-switchboard in a container (#60). docs/docker.md has the steps: build or pull, log in
 # through pi, start.
 #
 #   export PI_SWITCHBOARD_AUTH_TOKEN="$(openssl rand -hex 32)"

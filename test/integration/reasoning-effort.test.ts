@@ -210,7 +210,7 @@ describe('reasoning_effort "none" on openai-completions follows the model defini
   })
 
   // Catches the proxy overriding the model definition with an effort of its own: a model that
-  // declares no off value says that sending nothing is off (pi's contract; README).
+  // declares no off value says that sending nothing is off (pi's contract; docs/api.md).
   test('a model that declares no off value gets no reasoning_effort', async () => {
     expect(
       await sentField('completions/chat-undeclared-off', 'none', 'reasoning_effort')

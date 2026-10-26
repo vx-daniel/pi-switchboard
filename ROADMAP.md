@@ -138,7 +138,9 @@ Get 0.1.0 into people's hands under the new name.
 - [ ] The same on npmjs, with no token (later, by choice)
 - [x] Docker image built from this repo and published on release (#60): Docker Hub and GHCR, from
       0.1.0
-- [ ] Standalone binary with an opt-in TUI for logs, status and accounts (#61)
+- [x] Standalone binary with an opt-in TUI for logs, status and accounts (#61): Linux, macOS and
+      Windows (x64, arm64) on every release from 0.4.0; a manual check of a real login's token
+      refresh inside the binary is still open on #61
 
 ## Phase 5 — Routing across pi's logins
 
@@ -148,15 +150,17 @@ What the name promises, under constitution principle VI (explicit, visible, expo
 - [x] Fallback chains for aliases (#67)
 - [x] Cooldowns after rate limits (#68); pi already makes no hidden SDK retries; ended early by `DELETE /v1/switchboard/cooldowns` or the console's `c` (#182)
 - [x] Quota awareness from provider rate-limit headers (#69): tracked, shown, and kept in reserve by fallback chains (`routing.reserve`); Anthropic recorded, Codex and Copilot in #238
-- [ ] Usage and cost by route (#70): log tags and in-memory totals done; an HTTP view is undecided
-- [ ] Several logins per provider (#227): `{provider}-N` logins found in pi's store at startup and added from the console; one model, routing picks the login (constitution 3.6.0); a recording through a copy to come
+- [x] Usage and cost by route (#70): log tags, in-memory totals, the stats file and
+      `GET /v1/switchboard/usage` (#225)
+- [x] Several logins per provider (#227): `{provider}-N` logins found in pi's store at startup and added from the console; one model, routing picks the login (constitution 3.6.0); a live recording through a copy, and putting a login first, continue in #233
 
 ## Phase 6 — More of OpenAI's API
 
 Routes OpenAI defines that pi can back, each experimental first and then promoted to PLAN's
 "Stable surface" once it meets principle I.
 
-- [ ] Responses API, stateless (`POST /v1/responses`, #140)
+- [ ] Responses API, stateless (`POST /v1/responses`, #140): in since 0.4.0, experimental and off
+      by default (`--responses-api`); promoted to the stable surface once it has had real use
 - [x] `prompt_cache_key` → pi's `sessionId` (#39)
 
 ## Open decisions

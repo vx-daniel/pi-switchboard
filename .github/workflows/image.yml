@@ -7,8 +7,12 @@ name: Image
 # release; run it by hand to publish a release whose image is missing. A published tag is never
 # overwritten, on either registry.
 #
+# Every action is pinned by commit, with its version in a comment: the job holds the Docker Hub
+# token and pushes the release's image, so a moved tag must not change the code it runs.
+#
 # Needs the DOCKERHUB_TOKEN secret: a Docker Hub personal access token of vxdaniel with read and
-# write access.
+# write access to push the image, and delete as well to update the repository's overview from
+# docker/README.md (Docker Hub asks for all three for that).
 on:
   workflow_call:
     inputs:
@@ -59,7 +63,7 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Check out the release tag
-        uses: actions/checkout@v5
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5.1.0
         with:
           ref: refs/tags/${{ inputs.tag }}
 
@@ -87,13 +91,13 @@ jobs:
           fi
 
       - name: Log in to Docker Hub
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Log in to GHCR
-        uses: docker/login-action@v4
+        uses: docker/login-action@81c6f93d4bc991e510b342a00b419b3bb4efc5c6 # v4.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -117,13 +121,13 @@ jobs:
           done
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
 
       - name: Set up Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build and push
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           # The checked-out tag, not the Git context of the commit that started the workflow.
           context: .
@@ -139,3 +143,20 @@ jobs:
             org.opencontainers.image.version=${{ steps.version.outputs.version }}
             org.opencontainers.image.revision=${{ steps.source.outputs.revision }}
             org.opencontainers.image.licenses=MIT
+
+      # The repository's overview page on Docker Hub, from docker/README.md at the released tag, so
+      # it always describes the image just published. Docker Hub takes it only from a token with
+      # read, write and delete scope. After the push, and allowed to fail: the image is the
+      # release, and a token without that scope must not mark the release failed. The step still
+      # shows as failed, so the overview is not left stale unnoticed.
+      - name: Update the Docker Hub overview
+        continue-on-error: true
+        # Pinned by commit: a third-party action given a token that can write and delete on Docker
+        # Hub, so a moved tag must not change the code it runs. Bump the SHA and the comment together.
+        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5.0.0
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          repository: vxdaniel/pi-switchboard
+          short-description: An OpenAI-compatible HTTP API over pi's models, logins and providers
+          readme-filepath: ./docker/README.md
