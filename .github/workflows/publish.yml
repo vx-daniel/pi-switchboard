@@ -1,13 +1,25 @@
 name: Release
 
+# A release is cut by hand: merge `dev` into `main`, then run this workflow on `main` with the
+# version. Pick it from the commit types since the last release (`fix` a patch, `feat` a minor; while
+# on 0.x a breaking change is a minor too). The run bumps `package.json`, gates that commit, pushes
+# it to `main` with its tag, creates the GitHub release with notes from the merged pull requests, and
+# publishes the image, the package and the binaries from the tag.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
+    inputs:
+      version:
+        description: The version to release, such as 0.5.0 (no `v`); above package.json's
+        required: true
+        type: string
 
 permissions:
   contents: read
+
+# Two runs at once would race to push `main` and the tag.
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -16,12 +28,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      issues: write
-      pull-requests: write
     outputs:
-      tag: ${{ steps.released.outputs.tag }}
+      tag: ${{ steps.version.outputs.tag }}
 
     steps:
+      - name: Release from main only
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Run the release on main, not $GITHUB_REF"
+          exit 1
+
       - name: Check out repository
         uses: actions/checkout@v5
         with:
@@ -36,40 +52,73 @@ jobs:
         env:
           VP_GIT_HOOKS: '0'
 
-      # The same gate as CI and the pre-commit hook (scripts/gate.ts): nothing is published that
-      # would not pass a pull request.
+      # The input reaches the script through the environment, never through `${{ }}` in the script.
+      - name: Check the version
+        id: version
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          if ! printf '%s' "$VERSION" | grep -Eqx '[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::Version '$VERSION' is not MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          current="$(node -p 'require("./package.json").version')"
+          highest="$(printf '%s\n%s\n' "$current" "$VERSION" | sort -V | tail -n 1)"
+          if [ "$VERSION" = "$current" ] || [ "$highest" != "$VERSION" ]; then
+            echo "::error::Version $VERSION is not above package.json's $current"
+            exit 1
+          fi
+          tag="pi-switchboard-v$VERSION"
+          if git rev-parse -q --verify "refs/tags/$tag" > /dev/null; then
+            echo "::error::Tag $tag already exists"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "previous=pi-switchboard-v$current" >> "$GITHUB_OUTPUT"
+
+      - name: Bump package.json
+        env:
+          VERSION: ${{ inputs.version }}
+        run: npm pkg set "version=$VERSION"
+
+      # The same gate as CI and the pre-commit hook (scripts/gate.ts), on the bumped commit: nothing
+      # is published that would not pass a pull request.
       - name: Gate (oxfmt + oxlint + type check + tests + build)
         run: pnpm run check:all
 
       - name: Verify package contents
         run: vp pm pack --json --pack-destination /tmp
 
-      - name: Record the release tags
-        run: git tag --list 'pi-switchboard-v*' | sort > "$RUNNER_TEMP/tags-before"
-
-      - name: Release
-        run: vp exec semantic-release
+      # One atomic push: `main` never has the release commit without its tag, or the reverse.
+      - name: Commit, tag and push
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # semantic-release tags the release commit in this checkout before it pushes, so a new tag
-      # here is this run's release; none means the commits since the last one released nothing.
-      - name: Find this run's release tag
-        id: released
+          VERSION: ${{ inputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          git tag --list 'pi-switchboard-v*' | sort > "$RUNNER_TEMP/tags-after"
-          tag="$(comm -13 "$RUNNER_TEMP/tags-before" "$RUNNER_TEMP/tags-after")"
-          # One release per run: more than one new tag would be a bug, not two images to publish.
-          if [ "$(printf '%s' "$tag" | grep -c .)" -gt 1 ]; then
-            echo "::error::semantic-release created more than one tag: $(printf '%s' "$tag" | tr '\n' ' ')"
-            exit 1
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add package.json
+          git commit -m "chore(release): $VERSION"
+          git tag "$TAG"
+          git push --atomic origin HEAD:main "refs/tags/$TAG"
+
+      # Notes from the pull requests merged since the previous release; binary.yml uploads the
+      # binaries to this release, so it exists before they are built.
+      - name: Create the GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          PREVIOUS: ${{ steps.version.outputs.previous }}
+        run: |
+          if git rev-parse -q --verify "refs/tags/$PREVIOUS" > /dev/null; then
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes --notes-start-tag "$PREVIOUS"
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
           fi
-          echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
   # The container image for the release (#60), built from its tag.
   image:
     needs: release
-    if: needs.release.outputs.tag != ''
     permissions:
       contents: read
       packages: write
@@ -82,7 +131,6 @@ jobs:
   # The pi package for the release (#59), on GitHub Packages' npm registry, built from its tag.
   package:
     needs: release
-    if: needs.release.outputs.tag != ''
     permissions:
       contents: read
       packages: write
@@ -95,7 +143,6 @@ jobs:
   # macOS set here, the Windows set in `binary-windows`, both at once.
   binary:
     needs: release
-    if: needs.release.outputs.tag != ''
     permissions:
       contents: write
       id-token: write
@@ -108,7 +155,6 @@ jobs:
   # The Windows binaries for the release, tested with the binary test suite on a Windows runner.
   binary-windows:
     needs: release
-    if: needs.release.outputs.tag != ''
     permissions:
       contents: write
       id-token: write

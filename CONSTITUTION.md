@@ -1,22 +1,26 @@
 <!--
 Sync Impact Report
-Version change: 3.8.0 → 3.9.0 (MINOR)
-Rationale: a `proxy-config.json` that existed but could not be read or parsed was replaced by the
-defaults, whose `authToken` is `''`: a token the file held became auth off, logged at `warn`, and
-the next save wrote `''` over the file. Principle III's exception now names this case: with no
-flag or env var token, such a file refuses to start, as the other unusable-auth causes do. A
-missing file still starts with the defaults.
-MINOR: materially expanded guidance (a fourth cause that refuses to start); no principle added or
-removed.
+Version change: 3.9.0 → 3.10.0 (MINOR)
+Rationale: semantic-release was carried over from the fork and pulled about 1,900 lockfile lines
+of release-only dependencies, the source of 29 Dependabot alerts (two critical), for one release
+every few days by one maintainer. Releases are now cut by hand: the maintainer runs the release
+workflow on `main` with the version. Merging `dev` into `main` no longer releases by itself.
+MINOR: materially changed guidance in principle V (how a release happens and why the commit type
+matters); no principle added or removed.
 Modified sections:
-- II. Validate at Boundaries: the operator-configuration exception lists a config file that
-  exists but cannot be read or is not valid JSON, with no override token
+- V. Release Hygiene and Traceability: the commit type matters because the maintainer picks each
+  release's version from it, not because semantic-release derives it; a release is a manual run
+  of the release workflow on `main`
 Templates requiring updates:
-- ✅ PLAN.md: "Proxy authentication" names the cause and `configFileProblem`
-- ✅ README.md: the config file paragraph and "Proxy authentication"
-- ✅ AGENTS.md: no change needed; it does not list the causes
+- ✅ AGENTS.md: the git workflow's `main` rule and the CI list
+- ✅ PLAN.md: "Tooling and type safety" (CI, Releases)
+- ✅ CONTRIBUTING.md: "Releasing"; README.md: links the releases, not `CHANGELOG.md`
+- ✅ CHANGELOG.md: frozen at 0.4.0, points to GitHub Releases
 Follow-up TODOs:
 - None.
+
+3.9.0 (2026-10-23): principle III's exception names a `proxy-config.json` that exists but cannot
+be read or parsed, with no override token: it refuses to start, where it used to turn auth off.
 
 3.8.0 (2026-10-23): #182's `DELETE /v1/switchboard/cooldowns`, the first non-standard route that
 writes state, and what it may change.
@@ -149,7 +153,7 @@ Rationale: model identity and auth headers are the two places where ambiguity ca
 ### V. Release Hygiene and Traceability
 Behavior changes MUST be reflected in the same change in the durable project docs that their guidance touches: `README.md` (operator-facing behavior), `PLAN.md` (architecture, compatibility policy, security boundaries), `TODO.md`, `ROADMAP.md`, and `AGENTS.md` (the always-loaded agent rules; `CLAUDE.md` is a symlink to it).
 
-Commits SHOULD stay small and reviewable and MUST follow Conventional Commits. The commit type MUST match the change, because semantic-release derives versions from it: a behavior change is `fix` or `feat` (or carries `BREAKING CHANGE`), never `refactor` or `chore`. Releases follow semantic versioning, happen only when `dev` is merged into `main`, and that merge is the maintainer's decision.
+Commits SHOULD stay small and reviewable and MUST follow Conventional Commits. The commit type MUST match the change, because the maintainer picks each release's version from the commit types since the last one: a behavior change is `fix` or `feat` (or carries `BREAKING CHANGE`), never `refactor` or `chore`. Releases follow semantic versioning; while on 0.x a breaking change bumps the minor version. A release is cut only from `main`, after `dev` is merged into it, by running the release workflow with the version; the merge and the release are the maintainer's decisions.
 
 Rationale: the proxy's public contract is documentation-heavy. If behavior changes without synchronized docs and verification, downstream users and agents will diverge from the real system.
 
@@ -202,4 +206,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.9.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23
+**Version**: 3.10.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-26

@@ -70,7 +70,7 @@ A request for `"model": "coding"` goes to Claude Opus, and to Codex when Opus is
 
 Everything else is in [`docs/`](docs/README.md): installing, configuration, the HTTP API, routing, logins, the console, the pi extension and security.
 
-Working on pi-switchboard: [CONTRIBUTING.md](CONTRIBUTING.md), [CHANGELOG.md](CHANGELOG.md), [ROADMAP.md](ROADMAP.md), and the principles in [CONSTITUTION.md](CONSTITUTION.md).
+Working on pi-switchboard: [CONTRIBUTING.md](CONTRIBUTING.md), the [releases](https://github.com/vx-daniel/pi-switchboard/releases), [ROADMAP.md](ROADMAP.md), and the principles in [CONSTITUTION.md](CONSTITUTION.md).
 
 ## Attribution
 
