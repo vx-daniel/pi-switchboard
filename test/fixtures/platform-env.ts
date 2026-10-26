@@ -9,8 +9,8 @@ import { resolve } from 'node:path'
 
 /**
  * Returns the binary the tests run: `PI_SWITCHBOARD_BINARY` when set (the Windows workflow job
- * points it at the cross-compiled release file it downloaded), else the host build
- * `pnpm run build:binary` writes.
+ * points it at the release file it downloaded), else the host build `pnpm run build:binary`
+ * writes.
  *
  * @returns the binary's absolute path
  */
