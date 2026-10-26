@@ -149,6 +149,21 @@ export function badge(text: string): string {
 }
 
 /**
+ * Marks a badge that warns (#287): bold warning text on the pending background, or bold error text
+ * on the error background. The text must say what is wrong by itself, since `NO_COLOR` leaves it
+ * plain.
+ *
+ * @param level - how serious: `warning` or `error`
+ * @param text - the badge's text, with its own padding
+ * @returns the badge, marked when a theme is installed
+ */
+export function alertBadge(level: 'warning' | 'error', text: string): string {
+  if (active === undefined) return text
+  const background = level === 'error' ? 'toolErrorBg' : 'toolPendingBg'
+  return active.bg(background, strong(active.fg(level, text)))
+}
+
+/**
  * Draws a key as a raised chip in the footer: bold on the selection background, as
  * {@link highlight} does, in the plain text color so it reads as a key, not a selected item.
  *
