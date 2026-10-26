@@ -36,6 +36,7 @@ import {
 } from '@proxy/logging'
 import { getAvailableModels } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { recordStatsToFile } from '@proxy/stats/recorder'
 import type * as z from 'zod'
@@ -402,12 +403,16 @@ export async function openServer(
     server.once('error', failed)
     server.once('listening', listening)
   })
+  const modelCount = getAvailableModels().length
   lifecycleLogger.info('Listening on http://{host}:{port} with {modelCount} models', {
     host: config.host,
     port: config.port,
-    modelCount: getAvailableModels().length,
+    modelCount,
     logLevel: config.logLevel
   })
+  recordConsoleEvent(
+    `Listening on http://${config.host}:${String(config.port)} with ${String(modelCount)} models`
+  )
   return server
 }
 

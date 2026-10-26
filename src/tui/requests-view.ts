@@ -11,14 +11,17 @@
  * drop on a narrow view: the ID first, then the first event, then the duration; the models go when
  * they would be narrower than {@link MODEL_LEAST_COLUMNS}.
  *
- * The view follows new requests, or is pinned to a request (by its place in the order) while new
- * ones arrive, as the raw log is pinned to a line.
+ * The view follows new requests, or is pinned to a row (by its place in the order) while new ones
+ * arrive, as the raw log is pinned to a line. Lifecycle events (`console-events.ts`, #266) share
+ * that order and show among the requests as quiet divider rows; a request in flight shows a
+ * spinner that moves on with the console's one-second redraw.
  *
  * @packageDocumentation
  */
 
-import { truncateToWidth } from '@earendil-works/pi-tui'
+import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import type { ActiveRequest, FinishedRequest } from '@proxy/server/active-requests'
+import type { ConsoleEvent, ConsoleEventLevel } from '@proxy/server/console-events'
 import type { HttpRequest } from '@proxy/server/http-requests'
 import { REQUEST_ID_PREFIX } from '@proxy/server/request-id'
 import { gauge, latency } from '@proxy/tui/panel'
@@ -126,14 +129,24 @@ function statusColor(status: number): ConsoleColor {
   return 'success'
 }
 
+/** The in-flight mark's frames, one per second as the console redraws (#266). */
+const SPINNER = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏'] as const
+/** Milliseconds each spinner frame shows: the console redraws every second. */
+const SPINNER_FRAME_MS = 1000
+
 /**
- * Renders the status badge, or a mark while the request is in flight.
+ * Renders the status badge, or while the request is in flight a spinner that moves on with the
+ * console's one-second redraw.
  *
  * @param request - the request
+ * @param now - the time now, which picks the spinner's frame
  * @returns the cell
  */
-function statusCell(request: HttpRequest): string {
-  if (request.status === undefined) return strong(paint('warning', ' ··· '))
+function statusCell(request: HttpRequest, now: number): string {
+  if (request.status === undefined) {
+    const frame = SPINNER[Math.floor(now / SPINNER_FRAME_MS) % SPINNER.length] ?? SPINNER[0]
+    return strong(paint('warning', `  ${frame}  `))
+  }
   return strong(paint(statusColor(request.status), ` ${String(request.status)} `))
 }
 
@@ -249,7 +262,7 @@ function requestRow(
 ): string {
   const cells: (readonly [string, number])[] = [
     [paint('dim', timeOfDay(request.startedAt)), COLUMNS.time],
-    [statusCell(request), COLUMNS.status],
+    [statusCell(request, now), COLUMNS.status],
     [strong(request.method), COLUMNS.method],
     [request.path, layout.path]
   ]
@@ -258,6 +271,57 @@ function requestRow(
   if (layout.firstEvent) cells.push([firstEventCell(request, chat), FIRST_EVENT_COLUMNS])
   if (layout.id) cells.push([idCell(request.requestId), ID_COLUMNS])
   return joinCells(cells)
+}
+
+/** Each event level's mark and color: info quiet, a warning or an error in its color. */
+const EVENT_STYLE: Readonly<
+  Record<ConsoleEventLevel, { readonly mark: string; readonly color: ConsoleColor }>
+> = {
+  info: { mark: '◇', color: 'dim' },
+  warning: { mark: '◆', color: 'warning' },
+  error: { mark: '◆', color: 'error' }
+}
+
+/**
+ * Renders a lifecycle event as a divider among the requests (#266): its time, its mark and what
+ * happened, then a dotted rule to the row's end.
+ *
+ * @param event - the event
+ * @param width - the row's columns
+ * @returns the row
+ */
+function eventRow(event: ConsoleEvent, width: number): string {
+  const { mark, color } = EVENT_STYLE[event.level]
+  const text = `${mark} ${event.text} `
+  const rule = '┄'.repeat(Math.max(0, width - COLUMNS.time - GAP.length - visibleWidth(text)))
+  return `${paint('dim', timeOfDay(event.at))}${GAP}${paint(color, `${text}${rule}`)}`
+}
+
+/** A row of the table: an HTTP request, or a lifecycle event among them. */
+export type TableEntry = HttpRequest | ConsoleEvent
+
+/**
+ * Checks whether a row is a lifecycle event.
+ *
+ * @param entry - the row
+ * @returns whether it is an event
+ */
+function isEvent(entry: TableEntry): entry is ConsoleEvent {
+  return entry.kind === 'event'
+}
+
+/**
+ * Merges the requests and the events into the table's rows, in the order they share.
+ *
+ * @param requests - the HTTP requests
+ * @param events - the lifecycle events
+ * @returns the rows, oldest first
+ */
+export function tableEntries(
+  requests: readonly HttpRequest[],
+  events: readonly ConsoleEvent[]
+): TableEntry[] {
+  return [...requests, ...events].toSorted((left, right) => left.sequence - right.sequence)
 }
 
 /**
@@ -281,57 +345,63 @@ function headingRow(layout: Layout): string {
 }
 
 /**
- * Finds where a pinned view ends: the last request at or before its place in the order, which may
+ * Finds where a pinned view ends: the last row at or before its place in the order, which may
  * have been dropped since.
  *
  * @param view - the pinned view
- * @param requests - the requests, oldest first
- * @returns the index of the last request shown; 0 when every request before it was dropped
+ * @param entries - the rows, oldest first
+ * @returns the index of the last row shown; 0 when every row before it was dropped
  */
-function pinnedIndex(view: { readonly last: number }, requests: readonly HttpRequest[]): number {
+function pinnedIndex(
+  view: { readonly last: number },
+  entries: readonly { readonly sequence: number }[]
+): number {
   return Math.max(
     0,
-    requests.findLastIndex((request) => request.sequence <= view.last)
+    entries.findLastIndex((entry) => entry.sequence <= view.last)
   )
 }
 
 /**
- * Scrolls the table by some requests, pinning it when it leaves the newest and following again
- * when it reaches it.
+ * Scrolls the table by some rows, pinning it when it leaves the newest and following again when
+ * it reaches it.
  *
  * @param view - where the view is
- * @param requests - the requests, oldest first
- * @param lines - requests to scroll up (positive) or down (negative)
+ * @param entries - the rows, requests and events, oldest first ({@link tableEntries})
+ * @param lines - rows to scroll up (positive) or down (negative)
  * @returns where the view is now
  */
 export function scrollRequestsView(
   view: RequestsViewport,
-  requests: readonly HttpRequest[],
+  entries: readonly { readonly sequence: number }[],
   lines: number
 ): RequestsViewport {
-  const last = view === undefined ? requests.length - 1 : pinnedIndex(view, requests)
+  const last = view === undefined ? entries.length - 1 : pinnedIndex(view, entries)
   const target = last - lines
-  if (target >= requests.length - 1) return undefined
-  const request = requests[Math.max(0, target)]
-  return request === undefined ? undefined : { last: request.sequence }
+  if (target >= entries.length - 1) return undefined
+  const entry = entries[Math.max(0, target)]
+  return entry === undefined ? undefined : { last: entry.sequence }
 }
 
 /** What the Requests table shows. */
 export interface RequestsData {
   /** The HTTP requests, oldest first. */
   readonly requests: readonly HttpRequest[]
+  /** The lifecycle events, oldest first, shown among the requests in the order they share. */
+  readonly events: readonly ConsoleEvent[]
   /** The chat requests, in flight and finished, by request ID. */
   readonly chats: ReadonlyMap<string, ChatRequest>
-  /** The time now, for the requests in flight. */
+  /** The time now, for the requests in flight and the spinner. */
   readonly now: number
 }
 
 /**
- * Renders the Requests table: a heading, then the requests that fit, newest at the bottom once
- * they fill the height.
+ * Renders the Requests table: a heading, then the rows that fit, requests and lifecycle events in
+ * the order they happened, newest at the bottom once they fill the height; with no request yet,
+ * a line under the events says so.
  *
  * @param view - where the view is
- * @param data - the requests, their chat requests, and the time now
+ * @param data - the requests, the events, the chat requests, and the time now
  * @param size - the space available
  * @param size.height - rows
  * @param size.width - columns
@@ -342,19 +412,23 @@ export function requestsRows(
   data: RequestsData,
   size: { readonly height: number; readonly width: number }
 ): string[] {
-  const { requests, chats, now } = data
+  const { chats, now } = data
   const layout = layoutFor(size.width)
-  const visible = Math.max(0, size.height - 1)
+  const entries = tableEntries(data.requests, data.events)
+  const hint = data.requests.length === 0 ? [paint('dim', 'No requests yet.')] : []
+  const visible = Math.max(0, size.height - 1 - hint.length)
   const end =
     view === undefined
-      ? requests.length
-      : Math.max(pinnedIndex(view, requests) + 1, Math.min(visible, requests.length))
-  const shown = requests.slice(Math.max(0, end - visible), end)
-  const body =
-    requests.length === 0
-      ? [paint('dim', 'No requests yet.')]
-      : shown.map((request) => requestRow(request, chats.get(request.requestId), layout, now))
-  return [headingRow(layout), ...body]
+      ? entries.length
+      : Math.max(pinnedIndex(view, entries) + 1, Math.min(visible, entries.length))
+  const body = entries
+    .slice(Math.max(0, end - visible), end)
+    .map((tableEntry) =>
+      isEvent(tableEntry)
+        ? eventRow(tableEntry, size.width)
+        : requestRow(tableEntry, chats.get(tableEntry.requestId), layout, now)
+    )
+  return [headingRow(layout), ...body, ...hint]
     .slice(0, Math.max(0, size.height))
     .map((row) => truncateToWidth(row, size.width, '…', true))
 }

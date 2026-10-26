@@ -23,6 +23,7 @@ import {
   registerStoredAccounts,
   unregisterAccountProvider
 } from '@proxy/pi/accounts'
+import { consoleEvents } from '@proxy/server/console-events'
 import { describe, expect, test } from 'vite-plus/test'
 
 /**
@@ -264,6 +265,8 @@ describe('registerAccountProvider', () => {
     const { runtime, ids } = fakeRuntime([], ['anthropic'])
 
     expect(registerAccountProvider(runtime, 'anthropic-2')).toBe(true)
+    // The console's Requests table says a login slot was added (#266).
+    expect(consoleEvents().at(-1)?.text).toBe('Registered anthropic-2 as a login of anthropic')
     expect(registerAccountProvider(runtime, 'anthropic-2')).toBe(false)
     expect(registerAccountProvider(runtime, 'no-such-provider-2')).toBe(false)
     expect(registerAccountProvider(runtime, 'anthropic')).toBe(false)

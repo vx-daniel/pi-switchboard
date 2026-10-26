@@ -2001,7 +2001,13 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   84). The table follows new requests, or stays pinned to a request by its place in the order
   (not by its distance from the bottom) while new ones arrive. `r` switches between it and the raw
   log, each keeping its own position; the mouse wheel scrolls whichever is shown
-  (`wheelLines`).
+  (`wheelLines`). Lifecycle events (`console-events.ts`, #266: listening, stats on or off, a
+  login slot registered, a login or logout from the console, a restart and a failed
+  one) show among the requests as divider rows, the last 100 kept, never a credential. They take
+  their place in the order from the counter the requests take theirs from (`takeSequence`), so
+  the table merges the two by it and a view pinned to a row stays on it whichever kind it is. A
+  request in flight shows a braille spinner whose frame is the second, moved on by the console's
+  one-second redraw.
 - **Raw log.** LogTape writes into a bounded buffer (`log-buffer.ts`, 5000 lines) instead of stderr,
   with the same redaction, in the `console` layout of the pretty format: the time only, and the
   category without the `pi-switchboard` root, 16 columns wide, so the message starts at column 42.

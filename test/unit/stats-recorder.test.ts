@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import type { Usage } from '@earendil-works/pi-ai'
 import { beginActiveRequest, recordRejectedRequest } from '@proxy/server/active-requests'
+import { consoleEvents } from '@proxy/server/console-events'
 import {
   recordRouteAttempt,
   recordRouteFailure,
@@ -186,8 +187,8 @@ describe('the stats recorder', () => {
   })
 
   // Catches an agent dir the proxy can't write to stopping the proxy, instead of running it
-  // without stats.
-  test('runs without stats when the file cannot be opened', () => {
+  // without stats, or doing so without the console's Requests table saying why (#266).
+  test('runs without stats when the file cannot be opened, and says so in the console', () => {
     const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
     directories.push(directory)
     const notADirectory = join(directory, 'file')
@@ -195,5 +196,9 @@ describe('the stats recorder', () => {
     vi.stubEnv('PI_CODING_AGENT_DIR', join(notADirectory, 'agent'))
 
     expect(recordStatsToFile()).toBeUndefined()
+    expect(consoleEvents().at(-1)).toMatchObject({
+      level: 'warning',
+      text: expect.stringMatching(/^Stats are off: could not open .*pi-switchboard-stats\.sqlite$/u)
+    })
   })
 })

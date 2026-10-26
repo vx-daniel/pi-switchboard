@@ -36,6 +36,7 @@ import {
   finishedRequests,
   onActiveRequestsChange
 } from '@proxy/server/active-requests'
+import { consoleEvents, onConsoleEventsChange } from '@proxy/server/console-events'
 import { httpRequests, onHttpRequestsChange } from '@proxy/server/http-requests'
 import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
@@ -80,7 +81,7 @@ import {
   type RestartReport,
   startConsoleServer
 } from '@proxy/tui/proxy-server'
-import { chatsById, requestsRows, scrollRequestsView } from '@proxy/tui/requests-view'
+import { chatsById, requestsRows, scrollRequestsView, tableEntries } from '@proxy/tui/requests-view'
 import { consoleScreen } from '@proxy/tui/screen'
 import { SETTING_KEYS, settingsViewRows } from '@proxy/tui/settings-view'
 import { type SidebarInput, sidebarRows } from '@proxy/tui/sidebar'
@@ -282,6 +283,7 @@ function logsRows(
   if (state.logRaw) return logViewRows(state.logView, logs, size)
   const data = {
     requests: httpRequests(),
+    events: consoleEvents(),
     chats: chatsById(activeRequests(), finishedRequests()),
     now: Date.now()
   }
@@ -297,7 +299,10 @@ function logsRows(
 function scrollLogs(context: ConsoleContext, lines: number): void {
   const { state } = context
   if (state.logRaw) state.logView = scrollLogView(state.logView, context.logs, lines)
-  else state.requestsView = scrollRequestsView(state.requestsView, httpRequests(), lines)
+  else {
+    const entries = tableEntries(httpRequests(), consoleEvents())
+    state.requestsView = scrollRequestsView(state.requestsView, entries, lines)
+  }
 }
 
 /** The space a view's body has: rows and columns. */
@@ -552,6 +557,7 @@ function startUpdates(context: ConsoleContext, server: ConsoleServer): () => voi
   const unsubscribeTotals = onRouteTotalsChange(redraw)
   const unsubscribeActive = onActiveRequestsChange(redraw)
   const unsubscribeHttp = onHttpRequestsChange(redraw)
+  const unsubscribeEvents = onConsoleEventsChange(redraw)
   const timer = setInterval(
     () => inBackground(context.refresh(), 'Reading the status'),
     STATUS_REFRESH_MS
@@ -570,6 +576,7 @@ function startUpdates(context: ConsoleContext, server: ConsoleServer): () => voi
     unsubscribeTotals()
     unsubscribeActive()
     unsubscribeHttp()
+    unsubscribeEvents()
     restoreStderr()
   }
 }

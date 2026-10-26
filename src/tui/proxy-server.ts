@@ -16,6 +16,7 @@ import type { ServerType } from '@hono/node-server'
 import type { LogLevel } from '@logtape/logtape'
 import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { logEffectiveConfig, openServer } from '@proxy/server/startup'
 import { recordStatsToFile } from '@proxy/stats/recorder'
@@ -169,6 +170,7 @@ export async function startConsoleServer(
     server: () => server,
     restart: async (next) => {
       lifecycleLogger.info('Restarting on {host}:{port}', { host: next.host, port: next.port })
+      recordConsoleEvent(`Restarting on ${next.host}:${String(next.port)}`)
       const sameAddress = next.host === config.host && next.port === config.port
       const outcome = sameAddress ? await rebind(next) : await moveTo(next)
       if (outcome.kind === 'restarted') lifecycleLogger.info('Restarted')
@@ -196,6 +198,10 @@ function kept(next: ServerConfig, failure: unknown): RestartOutcome {
     port: next.port,
     error: reason
   })
+  recordConsoleEvent(
+    `Cannot listen on ${next.host}:${String(next.port)}: ${reason}; still serving the old config`,
+    'error'
+  )
   return { kind: 'kept', reason }
 }
 

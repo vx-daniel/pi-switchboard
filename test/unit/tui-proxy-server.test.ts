@@ -11,6 +11,7 @@ import { createServer, type Server } from 'node:http'
 import { createServer as createNetServer, type Server as NetServer } from 'node:net'
 
 import type { ServerConfig } from '@proxy/config/env'
+import { consoleEvents } from '@proxy/server/console-events'
 import { createProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import type { StatsView } from '@proxy/tui/dashboard'
 import {
@@ -142,6 +143,7 @@ describe('startConsoleServer', () => {
       'stats 1 off',
       'stats 2 on'
     ])
+    expect(consoleEvents().at(-1)?.text).toBe(`Restarting on 127.0.0.1:${String(to)}`)
     server.close()
   })
 
@@ -164,6 +166,16 @@ describe('startConsoleServer', () => {
     expect(server.server().listening).toBe(true)
     expect(auth.current()).toEqual({ kind: 'off' })
     expect(events).toEqual([`listen ${String(from)}`, 'stats 1 on'])
+    // The Requests table says why the restart didn't happen (#266).
+    expect(consoleEvents().at(-1)).toMatchObject({
+      level: 'error',
+      text: expect.stringMatching(
+        new RegExp(
+          `^Cannot listen on 127\\.0\\.0\\.1:${String(taken)}: .*EADDRINUSE.*; still serving the old config$`,
+          'u'
+        )
+      )
+    })
     server.close()
   })
 
