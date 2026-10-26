@@ -13,7 +13,7 @@ A setting can come from four places. The first one that sets it wins: **flag > e
 | **`proxy-config.json`** | Repaired, never refused: a number is clamped to its range, a list or map keeps its valid entries, anything else takes its default, and one warning names the fields. Two exceptions stop the proxy from starting, both about the auth token: an `authToken` that is not a string, and a file that can't be read or parsed while no flag or variable sets the token ([Proxy authentication](#proxy-authentication)) |
 | **Default** | The value in the table below |
 
-The file is also written for you: the pi extension's settings panel (`/proxy config`) saves every setting there, and the console (`pi-switchboard tui`) saves the auth token (`p`), aliases (Models view) and login labels. `pi-switchboard --config` prints the file's contents; flags and variables are not applied to what it shows.
+The file is also written for you: the pi extension's settings panel (`/proxy config`) saves every setting there, and the console (`pi-switchboard tui`) saves every setting but `lifetime` and `zed` from its Settings view (`5`), aliases from its Models view and login labels from its Accounts view, and restarts its server to apply the ones read at startup ([The console](console.md#the-console-logs-logins-and-status-at-a-terminal)). `pi-switchboard --config` prints the file's contents; flags and variables are not applied to what it shows.
 
 ## Where the files are
 
@@ -121,7 +121,7 @@ From pi's `settings.json` the proxy reads only `enabledModels`, for `scoped` exp
 
 ## What the proxy adds
 
-Proxy-specific settings are configured via CLI flags, environment variables, the JSON config file (`~/.pi/agent/proxy-config.json`), or the `/proxy config` panel (when installed as a pi package). Priority: flag > env var > config file > default:
+Proxy-specific settings are configured via CLI flags, environment variables, the JSON config file (`~/.pi/agent/proxy-config.json`), the console's Settings view (`pi-switchboard tui`, `5`), or the `/proxy config` panel (when installed as a pi package). Priority: flag > env var > config file > default:
 
 | Setting | Env variable | Default | Description |
 |---|---|---|---|
