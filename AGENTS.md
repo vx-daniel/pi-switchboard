@@ -105,7 +105,7 @@ Hook-backed workflow already exists (`.vite-hooks/`, installed by `vp config` on
 - `pre-commit` -> `pnpm run check:all` over the working tree
 - `pre-push` -> lockfile sync check
 
-CI (`.github/workflows/`): `ci.yml` (`gate`, pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks over every pushed commit), `claude-pr-review.yml` (manual Claude review; needs the `CLAUDE_CODE_OAUTH_TOKEN` secret), `publish.yml` (release on `main`, then `image.yml` and `package.yml` for the new tag).
+CI (`.github/workflows/`): `ci.yml` (`gate`, pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks over every pushed commit), `claude-pr-review.yml` (manual Claude review; needs the `CLAUDE_CODE_OAUTH_TOKEN` secret), `publish.yml` (the release, run by hand on `main` with the version; then `image.yml`, `package.yml` and `binary.yml` for the new tag).
 
 Do not weaken these hooks or workflows unless the user asks.
 
@@ -116,7 +116,7 @@ Repository preference:
 - Make **frequent small commits** for logical slices.
 - Use **Conventional Commits**.
 - Normal collaboration model is **feature branches + PRs into `dev`**. Pushing feature branches is safe once the task is complete and verified.
-- **Never push or merge to `main` directly.** Every push to `main` runs the release workflow (semantic-release). Releases happen only when `dev` is merged into `main`, and that merge is the user's decision.
+- **Never push or merge to `main` directly.** `dev` is merged into `main` by the user, and a release is cut only when the user runs the release workflow (`publish.yml`) on `main` with a version; both are the user's decision.
 
 Practical guidance:
 

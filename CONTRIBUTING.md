@@ -31,6 +31,15 @@ Offline tests run with pi pointed at an empty agent directory and credential env
 - **pnpm** — package manager, driven by `vp`
 - **Node.js** — runtime (`@hono/node-server`)
 - **commitlint** — conventional commits (`commit-msg` hook)
-- **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`, plus the `binary` job, which builds and tests the standalone binary with Bun), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (release on `main`, then the image, package and binaries)
+- **GitHub Actions** — `ci.yml` (the gate on pull requests into `dev`/`main` and pushes to `dev`, plus the `binary` job, which builds and tests the standalone binary with Bun), `secret-scan.yml` (gitleaks on every pushed commit), `claude-pr-review.yml` (manual Claude review), `publish.yml` (the release, run by hand on `main`, then the image, package and binaries)
 - **Bun** — build-only: compiles the standalone binary (`scripts/build-binary.ts`, `src/standalone/main.ts`); nothing else runs on it
-- **semantic-release** — automated versioning, GitHub releases and the changelog; the release workflow then publishes the image, the pi package on GitHub Packages and the binaries (npmjs is [#59](https://github.com/vx-daniel/pi-switchboard/issues/59))
+
+### Releasing
+
+A release is cut by hand, by the maintainer:
+
+1. Merge `dev` into `main`.
+2. Pick the version from the commit types since the last release: `fix` is a patch, `feat` a minor. While on 0.x a breaking change is a minor too; 1.0.0 is released deliberately.
+3. Run the release workflow on `main`: `gh workflow run publish.yml --ref main -f version=0.5.0`.
+
+The run refuses a version that is not above `package.json`'s or whose tag exists. It bumps `package.json`, runs the gate on that commit, pushes it to `main` with its `pi-switchboard-v<version>` tag, and creates the GitHub release with notes generated from the merged pull requests. Then it publishes the image, the pi package on GitHub Packages and the binaries from the tag (npmjs is [#59](https://github.com/vx-daniel/pi-switchboard/issues/59)). Merge `main` back into `dev` afterwards so `dev` has the version. The [GitHub releases](https://github.com/vx-daniel/pi-switchboard/releases) are the changelog; `CHANGELOG.md` ends at 0.4.0.
