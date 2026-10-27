@@ -19,6 +19,7 @@
  */
 
 import {
+  emptyArraySchema,
   MAX_TEMPERATURE,
   PROMPT_CACHE_KEY_MAX_LENGTH,
   promptCacheBreakpointSchema,
@@ -59,8 +60,8 @@ const outputTextPartSchema = z
   .object({
     type: z.literal('output_text'),
     text: textSchema,
-    annotations: z.tuple([]).optional(),
-    logprobs: z.tuple([]).optional()
+    annotations: emptyArraySchema.optional(),
+    logprobs: emptyArraySchema.optional()
   })
   .strict()
 

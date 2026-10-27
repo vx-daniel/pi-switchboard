@@ -364,7 +364,8 @@ export const docsPageDescription: DescribeRouteOptions = {
 
 /**
  * Documents the unsupported endpoints by hand: hono-openapi leaves wildcard routes out, and an
- * `ALL` route has no method to document. Each gets `GET` and `POST`, marked deprecated.
+ * `ALL` route has no method to document. Each gets `GET` and `POST`, marked deprecated, with the
+ * 401 every `/v1` route answers before the 404 while proxy auth is on.
  *
  * @returns the path items, keyed by OpenAPI path (`/*` as a `{path}` parameter)
  */
@@ -386,9 +387,13 @@ function unsupportedPaths(): Record<string, Record<string, unknown>> {
           tags: [NOT_SUPPORTED_TAG],
           summary: 'Not supported by this proxy',
           description:
-            'Any method answers 404 `invalid_request_error`; nothing reaches a provider.',
+            'Any method answers 404 `invalid_request_error`; nothing reaches a provider. ' +
+            'With proxy auth on, a request without the token gets the 401 first.',
           deprecated: true,
-          responses: { 404: { $ref: `#/components/responses/${NOT_SUPPORTED_RESPONSE}` } }
+          responses: {
+            401: UNAUTHORIZED,
+            404: { $ref: `#/components/responses/${NOT_SUPPORTED_RESPONSE}` }
+          }
         }
       ])
     )

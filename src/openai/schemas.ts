@@ -108,6 +108,13 @@ const userMessageSchema = z
   .strict()
 
 /**
+ * An array that must be empty: what an SDK echoes back for a response field the proxy never sets
+ * (`annotations`, `logprobs`). Not `z.tuple([])`, whose JSON Schema (`prefixItems: []`) is invalid
+ * under 2020-12 and stops schema-driven tools from testing the routes that use it (#207).
+ */
+export const emptyArraySchema = z.array(z.never()).max(0)
+
+/**
  * An `assistant` message: optional (nullable) text content and optional function tool calls.
  *
  * @remarks
@@ -126,7 +133,7 @@ const assistantMessageSchema = z
     refusal: z.null().optional(),
     audio: z.null().optional(),
     function_call: z.null().optional(),
-    annotations: z.tuple([]).nullable().optional(),
+    annotations: emptyArraySchema.nullable().optional(),
     tool_calls: z
       .array(
         z
