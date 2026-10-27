@@ -307,6 +307,7 @@ describe('normalizeConfig', () => {
       port: 9090,
       lifetime: 'session',
       authToken: 'tok',
+      hostOriginGuard: true,
       remoteImages: true,
       docsUi: true,
       responsesApi: true,

@@ -20,9 +20,11 @@ import {
   UnusableProxyAuthError
 } from '@proxy/config/env'
 import {
+  authOffRisk,
   describeConfigFileProblem,
   getConfigPath,
   intBounds,
+  isLoopbackHost,
   parseIntText,
   ProxyConfigSchema
 } from '@proxy/config/schema'
@@ -69,6 +71,11 @@ export const SERVER_ARGS = {
     type: 'string',
     description: 'Bearer token for proxy authentication'
   },
+  'host-origin-guard': {
+    type: 'boolean',
+    description:
+      'Refuse requests a web page could send: a Host a DNS-rebinding page would use, or another Origin (off by default)'
+  },
   'remote-images': {
     type: 'boolean',
     description:
@@ -108,6 +115,7 @@ export interface CliArgs {
   'host'?: string | undefined
   'port'?: string | undefined
   'auth-token'?: string | undefined
+  'host-origin-guard'?: boolean | undefined
   'remote-images'?: boolean | undefined
   'docs-ui'?: boolean | undefined
   'responses-api'?: boolean | undefined
@@ -116,16 +124,6 @@ export interface CliArgs {
   'upstream-timeout'?: string | undefined
   'log-level'?: string | undefined
   'log-format'?: string | undefined
-}
-
-/**
- * Checks whether a bind address only accepts connections from this machine.
- *
- * @param host - The bind address.
- * @returns Whether `host` is `localhost`, `::1` or in `127.0.0.0/8`.
- */
-export function isLoopbackHost(host: string): boolean {
-  return host === 'localhost' || host === '::1' || host.startsWith('127.')
 }
 
 /** An integer flag: which flag, which override it sets, and the bounds its value must satisfy. */
@@ -187,6 +185,9 @@ function copyPlainFlags(args: CliArgs, cli: CliOverrides): void {
   }
   if (args['auth-token'] !== undefined) {
     cli.authToken = args['auth-token']
+  }
+  if (args['host-origin-guard'] !== undefined) {
+    cli.hostOriginGuard = args['host-origin-guard']
   }
   if (args['remote-images'] !== undefined) {
     cli.remoteImages = args['remote-images']
@@ -333,8 +334,8 @@ export function loadConfigWithLogging(args: CliArgs, output: LogOutput): ServerC
  * Logs the effective config and how proxy auth is set, never the token itself.
  *
  * @remarks
- * Auth off is a warning when the proxy listens beyond loopback, and debug otherwise; a token needs
- * no line.
+ * Auth off is a warning wherever the proxy listens, saying who can use it ({@link authOffRisk})
+ * and how to stop them; a token needs no line.
  *
  * @param config - the resolved server config
  */
@@ -344,6 +345,7 @@ export function logEffectiveConfig(config: ServerConfig): void {
     host: config.host,
     port: config.port,
     proxyAuthMode: config.proxyAuth.kind,
+    hostOriginGuardEnabled: config.hostOriginGuardEnabled,
     agenticEnabled: config.agenticEnabled,
     remoteImagesEnabled: config.remoteImagesEnabled,
     docsUiEnabled: config.docsUiEnabled,
@@ -358,15 +360,16 @@ export function logEffectiveConfig(config: ServerConfig): void {
     logLevel: config.logLevel
   })
   if (config.proxyAuth.kind === 'token') return
-  if (isLoopbackHost(config.host)) {
-    lifecycleLogger.debug('Proxy auth is disabled: /v1 endpoints accept unauthenticated requests')
-  } else {
-    // Off-loopback without auth is an exposure worth seeing at the default level.
-    lifecycleLogger.warn(
-      'Proxy auth is disabled and the proxy listens on {host}: any client that can reach it can use your provider credentials',
-      { host: config.host }
-    )
-  }
+  // Auth off is a warning wherever the proxy listens (#188): on loopback too, web pages reach it.
+  const advice =
+    isLoopbackHost(config.host) && !config.hostOriginGuardEnabled
+      ? 'Set a token (--auth-token, PI_SWITCHBOARD_AUTH_TOKEN or authToken), or at least turn on the host/origin guard (--host-origin-guard)'
+      : 'Set a token (--auth-token, PI_SWITCHBOARD_AUTH_TOKEN or authToken)'
+  lifecycleLogger.warn('Proxy auth is off on {host}: {risk}. {advice}', {
+    host: config.host,
+    risk: authOffRisk(config.host, config.hostOriginGuardEnabled),
+    advice
+  })
 }
 
 /**

@@ -10,6 +10,7 @@ import { proxyLogger } from '@proxy/logging'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
 import { internalError, invalidRequest } from '@proxy/server/errors'
 import { createHealthRoutes } from '@proxy/server/health'
+import { hostOriginGuardMiddleware } from '@proxy/server/host-origin-guard'
 import { requestLogMiddleware } from '@proxy/server/http-requests'
 import { HTTP_INTERNAL_SERVER_ERROR, HTTP_NOT_FOUND } from '@proxy/server/http-status'
 import {
@@ -53,8 +54,8 @@ const httpLogger = proxyLogger('server', 'http')
  * that runs; `/docs` is outside `/v1`. The docs route is always registered, so the document is
  * the same whatever the config; with `docsUi` off it answers 404.
  *
- * @param config - the server config: proxy auth mode, body size limit, upstream timeout, remote
- *   images, docs UI
+ * @param config - the server config: proxy auth mode, the host/origin guard, body size limit,
+ *   upstream timeout, remote images, docs UI
  * @param configReader - where the model exposure config comes from; `undefined` reads the config
  *   file and pi's settings on each request ({@link fileConfigReader})
  * @param remoteImageFetch - how remote images are fetched when `remoteImagesEnabled` is on;
@@ -79,6 +80,10 @@ export function createApp(
   // Ahead of the body size limit and proxy auth, so a chat request they turn away is recorded too.
   app.use('/v1/chat/completions', rejectedChatMiddleware())
   app.use('/v1/responses', rejectedChatMiddleware())
+  // The host/origin guard (#188), when on: after the request log and the rejected-chat record, so
+  // a refusal is listed; ahead of the body and proxy auth, so it never depends on a token being
+  // set. Every path, `/healthz` and the docs page included.
+  if (config.hostOriginGuardEnabled) app.use('*', hostOriginGuardMiddleware())
   app.use('*', bodySizeLimitMiddleware(config))
 
   // The OpenAPI document and the docs page, open like `/healthz`: registered before proxy auth.

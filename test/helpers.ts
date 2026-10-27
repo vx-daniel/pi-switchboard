@@ -136,6 +136,7 @@ export function testConfig(): ServerConfig {
     host: '127.0.0.1',
     port: 4141,
     proxyAuth: { kind: 'off' },
+    hostOriginGuardEnabled: false,
     agenticEnabled: false,
     remoteImagesEnabled: false,
     docsUiEnabled: false,

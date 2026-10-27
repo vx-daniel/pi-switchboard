@@ -20,10 +20,14 @@ import { randomBytes } from 'node:crypto'
 import { copyToClipboard } from '@earendil-works/pi-coding-agent'
 import type { TuiAltScreen } from '@earendil-works/pi-tui'
 import type { OverrideSource, ServerConfig } from '@proxy/config/env'
-import { getConfigPath, loadConfigFromFile, saveConfigToFile } from '@proxy/config/schema'
+import {
+  authOffRisk,
+  getConfigPath,
+  loadConfigFromFile,
+  saveConfigToFile
+} from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
-import { isLoopbackHost } from '@proxy/server/startup'
 import { askLine, pickAlert, pickLabel } from '@proxy/tui/dialogs'
 import { errorMessage } from '@proxy/utils/guards'
 
@@ -74,8 +78,10 @@ export interface AuthTarget {
   readonly override: OverrideSource | undefined
   /** The token the flag or env var set, to tell it from one set since. */
   readonly overrideToken: string | undefined
-  /** The bind address, to warn when auth goes off beyond this machine. */
+  /** The bind address: who can use the proxy with auth off depends on it. */
   readonly host: string
+  /** Whether the host/origin guard is on, which keeps web pages out with auth off (#188). */
+  readonly hostOriginGuard: boolean
   /** `host:port`, for the menu's title. */
   readonly address: string
 }
@@ -195,12 +201,11 @@ function turnOff(
       source: override
     })
   }
-  if (!isLoopbackHost(target.host)) {
-    authLogger.warn(
-      'The proxy listens on {host}: any client that can reach it can use your provider credentials',
-      { host: target.host }
-    )
-  }
+  // Wherever it listens (#188): on loopback too, web pages can reach it.
+  authLogger.warn('Proxy auth is off on {host}: {risk}', {
+    host: target.host,
+    risk: authOffRisk(target.host, target.hostOriginGuard)
+  })
 }
 
 /**
@@ -256,7 +261,7 @@ export async function runAuthMenu(
   const current = target.proxyAuth.current()
   if (current.kind === 'off') {
     const choice = await screens.select(
-      `Proxy auth is off: any client that can reach ${target.address} can use the proxy.`,
+      `Proxy auth is off on ${target.address}: ${authOffRisk(target.host, target.hostOriginGuard)}.`,
       [ACTIONS.generate, ACTIONS.enter]
     )
     if (choice === ACTIONS.generate) await generate(target, screens, save)
@@ -330,9 +335,7 @@ export async function runAuthOffPrompt(
   save: (token: string) => boolean = saveAuthToken
 ): Promise<void> {
   if (target.proxyAuth.current().kind !== 'off') return
-  const who = isLoopbackHost(target.host)
-    ? 'any program on this machine, and a web page you open, can use your provider logins through it'
-    : 'anyone who can reach it can use your provider logins'
+  const who = authOffRisk(target.host, target.hostOriginGuard)
   const choice = await screens.warn(
     `⚠ Proxy auth is off on ${target.address}: ${who}. Set a token now?`,
     [ACTIONS.generate, ACTIONS.enter, ACTIONS.keepOff]
@@ -360,6 +363,7 @@ function consoleAuth(
       override: config.proxyAuthOverride,
       overrideToken: config.proxyAuth.kind === 'token' ? config.proxyAuth.token : undefined,
       host: config.host,
+      hostOriginGuard: config.hostOriginGuardEnabled,
       address: `${config.host}:${String(config.port)}`
     },
     screens: {

@@ -161,6 +161,7 @@ const SETTING_DISPLAY_VALUES = {
   'host': (config: ProxyConfig) => config.host,
   'port': (config: ProxyConfig) => String(config.port),
   'authToken': (config: ProxyConfig) => authDisplay(config),
+  'hostOriginGuard': (config: ProxyConfig) => (config.hostOriginGuard ? 'on' : 'off'),
   'remoteImages': (config: ProxyConfig) => (config.remoteImages ? 'on' : 'off'),
   'docsUi': (config: ProxyConfig) => (config.docsUi ? 'on' : 'off'),
   'stats': (config: ProxyConfig) => (config.stats ? 'on' : 'off'),
@@ -199,8 +200,8 @@ function getDisplayValue(config: ProxyConfig, id: string): string {
 }
 
 /**
- * Builds the server rows: lifetime, host, port, auth, remote images, body size, timeout and log
- * level.
+ * Builds the server rows: lifetime, host, port, auth, the host/origin guard, remote images, body
+ * size, timeout and log level.
  *
  * @param config - the current proxy config
  * @returns the server setting items
@@ -229,6 +230,14 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
       values: ['4141', '8080', '3000', '9090']
     },
     authSettingItem(config),
+    {
+      id: 'hostOriginGuard',
+      label: 'Host/origin guard',
+      description:
+        'Refuse requests a web page could send (a DNS-rebinding Host, another Origin); for a proxy without a token',
+      currentValue: config.hostOriginGuard ? 'on' : 'off',
+      values: ['off', 'on']
+    },
     {
       id: 'remoteImages',
       label: 'Remote images',
@@ -398,6 +407,7 @@ const CONFIG_UPDATERS: Record<Exclude<SettingId, 'authToken'>, ConfigUpdater> = 
     ...config,
     port: Math.max(1, Math.min(MAX_PORT, Number.parseInt(value, 10) || config.port))
   }),
+  'hostOriginGuard': (config, value) => ({ ...config, hostOriginGuard: value === 'on' }),
   'remoteImages': (config, value) => ({ ...config, remoteImages: value === 'on' }),
   'docsUi': (config, value) => ({ ...config, docsUi: value === 'on' }),
   'stats': (config, value) => ({ ...config, stats: value === 'on' }),

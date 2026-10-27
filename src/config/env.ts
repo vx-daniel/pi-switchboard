@@ -24,6 +24,7 @@ import type {
   AliasTarget,
   ConfigFileProblem,
   ModelExposureMode,
+  ProxyConfig,
   PublicModelIdMode
 } from '@proxy/config/schema'
 import {
@@ -158,6 +159,8 @@ export interface ServerConfig {
    * auth off. The console says it applies again at the next start when auth is turned off.
    */
   readonly proxyAuthOverride?: OverrideSource
+  /** Whether requests a web page could send are refused (`hostOriginGuard`, #188). */
+  readonly hostOriginGuardEnabled: boolean
   /** Whether agentic mode is enabled. */
   readonly agenticEnabled: boolean
   /** Whether remote image URL fetching is enabled. */
@@ -202,6 +205,7 @@ const RUNTIME_ENV_SUFFIXES = [
   'HOST',
   'PORT',
   'AUTH_TOKEN',
+  'HOST_ORIGIN_GUARD',
   'REMOTE_IMAGES',
   'DOCS_UI',
   'RESPONSES_API',
@@ -314,6 +318,7 @@ export interface CliOverrides {
   host?: string | undefined
   port?: number | undefined
   authToken?: string | undefined
+  hostOriginGuard?: boolean | undefined
   remoteImages?: boolean | undefined
   docsUi?: boolean | undefined
   responsesApi?: boolean | undefined
@@ -321,6 +326,55 @@ export interface CliOverrides {
   maxBodySizeMb?: number | undefined
   upstreamTimeoutSec?: number | undefined
   logLevel?: LogLevel | undefined
+}
+
+/** The on/off settings {@link resolveSwitches} resolves. */
+type Switches = Pick<
+  ServerConfig,
+  | 'hostOriginGuardEnabled'
+  | 'remoteImagesEnabled'
+  | 'docsUiEnabled'
+  | 'responsesApiEnabled'
+  | 'statsEnabled'
+>
+
+/**
+ * Resolves the on/off settings, each CLI > env > file.
+ *
+ * @param cli - Settings from CLI flags.
+ * @param file - The config file's values.
+ * @returns Each switch's resolved value.
+ */
+function resolveSwitches(cli: CliOverrides, file: ProxyConfig): Switches {
+  return {
+    hostOriginGuardEnabled:
+      cli.hostOriginGuard ??
+      parseBoolean(
+        'PI_SWITCHBOARD_HOST_ORIGIN_GUARD',
+        process.env.PI_SWITCHBOARD_HOST_ORIGIN_GUARD,
+        file.hostOriginGuard
+      ),
+    remoteImagesEnabled:
+      cli.remoteImages ??
+      parseBoolean(
+        'PI_SWITCHBOARD_REMOTE_IMAGES',
+        process.env.PI_SWITCHBOARD_REMOTE_IMAGES,
+        file.remoteImages
+      ),
+    docsUiEnabled:
+      cli.docsUi ??
+      parseBoolean('PI_SWITCHBOARD_DOCS_UI', process.env.PI_SWITCHBOARD_DOCS_UI, file.docsUi),
+    responsesApiEnabled:
+      cli.responsesApi ??
+      parseBoolean(
+        'PI_SWITCHBOARD_RESPONSES_API',
+        process.env.PI_SWITCHBOARD_RESPONSES_API,
+        file.responsesApi
+      ),
+    statsEnabled:
+      cli.stats ??
+      parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats)
+  }
 }
 
 /**
@@ -363,29 +417,6 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
   }
   const proxyAuth = resolveProxyAuth(override, file.authToken)
 
-  const remoteImagesEnabled =
-    cli.remoteImages ??
-    parseBoolean(
-      'PI_SWITCHBOARD_REMOTE_IMAGES',
-      process.env.PI_SWITCHBOARD_REMOTE_IMAGES,
-      file.remoteImages
-    )
-
-  const docsUiEnabled =
-    cli.docsUi ??
-    parseBoolean('PI_SWITCHBOARD_DOCS_UI', process.env.PI_SWITCHBOARD_DOCS_UI, file.docsUi)
-
-  const responsesApiEnabled =
-    cli.responsesApi ??
-    parseBoolean(
-      'PI_SWITCHBOARD_RESPONSES_API',
-      process.env.PI_SWITCHBOARD_RESPONSES_API,
-      file.responsesApi
-    )
-
-  const statsEnabled =
-    cli.stats ?? parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats)
-
   const maxBodySize =
     cli.maxBodySizeMb === undefined
       ? parseEnvInt(
@@ -417,11 +448,8 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     port,
     proxyAuth,
     ...(override === undefined ? {} : { proxyAuthOverride: override.source }),
+    ...resolveSwitches(cli, file),
     agenticEnabled,
-    remoteImagesEnabled,
-    docsUiEnabled,
-    responsesApiEnabled,
-    statsEnabled,
     maxBodySize,
     upstreamTimeoutMs,
     publicModelIdMode: file.publicModelIdMode,
