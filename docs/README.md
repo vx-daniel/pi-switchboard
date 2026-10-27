@@ -21,6 +21,7 @@ pi-switchboard is a local HTTP API over pi's models, logins and providers that s
 | [The HTTP API](api.md) | Endpoints, the API document, usage and health checks, chat completion features, the Responses API, model IDs and exposure, errors |
 | [Routing](routing.md) | Aliases, fallback chains, reasoning effort per alias, family aliases, cooldowns, quota |
 | [Several logins per provider](logins.md) | A second subscription to the same provider, and how the proxy picks the login |
+| [Prompt caching](caching.md) | How each provider caches, reading cache hits and writes, keeping a prompt cacheable, routing's effect on the cache, `PI_CACHE_RETENTION` and when it pays |
 | [The console](console.md) | `pi-switchboard tui`: requests, accounts and logins, stats, models and aliases |
 | [Pi Integration](pi-extension.md) | The `/proxy` commands and the settings panel inside pi |
 | [Security](security.md) | The defaults: the bind address, remote images, size limits, timeouts |
