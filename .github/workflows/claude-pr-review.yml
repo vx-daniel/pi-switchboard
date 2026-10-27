@@ -117,7 +117,7 @@ jobs:
       # reviewer would read the default branch's files while judging the pull request's diff.
       - name: Checkout PR head
         if: steps.token.outputs.present == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           ref: ${{ needs.pull-request.outputs.head_sha }}
           fetch-depth: 1
