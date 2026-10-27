@@ -122,7 +122,8 @@ function enterHint(text: string): string {
  * skips.
  *
  * @param model - the exposed model
- * @returns `low → high (4 levels)`, `none (no reasoning)`, and the skipped levels when any
+ * @returns `range`, as `low → high (4 levels)`, a single level, or `none (no reasoning)`; and
+ *   `skips`, the levels inside the range the model does not run at (none when it skips none)
  */
 function effortFacts(model: ExposedModel): { range: string; skips: readonly ReasoningEffort[] } {
   const supported = supportedReasoningEfforts(model.model)

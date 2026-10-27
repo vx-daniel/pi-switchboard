@@ -279,6 +279,71 @@ describe('the console Models view', () => {
     expect(sideBoxLines(onNew, 'MODEL')).toEqual([])
   })
 
+  // Catches a built-in alias described as one the operator configured (so Enter's pin looks like
+  // an edit), or its family shown without what it resolves to now.
+  test('on a built-in alias, the pane names it built in, its resolution, and that Enter pins it', () => {
+    const family = 'anthropic/claude-sonnet'
+    const view: ModelsView = {
+      models: [exposed('m0')],
+      aliases: {},
+      latest: { 'sonnet-latest': { family } },
+      diagnostics: [],
+      families: [
+        {
+          alias: 'sonnet-latest',
+          position: 0,
+          family,
+          pin: null,
+          resolved: 'anthropic/claude-sonnet-5-5',
+          newest: 'anthropic/claude-sonnet-5-5',
+          newerHidden: null
+        }
+      ],
+      selected: 2
+    }
+
+    const pane = sideBoxLines(rendered(view, 30, SIDE_BY_SIDE), 'BUILT-IN ALIAS sonnet-latest')
+
+    expect(pane.join('\n')).toMatch(
+      /target anthropic\/claude-sonnet → claude-sonnet-5-5 \(newest\)/u
+    )
+    expect(pane.join('\n')).toContain('↵ pins it')
+  })
+
+  // Catches a model served by a second login shown as served by its provider's own, so the
+  // operator looks for a cooldown or a refusal on the wrong login.
+  test('the pane names the login only when it is not the provider', () => {
+    const view = (login: string): ModelsView => ({
+      models: [{ ...exposed('m0'), login }],
+      aliases: {},
+      diagnostics: [],
+      families: [],
+      selected: 0
+    })
+
+    expect(sideBoxLines(rendered(view('alpha-2'), 24, SIDE_BY_SIDE), 'MODEL')).toContainEqual(
+      expect.stringMatching(/^login +alpha-2$/u)
+    )
+    expect(sideBoxLines(rendered(view('alpha'), 24, SIDE_BY_SIDE), 'MODEL').join('\n')).not.toMatch(
+      /login/u
+    )
+  })
+
+  // Catches a pane taller than the rows left pushing past the view's height or losing its
+  // bottom border, so it reads as running on off screen.
+  test('a pane taller than the rows left loses its last lines and keeps its frame', () => {
+    const model = { ...exposed('m0', 'alpha', true), login: 'alpha-2' }
+    const view = { models: [model], aliases: {}, diagnostics: [], families: [], selected: 0 }
+
+    const rows = rendered(view, 10, SIDE_BY_SIDE)
+    const pane = sideBoxLines(rows, 'MODEL')
+
+    expect(rows).toHaveLength(10)
+    expect(rows.at(-1)).toMatch(/╰─+╯$/u)
+    expect(pane.length).toBeGreaterThan(0)
+    expect(pane.join('\n')).not.toContain('↵ makes an alias')
+  })
+
   // Catches the pane squeezing the boxes or the matrix: it shows only with six rows left under
   // the boxes, and never under the matrix on a narrow view.
   test('the pane shows only beside the matrix with six rows left under the boxes', () => {
