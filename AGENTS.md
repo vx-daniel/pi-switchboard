@@ -91,7 +91,7 @@ vp pack             # build
 
 `scripts/gate.ts` is the single definition of "green": the pre-commit hook, CI (`.github/workflows/ci.yml`) and the release workflow all run `check:all`. Add a check there, not in a hook or a workflow.
 
-Offline tests never read the developer's pi login or provider credentials: `test/setup/offline.ts` points pi at an empty agent dir and removes credential env vars. A test that needs models or an upstream uses `loadFixtureAgentDir` (`test/fixtures/agent-dir.ts`) and `startMockProvider` (`test/fixtures/mock-provider.ts`), with scripted replies or `replay(loadRecording(...))` of recorded real traffic (`test/fixtures/recording.ts`). Never test or record against a copy of a live login: resolving an expired OAuth credential refreshes it and rotates the refresh token under every other copy.
+Offline tests never read the developer's pi login or provider credentials: `test/setup/offline.ts` points pi at an empty agent dir and removes credential env vars. Nor do they reach the developer's own proxy: the setup's `fetch` guard refuses the default port (4141) on loopback, so a test that starts a proxy picks a free port. A test that needs models or an upstream uses `loadFixtureAgentDir` (`test/fixtures/agent-dir.ts`) and `startMockProvider` (`test/fixtures/mock-provider.ts`), with scripted replies or `replay(loadRecording(...))` of recorded real traffic (`test/fixtures/recording.ts`). Never test or record against a copy of a live login: resolving an expired OAuth credential refreshes it and rotates the refresh token under every other copy.
 
 Expected discipline in this repo:
 
