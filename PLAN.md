@@ -479,6 +479,17 @@ models name also has a built-in `-latest` alias (principle VI's second recorded 
   never mix; Enter on one offers only **Pin to…**, which saves a configured alias of its name,
   replacing it. The tab counts them apart (`24 models · 1 alias · 8 latest`).
 
+### Model availability (#174)
+
+pi's catalogue lists models a login's plan may not include (a Codex model on a ChatGPT login,
+#156). The proxy remembers, in memory (`src/pi/availability.ts`), what each call said: a refusal
+(`404 model_not_found`) marks the model `refused`, a whole answer (a completion, or a stream that
+ended without an error event) `verified`. `/v1/switchboard/models` reports it as `availability`,
+`unknown` before either; an alias reports its target's. It is keyed by canonical ID, so a model's
+logins share one state, and the latest result wins. A request with its own upstream key records
+nothing. The first refusal of a model is an info line; each refused request is still logged at
+error by its route. Refused models are not hidden and never probed.
+
 ### Cooldowns (#68)
 
 A 429 or 503 is remembered, so a chain stops calling a failing provider first on every request.
