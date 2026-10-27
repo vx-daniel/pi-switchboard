@@ -315,17 +315,30 @@ describe('a model that refuses the field (#163)', () => {
     expect(breakpointPatch(model, WITH_BREAKPOINT)).toBeUndefined()
   })
 
-  // Catches the retry widened past a 400 prefix (#253): a 400 that is not where pi puts the status,
-  // or a refusal body on another host, is the failure it is.
-  test.each<[string, string, string]>([
-    ['`400:` with no space', `400:${REFUSAL_BODY}`, OPENAI_BASE_URL],
-    ['a 4000', `4000: ${REFUSAL_BODY}`, OPENAI_BASE_URL],
-    ['a 400 not at the start', `upstream 400: ${REFUSAL_BODY}`, OPENAI_BASE_URL],
-    ['another host', `400: ${REFUSAL_BODY}`, OTHER_BASE_URL]
-  ])('%s is not retried', (label, errorMessage, baseUrl) => {
-    const model = { ...makeModel('openai-completions', baseUrl), id: `kept-shape-${label}` }
+  // Catches the retry widened past a 400 prefix (#253): a 400 that is not where pi puts the status
+  // is the failure it is, and the model is not remembered as refusing the field.
+  test.each<[string, string]>([
+    ['`400:` with no space', `400:${REFUSAL_BODY}`],
+    ['a 4000', `4000: ${REFUSAL_BODY}`],
+    ['a 400 not at the start', `upstream 400: ${REFUSAL_BODY}`]
+  ])('%s is not retried', (label, errorMessage) => {
+    const model = { ...makeModel('openai-completions', OPENAI_BASE_URL), id: `kept-shape-${label}` }
 
     expect(retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(errorMessage))).toBe(false)
+    expect(breakpointPatch(model, WITH_BREAKPOINT)).toBeDefined()
+  })
+
+  // Catches the retry widened past OpenAI's own host (#253): another server never received the
+  // field, so its refusal-shaped 400 is the failure it is.
+  test('a refusal body from another host is not retried', () => {
+    const model = {
+      ...makeModel('openai-completions', OTHER_BASE_URL),
+      id: 'kept-shape-other-host'
+    }
+
+    expect(
+      retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(`400: ${REFUSAL_BODY}`))
+    ).toBe(false)
   })
 
   // Catches the retry widened past the field: another param, another status, or a message that

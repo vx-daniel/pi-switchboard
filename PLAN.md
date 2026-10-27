@@ -1598,16 +1598,15 @@ Use an OpenAI-style shape:
 Upstream failures (`mapUpstreamError`, `src/server/errors.ts`): pi reports a failure as text, with
 no structured status (`onResponse` fires only for successful responses). The provider's HTTP status
 is read from the fixed positions pi 1.3.0's messages put it in, which live in one place,
-`splitUpstreamError` in `src/pi/upstream-error.ts`: leading, and only when followed by
-what only a status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 status code (no body)`;
-`429 tokens…` is not a status), after a label (`OpenAI API error (429): …`, `Mistral API error
-(429): …`), or Google's `got status: 429.`; `errors.ts` adds Google's error body's `error.code`.
-When a status is found it
-decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`, `overloaded`,
-`model is at capacity`, `servers are currently busy`, `experiencing high demand`, `service
-unavailable`, …, checked in that order) is consulted only when no status is reported (Bedrock,
-network failures, the proxy's own idle timeout, pi's Codex usage limit), and a number elsewhere in
-the text never counts (#42). `usage limit` also matches `usage_limit_reached` and
+`splitUpstreamError` in `src/pi/upstream-error.ts`: leading, and only when followed by what only a
+status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 status code (no body)`; `429 tokens…`
+is not a status), after a label (`OpenAI API error (429): …`, `Mistral API error (429): …`), or
+Google's `got status: 429.`; `errors.ts` adds Google's error body's `error.code`. When a status is
+found it decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`,
+`overloaded`, `model is at capacity`, `servers are currently busy`, `experiencing high demand`,
+`service unavailable`, …, checked in that order) is consulted only when no status is reported
+(Bedrock, network failures, the proxy's own idle timeout, pi's Codex usage limit), and a number
+elsewhere in the text never counts (#42). `usage limit` also matches `usage_limit_reached` and
 `subscription_sharing_usage_limit_exceeded`, but not "usage limitations" (#190). The capacity
 wordings are the phrases pi's own retry classifier (`pi-ai/utils/retry`) treats as transient;
 with no status they answer `503 provider_overloaded`, whose class `unavailable` cools the model
