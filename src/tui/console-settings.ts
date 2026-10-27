@@ -20,6 +20,7 @@ import {
   getConfigPath,
   intBounds,
   isModelExposureMode,
+  isLoopbackHost,
   isPublicModelIdMode,
   loadConfigFromFile,
   ModelExposureModeSchema,
@@ -32,7 +33,6 @@ import {
 import { proxyLogger } from '@proxy/logging'
 import { canonicalModelId } from '@proxy/pi/model-id'
 import { getAvailableModels } from '@proxy/pi/registry'
-import { isLoopbackHost } from '@proxy/server/startup'
 import type { ConsoleContext } from '@proxy/tui/console'
 import { inBackground } from '@proxy/tui/console-accounts'
 import { askLine, type DialogScreens, pickLabel, pickMany, tickList } from '@proxy/tui/dialogs'
@@ -176,7 +176,7 @@ async function askSwitch(
  */
 function switchEdit(
   key: SettingKey,
-  field: 'remoteImages' | 'responsesApi' | 'docsUi' | 'stats'
+  field: 'hostOriginGuard' | 'remoteImages' | 'responsesApi' | 'docsUi' | 'stats'
 ): SettingEdit {
   return async (editor, file) => {
     const on = await askSwitch(editor, key, file[field])
@@ -466,6 +466,7 @@ const EDITS: Readonly<Record<Exclude<SettingKey, 'authToken'>, SettingEdit>> = {
     const found = getLogLevels().find((candidate) => candidate === level)
     return found === undefined ? undefined : { ...file, logLevel: found }
   },
+  hostOriginGuard: switchEdit('hostOriginGuard', 'hostOriginGuard'),
   remoteImages: switchEdit('remoteImages', 'remoteImages'),
   responsesApi: switchEdit('responsesApi', 'responsesApi'),
   docsUi: switchEdit('docsUi', 'docsUi'),

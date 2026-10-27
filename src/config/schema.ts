@@ -359,6 +359,11 @@ export const ProxyConfigSchema = z.object({
   port: boundedInt(1, MAX_PORT),
   /** Bearer token for proxy auth. Empty string = disabled. */
   authToken: VerbatimStringSchema,
+  /**
+   * Refuse requests a web page could send (#188): a `Host` a DNS-rebinding page would use, or an
+   * `Origin` other than the proxy's own. Off by default.
+   */
+  hostOriginGuard: z.boolean(),
   /** Allow remote image URL fetching. */
   remoteImages: z.boolean(),
   /** Serve the Swagger UI docs page at `/docs` (#129). */
@@ -426,6 +431,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   host: '127.0.0.1',
   port: 4141,
   authToken: '',
+  hostOriginGuard: false,
   remoteImages: false,
   docsUi: false,
   responsesApi: false,
@@ -680,6 +686,11 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     host: field('host', fields.host, () => DEFAULT_CONFIG.host),
     port: field('port', fields.port, clampInt(fields.port, DEFAULT_CONFIG.port)),
     authToken: field('authToken', fields.authToken, () => DEFAULT_CONFIG.authToken),
+    hostOriginGuard: field(
+      'hostOriginGuard',
+      fields.hostOriginGuard,
+      () => DEFAULT_CONFIG.hostOriginGuard
+    ),
     remoteImages: field('remoteImages', fields.remoteImages, () => DEFAULT_CONFIG.remoteImages),
     docsUi: field('docsUi', fields.docsUi, () => DEFAULT_CONFIG.docsUi),
     responsesApi: field('responsesApi', fields.responsesApi, () => DEFAULT_CONFIG.responsesApi),
@@ -974,6 +985,7 @@ export function configToEnv(config: ProxyConfig): Record<string, string> {
   if (config.authToken.length > 0) {
     env['PI_SWITCHBOARD_AUTH_TOKEN'] = config.authToken
   }
+  env['PI_SWITCHBOARD_HOST_ORIGIN_GUARD'] = String(config.hostOriginGuard)
   env['PI_SWITCHBOARD_REMOTE_IMAGES'] = String(config.remoteImages)
   env['PI_SWITCHBOARD_DOCS_UI'] = String(config.docsUi)
   env['PI_SWITCHBOARD_RESPONSES_API'] = String(config.responsesApi)
@@ -984,4 +996,39 @@ export function configToEnv(config: ProxyConfig): Record<string, string> {
   // Model exposure settings are not passed: the proxy reads them from the shared JSON config file,
   // at startup and again on every request (`fileConfigReader` in src/server/routes.ts).
   return env
+}
+
+/** An IPv4 address in `127.0.0.0/8`, written out in full. */
+const LOOPBACK_IPV4 = /^127(?:\.\d{1,3}){3}$/
+
+/**
+ * Checks whether a bind address only accepts connections from this machine.
+ *
+ * @param host - The bind address.
+ * @returns Whether `host` is `localhost`, `::1` or an address in `127.0.0.0/8`; a name that only
+ *   starts with `127.` (`127.evil.example`) is not, since it can resolve anywhere.
+ */
+export function isLoopbackHost(host: string): boolean {
+  return host === 'localhost' || host === '::1' || LOOPBACK_IPV4.test(host)
+}
+
+/**
+ * Says who can use the proxy while proxy auth is off (#188): every warning about auth off words it
+ * the same way. On loopback, other programs on this machine, and web pages open in a browser
+ * (DNS rebinding, cross-origin posts) unless the host/origin guard is on; beyond loopback, anyone
+ * on the network, whom the guard does not stop.
+ *
+ * @param host - The bind address.
+ * @param hostOriginGuard - Whether the host/origin guard is on.
+ * @returns The risk, as a clause with no capital or final stop.
+ */
+export function authOffRisk(host: string, hostOriginGuard: boolean): string {
+  if (isLoopbackHost(host)) {
+    return hostOriginGuard
+      ? 'any program on this machine can use your provider logins through it (the host/origin guard keeps web pages out)'
+      : 'any program on this machine, and any web page open in a browser on it, can use your provider logins through it'
+  }
+  return hostOriginGuard
+    ? 'anyone who can reach it on the network can use your provider logins (the host/origin guard keeps web pages out, not them)'
+    : 'anyone who can reach it on the network, and any web page open in a browser on this machine, can use your provider logins'
 }

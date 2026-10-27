@@ -21,6 +21,7 @@ import { MS_PER_SECOND } from '@proxy/utils/time'
 /** The settings, in the view's order. */
 export const SETTING_KEYS = [
   'host',
+  'hostOriginGuard',
   'port',
   'maxBodySizeMb',
   'upstreamTimeoutSec',
@@ -118,6 +119,15 @@ const SPECS: Readonly<Record<SettingKey, SettingSpec>> = {
     running: (config) => config.host,
     flag: '--host',
     env: 'PI_SWITCHBOARD_HOST'
+  },
+  hostOriginGuard: {
+    section: 'server',
+    label: 'Host/origin guard',
+    help: 'Refuse requests a web page could send (a DNS-rebinding Host, another Origin). For a proxy without a token; a token stops web pages anyway.',
+    saved: (file) => onOff(file.hostOriginGuard),
+    running: (config) => onOff(config.hostOriginGuardEnabled),
+    flag: '--host-origin-guard',
+    env: 'PI_SWITCHBOARD_HOST_ORIGIN_GUARD'
   },
   port: {
     section: 'server',
@@ -282,6 +292,7 @@ const FLAG_SETTINGS = [
   'host',
   'port',
   'authToken',
+  'hostOriginGuard',
   'remoteImages',
   'docsUi',
   'responsesApi',

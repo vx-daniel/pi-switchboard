@@ -39,6 +39,7 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | Bind address | `--host` | `PI_SWITCHBOARD_HOST` | `host` | `127.0.0.1` | An address; `0.0.0.0` for every interface |
 | Port | `--port` | `PI_SWITCHBOARD_PORT` | `port` | `4141` | 1–65535 |
 | [Proxy auth token](#proxy-authentication) | `--auth-token` | `PI_SWITCHBOARD_AUTH_TOKEN` | `authToken` | `""`, off | Any string, matched exactly |
+| [Host/origin guard](#running-without-a-token) | `--host-origin-guard` | `PI_SWITCHBOARD_HOST_ORIGIN_GUARD` | `hostOriginGuard` | `false` | `true`, `false` |
 | [Remote images](security.md#security-defaults) | `--remote-images` | `PI_SWITCHBOARD_REMOTE_IMAGES` | `remoteImages` | `false` | `true`, `false` |
 | [Responses API](api.md#responses-api-experimental) | `--responses-api` | `PI_SWITCHBOARD_RESPONSES_API` | `responsesApi` | `false` | `true`, `false` |
 | [Docs page](api.md#api-documentation) | `--docs-ui` | `PI_SWITCHBOARD_DOCS_UI` | `docsUi` | `false` | `true`, `false` |
@@ -75,6 +76,7 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
   "host": "127.0.0.1",
   "port": 4141,
   "authToken": "",
+  "hostOriginGuard": false,
   "remoteImages": false,
   "responsesApi": false,
   "docsUi": false,
@@ -128,6 +130,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 | Bind address | `PI_SWITCHBOARD_HOST` | `127.0.0.1` | Network interface (`127.0.0.1` = local only, `0.0.0.0` = all) (`--host`, `host` in the config file) |
 | Port | `PI_SWITCHBOARD_PORT` | `4141` | HTTP listen port, 1–65535 (`--port`, `port`) |
 | Auth token | `PI_SWITCHBOARD_AUTH_TOKEN` | (disabled) | Bearer token for proxy authentication (`--auth-token`, `authToken`) |
+| Host/origin guard | `PI_SWITCHBOARD_HOST_ORIGIN_GUARD` | `false` | Refuse requests a web page could send: a `Host` a DNS-rebinding page would use, or an `Origin` other than the proxy's own, with `403` ([Running without a token](#running-without-a-token)) (`--host-origin-guard`, `hostOriginGuard`) |
 | Remote images | `PI_SWITCHBOARD_REMOTE_IMAGES` | `false` | Fetch remote image URLs server-side and inline them as base64; off, they are rejected with `400`. The proxy then makes requests for its clients, so only public `http`/`https` hosts are allowed (see [Security defaults](security.md#security-defaults)) (`--remote-images`, `remoteImages`) |
 | Responses API | `PI_SWITCHBOARD_RESPONSES_API` | `false` | Answer the experimental `POST /v1/responses` ([Responses API](api.md#responses-api-experimental)) (`--responses-api`, `responsesApi`) |
 | Docs UI | `PI_SWITCHBOARD_DOCS_UI` | `false` | Serve Swagger UI at `/docs` ([API documentation](api.md#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
@@ -149,7 +152,7 @@ Passing `/healthz` checks are logged at `debug`; a failed one stays at `info`.
 
 An invalid flag stops the proxy from starting and lists the valid values: `--log-level` and `--log-format` name their options, and `--port`, `--max-body-size` and `--upstream-timeout` name their range (the same bounds the config file applies). An invalid env var is ignored with a warning: `PI_SWITCHBOARD_LOG_LEVEL` or `PI_SWITCHBOARD_LOG_FORMAT` naming no level or format, or `PI_SWITCHBOARD_PORT`, `PI_SWITCHBOARD_MAX_BODY_SIZE` or `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` not an integer within its bounds (digits only: `80abc` is not 80). An invalid `logLevel` in the config file falls back to `info`, and a number outside its range is clamped, so a bad value in the environment or the file never keeps a background proxy from starting.
 
-If proxy auth is off and the proxy binds to anything other than a loopback address, it logs a warning at startup: any client that can reach the port can use your provider credentials.
+While proxy auth is off, the proxy logs a warning at startup wherever it listens, saying who can use your provider logins through it: on loopback, any program on this machine and any web page open in a browser on it (unless the [host/origin guard](#running-without-a-token) is on); beyond loopback, anyone who can reach the port as well.
 
 Every line a request causes carries its `requestId` (and `clientRequestId` when the client sent `X-Client-Request-Id`). At `debug` and `trace` you see the internal decisions: model resolution, conversion, upstream calls and stream events.
 
@@ -195,3 +198,20 @@ In the console (`pi-switchboard tui`), `p` turns auth on with a generated or typ
 An empty override (`--auth-token ''` or `PI_SWITCHBOARD_AUTH_TOKEN=`) refuses to start the same way, naming the flag or variable. The config file's token is not used instead; unset the variable to use it. An empty `PI_SWITCHBOARD_AUTH_TOKEN` in pi's own environment reaches a proxy the extension starts, so `/proxy start` refuses then as well, unless a token is set in `/proxy config`.
 
 A `proxy-config.json` that exists but cannot be read or is not valid JSON also refuses to start when neither the flag nor `PI_SWITCHBOARD_AUTH_TOKEN` sets a token: the file may hold one the proxy cannot see, and starting on the defaults would turn it into auth off. The log names the file and the problem (`cannot be read (EACCES)`, `is not valid JSON`), never the file's contents. Fix or remove the file, or set a token by flag or environment; `/proxy start` refuses with the same reason. A missing file holds nothing and starts with the defaults. For the same reason nothing saves over such a file (the console, the settings panel), since it would write the defaults it loads as over whatever it holds; only `/proxy reset` replaces it.
+
+### Running without a token
+
+With proxy auth off (the default outside Docker), the proxy serves anyone who can send it a request, with your provider logins:
+
+- **Programs on this machine.** Anything running as any user here can call `127.0.0.1:4141`.
+- **Web pages you open.** Bound to `127.0.0.1`, the proxy is still reachable from your browser. A page can send it a chat request it cannot read the answer to (a cross-origin form or `fetch` with `Content-Type: text/plain`, which the proxy parses as JSON), spending your quota. With DNS rebinding (the page's own domain resolving to `127.0.0.1`), it can also read every answer: list your models and logins, and run chats on your subscriptions.
+- **Anyone on the network**, when the proxy listens beyond loopback (`--host 0.0.0.0`, a LAN address).
+
+A token stops all three: a page can't know it, and nothing answers without it but `/healthz`, the OpenAPI document and the docs page, which name no model, login or credential. Set one with `--auth-token`, `PI_SWITCHBOARD_AUTH_TOKEN` or `p` in the console. The Docker image refuses to start without one.
+
+If you keep auth off, the **host/origin guard** (`hostOriginGuard`, `--host-origin-guard`, `PI_SWITCHBOARD_HOST_ORIGIN_GUARD`; off by default) stops web pages. It refuses, with `403`, before proxy auth and on every path:
+
+- a `Host` that isn't an IP address, a name with no dot (`localhost`, a Docker service name such as `proxy`) or `host.docker.internal`, with code `invalid_host`. A DNS-rebinding page's requests carry its own domain, which always has a dot;
+- an `Origin` other than the proxy's own (`http://<Host>` or `https://<Host>`, which the `/docs` page sends), `null` included, with code `invalid_origin`. A browser sends `Origin` on every cross-origin request that can change something; curl, the OpenAI SDKs and docker-agent send none.
+
+It lets through every client that names the proxy by an address or a plain name: `127.0.0.1`, `localhost`, a LAN address, a container reaching the host as `host.docker.internal`. It refuses a dotted name it can't vouch for, such as an mDNS name (`mybox.local`) or a reverse proxy's domain, so leave it off in those setups and set a token. It does not protect a proxy reachable on the network: a client there sends no `Origin` and can use an IP address. Only a token does. A change applies on restart.

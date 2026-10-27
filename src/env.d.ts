@@ -19,6 +19,7 @@ declare namespace NodeJS {
     PI_SWITCHBOARD_PORT?: string | undefined
     PI_SWITCHBOARD_AUTH_TOKEN?: string | undefined
     PI_SWITCHBOARD_AGENTIC?: string | undefined
+    PI_SWITCHBOARD_HOST_ORIGIN_GUARD?: string | undefined
     PI_SWITCHBOARD_REMOTE_IMAGES?: string | undefined
     PI_SWITCHBOARD_DOCS_UI?: string | undefined
     PI_SWITCHBOARD_RESPONSES_API?: string | undefined

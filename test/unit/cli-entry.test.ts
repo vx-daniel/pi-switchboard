@@ -47,6 +47,7 @@ const FIXTURE_TOKEN = 'notarealsecret-cli-entry-token'
 const FIXTURE_MODEL = 'fixture-model'
 const HTTP_OK = 200
 const HTTP_UNAUTHORIZED = 401
+const HTTP_FORBIDDEN = 403
 const BODY_SIZE_MB = 3
 const BYTES_PER_MB = 1_048_576
 const UPSTREAM_TIMEOUT_SEC = 7
@@ -461,6 +462,7 @@ describe('starting the server', () => {
       String(port),
       '--auth-token',
       FIXTURE_TOKEN,
+      '--host-origin-guard',
       '--remote-images',
       '--docs-ui',
       '--responses-api',
@@ -483,6 +485,11 @@ describe('starting the server', () => {
     })
     expect(models.status).toBe(HTTP_OK)
     expect(JSON.stringify(await models.json())).toContain(FIXTURE_MODEL)
+    // The guard is on: a web page's origin is refused even with the token.
+    const fromPage = await fetch(`${origin}/v1/models`, {
+      headers: { authorization: `Bearer ${FIXTURE_TOKEN}`, origin: 'https://evil.example' }
+    })
+    expect(fromPage.status).toBe(HTTP_FORBIDDEN)
 
     const effective = logRecords().find((record) => record['message'] === 'Effective config')
     assert(effective !== undefined, 'no effective-config log line')
@@ -491,6 +498,7 @@ describe('starting the server', () => {
       host: '127.0.0.1',
       port,
       proxyAuthMode: 'token',
+      hostOriginGuardEnabled: true,
       agenticEnabled: false,
       remoteImagesEnabled: true,
       docsUiEnabled: true,

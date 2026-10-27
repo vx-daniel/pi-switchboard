@@ -148,6 +148,36 @@ export function authenticationError(message: string): OpenAIError {
 }
 
 /**
+ * Builds the `invalid_host` body: the host/origin guard refused a `Host` a DNS-rebinding page
+ * would send (#188).
+ *
+ * @returns the `permission_error` body with code `invalid_host`
+ */
+export function invalidHost(): OpenAIError {
+  return makeError(
+    'The proxy refuses this Host: use an IP address, localhost, or a name with no dot',
+    'permission_error',
+    null,
+    'invalid_host'
+  )
+}
+
+/**
+ * Builds the `invalid_origin` body: the host/origin guard refused a request from a web page on
+ * another origin (#188).
+ *
+ * @returns the `permission_error` body with code `invalid_origin`
+ */
+export function invalidOrigin(): OpenAIError {
+  return makeError(
+    'The proxy refuses requests from web pages on other origins',
+    'permission_error',
+    null,
+    'invalid_origin'
+  )
+}
+
+/**
  * Builds the body for a failure inside the proxy itself: fixed text, never the thrown message,
  * which can quote a path or a config value.
  *

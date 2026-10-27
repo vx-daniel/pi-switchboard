@@ -67,6 +67,7 @@ function proxyWith(initial: ProxyAuth, override?: OverrideSource): AuthTarget {
     override,
     overrideToken: override !== undefined && initial.kind === 'token' ? initial.token : undefined,
     host: '127.0.0.1',
+    hostOriginGuard: false,
     address: '127.0.0.1:4141'
   }
 }
@@ -197,7 +198,7 @@ describe('the auth-off popup (#287)', () => {
 
     // `[warn]`: the console's red alert panel, not the plain selector.
     expect(script.titles[0]).toMatch(/^\[warn\] ⚠ Proxy auth is off on 127\.0\.0\.1:4141/)
-    expect(script.titles[0]).toContain('a web page you open')
+    expect(script.titles[0]).toContain('any web page open in a browser on it')
     expect(script.options[0]).toEqual([
       'Generate a token',
       'Enter a token',
@@ -240,6 +241,18 @@ describe('the auth-off popup (#287)', () => {
       script.screens
     )
 
-    expect(script.titles[0]).toContain('anyone who can reach it can use your provider logins')
+    expect(script.titles[0]).toContain('anyone who can reach it on the network')
+  })
+
+  // Catches the warning ignoring the host/origin guard (#188): with it on, web pages are kept out
+  // on loopback, and the popup must not claim otherwise, nor drop the programs on this machine.
+  test('with the host/origin guard on, says web pages are kept out but programs are not', async () => {
+    const script = scripted([undefined])
+
+    await runAuthOffPrompt({ ...proxyWith({ kind: 'off' }), hostOriginGuard: true }, script.screens)
+
+    expect(script.titles[0]).toContain('any program on this machine can use your provider logins')
+    expect(script.titles[0]).toContain('the host/origin guard keeps web pages out')
+    expect(script.titles[0]).not.toContain('any web page open')
   })
 })

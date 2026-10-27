@@ -22,6 +22,7 @@ import {
   TuiAltScreen
 } from '@earendil-works/pi-tui'
 import type { ServerConfig } from '@proxy/config/env'
+import { isLoopbackHost } from '@proxy/config/schema'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
 import { activeCooldowns, clearCooldownsFor } from '@proxy/pi/cooldowns'
 import { providerQuota } from '@proxy/pi/quota'
@@ -42,7 +43,6 @@ import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
 import { fileConfigReader } from '@proxy/server/routes'
-import { isLoopbackHost } from '@proxy/server/startup'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { accountRows, accountsSnapshot, type AccountsView } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
