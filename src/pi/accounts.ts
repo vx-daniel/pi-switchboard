@@ -36,7 +36,7 @@ import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import type { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
 import { recordConsoleEvent } from '@proxy/server/console-events'
-import { errorMessage } from '@proxy/utils/guards'
+import { errorCode, errorMessage } from '@proxy/utils/guards'
 
 /** Logger for account registration. */
 const accountsLogger = proxyLogger('pi', 'registry')
@@ -307,23 +307,35 @@ export function isBuiltinProvider(providerId: string): boolean {
 }
 
 /**
+ * What {@link registerStoredAccounts} did: the providers it registered, or that the store could not
+ * be listed, which is not the same as having no `{provider}-N` credential.
+ *
+ * `reason` is the error's code or name (`EACCES`, `TimeoutError`), never its message, which can
+ * quote a path; the full message is in the log.
+ */
+export type StoredAccountsResult =
+  | { readonly listed: true; readonly accounts: readonly string[] }
+  | { readonly listed: false; readonly reason: string }
+
+/**
  * Registers a provider for every account slot pi has a credential for.
  *
  * @remarks
  * Runs at startup, so a login made in an earlier run, or through pi-rotator or pi-multi-account,
  * is served again. A credential whose base is no built-in provider is left as it is, with a
- * warning. A store that cannot be listed (unreadable, or not within `signal`) registers nothing
- * and is logged as a warning: the proxy starts with pi's base providers, as it did before slots
+ * warning. A store that cannot be listed (unreadable, or not within `signal`) registers nothing,
+ * is logged as a warning and is reported as `listed: false`, so the caller can tell it from a store
+ * with no slot credentials: the proxy starts with pi's base providers, as it did before slots
  * existed, rather than not at all.
  *
  * @param runtime - pi's model runtime
  * @param signal - bounds the credential listing
- * @returns the registered provider IDs
+ * @returns the registered provider IDs, or `listed: false` with the failure's code or name
  */
 export async function registerStoredAccounts(
   runtime: AccountRuntime,
   signal: AbortSignal
-): Promise<string[]> {
+): Promise<StoredAccountsResult> {
   let stored: readonly { readonly providerId: string }[]
   try {
     stored = await runtime.listCredentials({ signal })
@@ -332,9 +344,12 @@ export async function registerStoredAccounts(
       'Could not list the stored credentials; extra logins are not registered: {reason}',
       { reason: errorMessage(error) }
     )
-    return []
+    return { listed: false, reason: errorCode(error) }
   }
-  return stored
-    .map(({ providerId }) => providerId)
-    .filter((providerId) => registerAccountProvider(runtime, providerId))
+  return {
+    listed: true,
+    accounts: stored
+      .map(({ providerId }) => providerId)
+      .filter((providerId) => registerAccountProvider(runtime, providerId))
+  }
 }

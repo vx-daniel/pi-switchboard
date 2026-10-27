@@ -3,11 +3,16 @@
  * provider with a literal API key, so the credential is known and nothing leaves the machine.
  */
 
+import { ModelRuntime } from '@earendil-works/pi-coding-agent'
 import { createApp } from '@proxy/server/app'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
-import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import {
+  type FixtureAgentDir,
+  type FixtureAgentDirFiles,
+  loadFixtureAgentDir
+} from '../fixtures/agent-dir'
 import { jsonBody, testApp, testConfig } from '../helpers'
 
 const PROVIDER_KEY = 'notarealsecret-health-provider-key'
@@ -25,6 +30,15 @@ const agentDirs: FixtureAgentDir[] = []
  */
 async function loadAgentDir(modelsJson?: Record<string, unknown>): Promise<void> {
   agentDirs.push(await loadFixtureAgentDir(modelsJson === undefined ? {} : { modelsJson }))
+}
+
+/**
+ * Points pi at a fresh agent directory with these files, and loads it.
+ *
+ * @param files - the files to write
+ */
+async function loadFixtureAgentDirWith(files: FixtureAgentDirFiles): Promise<void> {
+  agentDirs.push(await loadFixtureAgentDir(files))
 }
 
 const MOCK_PROVIDER = {
@@ -163,6 +177,93 @@ describe('/healthz/creds', () => {
       expect(await jsonBody(response)).toEqual({
         status: 'unavailable',
         verified: false,
+        loginsRegistered: true,
+        providers: []
+      })
+    } finally {
+      await loadAgentDir(MOCK_PROVIDER)
+    }
+  })
+
+  // Catches the logins field missing from a normal answer, or `loginsError` present when the
+  // listing worked: the body is the whole contract, so it is compared exactly.
+  test('reports the logins as registered, with no loginsError, after a normal start', async () => {
+    const response = await testApp().request('/healthz/creds')
+
+    expect(response.status).toBe(200)
+    expect(await jsonBody(response)).toEqual({
+      status: 'ok',
+      verified: false,
+      loginsRegistered: true,
+      providers: [
+        {
+          provider: 'health-mock',
+          type: 'api_key',
+          source: 'models_json_key',
+          availableModelCount: 1,
+          quota: null
+        }
+      ]
+    })
+  })
+
+  // Catches a failed startup listing of pi's credential store (#252) reading as "no extra logins":
+  // the failure must show as `loginsRegistered: false` with its code, must not change the status
+  // of an otherwise healthy check, must not quote the error's message (a path), and must clear on
+  // a later successful init. The listing is made to fail at pi's seam: a corrupt auth.json also
+  // takes every other credential with it, which would turn the status to 503 for another reason.
+  test('reports a failed credential listing, without its message, and keeps the status', async () => {
+    vi.spyOn(ModelRuntime.prototype, 'listCredentials').mockRejectedValue(
+      Object.assign(new Error('EACCES: permission denied, open /home/notarealsecret-health-path'), {
+        code: 'EACCES'
+      })
+    )
+    await loadAgentDir(MOCK_PROVIDER)
+    try {
+      const response = await testApp().request('/healthz/creds')
+      const text = await response.text()
+
+      expect(response.status).toBe(200)
+      expect(text).not.toContain('notarealsecret-health')
+      expect(JSON.parse(text)).toEqual({
+        status: 'ok',
+        verified: false,
+        loginsRegistered: false,
+        loginsError: 'EACCES',
+        providers: [
+          {
+            provider: 'health-mock',
+            type: 'api_key',
+            source: 'models_json_key',
+            availableModelCount: 1,
+            quota: null
+          }
+        ]
+      })
+    } finally {
+      vi.restoreAllMocks()
+      await loadAgentDir(MOCK_PROVIDER)
+    }
+    const recovered = await testApp().request('/healthz/creds')
+    const body: unknown = await jsonBody(recovered)
+    expect(isRecord(body) ? body['loginsRegistered'] : undefined).toBe(true)
+    expect(isRecord(body) ? 'loginsError' in body : undefined).toBe(false)
+  })
+
+  // Catches a failed listing hiding a real "no credential" 503, or a body of the wrong shape when
+  // both hold: no provider and a failed listing is unavailable, and says both. Here auth.json is
+  // really unreadable, so the whole path from pi's error to the body is exercised.
+  test('answers 503 with the failed listing when no provider has a credential either', async () => {
+    await loadFixtureAgentDirWith({ authJsonText: '{not json' })
+    try {
+      const response = await testApp().request('/healthz/creds')
+
+      expect(response.status).toBe(503)
+      expect(await jsonBody(response)).toEqual({
+        status: 'unavailable',
+        verified: false,
+        loginsRegistered: false,
+        loginsError: 'SyntaxError',
         providers: []
       })
     } finally {

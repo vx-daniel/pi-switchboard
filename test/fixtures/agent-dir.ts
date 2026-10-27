@@ -20,6 +20,8 @@ export interface FixtureAgentDirFiles {
   readonly modelsJsonText?: string
   /** Written as JSON, owner-only, as pi expects. */
   readonly authJson?: unknown
+  /** Written as is, owner-only, for an auth.json pi cannot read. Wins over `authJson`. */
+  readonly authJsonText?: string
 }
 
 /** A loaded fixture agent directory: where it is, and how to delete it. */
@@ -75,8 +77,11 @@ export async function loadFixtureAgentDir(
     files.modelsJsonText ??
     (files.modelsJson === undefined ? undefined : JSON.stringify(files.modelsJson))
   if (modelsJson !== undefined) writeFileSync(join(path, 'models.json'), modelsJson)
-  if (files.authJson !== undefined) {
-    writeFileSync(join(path, 'auth.json'), JSON.stringify(files.authJson), { mode: OWNER_ONLY })
+  const authJson =
+    files.authJsonText ??
+    (files.authJson === undefined ? undefined : JSON.stringify(files.authJson))
+  if (authJson !== undefined) {
+    writeFileSync(join(path, 'auth.json'), authJson, { mode: OWNER_ONLY })
   }
   vi.stubEnv('PI_CODING_AGENT_DIR', path)
   await initRegistry()
