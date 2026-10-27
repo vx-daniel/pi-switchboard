@@ -126,6 +126,9 @@ Outside the OpenAI-compatible surface, not shaped like OpenAI responses (`src/se
   `503` when no provider has one or a verification fails. A verification error carries pi's
   summary, the token URL and the upstream status only (`summarizeAuthError`); the upstream body
   and pi's stack stay out of the response, and the body reaches the log at `debug` only.
+  `loginsRegistered: false` (with `loginsError`, an error code or name) says the startup listing of
+  pi's credential store failed (#252), so no `{provider}-N` login was registered; it is reported,
+  not retried (nothing re-runs availability after startup), and does not change `status`.
 
 The detail endpoints require proxy auth when it is on, because they name providers and models.
 None returns a credential. Without a proxy token, `?verify=true` is open to whoever can reach the

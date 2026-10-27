@@ -41,6 +41,7 @@ import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
 import {
   getAvailableModels,
   getCredentialStatuses,
+  getLoginRegistration,
   getModelsJsonError,
   providerCredentialStatusSchema
 } from '@proxy/pi/registry'
@@ -148,6 +149,21 @@ const credentialsHealthSchema = z
   .object({
     status: checkStatusSchema,
     verified: z.boolean().meta({ description: 'Whether `?verify=true` was asked for.' }),
+    loginsRegistered: z.boolean().meta({
+      description:
+        "`false` when pi's credential store could not be listed at startup, so the `{provider}-N` " +
+        'logins were not registered and stay unregistered until the proxy restarts. It does not ' +
+        'change `status`.'
+    }),
+    loginsError: z
+      .string()
+      .trim()
+      .optional()
+      .meta({
+        description:
+          "With `loginsRegistered: false`: the failure's error code or name (`EACCES`, " +
+          '`TimeoutError`); the message is in the proxy log.'
+      }),
     providers: z.array(providerCredentialStatusSchema.extend({ quota: credentialQuotaSchema }))
   })
   .meta({ id: 'CredentialsHealth' })
@@ -325,9 +341,12 @@ async function checkCredentials(context: HealthContext, verify: boolean): Promis
   const providers = await getCredentialStatuses(verify)
   const failed = providers.filter((provider) => provider.verified === false)
   const healthy = providers.length > 0 && failed.length === 0
+  const logins = getLoginRegistration()
   const body: CredentialsHealth = {
     status: healthy ? 'ok' : 'unavailable',
     verified: verify,
+    loginsRegistered: logins.registered,
+    ...(logins.registered ? {} : { loginsError: logins.reason }),
     // Usage shares, reset times and plan names only, never a credential or an account ID.
     providers: providers.map((provider) => ({
       ...provider,

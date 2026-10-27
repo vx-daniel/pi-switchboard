@@ -393,6 +393,14 @@
             "type": "boolean",
             "description": "Whether `?verify=true` was asked for."
           },
+          "loginsRegistered": {
+            "type": "boolean",
+            "description": "`false` when pi's credential store could not be listed at startup, so the `{provider}-N` logins were not registered and stay unregistered until the proxy restarts. It does not change `status`."
+          },
+          "loginsError": {
+            "description": "With `loginsRegistered: false`: the failure's error code or name (`EACCES`, `TimeoutError`); the message is in the proxy log.",
+            "type": "string"
+          },
           "providers": {
             "type": "array",
             "items": {
@@ -524,6 +532,7 @@
         "required": [
           "status",
           "verified",
+          "loginsRegistered",
           "providers"
         ],
         "additionalProperties": false
