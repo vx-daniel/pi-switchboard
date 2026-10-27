@@ -68,11 +68,13 @@ export const chatHeadersSchema = z.object({
   'x-switchboard-upstream-api-key': z
     .string()
     .trim()
+    .min(1)
     .optional()
     .meta({
       description:
         "An API key for the model's provider, used instead of pi's stored credential for this " +
-        'request. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.'
+        'request. Empty is refused with 400; leave the header out to use the stored credential. ' +
+        'Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.'
     })
 })
 
@@ -256,7 +258,8 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
     400: errorResponse(
       'Invalid JSON, an invalid field value or message, a conversation longer than the model ' +
         'takes (`context_length_exceeded`), a request the provider refused as invalid ' +
-        '(`upstream_invalid_request`), or the old `X-Pi-Upstream-Api-Key` header.'
+        '(`upstream_invalid_request`), the old `X-Pi-Upstream-Api-Key` header, or an empty ' +
+        '`X-Switchboard-Upstream-Api-Key`.'
     ),
     401: errorResponse(
       'Proxy auth failed, or the provider rejected the key sent in ' +

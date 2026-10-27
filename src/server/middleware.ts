@@ -114,26 +114,42 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
 }
 
 /**
- * Creates the middleware that rejects the upstream key header by its old name (#65).
+ * Creates the middleware that checks the upstream key header: refuses it by its old name (#65),
+ * and refuses it empty (#207).
  *
  * @remarks
- * Ignoring it would send the request with pi's stored credential instead of the key the client
- * meant (principle I: rejected, not ignored). The header's value is never logged or echoed.
+ * Ignoring the old name would send the request with pi's stored credential instead of the key the
+ * client meant (principle I: rejected, not ignored). An empty value would become the provider key
+ * and fail upstream with a 502 that blames the provider; it is a client mistake, refused with
+ * 400 as an empty `--auth-token` is refused. The header's value is never logged or echoed.
  *
- * @returns the middleware: a 400 naming the new header, or the next handler
+ * @returns the middleware: a 400 naming the header, or the next handler
  */
-export function renamedHeaderMiddleware(): MiddlewareHandler<ProxyEnv> {
+export function upstreamKeyHeaderMiddleware(): MiddlewareHandler<ProxyEnv> {
   return async (context, next) => {
-    if (context.req.header(OLD_UPSTREAM_API_KEY_HEADER) === undefined) return next()
-    httpLogger.warn('Rejected a request with the old {header} header', {
-      header: OLD_UPSTREAM_API_KEY_HEADER
-    })
-    return context.json(
-      invalidRequest(
-        `The ${OLD_UPSTREAM_API_KEY_HEADER} header is not read any more: send the key as ${UPSTREAM_API_KEY_HEADER}`
-      ),
-      HTTP_BAD_REQUEST
-    )
+    if (context.req.header(OLD_UPSTREAM_API_KEY_HEADER) !== undefined) {
+      httpLogger.warn('Rejected a request with the old {header} header', {
+        header: OLD_UPSTREAM_API_KEY_HEADER
+      })
+      return context.json(
+        invalidRequest(
+          `The ${OLD_UPSTREAM_API_KEY_HEADER} header is not read any more: send the key as ${UPSTREAM_API_KEY_HEADER}`
+        ),
+        HTTP_BAD_REQUEST
+      )
+    }
+    if (context.req.header(UPSTREAM_API_KEY_HEADER)?.trim() === '') {
+      httpLogger.warn('Rejected a request with an empty {header} header', {
+        header: UPSTREAM_API_KEY_HEADER
+      })
+      return context.json(
+        invalidRequest(
+          `The ${UPSTREAM_API_KEY_HEADER} header is empty: send a key, or leave the header out to use the proxy's login`
+        ),
+        HTTP_BAD_REQUEST
+      )
+    }
+    return next()
   }
 }
 
