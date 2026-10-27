@@ -19,6 +19,7 @@ import type { Usage } from '@earendil-works/pi-ai'
 import type { FailureClass } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
+import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for a listener that throws: the chat route's category, as the dispatcher records here. */
 const totalsLogger = proxyLogger('server', 'chat')
@@ -147,6 +148,9 @@ function notify(event: RouteEvent): void {
     } catch (error) {
       totalsLogger.warn('A route totals listener threw: {errorName}', {
         errorName: error instanceof Error ? error.name : typeof error
+      })
+      totalsLogger.debug('Route totals listener failure detail: {detail}', {
+        detail: errorMessage(error)
       })
     }
   }
