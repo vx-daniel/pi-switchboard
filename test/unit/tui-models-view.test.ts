@@ -49,7 +49,9 @@ function exposed(id: string, provider = 'alpha', reasoning = false): ExposedMode
  * @returns the rows, without colour codes or trailing spaces
  */
 function rendered(view: ModelsView, height: number, width = STACKED): string[] {
-  return modelsRows(view, { height, width }, 0).map((row) => stripTerminalSequences(row).trimEnd())
+  return modelsRows(view, { height, width }, 0).rows.map((row) =>
+    stripTerminalSequences(row).trimEnd()
+  )
 }
 
 /**
@@ -84,6 +86,22 @@ describe('the console Models view', () => {
     expect(boxLines(onAlias)).toContainEqual(expect.stringMatching(/^› reviewer +alpha\/m1$/u))
     expect(onLastModel).toContainEqual(expect.stringMatching(/^› m19 /u))
   })
+
+  // Catches the frame saying how many models there are while the matrix is scrolled past some,
+  // so the operator can't tell the list goes on, or a wrong count of those on screen.
+  test.each([STACKED, SIDE_BY_SIDE])(
+    'says how many models show while the matrix is scrolled, %d columns',
+    (width) => {
+      const models = Array.from({ length: 20 }, (_, position) => exposed(`m${String(position)}`))
+      const data = { models, aliases: {}, diagnostics: [], families: [] }
+
+      const scrolled = modelsRows({ ...data, selected: 0 }, { height: 20, width }, 0)
+      const shown = scrolled.rows.filter((row) => /^[› ] m\d/u.test(stripTerminalSequences(row)))
+      expect(scrolled.note).toBe(`${String(shown.length)} of 20 models shown · ↑↓`)
+      expect(shown.length).toBeLessThan(20)
+      expect(modelsRows({ ...data, selected: 0 }, { height: 40, width }, 0).note).toBe('')
+    }
+  )
 
   // Catches a screen too short for the matrix and the box together showing the part without the
   // selection, or neither: below ten rows the part with the selection takes them all.
@@ -197,7 +215,7 @@ describe('the console Models view', () => {
       families: [],
       selected: 3
     }
-    const rows = modelsRows(view, { height, width }, 0)
+    const { rows } = modelsRows(view, { height, width }, 0)
 
     expect(rows.length).toBeLessThanOrEqual(height)
     for (const row of rows) expect(visibleWidth(row)).toBe(width)

@@ -13,6 +13,7 @@ import {
   chatsById,
   type RequestsData,
   requestsRows,
+  requestsStatus,
   type RequestsViewport,
   scrollRequestsView,
   tableEntries
@@ -352,6 +353,20 @@ describe('scrolling the Requests table', () => {
     const shown = plainRows(withGap, [], { height: 4, width: 160 }, { view: { last: 6 } })
 
     expect(shownIds(shown)).toEqual(['003', '004', '005'])
+  })
+
+  // Catches the frame not saying the table stopped following, so new requests arrive unseen
+  // below a pinned view, or a wrong count of how many wait there.
+  test('says live while following, and how many newer rows wait while pinned', () => {
+    const pinned = scrollRequestsView(undefined, requests, 3)
+
+    expect(stripTerminalSequences(requestsStatus(undefined, requests))).toBe('● live')
+    expect(stripTerminalSequences(requestsStatus(pinned, requests))).toBe(
+      '‖ paused · 3 newer below · End to follow'
+    )
+    expect(stripTerminalSequences(requestsStatus(pinned, [...requests, http(10)]))).toContain(
+      '· 4 newer below ·'
+    )
   })
 })
 

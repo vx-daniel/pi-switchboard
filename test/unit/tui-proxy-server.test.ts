@@ -267,6 +267,7 @@ function statsView(name: string, events: string[]): StatsView {
     rows: () => [],
     todayCostUsd: () => undefined,
     frameNote: () => '',
+    perBar: () => '',
     close: () => events.push(`close ${name}`)
   }
 }

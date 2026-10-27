@@ -4,6 +4,7 @@ import {
   accountActions,
   clampSelection,
   footerLine,
+  logsKeys,
   moveSelection,
   stepView,
   VIEWS
@@ -91,5 +92,17 @@ describe('console navigation', () => {
     const at48 = stripTerminalSequences(footerLine('accounts', { width: 48, sidebarFits: false }))
     expect(at48).toMatch(/^ {2}↑↓ {2}select +q {2}quit \(stops the proxy\) $/)
     expect(visibleWidth(at48)).toBe(48)
+  })
+
+  // Catches `r` named for both views at once, or for the view already shown, instead of the one
+  // it switches to.
+  test('the first view’s r names the other view: the raw log from the table, and back', () => {
+    const size = { width: 160, sidebarFits: true }
+    const onTable = stripTerminalSequences(footerLine('logs', size, logsKeys(false)))
+    const onRaw = stripTerminalSequences(footerLine('logs', size, logsKeys(true)))
+
+    expect(onTable).toMatch(/ r {2}raw log /u)
+    expect(onRaw).toMatch(/ r {2}requests /u)
+    expect(onRaw).not.toContain('raw log')
   })
 })

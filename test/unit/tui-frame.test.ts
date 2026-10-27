@@ -134,6 +134,31 @@ describe('framedView', () => {
   })
 })
 
+describe('the bottom border’s status', () => {
+  // Catches the view's state (Requests live or paused) missing from the bottom border, drawn at
+  // the wrong end, or a status that pushes the row past the frame's width.
+  test('sits at the left of the bottom border, the note at the right, every row fitting', () => {
+    for (const columns of [60, 100, 160]) {
+      const input = frame({ columns, rows: 24 }, { status: '‖ paused · 3 newer below' })
+      const rendered = framedView(input, ['a row'])
+      for (const row of rendered) expect(visibleWidth(row)).toBe(input.layout.mainWidth)
+      const bottom = stripTerminalSequences(rendered.at(-1) ?? '')
+      expect(bottom).toMatch(/^╰─ ‖ paused · 3 newer below ─/u)
+      expect(bottom).toMatch(/─ 12 lines ─╯$/u)
+    }
+  })
+
+  // Catches the note crowding out the status on a narrow frame: the status says whether rows are
+  // arriving unseen, the note only counts them.
+  test('the note gives way to the status when both do not fit', () => {
+    const input = frame({ columns: 40, rows: 24 }, { status: '‖ paused · 3 newer below' })
+    const bottom = stripTerminalSequences(plain(input).at(-1) ?? '')
+
+    expect(bottom).toContain('‖ paused')
+    expect(bottom).not.toContain('12 lines')
+  })
+})
+
 describe('exposedModelsLabel', () => {
   // Catches the Models tab saying `0 models` while the status strip shows an exposure-config
   // error (two sources for one count), a count before the first status read, or the built-in

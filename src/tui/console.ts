@@ -68,6 +68,8 @@ import { logViewRows, scrollLogView, wheelLines } from '@proxy/tui/log-view'
 import { modelsItems, modelsRows, modelsViewData } from '@proxy/tui/models-view'
 import {
   installKeybindings,
+  type KeyHint,
+  logsKeys,
   moveSelection,
   STATS_WINDOW_KEYS,
   stepView,
@@ -81,7 +83,13 @@ import {
   type RestartReport,
   startConsoleServer
 } from '@proxy/tui/proxy-server'
-import { chatsById, requestsRows, scrollRequestsView, tableEntries } from '@proxy/tui/requests-view'
+import {
+  chatsById,
+  requestsRows,
+  requestsStatus,
+  scrollRequestsView,
+  tableEntries
+} from '@proxy/tui/requests-view'
 import { consoleScreen } from '@proxy/tui/screen'
 import { SETTING_KEYS, settingsViewRows } from '@proxy/tui/settings-view'
 import { type SidebarInput, sidebarRows } from '@proxy/tui/sidebar'
@@ -186,19 +194,39 @@ function stripInput(context: ConsoleContext, now: number): StatusStripInput {
   }
 }
 
+/** The space a view's body has: rows and columns. */
+interface ViewSize {
+  readonly height: number
+  readonly width: number
+}
+
+/**
+ * Names the Stats view's window for its tab's context, with how long a timeline bar is while the
+ * dashboard shows: `today · 22 min per bar`.
+ *
+ * @param context - the console: the window and the Stats view
+ * @param width - the view's columns, which set the bar's length
+ * @returns the text
+ */
+function statsContext({ state, statsView }: ConsoleContext, width: number): string {
+  const window = STATS_WINDOW_KEYS[state.statsWindow][1]
+  const perBar = statsView.perBar(state.statsWindow, width)
+  return perBar === '' ? window : `${window} · ${perBar}`
+}
+
 /**
  * What the right end of the tab row says about each view: what is in flight on Requests, the logins
- * and cooldowns on Accounts, the window on Stats, the models and aliases on Models, and on Settings
- * whether a restart is due.
+ * and cooldowns on Accounts, the window and a bar's length on Stats, the models and aliases on
+ * Models, and on Settings whether a restart is due.
  */
-const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext) => string>> = {
+const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext, size: ViewSize) => string>> = {
   logs: () => {
     const inFlight = activeRequests().length
     return inFlight === 0 ? 'idle' : `${String(inFlight)} in flight`
   },
   accounts: ({ state }) =>
     `${String(state.accounts.length)} logins · ${String(state.status?.cooldowns ?? 0)} cooldowns`,
-  stats: ({ state }) => STATS_WINDOW_KEYS[state.statsWindow][1],
+  stats: (context, size) => statsContext(context, size.width),
   models: ({ state }) => {
     const { aliases, latest } = modelsViewData(state.status)
     return exposedModelsLabel(state.status?.exposed, {
@@ -210,8 +238,8 @@ const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext) => string>> =
 }
 
 /**
- * What the right end of the frame's bottom border notes about each view: how many log lines,
- * logins or exposed models it holds, on Stats how long the stats file keeps its history (nothing
+ * What the right end of the frame's bottom border notes about each view, unless its render says
+ * otherwise ({@link ViewBody}): how many log lines, logins or exposed models it holds, on Stats how long the stats file keeps its history (nothing
  * while the view shows the totals instead), and on Settings the file they are saved to.
  */
 const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
@@ -255,44 +283,55 @@ function accountsView(state: ConsoleState, now: number): AccountsView {
 }
 
 /**
- * Renders the Models view from the console's state.
- *
- * @param state - the console's state: the last exposure and aliases read, and the selected row
- * @param size - the space available
- * @param size.height - rows
- * @param size.width - columns
- * @returns the rows
+ * A view rendered: its rows, and what the frame and the footer say about its state where that
+ * differs from {@link FRAME_NOTE} and the view's usual keys.
  */
-function modelsViewRows(
-  state: ConsoleState,
-  size: { readonly height: number; readonly width: number }
-): string[] {
-  return modelsRows({ ...modelsViewData(state.status), selected: state.modelsSelected }, size)
+interface ViewBody {
+  readonly rows: readonly string[]
+  /** The frame's note, in place of the view's usual one. */
+  readonly note?: string
+  /** The left end of the frame's bottom border: `● live` on the Requests table. */
+  readonly status?: string
+  /** The footer's keys for the view, in place of its usual ones. */
+  readonly keys?: readonly KeyHint[]
 }
 
 /**
- * Renders the first view: the Requests table, or the raw log after `r`.
+ * Renders the Models view from the console's state, noting how many models show while the matrix
+ * is scrolled.
+ *
+ * @param state - the console's state: the last exposure and aliases read, and the selected row
+ * @param size - the space available
+ * @returns the rows, and the note while the matrix is scrolled
+ */
+function modelsViewBody(state: ConsoleState, size: ViewSize): ViewBody {
+  const { rows, note } = modelsRows(
+    { ...modelsViewData(state.status), selected: state.modelsSelected },
+    size
+  )
+  return note === '' ? { rows } : { rows, note }
+}
+
+/**
+ * Renders the first view: the Requests table with whether it follows new requests, or the raw log
+ * after `r`; the footer's `r` names the other one.
  *
  * @param state - the console's state: which of the two, and where each is
  * @param logs - the log buffer
  * @param size - the space available
- * @param size.height - rows
- * @param size.width - columns
- * @returns the rows
+ * @returns the rows, the status and the keys
  */
-function logsRows(
-  state: ConsoleState,
-  logs: LogBuffer,
-  size: { readonly height: number; readonly width: number }
-): string[] {
-  if (state.logRaw) return logViewRows(state.logView, logs, size)
+function logsBody(state: ConsoleState, logs: LogBuffer, size: ViewSize): ViewBody {
+  const keys = logsKeys(state.logRaw)
+  if (state.logRaw) return { rows: logViewRows(state.logView, logs, size), keys }
   const data = {
     requests: httpRequests(),
     events: consoleEvents(),
     chats: chatsById(activeRequests(), finishedRequests()),
     now: Date.now()
   }
-  return requestsRows(state.requestsView, data, size)
+  const status = requestsStatus(state.requestsView, tableEntries(data.requests, data.events))
+  return { rows: requestsRows(state.requestsView, data, size), status, keys }
 }
 
 /**
@@ -310,25 +349,20 @@ function scrollLogs(context: ConsoleContext, lines: number): void {
   }
 }
 
-/** The space a view's body has: rows and columns. */
-interface ViewSize {
-  readonly height: number
-  readonly width: number
-}
-
 /** How each view renders its body, from the console and the space it has. */
-const VIEW_ROWS: Readonly<Record<View, (context: ConsoleContext, size: ViewSize) => string[]>> = {
-  logs: ({ state, logs }, size) => logsRows(state, logs, size),
-  accounts: ({ state }, size) => accountRows(accountsView(state, Date.now()), size),
-  stats: ({ state, statsView }, size) => statsView.rows(state.statsWindow, size),
-  models: ({ state }, size) => modelsViewRows(state, size),
-  settings: (context, size) =>
-    settingsViewRows(
+const VIEW_BODY: Readonly<Record<View, (context: ConsoleContext, size: ViewSize) => ViewBody>> = {
+  logs: ({ state, logs }, size) => logsBody(state, logs, size),
+  accounts: ({ state }, size) => ({ rows: accountRows(accountsView(state, Date.now()), size) }),
+  stats: ({ state, statsView }, size) => ({ rows: statsView.rows(state.statsWindow, size) }),
+  models: ({ state }, size) => modelsViewBody(state, size),
+  settings: (context, size) => ({
+    rows: settingsViewRows(
       currentSettingRows(context),
       context.state.settingsSelected,
       size,
       context.state.status?.fileProblem
     )
+  })
 }
 
 /**
@@ -392,19 +426,20 @@ function screenRows(
     layout.sidebarWidth === undefined
       ? undefined
       : sidebarRows(sidebarInput(context), { height: layout.frameRows, width: layout.sidebarWidth })
+  const { view } = context.state
+  const size = { height: layout.viewHeight, width: layout.viewWidth }
+  const { rows, note, ...chrome } = VIEW_BODY[view](context, size)
   return consoleScreen({
-    view: context.state.view,
+    view,
     layout,
     now,
     strip: stripInput(context, now),
-    context: TAB_CONTEXT[context.state.view](context),
-    note: FRAME_NOTE[context.state.view](context),
-    body: VIEW_ROWS[context.state.view](context, {
-      height: layout.viewHeight,
-      width: layout.viewWidth
-    }),
+    context: TAB_CONTEXT[view](context, size),
+    note: note ?? FRAME_NOTE[view](context),
+    body: rows,
     sidebar,
-    authOffAt: alertAt
+    authOffAt: alertAt,
+    ...chrome
   })
 }
 
