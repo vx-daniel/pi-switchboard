@@ -555,8 +555,8 @@ interface ModelsLayout {
 export interface ModelsRender {
   readonly rows: string[]
   /**
-   * `k of N models shown · ↑↓` while the matrix is scrolled past some models; `''` while every
-   * model shows, for the frame's usual note.
+   * `k of N models shown · ↑↓` while the matrix is taller than its space, so some models are cut
+   * off (whether above or below); `''` while every model shows, for the frame's usual note.
    */
   readonly note: string
 }
@@ -715,7 +715,7 @@ function stackedRows(
  * @param size.width - columns
  * @param now - the time now, for cooldowns
  * @returns the rows, one line saying why when the exposure config is invalid, and the note while
- *   the matrix is scrolled
+ *   some models are cut off
  */
 export function modelsRows(
   view: ModelsView,
