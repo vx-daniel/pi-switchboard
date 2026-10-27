@@ -83,6 +83,7 @@ function namedRejection(body: unknown): ValidationError | undefined {
   if (field !== undefined) {
     return named(field, `'${field}' is not supported: ${RESPONSES_REJECTED_FIELDS[field] ?? ''}`)
   }
+  // Chat completions refuse it the same way (`chatRequestRejection`); both use one message.
   if (body['store'] === true) {
     return named('store', STORE_TRUE_REFUSAL)
   }

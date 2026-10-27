@@ -122,6 +122,7 @@ export function schemaRejection(schema: z.ZodType, body: unknown): ValidationErr
  */
 function rejectedFieldRejection(body: unknown): ValidationError | undefined {
   if (!isRecord(body)) return undefined
+  // The Responses API refuses it the same way (`responsesRequestRejection`); both use one message.
   if (body['store'] === true) {
     validateLogger.warn('Rejected unsupported field {field}', { field: 'store' })
     return { ok: false, status: 422, message: STORE_TRUE_REFUSAL, param: 'store' }
