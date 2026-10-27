@@ -44,6 +44,17 @@ const MODELS_JSON_PARSE_PREFIX = 'Failed to parse models.json:'
 const JSON_ERROR_LINE_COLUMN = /\(line (\d+) column (\d+)\)/
 /** Where other JSON.parse messages put the fault: `position N`. */
 const JSON_ERROR_OFFSET = /position (\d+)/
+/**
+ * JavaScriptCore's JSON.parse messages (the Bun binary) that quote nothing from the file, captured
+ * from Bun 1.4.4. JavaScriptCore gives no location, so this phrase is all there is to keep.
+ *
+ * @remarks
+ * An allowlist, not a denylist: other JavaScriptCore messages quote the file (`Unexpected
+ * identifier "notarealsec"`, `Invalid escape character q`, `"\uZZZZ" is not a valid unicode
+ * escape`, `Unrecognized token '#'`). `Unexpected token` is kept only for JSON's own punctuation.
+ */
+const JSON_ERROR_JSC_REASON =
+  /^JSON Parse error: (Unexpected EOF|Expected '[}\]]'|Expected ':' before value in object property definition|Unterminated string|Unexpected comma at the end of array expression|Property name must be a string literal|Unable to parse JSON string|Single quotes \('\) are not allowed in JSON|Invalid number|Invalid digits after decimal point|\\u must be followed by 4 hex digits|Unexpected token '[{}[\]:,]')$/
 
 /**
  * Splits pi's models.json error into its message and the file's path.
@@ -71,9 +82,11 @@ function splitModelsJsonError(error: string): { detail: string; path: string | u
  * @remarks
  * JSON.parse messages can include a slice of the text around the fault (`Unexpected token 'o',
  * ..."apiKey": notarealsec"... is not valid JSON`), which is often a key, so a parse error keeps
- * only where it is. Load errors (the fs message) and schema errors (property paths, which name the
- * user's providers and models, and TypeBox's fixed messages) quote no values and pass through. The
- * file's path is dropped; callers that log it take it separately.
+ * only where it is (V8) or, when the engine gives no location (JavaScriptCore, the Bun binary),
+ * its reason if that is one known to quote nothing ({@link JSON_ERROR_JSC_REASON}). Load errors
+ * (the fs message) and schema errors (property paths, which name the user's providers and models,
+ * and TypeBox's fixed messages) quote no values and pass through. The file's path is dropped;
+ * callers that log it take it separately.
  *
  * @param error - pi's models.json error, as `ModelRuntime.getError()` returns it
  * @returns the reduced message
@@ -86,9 +99,11 @@ export function describeModelsJsonError(error: string): string {
     return `models.json is not valid JSON at line ${String(lineColumn[1])} column ${String(lineColumn[2])}`
   }
   const offset = JSON_ERROR_OFFSET.exec(detail)
-  return offset === null
+  if (offset !== null) return `models.json is not valid JSON at position ${String(offset[1])}`
+  const reason = JSON_ERROR_JSC_REASON.exec(detail.slice(MODELS_JSON_PARSE_PREFIX.length).trim())
+  return reason === null
     ? 'models.json is not valid JSON'
-    : `models.json is not valid JSON at position ${String(offset[1])}`
+    : `models.json is not valid JSON: ${String(reason[1])}`
 }
 
 /** How long listing pi's stored credentials at startup may take. */
