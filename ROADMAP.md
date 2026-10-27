@@ -134,13 +134,13 @@ routing across pi's logins. `TODO.md` uses the same numbering.
 Get 0.1.0 into people's hands under the new name.
 
 - [x] Publish the pi package so `pi install npm:@vx-daniel/pi-switchboard` works: GitHub Packages,
-      which needs a token to install (#59)
+      which needs a token to install (#59); the install on a clean machine is checked by hand (#301)
 - [ ] The same on npmjs, with no token (later, by choice)
 - [x] Docker image built from this repo and published on release (#60): Docker Hub and GHCR, from
       0.1.0
 - [x] Standalone binary with an opt-in TUI for logs, status and accounts (#61): Linux, macOS and
       Windows (x64, arm64) on every release from 0.4.0; a manual check of a real login's token
-      refresh inside the binary is still open on #61
+      refresh inside the binary is #301
 
 ## Phase 5 — Routing across pi's logins
 
