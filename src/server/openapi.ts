@@ -73,7 +73,8 @@ export const chatHeadersSchema = z.object({
     .meta({
       description:
         "An API key for the model's provider, used instead of pi's stored credential for this " +
-        'request. Empty is refused with 400; leave the header out to use the stored credential. ' +
+        'request. Empty or only spaces is refused with 400; leave the header out to use the ' +
+        'stored credential. ' +
         'Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.'
     })
 })
