@@ -540,11 +540,6 @@ describe('startProxy', () => {
   test('a config file that is not valid JSON: refused with the reason, nothing spawned', async () => {
     const freePort = await closedPort()
     writeFileSync(join(agentDir, 'proxy-config.json'), '{"authToken": "notarealsecret-fi')
-    // The file cannot name a port, so the probe would go to the default 4141, where the developer's
-    // own proxy may be listening: answer it with a refused connection instead.
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
-      Object.assign(new Error('fetch failed'), { code: 'ECONNREFUSED' })
-    )
     writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
     const { context, notifications, statuses } = fakeCommandContext({})
 
@@ -569,9 +564,6 @@ describe('startProxy', () => {
     const freePort = await closedPort()
     rmSync(join(agentDir, 'proxy-config.json'), { force: true })
     mkdirSync(join(agentDir, 'proxy-config.json'))
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
-      Object.assign(new Error('fetch failed'), { code: 'ECONNREFUSED' })
-    )
     writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
     const { context, notifications, statuses } = fakeCommandContext({})
 

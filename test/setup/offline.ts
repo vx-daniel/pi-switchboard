@@ -11,7 +11,9 @@
  *
  * Nor may one reach the network: a call to anything but this machine fails at once. pi refreshes
  * provider catalogs from `pi.dev` after a login, which made a test's time depend on pi.dev's
- * latency; offline, pi keeps its built-in catalog.
+ * latency; offline, pi keeps its built-in catalog. On this machine, the proxy's default port is
+ * refused too: the extension probes it when `proxy-config.json` is absent or unparseable, and the
+ * developer's own proxy may be listening there (#257).
  *
  * @packageDocumentation
  */
@@ -20,6 +22,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import { DEFAULT_CONFIG } from '@proxy/config/schema'
 import { afterAll } from 'vite-plus/test'
 
 /**
@@ -51,13 +54,23 @@ const LOOPBACK: Readonly<Record<string, true>> = {
   '::1': true
 }
 
+/**
+ * The proxy's default port, refused on loopback too: whatever listens there is the developer's,
+ * not the test's. Tests that start a proxy pick a free port.
+ */
+const DEVELOPER_PORT = String(DEFAULT_CONFIG.port)
+
 /** The fetch the offline guard passes loopback calls to. */
 const realFetch = globalThis.fetch
 globalThis.fetch = (input, init) => {
   const url = new URL(input instanceof Request ? input.url : String(input))
-  return LOOPBACK[url.hostname] === true
-    ? realFetch(input, init)
-    : Promise.reject(new TypeError(`offline test: no network access to ${url.hostname}`))
+  if (LOOPBACK[url.hostname] !== true) {
+    return Promise.reject(new TypeError(`offline test: no network access to ${url.hostname}`))
+  }
+  if (url.port === DEVELOPER_PORT) {
+    return Promise.reject(new TypeError(`offline test: no access to the default port ${url.port}`))
+  }
+  return realFetch(input, init)
 }
 
 afterAll(() => {
