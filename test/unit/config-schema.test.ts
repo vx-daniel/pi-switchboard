@@ -15,6 +15,7 @@ import {
   DEFAULT_CONFIG,
   getConfigPath,
   intBounds,
+  isLoopbackHost,
   normalizeConfig,
   parseIntText,
   ProxyConfigSchema
@@ -488,6 +489,23 @@ describe('normalizeConfig: repairs', () => {
   test('host is trimmed, and a blank host takes the default', () => {
     expect(normalizeConfig({ host: ' 0.0.0.0 ' }).host).toBe('0.0.0.0')
     expect(normalizeConfig({ host: '   ' }).host).toBe(DEFAULT_CONFIG.host)
+  })
+})
+
+describe('isLoopbackHost', () => {
+  // Catches a bind address that only looks like loopback counted as one, which would word the
+  // auth-off warning as a local matter for a name that can resolve to any interface (#309 review).
+  test.each([
+    ['127.0.0.1', true],
+    ['127.10.20.30', true],
+    ['localhost', true],
+    ['::1', true],
+    ['127.evil.example', false],
+    ['127.0.0.1.nip.io', false],
+    ['0.0.0.0', false],
+    ['192.168.1.20', false]
+  ])('%s is loopback: %s', (host, loopback) => {
+    expect(isLoopbackHost(host)).toBe(loopback)
   })
 })
 

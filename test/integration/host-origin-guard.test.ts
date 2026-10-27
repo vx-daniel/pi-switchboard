@@ -90,11 +90,15 @@ describe('the host/origin guard (#188)', () => {
   })
 
   // Catches a web page's request getting through, or the proxy's own pages (/docs) refused: a
-  // browser sends Origin on cross-origin requests; the proxy's own origin must match the Host.
+  // browser sends Origin on cross-origin requests; the proxy's own origin must match the Host,
+  // brackets and all for IPv6, and with no Host there is no own origin to match.
   test.each([
     [{ host: '127.0.0.1:4141' }, 200, undefined],
     [{ host: '127.0.0.1:4141', origin: 'http://127.0.0.1:4141' }, 200, undefined],
     [{ host: 'localhost:4141', origin: 'https://localhost:4141' }, 200, undefined],
+    [{ host: '[::1]:4141', origin: 'http://[::1]:4141' }, 200, undefined],
+    [{}, 200, undefined],
+    [{ origin: 'http://127.0.0.1:4141' }, 403, 'invalid_origin'],
     [{ host: '127.0.0.1:4141', origin: 'https://evil.example' }, 403, 'invalid_origin'],
     [{ host: '127.0.0.1:4141', origin: 'null' }, 403, 'invalid_origin'],
     [{ host: '127.0.0.1:4141', origin: 'http://localhost:4141' }, 403, 'invalid_origin'],

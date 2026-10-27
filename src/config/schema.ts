@@ -998,14 +998,18 @@ export function configToEnv(config: ProxyConfig): Record<string, string> {
   return env
 }
 
+/** An IPv4 address in `127.0.0.0/8`, written out in full. */
+const LOOPBACK_IPV4 = /^127(?:\.\d{1,3}){3}$/
+
 /**
  * Checks whether a bind address only accepts connections from this machine.
  *
  * @param host - The bind address.
- * @returns Whether `host` is `localhost`, `::1` or in `127.0.0.0/8`.
+ * @returns Whether `host` is `localhost`, `::1` or an address in `127.0.0.0/8`; a name that only
+ *   starts with `127.` (`127.evil.example`) is not, since it can resolve anywhere.
  */
 export function isLoopbackHost(host: string): boolean {
-  return host === 'localhost' || host === '::1' || host.startsWith('127.')
+  return host === 'localhost' || host === '::1' || LOOPBACK_IPV4.test(host)
 }
 
 /**
