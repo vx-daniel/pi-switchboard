@@ -3,7 +3,7 @@
  */
 
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
-import { gauge, panel, quotaColor, usd } from '@proxy/tui/panel'
+import { gauge, hitRate, panel, quotaColor, usd } from '@proxy/tui/panel'
 import { describe, expect, test } from 'vite-plus/test'
 
 describe('gauge', () => {
@@ -47,6 +47,19 @@ describe('usd', () => {
     expect(usd(1.234)).toBe('$1.23')
     expect(usd(0)).toBe('$0.00')
     expect(usd(0.00425, 4)).toBe('$0.0043')
+  })
+})
+
+describe('hitRate', () => {
+  // Catches a route with no prompt tokens yet (only failed calls) shown as `NaN%`, and a rate
+  // that leaves the writes out of the prompt (60%, not 100%).
+  test.each([
+    [{ inputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 }, '-'],
+    [{ inputTokens: 100, cacheReadTokens: 0, cacheWriteTokens: 0 }, '0%'],
+    [{ inputTokens: 0, cacheReadTokens: 600, cacheWriteTokens: 400 }, '60%'],
+    [{ inputTokens: 0, cacheReadTokens: 1000, cacheWriteTokens: 0 }, '100%']
+  ])('%j is %s', (tokens, text) => {
+    expect(hitRate(tokens)).toBe(text)
   })
 })
 

@@ -48,7 +48,8 @@ describe('the console Stats view', () => {
   })
 
   // Catches a route shown without its alias (the operator could not tell a chain's model from a
-  // direct request), a total that does not add up, or a cache column that drops the writes.
+  // direct request), a total that does not add up, cache reads and writes swapped or summed, or a
+  // hit rate that leaves the writes out of the prompt (15%, not 600 / 3,000 = 20%).
   test('labels each route and adds up the total', () => {
     const rows = rendered([
       route({ alias: null, model: 'mock/ok', requests: 1, inputTokens: 1200, costUsd: 0.0081 }),
@@ -57,15 +58,17 @@ describe('the console Stats view', () => {
         model: 'mock/ok',
         requests: 2,
         inputTokens: 2400,
-        cacheReadTokens: 100,
-        cacheWriteTokens: 50,
+        cacheReadTokens: 600,
+        cacheWriteTokens: 1000,
         costUsd: 0.0162
       })
     ])
 
-    expect(rows[2]).toMatch(/^ {2}mock\/ok +1 +0 +\$0\.0081 +0 +1,200 +0 +0$/)
-    expect(rows[3]).toMatch(/^ {2}coding → mock\/ok +2 +0 +\$0\.0162 +0 +2,400 +0 +150$/)
-    expect(rows[4]).toMatch(/^ {2}total +3 +0 +\$0\.0243 +0 +3,600 +0 +150$/)
+    expect(rows[2]).toMatch(/^ {2}mock\/ok +1 +0 +\$0\.0081 +0 +0% +1,200 +0 +0 +0$/)
+    expect(rows[3]).toMatch(
+      /^ {2}coding → mock\/ok +2 +0 +\$0\.0162 +0 +15% +2,400 +0 +600 +1,000$/
+    )
+    expect(rows[4]).toMatch(/^ {2}total +3 +0 +\$0\.0243 +0 +12% +3,600 +0 +600 +1,000$/)
   })
 
   // Catches failure classes that reorder between redraws as failures arrive.

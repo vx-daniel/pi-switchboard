@@ -145,6 +145,7 @@ describe('the stats store', () => {
           model: 'a/fast',
           alias: 'coding',
           cacheReadTokens: 40,
+          cacheWriteTokens: 15,
           costUsd: 0.25
         }),
         attemptRow({ minute: 3, model: 'b/slow', fallbacks: 1, outputTokens: 7 }),
@@ -166,7 +167,8 @@ describe('the stats store', () => {
         fallbacks: 0,
         inputTokens: 1000,
         outputTokens: 0,
-        cacheTokens: 40,
+        cacheReadTokens: 40,
+        cacheWriteTokens: 15,
         costUsd: 0.75
       },
       expect.objectContaining({

@@ -41,8 +41,8 @@ function usage(input: number, cost: number): Usage {
     input,
     output: 10,
     cacheRead: 5,
-    cacheWrite: 0,
-    totalTokens: input + 15,
+    cacheWrite: 3,
+    totalTokens: input + 18,
     cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost }
   }
 }
@@ -81,7 +81,8 @@ describe('the stats recorder', () => {
         averageFirstEventMs: 500,
         attempts: 1,
         inputTokens: 100,
-        cacheTokens: 5,
+        cacheReadTokens: 5,
+        cacheWriteTokens: 3,
         costUsd: 0.5
       }),
       expect.objectContaining({ model: 'alpha/one', requests: 0, attempts: 1, fallbacks: 1 })

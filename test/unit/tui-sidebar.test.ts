@@ -482,7 +482,8 @@ describe('the console sidebar', () => {
     expect(panelLines(rows, 'QUOTA 0 logins')).toEqual(['No logins · n to log in'])
   })
 
-  // Catches a session panel that does not add up the routes.
+  // Catches a session panel that does not add up the routes, counts only the uncached input as
+  // tokens in, or shows the cache's reads and writes summed instead of a hit rate and the writes.
   test('adds up the session over every route', () => {
     const route = (fields: Partial<RouteTotals>): RouteTotals => ({
       alias: null,
@@ -508,8 +509,9 @@ describe('the console sidebar', () => {
               alias: 'coding',
               requests: 2,
               fallbacks: 1,
-              inputTokens: 1_250_000,
-              cacheReadTokens: 900,
+              inputTokens: 300_000,
+              cacheReadTokens: 900_000,
+              cacheWriteTokens: 50_000,
               costUsd: 0.25
             })
           ]
@@ -522,7 +524,7 @@ describe('the console sidebar', () => {
       'requests 5',
       'failed · fallbacks 1 · 1',
       'tokens in / out 1.3M / 400',
-      'cache 900',
+      'cache hit · written 72% · 50K',
       'cost $0.7500'
     ])
   })
