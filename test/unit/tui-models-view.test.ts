@@ -68,6 +68,24 @@ function boxLines(rows: readonly string[], title = 'ALIASES'): string[] {
   return rows.slice(top + 1, bottom).map((row) => row.slice(2, -1).trimEnd())
 }
 
+/**
+ * Reads a box's content off the plain rows of a side-by-side view: the column it starts at, from
+ * its top border to its bottom one, without its borders.
+ *
+ * @param rows - the plain rows
+ * @param title - the box's title
+ * @returns the box's lines, without trailing spaces; none when no box has the title
+ */
+function sideBoxLines(rows: readonly string[], title: string): string[] {
+  const top = rows.findIndex((row) => row.includes(`╭─ ${title}`))
+  if (top === -1) return []
+  const column = rows[top]?.indexOf(`╭─ ${title}`) ?? 0
+  return boxLines(
+    rows.slice(top).map((row) => row.slice(column)),
+    title
+  )
+}
+
 describe('the console Models view', () => {
   afterEach(() => {
     clearAllCooldowns()
@@ -219,6 +237,65 @@ describe('the console Models view', () => {
 
     expect(rows.length).toBeLessThanOrEqual(height)
     for (const row of rows) expect(visibleWidth(row)).toBe(width)
+  })
+
+  // Catches the detail pane missing beside the matrix, or showing a public ID cut as the matrix
+  // cuts it, or a model's skipped levels and cooldown reason left out.
+  test('beside the matrix, a pane under the box shows the selected model in full', () => {
+    const long = exposed(`a-model-with-a-public-id-longer-than-thirty-columns`, 'alpha', true)
+    const skipping = { ...long, model: { ...long.model, thinkingLevelMap: { minimal: null } } }
+    startCooldown({ provider: 'alpha', canonicalId: long.canonicalId }, 'unavailable', 42_000, 0)
+    const view = { models: [skipping], aliases: {}, diagnostics: [], families: [], selected: 0 }
+
+    const pane = sideBoxLines(rendered(view, 24, SIDE_BY_SIDE), 'MODEL').join('\n')
+
+    expect(pane).toContain('a-model-with-a-public-id-longer-than-thirty-columns')
+    expect(pane).toMatch(/provider alpha/u)
+    expect(pane).toMatch(/efforts none → high \(4 levels\)/u)
+    expect(pane).toMatch(/skips minimal/u)
+    expect(pane).toMatch(/cooling 42s unavailable/u)
+    expect(pane).toContain('↵ makes an alias for this model')
+  })
+
+  // Catches the pane describing a model while an alias or the new-alias row is selected, so
+  // Enter does something other than the pane says.
+  test('the pane follows the selection onto an alias and the new-alias row', () => {
+    const data = {
+      models: [exposed('m0')],
+      aliases: { reviewer: { targets: ['alpha/m0'], fallbackOn: [], reasoningEffort: 'high' } },
+      diagnostics: [],
+      families: []
+    }
+
+    const onAlias = sideBoxLines(
+      rendered({ ...data, selected: 1 }, 24, SIDE_BY_SIDE),
+      'ALIAS reviewer'
+    )
+    const onNew = rendered({ ...data, selected: 2 }, 24, SIDE_BY_SIDE)
+
+    expect(onAlias.join('\n')).toMatch(/target alpha\/m0/u)
+    expect(onAlias.join('\n')).toContain('↵ rename')
+    expect(sideBoxLines(onNew, 'NEW ALIAS').join('\n')).toContain('↵ names a new alias')
+    expect(sideBoxLines(onNew, 'MODEL')).toEqual([])
+  })
+
+  // Catches the pane squeezing the boxes or the matrix: it shows only with six rows left under
+  // the boxes, and never under the matrix on a narrow view.
+  test('the pane shows only beside the matrix with six rows left under the boxes', () => {
+    const view = {
+      models: [exposed('m0')],
+      aliases: {},
+      diagnostics: [],
+      families: [],
+      selected: 0
+    }
+    const hasPane = (height: number, width: number): boolean =>
+      rendered(view, height, width).some((row) => row.includes('╭─ MODEL'))
+
+    // The ALIASES box wants four rows here: the new-alias row, its heading and its frame.
+    expect(hasPane(10, SIDE_BY_SIDE)).toBe(true)
+    expect(hasPane(9, SIDE_BY_SIDE)).toBe(false)
+    expect(hasPane(30, STACKED)).toBe(false)
   })
 
   // Catches the box left under the matrix on a wide view, or put beside it on a narrow one.

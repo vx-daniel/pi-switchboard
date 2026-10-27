@@ -9,29 +9,28 @@
  * opens its menu, on the new-alias row starts a new alias, and on a built-in alias offers to pin
  * it. The matrix and the boxes each scroll to keep the selection on screen, since a login can
  * expose more models than the screen has rows. The boxes sit beside the matrix on a wide view,
- * under it otherwise, ALIASES above LATEST.
+ * under it otherwise, ALIASES above LATEST; beside the matrix, a detail pane under them shows the
+ * selected item in full when there is room.
  *
  * @packageDocumentation
  */
 
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
 import {
-  type AliasModel,
   type AliasTarget,
   aliasFallbackOn,
   aliasModels,
   type FamilyTarget,
-  isAliasChain,
-  isFamilyTarget
+  isAliasChain
 } from '@proxy/config/schema'
 import type { AliasDiagnostic, FamilyResolution } from '@proxy/openai/model-aliases'
 import type { ExposedModel, ModelExposureResult } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
 import { activeCooldown, loginSubject } from '@proxy/pi/cooldowns'
-import { compactDuration, firstShown, FRAME_COLUMNS, panel } from '@proxy/tui/panel'
+import { cooldownCell, detailPane, type ModelsItem, targetCell } from '@proxy/tui/models-detail'
+import { firstShown, FRAME_COLUMNS, panel } from '@proxy/tui/panel'
 import { highlight, paint, strong, tabAccent } from '@proxy/tui/theme'
-import { MS_PER_SECOND } from '@proxy/utils/time'
 
 /** The label of the row after the aliases, which adds one. */
 const NEW_ALIAS_ROW = '+ New alias…'
@@ -85,6 +84,8 @@ const PART_LEAST_ROWS = 5
 const STACKED_LEAST_ROWS = PART_LEAST_ROWS + PART_LEAST_ROWS
 /** Halves of a cell's spare columns: one before a centred text, one after. */
 const HALVES = 2
+/** Rows left under the boxes, beside the matrix, that the detail pane needs before it shows. */
+const DETAIL_LEAST_ROWS = 6
 /** Rows a box's frame takes. */
 const BOX_BORDER_ROWS = 2
 
@@ -139,14 +140,6 @@ export function modelsViewData(status: ModelsStatus | undefined): ModelsData {
     ...(typeof exposed === 'string' ? { unavailable: exposed } : {})
   }
 }
-
-/** What a selected item is. */
-export type ModelsItem =
-  | { readonly kind: 'model'; readonly model: ExposedModel }
-  | { readonly kind: 'alias'; readonly name: string; readonly target: AliasTarget }
-  | { readonly kind: 'new' }
-  /** A built-in `-latest` alias, which only a configured alias of its name changes. */
-  | { readonly kind: 'latest'; readonly name: string; readonly target: FamilyTarget }
 
 /** The exposed models of one provider, in list order. */
 interface ProviderGroup {
@@ -219,25 +212,6 @@ interface MatrixColumns {
 }
 
 /**
- * Renders a model's cooldown, if it has one: the time left (`42s`, `3m00s`), and the reason when it fits too,
- * so a narrow cell keeps the countdown.
- *
- * @param model - the exposed model
- * @param now - the time now, in milliseconds since the epoch
- * @param room - the cell's columns
- * @returns the cell, or `''`
- */
-function cooldownCell(model: ExposedModel, now: number, room: number): string {
-  const cooldown = activeCooldown(loginSubject(model), now)
-  if (cooldown === undefined) return ''
-  // Rounded up to the second: a cooldown with a moment left still reads `1s`, not `0s`.
-  const left = Math.max(0, Math.ceil((cooldown.until - now) / MS_PER_SECOND)) * MS_PER_SECOND
-  const countdown = `cooling ${compactDuration(left)}`
-  const withReason = `${countdown} ${cooldown.reason}`
-  return paint('warning', visibleWidth(withReason) <= room ? withReason : countdown)
-}
-
-/**
  * Centres a text in an effort's column.
  *
  * @param text - the text, at most {@link EFFORT_COLUMNS} wide
@@ -264,47 +238,6 @@ function modelRow(model: ExposedModel, columns: MatrixColumns, now: number): str
   )
   const name = truncateToWidth(model.publicId, columns.name, '…', true)
   return `${name}${cells.join('')} ${cooldownCell(model, now, columns.cooldown)}`
-}
-
-/**
- * Shortens a canonical ID to its model ID, for a family's members: the family names the provider.
- *
- * @param canonicalId - `provider/model-id`
- * @returns the model ID
- */
-function modelIdOf(canonicalId: string): string {
-  return canonicalId.slice(canonicalId.indexOf('/') + 1)
-}
-
-/**
- * Renders a family target with what it resolves to: `→ claude-opus-5-5 (newest)`, or its pin and
- * the newest, and a newer member the exposure config hides.
- *
- * @param family - the family target's family
- * @param resolution - what it resolves to now, or `undefined` for an unknown family
- * @returns the cell
- */
-function familyCell(family: string, resolution: FamilyResolution | undefined): string {
-  if (resolution === undefined) return family
-  const newest = resolution.newest === null ? 'none exposed' : modelIdOf(resolution.newest)
-  const shown =
-    resolution.pin === null
-      ? `${family} → ${newest} (newest)`
-      : `${family} pinned: ${modelIdOf(resolution.pin)} · newest: ${newest}`
-  if (resolution.newerHidden === null) return shown
-  return `${shown}${paint('dim', ` · newer hidden: ${modelIdOf(resolution.newerHidden)}`)}`
-}
-
-/**
- * Renders one alias target, with the effort it sets.
- *
- * @param target - the target
- * @param resolution - what it resolves to, for a family target
- * @returns the cell
- */
-function targetCell(target: AliasModel, resolution: FamilyResolution | undefined): string {
-  const shown = isFamilyTarget(target) ? familyCell(target.family, resolution) : target.model
-  return target.reasoningEffort === undefined ? shown : `${shown} @${target.reasoningEffort}`
 }
 
 /**
@@ -663,8 +596,33 @@ function cooldownRoom(matrixWidth: number, nameColumns: number): number {
 }
 
 /**
+ * Puts the detail pane under the boxes when at least {@link DETAIL_LEAST_ROWS} rows are left;
+ * a pane taller than the rows left loses its last lines, keeping its frame.
+ *
+ * @param box - the boxes' rows
+ * @param view - what the view shows, with the selection
+ * @param size - the column's rows and columns
+ * @param size.height - rows
+ * @param size.width - columns
+ * @param now - the time now, for a model's cooldown
+ * @returns the column's rows
+ */
+function withDetailPane(
+  box: readonly string[],
+  view: ModelsView,
+  size: { readonly height: number; readonly width: number },
+  now: number
+): string[] {
+  const left = size.height - box.length
+  if (left < DETAIL_LEAST_ROWS) return [...box]
+  const pane = detailPane(modelsItemAt(view, view.selected), view.families, size.width, now)
+  if (pane.length <= left) return [...box, ...pane]
+  return [...box, ...pane.slice(0, left - 1), ...pane.slice(-1)]
+}
+
+/**
  * Puts the box beside the matrix: the matrix takes what the effort cells and a cooldown need, the
- * box the rest.
+ * box the rest, and the detail pane for the selected item goes under the box when it has room.
  *
  * @param view - what the view shows
  * @param size - the view's rows and columns
@@ -687,7 +645,8 @@ function sideBySideRows(
     size.width - PANE_GAP - ALIAS_BOX_LEAST_WIDTH
   )
   const boxWidth = size.width - matrixWidth - PANE_GAP
-  const box = stackedBoxes(sideBoxes(view, boxWidth), { height: size.height, width: boxWidth })
+  const boxSize = { height: size.height, width: boxWidth }
+  const box = withDetailPane(stackedBoxes(sideBoxes(view, boxWidth), boxSize), view, boxSize, now)
   const columns = {
     name: NAME_COLUMNS.most,
     cooldown: cooldownRoom(matrixWidth, NAME_COLUMNS.most)
