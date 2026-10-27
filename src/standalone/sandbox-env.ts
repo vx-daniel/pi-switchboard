@@ -11,8 +11,8 @@ import { readFileSync } from 'node:fs'
 
 /**
  * Fills `env` from `readEnviron()` when it is empty. A non-empty environment is left alone, and an
- * unreadable source (not Linux, or no permission) leaves it empty and
- * writes one line to stderr saying so, since logging is not configured yet. Values may contain `=`.
+ * unreadable source (not Linux, or no permission) leaves it empty and writes one line to stderr
+ * saying so, since logging is not configured yet. Values may contain `=`.
  *
  * @param env - the environment to restore, `process.env` by default
  * @param readEnviron - reads the NUL-separated environment, `/proc/self/environ` by default
