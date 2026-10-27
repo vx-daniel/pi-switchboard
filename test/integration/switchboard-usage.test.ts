@@ -72,6 +72,7 @@ function recordTraffic(): void {
         inputTokens: 100,
         outputTokens: 40,
         cacheReadTokens: 10,
+        cacheWriteTokens: 4,
         costUsd: 0.5
       },
       { ...attempt(minute, '', 'p/a'), attempts: 1, failures: 1 }
@@ -130,7 +131,8 @@ describe('GET /v1/switchboard/usage', () => {
           fallbacks: 1,
           input_tokens: 100,
           output_tokens: 40,
-          cache_tokens: 10,
+          cache_read_tokens: 10,
+          cache_write_tokens: 4,
           cost_usd: 0.5,
           average_ms: 1500,
           slowest_ms: 2000,

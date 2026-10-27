@@ -6,6 +6,7 @@
  */
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
+import { cacheHitRate, type InputTokens } from '@proxy/stats/cache'
 import { type ConsoleColor, paint, strong } from '@proxy/tui/theme'
 import { MS_PER_SECOND } from '@proxy/utils/time'
 
@@ -25,6 +26,8 @@ const THOUSAND = 1000
 const MILLION = 1_000_000
 /** Decimal places a cost is shown with unless asked for more: dollars and cents. */
 const CENTS_DECIMALS = 2
+/** A share's scale as a percentage. */
+const PERCENT = 100
 /** Share used from which a quota window shows as nearly spent, then as spent. */
 export const USED_LEVELS = { warn: 0.7, high: 0.9 } as const
 /** A gauge cell's eighths, from one eighth filled to full. */
@@ -142,6 +145,17 @@ export function compactCount(value: number): string {
   if (value < THOUSAND) return String(value)
   const [scaled, unit] = value < MILLION ? [value / THOUSAND, 'K'] : [value / MILLION, 'M']
   return `${scaled.toFixed(1).replace(/\.0$/, '')}${unit}`
+}
+
+/**
+ * Formats the share of the prompt read from the cache: `97%`, or `-` with no prompt tokens.
+ *
+ * @param tokens - the input token counts
+ * @returns the text
+ */
+export function hitRate(tokens: InputTokens): string {
+  const rate = cacheHitRate(tokens)
+  return rate === undefined ? '-' : `${String(Math.round(rate * PERCENT))}%`
 }
 
 /**

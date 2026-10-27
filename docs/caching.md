@@ -18,7 +18,7 @@ A provider caches a prompt only above a minimum length it sets, so a short reque
 
 - **Each response.** `usage.prompt_tokens` is the whole prompt; `usage.prompt_tokens_details.cached_tokens` is the part read from the cache and `cache_write_tokens` the part written to it (on the Responses API, `usage.input_tokens_details`). `x_pi` repeats them as `cache_read_tokens` and `cache_write_tokens`, with the call's `cost` in US dollars.
 - **The request log.** Each request's result line has `cacheReadTokens` and `cacheWriteTokens`.
-- **Totals.** The console's Stats view and sidebar, and `GET /v1/switchboard/usage`, add reads and writes into one `cache` number today, which can't tell a working cache from one rewritten every turn ([#297](https://github.com/vx-daniel/pi-switchboard/issues/297)). Until that changes, read the stats file. It is SQLite, in pi's agent dir (`~/.pi/agent` by default); open it read-only:
+- **Totals.** `GET /v1/switchboard/usage` reports `cache_read_tokens` and `cache_write_tokens` per model and alias, beside `input_tokens` (the uncached input). The console shows the hit rate: per model and alias in the Stats view (`hit`), and since the proxy started in the sidebar's SESSION panel, with the tokens written. For any other cut, read the stats file. It is SQLite, in pi's agent dir (`~/.pi/agent` by default); open it read-only:
 
 ```bash
 sqlite3 -readonly -header -column ~/.pi/agent/pi-switchboard-stats.sqlite "

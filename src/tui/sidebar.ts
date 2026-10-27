@@ -22,10 +22,12 @@ import {
   type RequestOutcome
 } from '@proxy/server/active-requests'
 import type { RouteTotals } from '@proxy/server/route-totals'
+import { promptTokens } from '@proxy/stats/cache'
 import {
   compactCount,
   compactDuration,
   FRAME_COLUMNS,
+  hitRate,
   latency,
   panel,
   quotaColor,
@@ -368,8 +370,9 @@ function recentLines(
 }
 
 /**
- * Renders the SESSION panel's lines: requests, failures and fallbacks, tokens, cache and cost
- * since the proxy started.
+ * Renders the SESSION panel's lines: requests, failures and fallbacks, tokens, the cache and cost
+ * since the proxy started. Tokens in are the whole prompt, cached parts included; the cache line
+ * is the share of it read from the cache, then the tokens written to it.
  *
  * @param input - the snapshot
  * @param width - the content's columns
@@ -388,10 +391,14 @@ function sessionLines(input: SidebarInput, width: number): string[] {
     ),
     spread(
       'tokens in / out',
-      `${compactCount(counts.inputTokens)}${paint('border', ' / ')}${compactCount(counts.outputTokens)}`,
+      `${compactCount(promptTokens(counts))}${paint('border', ' / ')}${compactCount(counts.outputTokens)}`,
       width
     ),
-    spread('cache', compactCount(counts.cacheReadTokens + counts.cacheWriteTokens), width),
+    spread(
+      'cache hit · written',
+      `${hitRate(counts)}${separator}${compactCount(counts.cacheWriteTokens)}`,
+      width
+    ),
     spread('cost', tabAccent(usd(counts.costUsd, COST_DECIMALS)), width)
   ]
 }

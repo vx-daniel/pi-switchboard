@@ -189,9 +189,13 @@ export interface UsageStats {
   readonly averageFirstEventMs: number | undefined
   readonly attempts: number
   readonly fallbacks: number
+  /** Uncached input tokens: the prompt is these plus the cache reads and writes. */
   readonly inputTokens: number
   readonly outputTokens: number
-  readonly cacheTokens: number
+  /** Input tokens read from the provider's prompt cache. */
+  readonly cacheReadTokens: number
+  /** Input tokens written to the provider's prompt cache. */
+  readonly cacheWriteTokens: number
   readonly costUsd: number
 }
 
@@ -428,7 +432,8 @@ function usageBy(
     .prepare(
       `SELECT ${column} AS name, sum(attempts) AS attempts, sum(fallbacks) AS fallbacks,
         sum(input_tokens) AS input, sum(output_tokens) AS output,
-        sum(cache_read_tokens) + sum(cache_write_tokens) AS cache, sum(cost_usd) AS cost
+        sum(cache_read_tokens) AS cache_read, sum(cache_write_tokens) AS cache_write,
+        sum(cost_usd) AS cost
       FROM attempt_minutes WHERE minute >= ? AND minute < ? GROUP BY ${column}`
     )
     .all(range.fromMinute, range.toMinute)
@@ -472,7 +477,8 @@ function usageStats(
     fallbacks: numberOf(attempts, 'fallbacks'),
     inputTokens: numberOf(attempts, 'input'),
     outputTokens: numberOf(attempts, 'output'),
-    cacheTokens: numberOf(attempts, 'cache'),
+    cacheReadTokens: numberOf(attempts, 'cache_read'),
+    cacheWriteTokens: numberOf(attempts, 'cache_write'),
     costUsd: numberOf(attempts, 'cost')
   }
 }

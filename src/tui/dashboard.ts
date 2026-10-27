@@ -18,6 +18,7 @@
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import { proxyLogger } from '@proxy/logging'
 import { routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
+import { promptTokens } from '@proxy/stats/cache'
 import { statsFilePath } from '@proxy/stats/recorder'
 import {
   type AliasStats,
@@ -40,6 +41,7 @@ import {
   compactCount,
   compactDuration,
   FRAME_COLUMNS,
+  hitRate,
   latency,
   panel,
   spread,
@@ -99,7 +101,11 @@ const KEPT_NOTE = `stats kept ${String(STATS_KEPT_DAYS)} days`
 /** What the ALIASES panel calls requests that named a model directly. */
 const DIRECT_LABEL = 'direct'
 
-/** The usage table's number columns, for models and aliases alike. */
+/**
+ * The usage table's number columns, for models and aliases alike. `in` is the whole prompt, cached
+ * parts included, as a chat completion's `prompt_tokens` is; `hit` is the share of it read from
+ * the cache.
+ */
 const USAGE_COLUMNS: readonly {
   readonly title: string
   readonly width: number
@@ -111,10 +117,11 @@ const USAGE_COLUMNS: readonly {
   { title: 'avg', width: 7, cell: (usage) => optionalLatency(usage.averageMs) },
   { title: 'slow', width: 7, cell: (usage) => latency(usage.slowestMs) },
   { title: '1st', width: 7, cell: (usage) => optionalLatency(usage.averageFirstEventMs) },
+  { title: 'hit', width: 4, cell: (usage) => hitRate(usage) },
   {
     title: 'tok in/out',
     width: 13,
-    cell: (usage) => `${compactCount(usage.inputTokens)}/${compactCount(usage.outputTokens)}`
+    cell: (usage) => `${compactCount(promptTokens(usage))}/${compactCount(usage.outputTokens)}`
   },
   { title: 'cost', width: 8, cell: (usage) => usd(usage.costUsd) }
 ]
@@ -285,7 +292,8 @@ interface WindowTotals {
   readonly failed: number
   /** Requests rejected before reaching a model, of any status. */
   readonly rejected: number
-  readonly inputTokens: number
+  /** The whole prompt, cached parts included. */
+  readonly promptTokens: number
   readonly outputTokens: number
   readonly costUsd: number
   /** The slowest request of any model. */
@@ -305,7 +313,7 @@ function windowTotals(data: DashboardData): WindowTotals {
     served: totalOf((model) => model.requests),
     failed: totalOf((model) => model.failed),
     rejected: data.errors.rejected.reduce((total, row) => total + row.count, 0),
-    inputTokens: totalOf((model) => model.inputTokens),
+    promptTokens: totalOf((model) => promptTokens(model)),
     outputTokens: totalOf((model) => model.outputTokens),
     costUsd: totalOf((model) => model.costUsd),
     slowestMs: Math.max(0, ...data.models.map((model) => model.slowestMs))
@@ -367,7 +375,7 @@ function overviewTiles(data: DashboardData, totals: WindowTotals, width: number)
     tokens: {
       label: 'TOKENS OUT',
       value: strong(compactCount(totals.outputTokens)),
-      caption: `${compactCount(totals.inputTokens)} in`
+      caption: `${compactCount(totals.promptTokens)} in`
     },
     cost: {
       label: 'COST',
