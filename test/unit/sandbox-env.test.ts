@@ -4,9 +4,13 @@
  */
 
 import { restoreSandboxEnv } from '@proxy/standalone/sandbox-env'
-import { describe, expect, test } from 'vite-plus/test'
+import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
 describe('restoreSandboxEnv', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   // Catches the recovery overwriting or adding to a real environment: only an empty one is filled.
   test('leaves a non-empty environment untouched, without reading the source', () => {
     const env: NodeJS.ProcessEnv = { HOME: '/home/user' }
@@ -37,5 +41,24 @@ describe('restoreSandboxEnv', () => {
       throw new Error('ENOENT')
     })
     expect(env).toEqual({})
+  })
+
+  // Catches the failed read being swallowed silently, which hides that auth was turned off.
+  test('says on stderr, without values, that an empty environment could not be restored', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    restoreSandboxEnv({}, () => {
+      throw new Error('EACCES')
+    })
+    expect(write).toHaveBeenCalledTimes(1)
+    expect(String(write.mock.calls[0]?.[0])).toContain('/proc/self/environ could not be read')
+  })
+
+  // Catches the warning firing on a normal run, where the source is never needed.
+  test('writes nothing to stderr when the environment is not empty', () => {
+    const write = vi.spyOn(process.stderr, 'write').mockReturnValue(true)
+    restoreSandboxEnv({ HOME: '/home/user' }, () => {
+      throw new Error('EACCES')
+    })
+    expect(write).not.toHaveBeenCalled()
   })
 })
