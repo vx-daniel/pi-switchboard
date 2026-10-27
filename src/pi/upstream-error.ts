@@ -5,8 +5,9 @@
  * @remarks
  * pi 1.3.0 words an upstream failure as a plain message, with the status in one of these
  * positions. This module is the only place that knows them, so a change in pi's wording is found
- * once. Callers: `mapUpstreamError` and `mapFailedCall` (`@proxy/server/errors`) want the status;
- * `retryWithoutBreakpoints` (`@proxy/pi/cache-breakpoints`) wants the JSON body of a 400.
+ * once. Callers: `upstreamStatusIn` (`@proxy/server/errors`, behind `mapUpstreamError` and
+ * `mapFailedCall`) wants the status; `retryWithoutBreakpoints` (`@proxy/pi/cache-breakpoints`)
+ * wants the JSON body of a 400.
  *
  * The positions, each with the body it yields:
  * - leading, followed by what only a status is followed by:

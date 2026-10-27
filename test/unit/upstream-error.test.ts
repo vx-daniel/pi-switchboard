@@ -65,4 +65,13 @@ describe('splitUpstreamError', () => {
   ])('no status in %j: the whole message is the body', (message) => {
     expect(splitUpstreamError(message)).toEqual({ status: undefined, body: message })
   })
+
+  // Catches the positions tried in another order (#296 review): pi's leading status is the call's
+  // own, and a body that quotes a labelled status (`… (429): …`) must not override it.
+  test('a leading status wins over a labelled one later in the message', () => {
+    expect(splitUpstreamError('400: upstream said (429): slow down')).toEqual({
+      status: 400,
+      body: 'upstream said (429): slow down'
+    })
+  })
 })
