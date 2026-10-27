@@ -75,7 +75,7 @@ curl -s "http://localhost:4141/v1/switchboard/usage?window=week" -H "Authorizati
 ```
 
 - **`window`:** `today` (from midnight, the proxy's local time; the default), `week` (the last 7 days) or `all` (the 30 days the file keeps). Anything else is a `400`.
-- **`models` and `aliases`:** per served model and per alias, busiest first: `requests`, `failed`, `left` (the client went away), `average_ms`, `slowest_ms`, `average_first_event_ms`, `attempts`, `fallbacks`, `input_tokens`, `output_tokens`, `cache_tokens` and `cost_usd`. An alias counts every model its fallback chain tried; `alias: null` is the requests that named a model directly.
+- **`models` and `aliases`:** per served model and per alias, busiest first: `requests`, `failed`, `left` (the client went away), `average_ms`, `slowest_ms`, `average_first_event_ms`, `attempts`, `fallbacks`, `input_tokens` (uncached input only), `output_tokens`, `cache_tokens` (cache reads and writes added together; [Prompt caching](caching.md#seeing-what-the-cache-did) shows how to read them apart) and `cost_usd`. An alias counts every model its fallback chain tried; `alias: null` is the requests that named a model directly.
 - **`failures` and `rejected`:** failed attempts by failure class, and rejected requests by HTTP status.
 - **`timeline`:** requests per hour (`today`), per 6 hours (`week`) or per day (`all`), with failed and rejected ones; `bucket_minutes` says which.
 - **Stats off** (`--no-stats`), or a file that can't be read, answers `503` with code `stats_unavailable`, not empty numbers.
