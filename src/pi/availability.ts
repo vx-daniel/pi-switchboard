@@ -18,7 +18,10 @@
 import type { FailureClass } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 
-/** Logger for routing decisions. */
+/**
+ * Logger for the first refusal of each model: the chat category, since a chat attempt is what
+ * learns it, and the operator reading chat lines is who needs it.
+ */
 const availabilityLogger = proxyLogger('server', 'chat')
 
 /** Whether the login serves a model: answered it, refused it, or never called. */
@@ -45,8 +48,9 @@ function recordAvailability(canonicalId: string, state: 'verified' | 'refused'):
 
 /**
  * Records what an attempt says about the login serving its model: a refusal marks the model
- * `refused`, a whole answer `verified`. A client's own upstream key is another login, so its
- * results are not recorded.
+ * `refused`, a whole answer `verified`. Every other failure class (a rate limit, a timeout, an
+ * upstream error) says nothing about whether the plan includes the model, so it is ignored. A
+ * client's own upstream key is another login, so its results are not recorded.
  *
  * @param canonicalId - the model called
  * @param options - the call's options, for the client's own key

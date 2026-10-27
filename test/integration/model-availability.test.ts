@@ -6,13 +6,14 @@
 
 import { resetSync } from '@logtape/logtape'
 import { configureLogging } from '@proxy/logging'
-import { clearAvailability } from '@proxy/pi/availability'
+import { clearAvailability, noteAvailability } from '@proxy/pi/availability'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
 import { FAKE_CODEX_TOKEN } from '../fixtures/codex-token'
 import {
+  cutOff,
   finishChunk,
   type MockProvider,
   sse,
@@ -40,7 +41,8 @@ const app = () => testApp({ ...testConfig(), aliases: { picky: 'codex/refused-mo
 beforeAll(async () => {
   mock = await startMockProvider({
     'refused-model': sse([{ type: 'error', message: REFUSAL }]),
-    'ok-model': sse([...textChunks('ok'), finishChunk('stop')])
+    'ok-model': sse([...textChunks('ok'), finishChunk('stop')]),
+    'cut-model': cutOff('o')
   })
   agentDir = await loadFixtureAgentDir({
     modelsJson: {
@@ -55,7 +57,7 @@ beforeAll(async () => {
           baseUrl: mock.origin,
           api: 'openai-completions',
           apiKey: 'test-key',
-          models: [{ id: 'ok-model' }]
+          models: [{ id: 'ok-model' }, { id: 'cut-model' }]
         }
       }
     }
@@ -87,14 +89,30 @@ afterAll(async () => {
  *
  * @param model - the model to ask
  * @param stream - whether to ask for a stream
+ * @param headers - extra request headers
  */
-async function ask(model: string, stream: boolean): Promise<void> {
+async function ask(
+  model: string,
+  stream: boolean,
+  headers: Record<string, string> = {}
+): Promise<void> {
   const response = await app().request('/v1/chat/completions', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...headers },
     body: JSON.stringify({ model, stream, messages: [{ role: 'user', content: 'Hi' }] })
   })
   await response.text()
+}
+
+/**
+ * Counts the info lines that announce a model's refusal (the route's own line per request names
+ * the requested model; the refusal's does not).
+ *
+ * @param model - the canonical ID
+ * @returns how many
+ */
+function refusalLines(model: string): number {
+  return infoLines.filter((line) => line.includes(model) && !line.includes('requestedModel')).length
 }
 
 /**
@@ -119,6 +137,7 @@ describe('availability on /v1/switchboard/models (#174)', () => {
     expect(await availability()).toEqual({
       'refused-model': 'unknown',
       'ok-model': 'unknown',
+      'cut-model': 'unknown',
       'picky': 'unknown'
     })
   })
@@ -136,16 +155,11 @@ describe('availability on /v1/switchboard/models (#174)', () => {
         'picky': 'refused',
         'ok-model': 'unknown'
       })
-      // The route's own line per request names the requested model; the refusal's does not.
-      const refusals = infoLines.filter(
-        (line) => line.includes('codex/refused-model') && !line.includes('requestedModel')
-      )
-      expect(refusals).toHaveLength(1)
+      expect(refusalLines('codex/refused-model')).toBe(1)
     }
   )
 
-  // Catches a model that answered left unknown, or a started stream that later failed counted as
-  // an answer.
+  // Catches a model that answered left unknown.
   test.each([false, true])('is verified after a whole answer (stream %s)', async (stream) => {
     await ask('acme/ok-model', stream)
 
@@ -153,5 +167,34 @@ describe('availability on /v1/switchboard/models (#174)', () => {
       'ok-model': 'verified',
       'refused-model': 'unknown'
     })
+  })
+
+  // Catches a stream that started and then broke off counted as an answer: the model would show
+  // as working though the client never got a whole reply.
+  test('stays unknown after a stream cut off mid-answer', async () => {
+    await ask('acme/cut-model', true)
+
+    expect(await availability()).toMatchObject({ 'cut-model': 'unknown' })
+  })
+
+  // Catches a client's own key speaking for the shared login: its answer says nothing about the
+  // plan of the login other clients use.
+  test('records nothing for a request with its own upstream key', async () => {
+    await ask('acme/ok-model', false, { 'X-Switchboard-Upstream-Api-Key': 'notarealsecret-own' })
+
+    expect(await availability()).toMatchObject({ 'ok-model': 'unknown' })
+  })
+
+  // Catches the refusal logged on every refused request (log noise), or never again after the
+  // plan changed and the model answered in between.
+  test('logs a refusal once, and again only after the model was verified in between', () => {
+    const model = 'codex/refused-model'
+    noteAvailability(model, {}, 'refused')
+    noteAvailability(model, {}, 'refused')
+    expect(refusalLines(model)).toBe(1)
+
+    noteAvailability(model, {}, 'answered')
+    noteAvailability(model, {}, 'refused')
+    expect(refusalLines(model)).toBe(2)
   })
 })
