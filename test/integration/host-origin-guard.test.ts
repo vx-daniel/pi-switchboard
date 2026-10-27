@@ -17,6 +17,8 @@ import { jsonBody, testApp, testConfig } from '../helpers'
 const TOKEN = 'notarealsecret-guard'
 /** The longest refused value a log line quotes. */
 const MAX_LOGGED_VALUE_LENGTH = 128
+/** Distinct refused values logged at warning before the rest go to debug. */
+const MAX_WARNED_VALUES = 100
 
 /**
  * Builds the test config with the guard on or off.
@@ -159,5 +161,23 @@ describe('the host/origin guard (#188)', () => {
     expect(isRecord(properties) ? properties['value'] : undefined).toHaveLength(
       MAX_LOGGED_VALUE_LENGTH
     )
+  })
+
+  // Catches the warned-value set growing without end: a scanner sending a new Host each time gets
+  // warnings for the first 100 values, and debug lines after that.
+  test('stops warning after 100 distinct values', async () => {
+    const lines: string[] = []
+    configureLogging({ level: 'debug', format: 'json', write: (line) => lines.push(line) })
+    const app = testApp(configWith(true))
+    for (let scanIndex = 0; scanIndex <= MAX_WARNED_VALUES; scanIndex++) {
+      await app.request('/healthz', { headers: { host: `scan-${String(scanIndex)}.example` } })
+    }
+    const levels = lines
+      .map((line): unknown => JSON.parse(line))
+      .filter(isRecord)
+      .filter((record) => String(record['message']).includes('host/origin guard'))
+      .map((record) => record['level'])
+    expect(levels.filter((level) => level === 'WARN')).toHaveLength(MAX_WARNED_VALUES)
+    expect(levels.at(-1)).toBe('DEBUG')
   })
 })

@@ -155,7 +155,7 @@ export function authenticationError(message: string): OpenAIError {
  */
 export function invalidHost(): OpenAIError {
   return makeError(
-    'The proxy refuses this Host: use an IP address, localhost, or a name with no dot',
+    'The proxy refuses this Host: use an IP address, localhost, or a name with no dot (behind a reverse proxy, turn hostOriginGuard off and set a proxy token)',
     'permission_error',
     null,
     'invalid_host'
@@ -170,7 +170,7 @@ export function invalidHost(): OpenAIError {
  */
 export function invalidOrigin(): OpenAIError {
   return makeError(
-    'The proxy refuses requests from web pages on other origins',
+    'The proxy refuses requests from web pages on other origins (behind a reverse proxy, turn hostOriginGuard off and set a proxy token)',
     'permission_error',
     null,
     'invalid_origin'
