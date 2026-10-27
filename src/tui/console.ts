@@ -239,8 +239,9 @@ const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext, size: ViewSiz
 
 /**
  * What the right end of the frame's bottom border notes about each view, unless its render says
- * otherwise ({@link ViewBody}): how many log lines, logins or exposed models it holds, on Stats how long the stats file keeps its history (nothing
- * while the view shows the totals instead), and on Settings the file they are saved to.
+ * otherwise ({@link ViewBody}): how many log lines, logins or exposed models it holds, on Stats
+ * how long the stats file keeps its history (nothing while the view shows the totals instead),
+ * and on Settings the file they are saved to.
  */
 const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
   logs: ({ logs, state }) =>
@@ -298,11 +299,11 @@ interface ViewBody {
 
 /**
  * Renders the Models view from the console's state, noting how many models show while the matrix
- * is scrolled.
+ * is too tall for its space.
  *
  * @param state - the console's state: the last exposure and aliases read, and the selected row
  * @param size - the space available
- * @returns the rows, and the note while the matrix is scrolled
+ * @returns the rows, and the note while some models are cut off
  */
 function modelsViewBody(state: ConsoleState, size: ViewSize): ViewBody {
   const { rows, note } = modelsRows(
