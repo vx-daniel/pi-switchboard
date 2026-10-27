@@ -994,8 +994,9 @@ message shows up there.
 the ChatGPT-subscription ones (`gpt-6-luna`, `gpt-5.6-terra`, `gpt-6.1-sol`, `gpt-6-astra`),
 answer it with a 400: `{"message":"prompt_cache_breakpoint is not supported on this model",
 "param":"prompt_cache_breakpoint",…}`. `retryWithoutBreakpoints` recognizes that answer in pi's
-error text (`400: {…}` on chat completions, `OpenAI API error (400): {…}` on Responses, `param`
-top level or under `error`) for a request that sent breakpoints. It remembers the model as
+error text (the 400 read from any of pi's status prefixes, `splitUpstreamError`, e.g. `400: {…}`
+on chat completions or `OpenAI API error (400): {…}` on Responses; `param` top level or under
+`error`) for a request that sent breakpoints. It remembers the model as
 `provider/id` for the life of the process, and `piComplete` or `piStream` sends the request once
 more. The breakpoint patch then leaves the field out for that model, on this request and every
 later one, so each such model costs one failed request per proxy start, or one per request
@@ -1599,15 +1600,16 @@ Use an OpenAI-style shape:
 
 Upstream failures (`mapUpstreamError`, `src/server/errors.ts`): pi reports a failure as text, with
 no structured status (`onResponse` fires only for successful responses). The provider's HTTP status
-is read from the fixed positions pi 1.3.0's messages put it in: leading, and only when followed by
-what only a status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 status code (no body)`;
-`429 tokens…` is not a status), after a label (`OpenAI API error (429): …`, `Mistral API error
-(429): …`), Google's `got status: 429.` or its error body's `error.code`. When a status is found it
-decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`, `overloaded`,
-`model is at capacity`, `servers are currently busy`, `experiencing high demand`, `service
-unavailable`, …, checked in that order) is consulted only when no status is reported (Bedrock,
-network failures, the proxy's own idle timeout, pi's Codex usage limit), and a number elsewhere in
-the text never counts (#42). `usage limit` also matches `usage_limit_reached` and
+is read from the fixed positions pi 1.3.0's messages put it in, which live in one place,
+`splitUpstreamError` in `src/pi/upstream-error.ts`: leading, and only when followed by what only a
+status is followed by (`429: {…}`, `429 {…}`, `429 "…"`, `429 status code (no body)`; `429 tokens…`
+is not a status), after a label (`OpenAI API error (429): …`, `Mistral API error (429): …`), or
+Google's `got status: 429.`; `errors.ts` adds Google's error body's `error.code`. When a status is
+found it decides; the wording (`rate limit`, `too many requests`, `usage limit`, `timed out`,
+`overloaded`, `model is at capacity`, `servers are currently busy`, `experiencing high demand`,
+`service unavailable`, …, checked in that order) is consulted only when no status is reported
+(Bedrock, network failures, the proxy's own idle timeout, pi's Codex usage limit), and a number
+elsewhere in the text never counts (#42). `usage limit` also matches `usage_limit_reached` and
 `subscription_sharing_usage_limit_exceeded`, but not "usage limitations" (#190). The capacity
 wordings are the phrases pi's own retry classifier (`pi-ai/utils/retry`) treats as transient;
 with no status they answer `503 provider_overloaded`, whose class `unavailable` cools the model

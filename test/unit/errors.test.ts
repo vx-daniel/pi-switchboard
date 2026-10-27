@@ -309,6 +309,65 @@ describe('mapUpstreamError', () => {
     expect(mapUpstreamError(new Error(upstreamMessage))).toEqual(expected)
   })
 
+  /** A label of exactly 80 characters, the longest that may precede ` (NNN):`. */
+  const LABEL_80 = 'L'.repeat(80)
+
+  // Catches a status prefix shape that pi 1.3.0 uses going unread (#253): each message here
+  // reports its status only in its prefix, with no wording a fallback would match, so a shape
+  // `splitUpstreamError` stops recognizing would map to the generic 502 instead.
+  test.each([
+    ['a bare `status code`, no `(no body)`', '429 status code', RATE_LIMITED],
+    ['`status code` followed by text', '503 status code from the edge', UNAVAILABLE],
+    ['`NNN:` then a newline', '429:\n{"message":"Slow down"}', RATE_LIMITED],
+    ['`NNN:` then a tab', '401:\t{"message":"Invalid key"}', AUTH_FAILED],
+    ['`NNN:` then several spaces', '503:   {"message":"down"}', UNAVAILABLE],
+    ['a multi-line body', '429: {"message":"Slow\ndown"}\nsecond line', RATE_LIMITED],
+    ['a label with no space after the colon', 'OpenAI API error (429):{"m":"x"}', RATE_LIMITED],
+    ['a label of exactly 80 characters', `${LABEL_80} (429): {"m":"x"}`, RATE_LIMITED],
+    ['a label then a text body', 'Mistral API error (503): try later', UNAVAILABLE],
+    ['Google mid-stream with no body', 'got status: 429', RATE_LIMITED],
+    ['Google mid-stream with no dot', 'got status: 401 {"error":{}}', AUTH_FAILED]
+  ])('reads the status from %s', (_case, upstreamMessage, expected) => {
+    expect(mapUpstreamError(new Error(upstreamMessage))).toEqual(expected)
+  })
+
+  // Catches a status prefix loosened past pi's wording (#253), so a number that only resembles a
+  // status decides the answer: each of these near-misses carries no status, and its 429, 401 or
+  // 503 would otherwise turn the generic 502 into a rate limit, an auth failure or an outage.
+  test.each([
+    ['`NNN:` with no whitespace after', '429:{"m":"x"}'],
+    ['`NNN:` ending the message', '429:'],
+    ['a status alone', '503'],
+    ['`NNN ` then a bracket, not `{` or `"`', '429 [{"m":"x"}]'],
+    ['`NNN ` then a single quote', "401 'nope'"],
+    ['a fourth digit', '4290: {"m":"x"}'],
+    ['`status codes`, a longer word', '429 status codes differ'],
+    ['leading whitespace', ' 429: {"m":"x"}'],
+    ['the prefix not at the start', 'upstream said 429: {"m":"x"}'],
+    ['the prefix on the second line', 'request failed\n429: {"m":"x"}'],
+    ['a label of 81 characters', `${LABEL_80}L (429): {"m":"x"}`],
+    ['a label containing `(`', 'Error (beta) (429): {"m":"x"}'],
+    ['a label broken by a newline', 'first\nOpenAI API error (429): {"m":"x"}'],
+    ['a label with no colon after the status', 'OpenAI API error (429) {"m":"x"}'],
+    ['`got status:` with a fourth digit', 'got status: 4290. {"m":"x"}'],
+    ['`got status:` not at the start', 'stream ended, got status: 503. {"m":"x"}'],
+    ['`Got status:` capitalized', 'Got status: 401. {"m":"x"}']
+  ])('reads no status from %s', (_case, upstreamMessage) => {
+    expect(mapUpstreamError(new Error(upstreamMessage))).toEqual(PROVIDER_FAILED)
+  })
+
+  // Catches a status outside 4xx/5xx read from a prefix (#253): it would decide with no mapping of
+  // its own (the generic 502), where with no status the wording decides and says rate limit.
+  test.each([
+    ['a 3xx', '301: {"message":"rate limit moved"}'],
+    ['a 2xx', '200 {"message":"rate limit ok"}'],
+    ['a 6xx', '629: {"message":"rate limit"}'],
+    ['a labeled 3xx', 'OpenAI API error (304): rate limit'],
+    ['`got status:` with a 2xx', 'got status: 200. rate limit']
+  ])('reads no status from %s, so the wording decides', (_case, upstreamMessage) => {
+    expect(mapUpstreamError(new Error(upstreamMessage))).toEqual(RATE_LIMITED)
+  })
+
   const OVERLOADED = {
     status: 503,
     body: upstreamBody('Upstream provider is overloaded', 'provider_overloaded')
@@ -459,10 +518,34 @@ describe('mapFailedCall', () => {
       '400 that is not an overflow',
       '400 {"type":"error","error":{"type":"invalid_request_error","message":"stop_sequences: each stop sequence must contain non-whitespace"}}',
       { status: 400, code: 'upstream_invalid_request' }
+    ],
+    // Catches the status after a label, or Google's mid-stream status, going unread here (#253):
+    // overflow wording would then decide and answer a rate limit as context_length_exceeded.
+    [
+      'labeled 429 mentioning the context window',
+      'OpenAI API error (429): {"message":"Your input exceeds the context window, slow down"}',
+      { status: 429, code: 'rate_limit' }
+    ],
+    [
+      'Google mid-stream 503 mentioning the input token count',
+      'got status: 503. {"error":{"code":503,"message":"The input token count (5) exceeds the maximum number of tokens allowed (4)"}}',
+      { status: 503, code: 'provider_unavailable' }
     ]
   ])('keeps a %s as its status says', (_case, errorMessage, expected) => {
     const mapped = mapFailedCall(failedCall(errorMessage))
 
     expect({ status: mapped.status, code: mapped.body.error.code }).toEqual(expected)
+  })
+
+  // Catches the leading-status prefix loosened from `NNN:` plus whitespace to any `NNN:` (#253):
+  // this message reports no status, so its overflow wording decides; read as a 429 it would be
+  // answered as a rate limit and the client would retry instead of compacting.
+  test('reads no status from `429:` with no whitespace, so overflow wording decides', () => {
+    const mapped = mapFailedCall(
+      failedCall(`429:{"message":"Your input exceeds the context window ${QUOTED}"}`)
+    )
+
+    expect(mapped).toEqual(CONTEXT_OVERFLOW)
+    expect(JSON.stringify(mapped)).not.toContain(QUOTED)
   })
 })
