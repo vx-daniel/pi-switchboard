@@ -12,7 +12,8 @@ import { proxyLogger } from '@proxy/logging'
 import {
   type ChatCompletionRequest,
   chatCompletionRequestSchema,
-  rejectedFields
+  rejectedFields,
+  STORE_TRUE_REFUSAL
 } from '@proxy/openai/schemas'
 import { isRecord } from '@proxy/utils/guards'
 import type * as z from 'zod'
@@ -83,7 +84,8 @@ export function logValidatedChatRequest(data: ChatCompletionRequest): void {
  *
  * @remarks
  * Fields in {@link rejectedFields} are checked first so they get a named 422 instead of the
- * generic unknown-parameter error. Only the first Zod issue is reported.
+ * generic unknown-parameter error, and so is `store: true` ({@link STORE_TRUE_REFUSAL}), which
+ * the schema refuses as a mere invalid value. Only the first Zod issue is reported.
  *
  * @param body - the parsed JSON request body, which does not match the schema
  * @returns a 422 for rejected/unknown fields, or a 400 for any other invalid value (with the
@@ -120,6 +122,10 @@ export function schemaRejection(schema: z.ZodType, body: unknown): ValidationErr
  */
 function rejectedFieldRejection(body: unknown): ValidationError | undefined {
   if (!isRecord(body)) return undefined
+  if (body['store'] === true) {
+    validateLogger.warn('Rejected unsupported field {field}', { field: 'store' })
+    return { ok: false, status: 422, message: STORE_TRUE_REFUSAL, param: 'store' }
+  }
   const field = rejectedFields.find((rejectedField) => body[rejectedField] !== undefined)
   if (field === undefined) return undefined
   validateLogger.warn('Rejected unsupported field {field}', { field })

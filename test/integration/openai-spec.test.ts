@@ -376,7 +376,6 @@ const FIELDS_NOT_ACCEPTED: Readonly<Record<string, string>> = {
   prompt_cache_options: `${UNKNOWN_REJECTION}; pi has no equivalent: its \`ttl\` takes one value and \`mode: explicit\` has no pi counterpart (#39)`,
   safety_identifier: UNKNOWN_REJECTION,
   service_tier: UNKNOWN_REJECTION,
-  store: UNKNOWN_REJECTION,
   modalities: `${UNKNOWN_REJECTION}; the proxy answers in text only`,
   audio: `${UNKNOWN_REJECTION}; the proxy answers in text only`,
   verbosity: UNKNOWN_REJECTION,

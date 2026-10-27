@@ -248,6 +248,39 @@ describe('POST /v1/chat/completions - validation', () => {
     expect(body.error['param']).toBe(choicesParameter)
   })
 
+  // Catches `store: false` refused again: pi's OpenAI adapter sends it to this host on every
+  // request (#197). The proxy stores nothing, so "don't store" is answered as asked.
+  test.each([false, null])('store: %s is answered', async (store) => {
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MOCK_MODEL,
+        messages: [{ role: 'user', content: 'Hi' }],
+        store
+      })
+    })
+    expect(response.status).toBe(HTTP_OK)
+    expect(await jsonBody(response)).toEqual(okCompletion(response))
+  })
+
+  // Catches `store: true` accepted as if the proxy stored completions, or refused without naming
+  // the field.
+  test('store: true is a named 422', async () => {
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MOCK_MODEL,
+        messages: [{ role: 'user', content: 'Hi' }],
+        store: true
+      })
+    })
+    expect(response.status).toBe(422)
+    const body = await jsonBody(response)
+    expect(isErrorLike(body) ? body.error['param'] : undefined).toBe('store')
+  })
+
   test('rejects unknown fields with 422', async () => {
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',

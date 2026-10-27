@@ -3600,6 +3600,17 @@
                       }
                     ]
                   },
+                  "store": {
+                    "anyOf": [
+                      {
+                        "type": "boolean",
+                        "const": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "metadata": {
                     "type": "object",
                     "propertyNames": {

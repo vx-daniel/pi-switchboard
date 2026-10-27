@@ -32,7 +32,11 @@ import {
   type ResponsesInputItem,
   createResponseRequestSchema
 } from '@proxy/openai/responses-api/request-schema'
-import type { ChatCompletionRequest, OpenAIMessage } from '@proxy/openai/schemas'
+import {
+  type ChatCompletionRequest,
+  type OpenAIMessage,
+  STORE_TRUE_REFUSAL
+} from '@proxy/openai/schemas'
 import { schemaRejection, type ValidationError } from '@proxy/openai/validate'
 import { isRecord } from '@proxy/utils/guards'
 
@@ -80,7 +84,7 @@ function namedRejection(body: unknown): ValidationError | undefined {
     return named(field, `'${field}' is not supported: ${RESPONSES_REJECTED_FIELDS[field] ?? ''}`)
   }
   if (body['store'] === true) {
-    return named('store', "'store: true' is not supported: the proxy stores nothing; send false")
+    return named('store', STORE_TRUE_REFUSAL)
   }
   const { tools, include } = body
   const tool = Array.isArray(tools)
