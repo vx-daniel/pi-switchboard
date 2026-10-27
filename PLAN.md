@@ -120,7 +120,9 @@ Outside the OpenAI-compatible surface, not shaped like OpenAI responses (`src/se
 - `GET /healthz/models`: available and exposed model counts, exposure modes, `models.json` load
   error; `503` when nothing is exposed or the exposure config is invalid. A parse error is reduced to where the file is not valid
   JSON (`describeModelsJsonError`): JSON.parse messages quote the text around the fault, often a
-  key. The same reduced text is what the startup warning logs.
+  key. JavaScriptCore (the Bun binary) gives no location, so there the parser's reason is kept
+  instead, but only a reason known to quote nothing (#249). The same reduced text is what the
+  startup warning logs.
 - `GET /healthz/creds`: per provider with a credential, its type, source and available model
   count; local state only unless `?verify=true` resolves each credential (may refresh OAuth);
   `503` when no provider has one or a verification fails. A verification error carries pi's
