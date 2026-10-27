@@ -32,6 +32,7 @@ import {
 } from '@proxy/server/http-status'
 import { isHealthPath } from '@proxy/server/middleware'
 import type { ProxyEnv } from '@proxy/server/types'
+import { errorMessage } from '@proxy/utils/guards'
 import type { MiddlewareHandler } from 'hono'
 
 /**
@@ -84,6 +85,9 @@ function notify(): void {
     } catch (error) {
       httpRequestsLogger.warn('An HTTP requests listener threw: {errorName}', {
         errorName: error instanceof Error ? error.name : typeof error
+      })
+      httpRequestsLogger.debug('HTTP requests listener failure detail: {detail}', {
+        detail: errorMessage(error)
       })
     }
   }
