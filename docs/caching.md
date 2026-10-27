@@ -1,6 +1,6 @@
 # Prompt caching
 
-A provider's prompt cache keeps the start of a prompt it has seen recently, so the next request that starts the same way pays a fraction of the input price for that part. In an agent loop, where every turn resends the whole conversation, the cache is most of the input bill. The proxy doesn't cache anything itself: pi asks each provider to cache, the provider decides, and the proxy reports what happened.
+A provider's prompt cache keeps the start of a prompt it has seen recently, so the next request that starts the same way pays a fraction of the input price for that part. In an agent loop, where every turn resends the whole conversation, the cache is most of the input bill. The proxy doesn't cache anything itself: pi asks each provider to cache, the provider decides, and the proxy reports what happened. What pi sends per provider below was read from pi-ai 1.4.0; a pi upgrade can change it.
 
 ## How each provider caches
 
@@ -68,7 +68,7 @@ pi asks for the provider's short cache by default: about 5 minutes on Anthropic,
 | OpenAI-compatible chat that supports it | `prompt_cache_retention: "24h"`, and `prompt_cache_key` sent even off `api.openai.com` |
 | Codex | No change |
 
-**On Anthropic it is a trade, not a free upgrade.** A 1-hour write costs 2× the input price instead of 1.25× (pi's cost accounting knows this), and every write pays it, including the turn's new messages that would never have expired. It pays only when more than about 40% of your writes are a cache expiring between turns. In units of the input price, for writes `W` of which a share `f` expired: short costs `1.25·W`; long costs `2·(1−f)·W` plus `f·W` read at the cache-read price. Long wins only when `f > 0.75 ÷ (2 − cache-read price ÷ input price)`.
+**On Anthropic it is a trade, not a free upgrade.** A 1-hour write costs 2× the input price instead of 1.25× (pi's cost accounting knows this), and every write pays it, including the turn's new messages that would never have expired. In units of the input price, for writes `W` of which a share `f` expired: short costs `1.25·W`; long costs `2·(1−f)·W` plus `f·W` read at the cache-read price. Long wins only when `f > 0.75 ÷ (2 − cache-read price ÷ input price)`: about 40% of your writes must be a cache expiring between turns (38.5% at the 0.05× cache-read price pi lists for Claude Sonnet and Opus 5.5; 39.5% at 0.1×).
 
 - **An agent loop**, with turns seconds apart, rarely lets the 5-minute cache expire: leave retention short.
 - **A chat you come back to** after 5–60 minutes rewrites its whole conversation each time: that is what `long` is for.
