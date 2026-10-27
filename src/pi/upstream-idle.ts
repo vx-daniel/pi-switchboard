@@ -19,6 +19,8 @@
  * @packageDocumentation
  */
 
+import { setImmediate } from 'node:timers/promises'
+
 import {
   type Api,
   type AssistantMessage,
@@ -129,17 +131,17 @@ const NO_RESULT = Symbol('no result')
  *
  * @remarks
  * pi's `end(result)` settles `result()` only when given a result, and before the stream's
- * iteration finishes, so here it is settled already or never will be (#248). An already settled
- * result wins a race with an already settled stand-in, as long as `result()` returns the settled
- * promise itself; the relay test "passes on a result the provider ended with, without a done
- * event" runs against pi's own stream and fails if a pi upgrade changes that.
+ * iteration finishes, so here it is settled already or never will be (#248). The stand-in waits
+ * for the event loop's next turn rather than a microtask, so a settled result wins however many
+ * promise hops `result()` puts in its way: the race does not depend on how pi builds that
+ * promise.
  *
  * @param upstream - pi's event stream, its iteration finished without a done or error event
  * @returns the result
  * @throws Error when the provider ended the stream with no result
  */
 async function endedResult(upstream: AssistantMessageEventStream): Promise<AssistantMessage> {
-  const result = await Promise.race([upstream.result(), Promise.resolve(NO_RESULT)])
+  const result = await Promise.race([upstream.result(), setImmediate(NO_RESULT)])
   if (result === NO_RESULT) throw new Error('Upstream stream ended with no final event or result')
   return result
 }
