@@ -265,15 +265,17 @@ describe('POST /v1/chat/completions - validation', () => {
   })
 
   // Catches `store: true` accepted as if the proxy stored completions, or refused without naming
-  // the field.
-  test('store: true is a named 422', async () => {
+  // the field, or its name lost to a generic 400 when another field is invalid too (the named
+  // refusal is checked before the schema).
+  test.each([{}, { temperature: 'hot' }])('store: true is a named 422 (with %j)', async (extra) => {
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         model: MOCK_MODEL,
         messages: [{ role: 'user', content: 'Hi' }],
-        store: true
+        store: true,
+        ...extra
       })
     })
     expect(response.status).toBe(422)
