@@ -37,7 +37,6 @@ const PROXY_ENV_VARIABLES = [
   'PI_SWITCHBOARD_STATS',
   'PI_SWITCHBOARD_MAX_BODY_SIZE',
   'PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS',
-  'PI_SWITCHBOARD_AGENTIC',
   'PI_SWITCHBOARD_LOG_LEVEL',
   'PI_SWITCHBOARD_LOG_FORMAT'
 ]
@@ -485,7 +484,6 @@ describe('starting the server', () => {
       port,
       proxyAuthMode: 'token',
       hostOriginGuardEnabled: true,
-      agenticEnabled: false,
       remoteImagesEnabled: true,
       docsUiEnabled: true,
       responsesApiEnabled: true,
