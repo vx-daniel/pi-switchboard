@@ -193,7 +193,7 @@ const functionToolSchema = z.object({
   type: z.literal('function'),
   function: z.object({
     name: z.string().trim(),
-    description: z.string().trim().optional(),
+    description: textSchema.optional(),
     parameters: z.record(z.string().trim(), z.unknown()).optional(),
     strict: z.boolean().nullable().optional()
   })
@@ -222,7 +222,7 @@ const jsonSchemaResponseFormatSchema = z.object({
   type: z.literal('json_schema'),
   json_schema: z.object({
     name: z.string().trim(),
-    description: z.string().trim().optional(),
+    description: textSchema.optional(),
     schema: z.record(z.string().trim(), z.unknown()).optional(),
     strict: z.boolean().nullable().optional()
   })

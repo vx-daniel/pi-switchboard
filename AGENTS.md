@@ -56,7 +56,7 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 - Use `node:` protocol for Node built-ins.
 - Use `import * as z from "zod"`; do not use named Zod imports.
 - Validate untrusted input with Zod at boundaries.
-- Request text whose whitespace is data (message content, text parts, tool results, `stop`, `prediction` content) uses `textSchema` from `@proxy/openai/text-schemas`; every other string is `z.string().trim()`. Never trim text the model reads (#145).
+- Request text whose whitespace is data (message content, text parts, tool results, `stop`, `prediction` content, tool and `json_schema` descriptions) uses `textSchema` from `@proxy/openai/text-schemas`; every other string is `z.string().trim()`. Never trim text the model reads (#145, #255).
 - Prefer `safeParse()` over assertion-based parsing.
 - No `any`, no `@ts-ignore`, no unsafe `as Type` casts.
 - Use repo type guards such as `isRecord()` instead of ad-hoc unsafe narrowing.

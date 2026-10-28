@@ -162,7 +162,7 @@ const responsesFunctionToolSchema = z
   .object({
     type: z.literal('function'),
     name: z.string().trim(),
-    description: z.string().trim().nullable().optional(),
+    description: textSchema.nullable().optional(),
     parameters: z.record(z.string().trim(), z.unknown()).nullable().optional(),
     strict: z.boolean().nullable().optional()
   })
@@ -182,7 +182,7 @@ const textFormatSchema = z.discriminatedUnion('type', [
     .object({
       type: z.literal('json_schema'),
       name: z.string().trim(),
-      description: z.string().trim().optional(),
+      description: textSchema.optional(),
       schema: z.record(z.string().trim(), z.unknown()),
       strict: z.boolean().nullable().optional()
     })
