@@ -56,6 +56,11 @@ const WAITS_OUT_READY_TEST_TIMEOUT_MS = 10_000
 const SLOW_START_MS = 700
 /** How often {@link waitForExit} checks that a process has exited. */
 const EXIT_POLL_MS = 10
+/**
+ * What `fetch` rejects with when nothing listens on a loopback port: matched on the socket's code,
+ * not undici's message, which may change between Node versions.
+ */
+const REFUSED = { cause: { code: 'ECONNREFUSED' } }
 
 /**
  * Builds a stand-in for the package's built entry: a server on the host and port the extension
@@ -255,7 +260,7 @@ describe('startProxy spawning a proxy', () => {
       pidFile: false
     })
     // The PID was the proxy's own: with that process gone, nothing answers.
-    await expect(fetch(`${url}/v1/models`)).rejects.toThrow('fetch failed')
+    await expect(fetch(`${url}/v1/models`)).rejects.toMatchObject(REFUSED)
   })
 
   // Catches a session-tied proxy outliving its pi session: at session shutdown the extension
@@ -280,7 +285,7 @@ describe('startProxy spawning a proxy', () => {
       pidFile: false,
       status: { key: STATUS_KEY, text: undefined }
     })
-    await expect(fetch(`${url}/v1/models`)).rejects.toThrow('fetch failed')
+    await expect(fetch(`${url}/v1/models`)).rejects.toMatchObject(REFUSED)
   })
 
   // Catches `/proxy start` hanging on a proxy that never answers, or losing track of it: after the
