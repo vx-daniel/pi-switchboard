@@ -32,11 +32,18 @@ let agentDir: FixtureAgentDir
 let infoLines: string[] = []
 
 /**
- * Builds the app, with an alias to the refused model.
+ * Builds the app, with an alias to the refused model and a chain from it to one that answers.
  *
  * @returns the app
  */
-const app = () => testApp({ ...testConfig(), aliases: { picky: 'codex/refused-model' } })
+const app = () =>
+  testApp({
+    ...testConfig(),
+    aliases: {
+      picky: 'codex/refused-model',
+      chain: { targets: ['codex/refused-model', 'acme/ok-model'], fallbackOn: ['refused'] }
+    }
+  })
 
 beforeAll(async () => {
   mock = await startMockProvider({
@@ -105,14 +112,15 @@ async function ask(
 }
 
 /**
- * Counts the info lines that announce a model's refusal (the route's own line per request names
- * the requested model; the refusal's does not).
+ * Counts the info lines that announce a model's refusal.
  *
  * @param model - the canonical ID
  * @returns how many
  */
 function refusalLines(model: string): number {
-  return infoLines.filter((line) => line.includes(model) && !line.includes('requestedModel')).length
+  return infoLines.filter(
+    (line) => line.includes('login refused') && line.includes(`"model":"${model}"`)
+  ).length
 }
 
 /**
@@ -138,7 +146,8 @@ describe('availability on /v1/switchboard/models (#174)', () => {
       'refused-model': 'unknown',
       'ok-model': 'unknown',
       'cut-model': 'unknown',
-      'picky': 'unknown'
+      'picky': 'unknown',
+      'chain': 'unknown'
     })
   })
 
@@ -196,5 +205,17 @@ describe('availability on /v1/switchboard/models (#174)', () => {
     noteAvailability(model, {}, 'answered')
     noteAvailability(model, {}, 'refused')
     expect(refusalLines(model)).toBe(2)
+  })
+
+  // Catches a fallback chain recording its outcome under the alias's first target only: the
+  // refused model would hide the answer of the one after it, or take its `verified`. Not
+  // streamed: the mock's refusal is an event inside a started stream, past falling back.
+  test('records each model of a fallback chain under its own ID', async () => {
+    await ask('chain', false)
+
+    expect(await availability()).toMatchObject({
+      'refused-model': 'refused',
+      'ok-model': 'verified'
+    })
   })
 })

@@ -473,6 +473,8 @@ async function attemptStream(
         const mapped = reportThrownFailure(err)
         failed = true
         const thrown = failureClass(mapped)
+        // The callback above records a failure pi reports as an error event; this one, a throw.
+        // Should both see one failure, the second records the same state and logs nothing more.
         noteAvailability(candidate.canonicalId, job.options, thrown)
         countFailure(thrown)
         chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
