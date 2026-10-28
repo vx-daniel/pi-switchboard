@@ -663,8 +663,9 @@ credentials outside pi's store, which the Scope rules out.
 base's, so `src/openai/model-logins.ts` groups pi's available models by base provider and model
 before exposure runs: `claude-opus-5-5` is one exposed model, owned by `anthropic`, whose entry
 carries `logins` (`ExposedModel.login` is the serving provider ID; `provider` the base) in the
-order routing tries them, base first, then slots by number. A model only a slot has (logged out
-of the base) stands in under the base's name. `scoped` mode's `enabledModels` patterns match the
+order routing tries them: base first, then slots by number, unless the operator orders them
+(below). A model only a slot has (logged out of the base) stands in under the base's name.
+`scoped` mode's `enabledModels` patterns match the
 base, so they cover every login. A login's ID is not a public or canonical ID: a request naming
 `anthropic-2/claude-opus-5-5` gets 404.
 
@@ -694,6 +695,26 @@ trimmed, 1–40 characters), saved by `saveLoginLabel` (`src/tui/login.ts`) thro
 identity (Anthropic's organization ID on responses, Codex's JWT claims) is deliberately not
 read: #69 keeps no account or organization ID, and a label the operator writes needs nothing from
 the credential.
+
+**Order and disabled logins** (#233). `routing.logins.order` (base provider → logins) puts the
+logins it lists first, in its order, the others after them in the usual order
+(`orderLogins`); `routing.logins.disabled` lists logins routing never calls. Both are read per
+request with the rest of the config (`fileConfigReader` → `ModelExposureConfig.loginRouting`)
+and applied in `groupLogins`, before exposure: a disabled login is left out of a model's
+`logins` and kept as `disabledLogins`, and a model whose every login is disabled is not exposed
+at all, as if it had no credential (principle IV: `/v1/models` lists what can be served). The
+login stays logged in; nothing touches pi's store. Cooldowns, `routing.reserve` and
+`routing.logins.fallbackOn` apply among the enabled logins in that order; an alias target
+expands to its model's logins in that order; a request with its own upstream key keeps the
+first enabled login's model only. A name that is no login of its provider is ignored, never an
+error: `loginDiagnostics` (`unknown-login`) lists it on `/healthz/models`, with a warning once per
+distinct set, and `all-logins-disabled` names a provider whose models left; neither fails the
+check. `/v1/switchboard/models` lists each model's enabled logins in routing order, then its
+disabled ones, each with `disabled`. The console's Accounts view marks the login called first
+(`▲ first`) and the disabled ones, and the account menu's **Use first**, **Disable** and
+**Enable** write the two settings (`src/tui/login-routing.ts`, through `saveConfigToFile`);
+disabling a provider's only enabled login asks first. The Settings view leaves them to the
+Accounts view, as it leaves aliases to the Models view.
 
 - **A fresh built-in, not the composed provider.** The copy is made from a fresh
   `builtinProviders()` instance, not from the runtime's provider: the composed one carries the

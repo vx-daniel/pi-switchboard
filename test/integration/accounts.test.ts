@@ -15,6 +15,7 @@ import { getRuntime } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
 import { loginLabels, loginOptions, runLogin, runLogout, saveLoginLabel } from '@proxy/tui/login'
+import { saveLoginDisabled, saveLoginFirst } from '@proxy/tui/login-routing'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -448,5 +449,167 @@ describe('a second login', () => {
     const options = loginOptions(getRuntime()).map((option) => option.id)
     expect(options).toContain('groq-3')
     expect(options).not.toContain('groq-4')
+  })
+})
+
+/**
+ * Reads the model's logins on `/v1/switchboard/models`, with whether each is disabled.
+ *
+ * @returns each login's `id` and `disabled`
+ */
+async function loginStates(): Promise<unknown[]> {
+  const entry = (await listed('/v1/switchboard/models')).find(
+    (model) => isRecord(model) && model['id'] === MODEL
+  )
+  const logins = isRecord(entry) && Array.isArray(entry['logins']) ? entry['logins'] : []
+  return logins.map((login: unknown) =>
+    isRecord(login) ? { id: login['id'], disabled: login['disabled'] } : undefined
+  )
+}
+
+/**
+ * Reads `/healthz/models`.
+ *
+ * @returns the status and the `loginDiagnostics`
+ */
+async function loginHealth(): Promise<{ status: number; diagnostics: unknown }> {
+  const response = await createApp(testConfig(), fileConfigReader).request('/healthz/models')
+  const body = await jsonBody(response)
+  return {
+    status: response.status,
+    diagnostics: isRecord(body) ? body['loginDiagnostics'] : undefined
+  }
+}
+
+describe("a provider's login order and disabled logins (#233)", () => {
+  // Catches `routing.logins.order` ignored (the base still called first, spending the login the
+  // operator meant to keep), the login left out of `x_pi.login`, an alias target or the
+  // switchboard list not following the order, an unlisted login dropped rather than appended, or
+  // a request with its own key handed to another login.
+  test('a login put first is called first, and the others follow', async () => {
+    setConfig({
+      aliases: { 'quiet-groq': { model: `groq/${MODEL}`, reasoningEffort: 'none' } },
+      routing: { logins: { order: { groq: ['groq-2'] } } }
+    })
+    try {
+      const answer = await ask(MODEL)
+
+      expect(answer.status).toBe(200)
+      expect(answer.upstreamKeys).toEqual([SECOND_KEY])
+      expect(answer.body).toMatchObject({ model: `groq/${MODEL}`, x_pi: { login: 'groq-2' } })
+      const xPi = isRecord(answer.body) ? answer.body['x_pi'] : undefined
+      expect(isRecord(xPi) && 'attempts' in xPi).toBe(false)
+      expect((await ask('quiet-groq')).upstreamKeys).toEqual([SECOND_KEY])
+      expect(await loginStates()).toEqual([
+        { id: 'groq-2', disabled: false },
+        { id: 'groq', disabled: false }
+      ])
+      const ownKey = await ask(MODEL, { headers: { 'X-Switchboard-Upstream-Api-Key': FIRST_KEY } })
+      expect(ownKey.upstreamKeys).toEqual([FIRST_KEY])
+    } finally {
+      setConfig({})
+    }
+  })
+
+  // Catches a name that is no login stopping the proxy or reordering the others, or ignored
+  // silently: it is listed on `/healthz/models`, which stays healthy.
+  test('a name that is no login is ignored and listed on /healthz/models', async () => {
+    setConfig({
+      routing: { logins: { order: { groq: ['groq-9', 'groq-2'] }, disabled: ['nobody-2'] } }
+    })
+    try {
+      expect((await ask(MODEL)).upstreamKeys).toEqual([SECOND_KEY])
+      const health = await loginHealth()
+      expect(health.status).toBe(200)
+      expect(health.diagnostics).toEqual([
+        expect.objectContaining({
+          code: 'unknown-login',
+          setting: 'routing.logins.order',
+          provider: 'groq',
+          login: 'groq-9'
+        }),
+        expect.objectContaining({
+          code: 'unknown-login',
+          setting: 'routing.logins.disabled',
+          provider: null,
+          login: 'nobody-2'
+        })
+      ])
+    } finally {
+      setConfig({})
+    }
+  })
+
+  // Catches a disabled login called anyway: as the fallback after the first login's 429, which
+  // `routing.logins.fallbackOn` names by default. It stays listed, marked disabled.
+  test('a disabled login is never called, not even as the fallback', async () => {
+    setConfig({ routing: { logins: { disabled: ['groq-2'] } } })
+    try {
+      const answer = await ask(MODEL)
+
+      expect(answer.status).toBe(429)
+      expect(answer.upstreamKeys).toEqual([FIRST_KEY])
+      expect(await loginStates()).toEqual([
+        { id: 'groq', disabled: false },
+        { id: 'groq-2', disabled: true }
+      ])
+      expect((await loginHealth()).diagnostics).toEqual([])
+    } finally {
+      setConfig({})
+    }
+  })
+
+  // Catches a model whose every login is disabled still listed (a client picks it and gets an
+  // upstream error) or still called, or its absence unexplained: `/healthz/models` names the
+  // provider.
+  test('a model whose every login is disabled leaves /v1/models', async () => {
+    setConfig({ routing: { logins: { disabled: ['groq', 'groq-2'] } } })
+    try {
+      const ids = (await listed('/v1/models')).map((model: unknown) =>
+        isRecord(model) ? model['id'] : undefined
+      )
+      expect(ids).not.toContain(MODEL)
+      expect(ids).toContain(OTHER_MODEL)
+      const detail = await createApp(testConfig(), fileConfigReader).request(
+        `/v1/models/${encodeURIComponent(MODEL)}`
+      )
+      expect(detail.status).toBe(404)
+      expect(await jsonBody(detail)).toMatchObject({ error: { code: 'model_not_found' } })
+      const answer = await ask(MODEL)
+      expect(answer.status).toBe(404)
+      expect(answer.upstreamKeys).toEqual([])
+      expect((await loginHealth()).diagnostics).toEqual([
+        expect.objectContaining({ code: 'all-logins-disabled', provider: 'groq', login: null })
+      ])
+    } finally {
+      setConfig({})
+    }
+  })
+
+  // Catches the console's **Use first**, **Disable** and **Enable** not reaching the next request
+  // (a restart needed), writing the order without the provider's other logins, or rewriting the
+  // rest of the config file.
+  test("the Accounts view's actions write the config the next request uses", async () => {
+    setConfig({ labels: { 'groq-2': 'work' } })
+    try {
+      expect(saveLoginFirst('groq-2', ['groq', 'groq-2', 'other'])).toBe(true)
+      expect(loginLabels()).toEqual({ 'groq-2': 'work' })
+      expect((await fileConfigReader()).loginRouting).toEqual({
+        fallbackOn: ['rate_limit'],
+        order: { groq: ['groq-2', 'groq'] },
+        disabled: []
+      })
+      expect((await ask(MODEL)).upstreamKeys).toEqual([SECOND_KEY])
+
+      expect(saveLoginDisabled('groq-2', true)).toBe(true)
+      expect((await ask(MODEL)).upstreamKeys).toEqual([FIRST_KEY])
+
+      clearAllCooldowns()
+      expect(saveLoginDisabled('groq-2', false)).toBe(true)
+      expect((await fileConfigReader()).loginRouting?.disabled).toEqual([])
+      expect((await ask(MODEL)).upstreamKeys).toEqual([SECOND_KEY])
+    } finally {
+      setConfig({})
+    }
   })
 })
