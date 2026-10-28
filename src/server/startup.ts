@@ -346,7 +346,6 @@ export function logEffectiveConfig(config: ServerConfig): void {
     port: config.port,
     proxyAuthMode: config.proxyAuth.kind,
     hostOriginGuardEnabled: config.hostOriginGuardEnabled,
-    agenticEnabled: config.agenticEnabled,
     remoteImagesEnabled: config.remoteImagesEnabled,
     docsUiEnabled: config.docsUiEnabled,
     responsesApiEnabled: config.responsesApiEnabled,
