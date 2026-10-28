@@ -6,6 +6,10 @@
 
 - **An error's `param` names a nested field as OpenAI does (#342):** an array index in brackets, `messages[0].content[1].type`, where some errors said `messages.0.content.1.type`. On `POST /v1/chat/completions` that is every `400` or `422` from request validation at a path through an array, such as inside `messages` or `tools` (a field OpenAI doesn't define, an assistant field accepted only empty, a wrong type or value, a role the proxy doesn't take, a malformed `prompt_cache_breakpoint`); message conversion, tool schema and remote-image errors already used brackets. On `POST /v1/responses` it is the same validation errors inside `input` and `tools`, the named `422` for a non-function tool (`tools[0].type`) or another `include` (`include[0]`), and the `400` for a reasoning item (`input[1].encrypted_content`, `input[1]`). A validation message that quotes the path (`Invalid value for '…'`, `Unknown parameter(s): …`) uses the same form. Top-level fields (`param: n`) are unchanged. A client that matched the dotted form should match the bracketed one.
 
+### The pi extension
+
+- **The settings panel has a Responses API row, and `/proxy show` lists `responses api` (#342).** Until now `responsesApi` could be set only in `proxy-config.json` or the console.
+
 ## From 0.4 to 0.5
 
 Nothing to change in `proxy-config.json`: every 0.4 file works unchanged. These are the changes a client or an operator may notice.
