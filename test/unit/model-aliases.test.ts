@@ -16,27 +16,7 @@ import {
 } from '@proxy/openai/model-exposure'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
-/**
- * Builds a text-only model.
- *
- * @param provider - the provider name
- * @param id - the model ID
- * @returns the model
- */
-function makeModel(provider: string, id: string): Model<Api> {
-  return {
-    id,
-    name: id,
-    api: 'openai-completions',
-    provider,
-    baseUrl: `https://${provider}.example.com`,
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096
-  }
-}
+import { makeModel } from '../helpers'
 
 /** Two providers that share `gpt-4o`, so collision-prefixed mode prefixes both. */
 const MODELS = [

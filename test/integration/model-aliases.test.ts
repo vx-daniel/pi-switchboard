@@ -14,7 +14,7 @@ import { isRecord } from '@proxy/utils/guards'
 import type { Hono } from 'hono'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { type FixtureAgentDir, loadFixtureAgentDir, setAliases } from '../fixtures/agent-dir'
 import {
   finishChunk,
   type MockProvider,
@@ -60,15 +60,6 @@ afterAll(async () => {
   await mock.close()
   agentDir.remove()
 })
-
-/**
- * Writes the proxy's config file with these aliases (scoped exposure, the default).
- *
- * @param aliases - alias -> canonical ID
- */
-function setAliases(aliases: Record<string, string>): void {
-  writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify({ aliases }))
-}
 
 /**
  * Writes pi's global settings with these `enabledModels`; none exposes every model.
@@ -163,7 +154,7 @@ describe('a chat request for an alias', () => {
   // Catches an alias that is listed but not resolved, resolved to the wrong model, or reported as
   // the alias in `model`, so a client could not tell which model answered.
   test('non-streamed: answered by the target, `model` is its canonical ID, x_pi.alias the alias', async () => {
-    setAliases({ coding: TARGET })
+    setAliases(agentDir.path, { coding: TARGET })
 
     const answer = await ask('coding', false)
 
@@ -176,7 +167,7 @@ describe('a chat request for an alias', () => {
   // Catches the alias reported on the non-streamed response only: streamed and non-streamed
   // responses say the same, in every chunk, so a client reading any one of them sees it.
   test('streamed: every chunk has the canonical ID and x_pi.alias', async () => {
-    setAliases({ coding: TARGET })
+    setAliases(agentDir.path, { coding: TARGET })
 
     const answer = await ask('coding', true)
 
@@ -197,7 +188,7 @@ describe('a chat request for an alias', () => {
     ['non-streamed', false],
     ['streamed', true]
   ])('%s: a request by the model ID carries no alias', async (_mode, stream) => {
-    setAliases({ coding: TARGET })
+    setAliases(agentDir.path, { coding: TARGET })
 
     const answer = await ask('opus-mock', stream)
 
@@ -210,7 +201,7 @@ describe('listing an alias', () => {
   // Catches an alias missing from any route that lists models: a client discovering models, or
   // their capabilities, sees the same names it can request.
   test('appears on /v1/models, /v1/models/{alias} and /v1/switchboard/models, as its target', async () => {
-    setAliases({ coding: TARGET })
+    setAliases(agentDir.path, { coding: TARGET })
 
     expect(await listedIds('/v1/models')).toEqual(['opus-mock', 'haiku-mock', 'coding'])
     const detail = await app().request('/v1/models/coding')
@@ -230,7 +221,7 @@ describe('listing an alias', () => {
   // with its target left out of enabledModels, the alias is not listed, not found, and not
   // answered, and /healthz/models says why without failing.
   test('disappears when its target is not exposed', async () => {
-    setAliases({ coding: TARGET })
+    setAliases(agentDir.path, { coding: TARGET })
     enableModels(['mock/haiku-mock'])
 
     expect(await listedIds('/v1/models')).toEqual(['haiku-mock'])
@@ -253,7 +244,7 @@ describe('an alias named like an exposed model', () => {
     ['public ID', 'haiku-mock'],
     ['canonical ID', 'mock/haiku-mock']
   ])('a %s: the model still answers it; /healthz/models is 503', async (_case, name) => {
-    setAliases({ [name]: TARGET })
+    setAliases(agentDir.path, { [name]: TARGET })
 
     const answer = await ask(name, false)
     expect(answer.status).toBe(HTTP_OK)

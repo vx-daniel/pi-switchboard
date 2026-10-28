@@ -3,31 +3,10 @@
  * group under the base provider's, and the base stands for them in exposure.
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
 import { groupLogins } from '@proxy/openai/model-logins'
 import { describe, expect, test } from 'vite-plus/test'
 
-/**
- * Builds a chat model of a provider.
- *
- * @param provider - the provider
- * @param id - the model ID
- * @returns the model
- */
-function makeModel(provider: string, id: string): Model<Api> {
-  return {
-    id,
-    name: id,
-    api: 'openai-completions',
-    provider,
-    baseUrl: `https://${provider}.example.com`,
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096
-  }
-}
+import { makeModel } from '../helpers'
 
 describe('groupLogins', () => {
   // Catches a slot's models grouped with the wrong model, listed as models of their own, or the

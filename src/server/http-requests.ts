@@ -32,7 +32,7 @@ import {
 } from '@proxy/server/http-status'
 import { isHealthPath } from '@proxy/server/middleware'
 import type { ProxyEnv } from '@proxy/server/types'
-import { errorMessage } from '@proxy/utils/guards'
+import { notifyListeners } from '@proxy/utils/listeners'
 import type { MiddlewareHandler } from 'hono'
 
 /**
@@ -79,18 +79,7 @@ const listeners = new Set<() => void>()
  * request that caused the change must not fail for it.
  */
 function notify(): void {
-  for (const listener of listeners) {
-    try {
-      listener()
-    } catch (error) {
-      httpRequestsLogger.warn('An HTTP requests listener threw: {errorName}', {
-        errorName: error instanceof Error ? error.name : typeof error
-      })
-      httpRequestsLogger.debug('HTTP requests listener failure detail: {detail}', {
-        detail: errorMessage(error)
-      })
-    }
-  }
+  notifyListeners(listeners, [], httpRequestsLogger, 'HTTP requests')
 }
 
 /**

@@ -51,8 +51,9 @@ const ID_MODE_DESCRIPTIONS: Record<string, string> = {
 
 /** Description shown for each model exposure mode. */
 const EXPOSURE_MODE_DESCRIPTIONS: Record<string, string> = {
-  scoped: "Expose models from pi's configured auth (default)",
-  all: 'Expose all registered models, including those without auth',
+  scoped:
+    "Expose the models pi's enabledModels setting selects; every model when it has none (default)",
+  all: 'Expose every model with a login or key',
   custom: 'Expose only manually selected models'
 }
 
@@ -200,8 +201,8 @@ function getDisplayValue(config: ProxyConfig, id: string): string {
 }
 
 /**
- * Builds the server rows: lifetime, host, port, auth, the host/origin guard, remote images, body
- * size, timeout and log level.
+ * Builds the server rows: lifetime, host, port, auth, the host/origin guard, remote images, docs
+ * UI, stats, body size, timeout and log level.
  *
  * @param config - the current proxy config
  * @returns the server setting items

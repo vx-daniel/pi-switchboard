@@ -5,7 +5,7 @@
  * (CONSTITUTION principle II), never clamped and never read leniently (`80abc` is not 80).
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -15,6 +15,8 @@ import { BYTES_PER_MB } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
 import { MS_PER_SECOND } from '@proxy/utils/time'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
+
+import { writeProxyConfig } from '../fixtures/agent-dir'
 
 const FILE_PORT = 4242
 const FILE_BODY_MB = 7
@@ -26,15 +28,6 @@ const MAX_TIMEOUT_SEC = 600
 
 let agentDir = ''
 let lines: string[] = []
-
-/**
- * Writes `proxy-config.json` into this test's agent dir.
- *
- * @param contents - the raw config file content
- */
-function writeConfigFile(contents: Record<string, unknown>): void {
-  writeFileSync(join(agentDir, 'proxy-config.json'), JSON.stringify(contents))
-}
 
 /**
  * Reads the messages of the warnings logged so far.
@@ -53,7 +46,7 @@ function warnings(): unknown[] {
 beforeEach(() => {
   agentDir = mkdtempSync(join(tmpdir(), 'pi-proxy-env-int-'))
   vi.stubEnv('PI_CODING_AGENT_DIR', agentDir)
-  writeConfigFile({
+  writeProxyConfig(agentDir, {
     port: FILE_PORT,
     maxBodySizeMb: FILE_BODY_MB,
     upstreamTimeoutSec: FILE_TIMEOUT_SEC

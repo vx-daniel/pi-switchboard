@@ -3,7 +3,6 @@
  * (`src/server/route-cooldowns.ts`), #68.
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
 import type { FailureClass } from '@proxy/config/schema'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import {
@@ -20,6 +19,8 @@ import { cooldownSkip } from '@proxy/server/route-cooldowns'
 import type { RouteHops } from '@proxy/server/route-hops'
 import { beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import { exposed } from '../helpers'
+
 const NOW = 1_800_000_000_000
 const MINUTE = 60_000
 
@@ -31,29 +32,6 @@ const MINUTE = 60_000
  */
 function hops(classes: readonly FailureClass[]): RouteHops {
   return { fallbackOn: new Set(classes), loginFallbackOn: new Set() }
-}
-
-/**
- * Builds an exposed model.
- *
- * @param provider - the provider
- * @param id - the model ID
- * @returns the exposed model
- */
-function exposed(provider: string, id: string): ExposedModel {
-  const model: Model<Api> = {
-    id,
-    name: id,
-    api: 'openai-completions',
-    provider,
-    baseUrl: 'https://example.com',
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096
-  }
-  return { publicId: id, canonicalId: `${provider}/${id}`, model, provider, login: provider }
 }
 
 const OPUS = exposed('anthropic', 'opus')

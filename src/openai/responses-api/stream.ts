@@ -113,7 +113,8 @@ function responseEvent(
 }
 
 /**
- * Encodes the events of a block that starts: its item added, and its first part.
+ * Encodes the events of a block that starts: the reasoning and text items still open end first
+ * ({@link closeOpenItems}), then its item is added, with its first part.
  *
  * @param state - the stream state
  * @param frameOf - the response
@@ -356,7 +357,7 @@ function failedFrame(state: StreamState, frameOf: ResponseFrame, body: OpenAIErr
  *
  * @param state - the stream state
  * @param frameOf - the response
- * @param event - pi's event, and the route it came by
+ * @param event - pi's event
  * @param route - how the request got to the model answering
  * @returns the frames
  */

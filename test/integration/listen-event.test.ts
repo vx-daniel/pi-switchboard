@@ -3,14 +3,12 @@
  * it serves, for the console's Requests table, as its first lifecycle row.
  */
 
-import { once } from 'node:events'
-import { createServer } from 'node:net'
-
 import { consoleEvents } from '@proxy/server/console-events'
 import { openServer } from '@proxy/server/startup'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { freePort } from '../fixtures/local-server'
 import { testConfig } from '../helpers'
 
 let agentDir: FixtureAgentDir
@@ -23,22 +21,6 @@ afterAll(() => {
   vi.unstubAllEnvs()
   agentDir.remove()
 })
-
-/**
- * Finds a port free on loopback now.
- *
- * @returns the port
- */
-async function freePort(): Promise<number> {
-  const probe = createServer()
-  probe.listen(0, '127.0.0.1')
-  await once(probe, 'listening')
-  const address = probe.address()
-  probe.close()
-  await once(probe, 'close')
-  if (address === null || typeof address === 'string') throw new Error('probe not on TCP')
-  return address.port
-}
 
 describe('openServer', () => {
   // Catches the server starting without the console's Requests table saying where it listens.

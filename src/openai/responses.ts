@@ -246,8 +246,8 @@ export const openAIChatCompletionSchema = z
       })
       .meta({
         description:
-          "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias and fallback " +
-          'attempts that led to the answer.'
+          "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias, login, effort " +
+          'report and fallback attempts that led to the answer.'
       })
   })
   .meta({ id: 'ChatCompletion', description: 'A non-streaming chat completion.' })
@@ -322,8 +322,8 @@ export function mapUsage(usage: Usage): OpenAIUsage {
  *
  * @param requestId - the response `id`
  * @param message - pi's final assistant message
- * @param route - the model that answered, reported as `model`, and the alias and failed attempts
- *   that led to it, under `x_pi` (#66, #67)
+ * @param route - the model that answered, reported as `model`, and the alias, login, effort
+ *   report and failed attempts that led to it, under `x_pi` (#66, #67, #175, #227)
  * @returns the `chat.completion` object with a single choice
  */
 export function buildChatCompletion(

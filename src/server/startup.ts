@@ -299,7 +299,7 @@ export function reloadConfig(args: CliArgs): ServerConfig | undefined {
  * @remarks
  * Config loading logs too, so logging is configured first with the level the CLI or env asks for,
  * then again with the fully resolved level (which may come from the config file). The logging
- * flags have already been checked ({@link invalidLoggingFlag}).
+ * flags have already been checked ({@link invalidFlag}).
  *
  * @param args - The parsed CLI flags.
  * @param output - Where log lines go, and in which format.

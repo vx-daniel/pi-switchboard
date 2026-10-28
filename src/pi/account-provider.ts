@@ -101,7 +101,7 @@ function refreshAs(base: Provider, id: string): NonNullable<Provider['refreshMod
  * would quietly serve on the base's account. Without a stored credential, the copy is not
  * configured. OAuth resolves from the stored credential only, so it is kept as it is.
  *
- * Only "no credential" needs catching: pi's `resolveProviderAuth` (pi-ai 1.3.0) sends a stored
+ * Only "no credential" needs catching: pi's `resolveProviderAuth` (pi-ai 1.4.0) sends a stored
  * credential to the handler of its own type, so `apiKey.resolve` sees an `api_key` credential or
  * none, never an OAuth one, and a failed OAuth refresh never falls back to it.
  *
@@ -144,7 +144,7 @@ function storedOnly(auth: ProviderAuth): ProviderAuth {
  */
 export function accountProvider(base: Provider, slot: AccountSlot): Provider {
   const { providerId: id, number } = slot
-  // A shallow copy: pi 1.3.0's built-in providers are plain objects of closures (`createProvider`),
+  // A shallow copy: pi 1.4.0's built-in providers are plain objects of closures (`createProvider`),
   // so no method relies on `this` or a prototype. The unit tests stream and refresh through the
   // copy, so a pi change that broke this would fail them.
   const copy: Provider = {

@@ -11,8 +11,8 @@
  * pi that moves it still works, with its system theme in the dialogs.
  *
  * The console's own text is colored by role ({@link paint}, {@link strong}, {@link highlight},
- * {@link activeTab}), and its header and sidebar sit on a background of their own
- * ({@link chrome}). With no theme installed (the tests, `NO_COLOR`) those return the text as it is.
+ * {@link activeTab}), and its status strip sits on a background of its own ({@link chrome}). With
+ * no theme installed (the tests, `NO_COLOR`) those return the text as it is.
  *
  * @packageDocumentation
  */
@@ -30,7 +30,7 @@ import { STORM, STORM_BACKGROUNDS, STORM_FOREGROUNDS } from '@proxy/tui/tokyonig
 
 /** Where pi keeps its global theme. */
 const PI_THEME_KEY = Symbol.for('@earendil-works/pi-coding-agent:theme')
-/** The background of the console's chrome: its header and its sidebar. */
+/** The background of the console's chrome: its status strip. */
 const CHROME_BG = STORM.bgHighlight
 /**
  * The escape sequences that end a background: a full reset, its short form, and a background's
@@ -108,7 +108,7 @@ export function strong(text: string): string {
 }
 
 /**
- * Marks the selected item of a list or the current tab: bold accent on the selection background.
+ * Marks the selected item of a list: bold accent on the selection background.
  *
  * @param text - the item
  * @returns the item, marked when a theme is installed
@@ -118,9 +118,10 @@ export function highlight(text: string): string {
 }
 
 /**
- * Marks the current tab where the tabs sit in the frame's border: bold in the chrome's amber,
- * inverted, so it reads as a pill. pi-tui's `styleText` for the inversion, as in {@link strong}:
- * the theme's `inverse` goes through chalk, which emits nothing in the console.
+ * Marks the current tab where the tabs sit in the frame's border, and the Stats view's current
+ * window: bold in the chrome's amber, inverted, so it reads as a pill. pi-tui's `styleText` for
+ * the inversion, as in {@link strong}: the theme's `inverse` goes through chalk, which emits
+ * nothing in the console.
  *
  * @param text - the tab's label
  * @returns the label, marked when a theme is installed
@@ -131,9 +132,10 @@ export function activeTab(text: string): string {
 }
 
 /**
- * Colors the chrome's accent: the current tab's outline and each tab's key digit, and the
- * headline numbers of the status strip. The instrument panel's amber is the theme's yellow, named
- * here once so no chrome module paints a tab with `warning`.
+ * Colors the chrome's accent: the current tab's outline and each tab's key digit, the headline
+ * numbers of the status strip and the sidebar, and the pointers and `↵` hints of the views. The
+ * instrument panel's amber is the theme's yellow, named here once so no chrome module paints a tab
+ * with `warning`.
  *
  * @param text - the text
  * @returns the text, amber when a theme is installed
@@ -181,8 +183,8 @@ export function keycap(text: string): string {
 }
 
 /**
- * Puts a row of the console's chrome (its header, its tab bar, a row of its sidebar) on the
- * chrome's background, padded to the row's width.
+ * Puts a row of the console's chrome (its status strip) on the chrome's background, padded to the
+ * row's width.
  *
  * @remarks
  * The row may already be styled: a reset inside it would end the background there, so the

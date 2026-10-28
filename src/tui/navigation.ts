@@ -249,7 +249,7 @@ export function footerLine(
  * pi's login dialog copies its sign-in URL on pi's own `app.message.copy` key, Ctrl+X in pi;
  * without a binding its hint names no key. The console has no other pi app keys. The screen's own
  * viewport scrolling takes PgUp and PgDn before any component; the console's view always fits the
- * screen, so they go to the raw log instead.
+ * screen, so they go to the views instead: they scroll the logs or move a view's selection.
  */
 export function installKeybindings(): void {
   setKeybindings(

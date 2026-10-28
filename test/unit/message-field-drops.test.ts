@@ -6,9 +6,10 @@
 import { resetSync } from '@logtape/logtape'
 import { configureLogging } from '@proxy/logging'
 import { convertMessages } from '@proxy/openai/messages'
-import { validateChatRequest } from '@proxy/openai/validate'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from 'vite-plus/test'
+
+import { parseChatBody } from '../helpers'
 
 /** A participant name, which must never reach the log. */
 const PARTICIPANT = 'notarealsecret-alice'
@@ -45,9 +46,7 @@ afterAll(() => {
  * @returns whether the conversion succeeded
  */
 function convert(messages: unknown[]): boolean {
-  const validation = validateChatRequest({ model: 'any/model', messages })
-  if (!validation.ok) throw new Error(`request did not validate: ${validation.message}`)
-  return convertMessages(validation.data.messages).ok
+  return convertMessages(parseChatBody({ model: 'any/model', messages }).messages).ok
 }
 
 describe('message fields pi has no equivalent for', () => {

@@ -18,13 +18,20 @@ Before changing code:
 
 ## Repo shape
 
-- `src/server/` — Hono HTTP app, middleware, routes, request/response handling
-- `src/openai/` — OpenAI request schemas, message conversion, tool conversion, SSE/response shaping
-- `src/pi/` — pi SDK integration and model registry resolution
+- `src/server/` — Hono HTTP app, middleware, routes, routing (`route-*.ts`, `chat-dispatch.ts`), request/response handling
+- `src/openai/` — OpenAI request schemas, message conversion, tool conversion, SSE/response shaping, model exposure and aliases; `responses-api/` for `POST /v1/responses`
+- `src/pi/` — pi SDK integration, model registry resolution, logins, cooldowns, quota
 - `src/config/` — env/config parsing and validation
+- `src/logging/` — LogTape setup and categories
+- `src/stats/` — the SQLite stats store and recorder
+- `src/doctor/` — `pi-switchboard doctor`
+- `src/tui/` — the opt-in console (`pi-switchboard tui`)
+- `src/standalone/` — the Bun binary's entry point
 - `src/sync/` — external/editor sync integrations
-- `extensions/` — Pi extension surface for the package
-- `test/unit/`, `test/integration/`, `test/conformance/` — behavior checks
+- `src/utils/` — type guards and small shared helpers
+- `extensions/proxy/` — Pi extension surface for the package
+- `scripts/` — the gate, fixture recording, spec pinning, binary build (plain Node)
+- `test/unit/`, `test/integration/`, `test/conformance/` — behavior checks; `test/binary/` runs the built binary (not in the gate)
 - `docs/` — the user documentation, from [`docs/README.md`](docs/README.md): install, configuration, the HTTP API, routing, the console, the pi extension; under it, supporting analysis and research that is not the main source of truth: `docs/reference/` compares the proxy with other implementations, `docs/engineering/` and `docs/discovery/` hold past analysis and client research, and `docs/archive/` holds the March 2026 plans that were not carried out
 
 ## Core constraints
@@ -80,7 +87,7 @@ fallow (`.fallowrc.jsonc`) checks dead code, duplication and complexity, with CR
 Common commands:
 
 ```bash
-pnpm run check:all  # the gate: format → lint + type check → tests with coverage → fallow → build (scripts/gate.ts)
+pnpm run check:all  # the gate: format → lint + type check → tests with coverage → fallow → build → smoke (scripts/gate.ts)
 vp check --fix      # apply formatting and lint fixes
 vp test             # offline tests: unit + integration, no real login (test:ci runs them with coverage, for fallow)
 pnpm run test:live  # live provider conformance tests: real login, spends quota; on demand only

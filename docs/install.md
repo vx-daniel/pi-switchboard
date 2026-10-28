@@ -32,6 +32,7 @@ Every way needs at least one provider login, stored where pi keeps them: `pi /lo
 - **An API key needs no login.** pi reads provider credentials from the environment: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY` and the others in pi's list (`pi-ai`'s `env-api-keys`; a few are not `_API_KEY` names, such as `HF_TOKEN`, `COPILOT_GITHUB_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS`). Set it where the proxy runs (`docker run -e ANTHROPIC_API_KEY=…`, a systemd `Environment=`, a shell profile) and the provider's models are served from the start.
 - **A subscription (OAuth) is interactive once.** It needs a browser, or a code pasted back, so it can't be scripted: run `pi-switchboard tui` and press `n`, or `pi /login`, once per host. pi keeps the login in `auth.json` and refreshes it from then on. There is no separate `pi-switchboard login` command (#201): it would be the console's `n` without the console.
 - **Restart after a login made elsewhere.** A running proxy reads pi's logins when it starts. A login through its own console is served at once; one made by another process (`pi /login`, another console, an edited `auth.json`) is served after the proxy restarts.
+- **Check the result.** `pi-switchboard doctor` (or `./pi-switchboard-<os>-<arch> doctor`) reports, without starting a proxy, whether a login exposes models, what the config gets wrong and how the prompt cache does; it exits with status `1` on an error, for scripts ([Checking the setup](configuration.md#checking-the-setup-pi-switchboard-doctor)).
 
 ## Installation
 
@@ -59,7 +60,7 @@ pnpm add -g @vx-daniel/pi-switchboard
 
 Install by the package name, as above. pi also accepts a tarball URL (`npm:https://…/x.tgz`), but pi 1.3.0 then reports the package as installed without loading its extension.
 
-pi's own packages (`@earendil-works/pi-ai`, `pi-coding-agent`) are optional dependencies, so that pi, which provides them to its extensions, does not load a second copy (#165). Every installer adds optional dependencies by default. Installed with `--omit=optional` or `--no-optional`, the `pi-switchboard` CLI cannot start: it says which package is missing and exits with status `1`.
+pi's own packages (`@earendil-works/pi-ai`, `pi-coding-agent`, `pi-tui`) are optional dependencies, so that pi, which provides them to its extensions, does not load a second copy (#165). Every installer adds optional dependencies by default. Installed with `--omit=optional` or `--no-optional`, the `pi-switchboard` CLI cannot start: it says which package is missing and exits with status `1`.
 
 ## Docker
 
@@ -89,7 +90,7 @@ chmod +x pi-switchboard-linux-x64
 ./pi-switchboard-linux-x64 --port 4141
 ```
 
-Every binary is run (`--version`) on its own platform (Linux and macOS, and Windows when it is built, on x64 and arm64) before the workflow uploads it, and each asset has a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) that `gh attestation verify` checks.
+Every binary is run (`--version`) on its own platform (Linux, macOS and Windows, on x64 and arm64) before the workflow uploads it, and each asset has a [build provenance attestation](https://docs.github.com/en/actions/security-for-github-actions/using-artifact-attestations) that `gh attestation verify` checks.
 
 - **macOS.** The binaries are not signed with a Developer ID, so Gatekeeper blocks the first run. After checking the checksum, remove the quarantine flag: `xattr -d com.apple.quarantine pi-switchboard-darwin-arm64`. Apple Silicon also needs a valid code signature. Bun writes an ad-hoc one when it compiles for macOS, and the release workflow runs the arm64 binary on macOS before uploading it, but if the shell only prints `killed` when you start it, the signature is missing or broken: sign it ad hoc yourself with `codesign --sign - ./pi-switchboard-darwin-arm64` (add `--force` to replace a broken one) and run it again.
 - **Windows.** Check the download in PowerShell with `Get-FileHash .\pi-switchboard-windows-x64.exe` against the line in `SHA256SUMS-windows`, then run `.\pi-switchboard-windows-x64.exe --port 4141`. The binaries are unsigned, so SmartScreen warns on the first run (**More info**, then **Run anyway**). Use the arm64 build on Windows on Arm.

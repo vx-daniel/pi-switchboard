@@ -662,9 +662,9 @@ function sideBySideRows(
 }
 
 /**
- * Puts the boxes under the matrix. When they don't all fit, each keeps {@link PART_LEAST_ROWS} and
- * the boxes give up the rest to the matrix; on a screen too short for both, only the part with
- * the selection shows.
+ * Puts the boxes under the matrix. When they don't all fit, the matrix keeps
+ * {@link PART_LEAST_ROWS} and the boxes take the rest, at least {@link PART_LEAST_ROWS}; on a
+ * screen too short for both, only the part with the selection shows.
  *
  * @param view - what the view shows
  * @param size - the view's rows and columns

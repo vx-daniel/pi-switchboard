@@ -2,41 +2,18 @@
  * How a fallback chain keeps a provider's quota in reserve (`src/server/route-reserve.ts`, #69).
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
 import type { FailureClass } from '@proxy/config/schema'
-import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { clearAllCooldowns, startCooldown } from '@proxy/pi/cooldowns'
 import { clearAllQuotas, recordQuota } from '@proxy/pi/quota'
 import type { RouteHops } from '@proxy/server/route-hops'
 import { reserveSkip } from '@proxy/server/route-reserve'
 import { beforeEach, describe, expect, test } from 'vite-plus/test'
 
+import { exposed } from '../helpers'
+
 const NOW = 1_800_000_000_000
 /** A reset an hour after {@link NOW}, in Unix seconds, as the headers carry it. */
 const LATER = String(NOW / 1000 + 3600)
-
-/**
- * Builds an exposed model.
- *
- * @param provider - the provider
- * @param id - the model ID
- * @returns the exposed model
- */
-function exposed(provider: string, id: string): ExposedModel {
-  const model: Model<Api> = {
-    id,
-    name: id,
-    api: 'openai-completions',
-    provider,
-    baseUrl: 'https://example.com',
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096
-  }
-  return { publicId: id, canonicalId: `${provider}/${id}`, model, provider, login: provider }
-}
 
 /**
  * Records a provider's quota report with a 5-hour and a 7-day window.

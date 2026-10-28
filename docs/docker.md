@@ -86,7 +86,7 @@ Everything the [configuration reference](configuration.md#every-setting) lists w
   docker compose exec -T proxy sh -c 'cat > /home/node/.pi/agent/proxy-config.json' < proxy-config.json
   ```
 
-  Aliases, exposure and routing apply from the next request. Server settings (the docs page, the Responses API, remote images, stats, the body size limit) apply at the next start: `docker compose restart`.
+  Exposure, aliases and routing apply from the next request. Every other setting (the docs page, the Responses API, remote images, stats, the body size limit, the upstream timeout, the log level, the host/origin guard) applies at the next start: `docker compose restart`.
 - **Environment variables.** `compose.yaml` passes four through, and only when they are set, so the file's values apply otherwise: `PI_SWITCHBOARD_LOG_LEVEL`, `PI_SWITCHBOARD_LOG_FORMAT`, `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` and `TZ`. For any other, add it in a `compose.override.yaml` beside `compose.yaml`, which Compose reads as well:
 
   ```yaml
@@ -115,6 +115,7 @@ To reach it from other machines, publish it on another address, and put it behin
 - **Logs** go to the container's output, as JSON lines (the default with no terminal): `docker compose logs -f`. `PI_SWITCHBOARD_LOG_FORMAT=pretty` makes them readable directly; `TZ` sets the time zone of the pretty timestamps. What is logged: [Logging](configuration.md#logging).
 - **Health.** The image's healthcheck asks `GET /healthz` every 30 seconds, which needs no token, so the container is healthy as soon as the proxy listens, before any login. `GET /healthz/creds?verify=true` with the token checks the login itself ([Health checks](api.md#health-checks)).
 - **Usage.** The proxy keeps its stats file in the volume; `GET /v1/switchboard/usage` reads it, as the console's Stats view does on a host ([Usage over HTTP](api.md#usage-over-http)).
+- **Checking the setup.** `docker compose exec proxy node dist/index.mjs doctor` runs [`pi-switchboard doctor`](configuration.md#checking-the-setup-pi-switchboard-doctor) in the running container, with the proxy's environment: the config, the login and the prompt cache, with what to change.
 
 ## Hardening
 

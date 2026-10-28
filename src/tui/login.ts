@@ -60,7 +60,7 @@ export interface LoginScreens {
 /** Logger for logins in the console. */
 const loginLogger = proxyLogger('tui', 'login')
 
-/** How long the catalog refresh after a login may take. */
+/** How long the catalog refresh after a login, or listing the stored credentials, may take. */
 const CATALOG_REFRESH_MS = 15_000
 
 /**

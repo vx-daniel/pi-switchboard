@@ -3,8 +3,8 @@
  * block, so a stateless client can send it back and the model keeps its reasoning across turns.
  *
  * @remarks
- * pi replays a thinking block only to the model that produced it, and only with its signature
- * (pi-ai 1.3.0 `transformMessages`): for OpenAI's Responses APIs the signature is OpenAI's own
+ * pi replays a thinking block only to the model that produced it, with its signature (pi-ai
+ * 1.4.0 `transformMessages`): for OpenAI's Responses APIs the signature is OpenAI's own
  * reasoning item, encrypted content included; for Anthropic it is the thinking signature. The
  * token is that block with the model it came from, base64url JSON. It is opaque to the client but
  * not encrypted by the proxy: it holds the thinking text the client already received, and OpenAI's

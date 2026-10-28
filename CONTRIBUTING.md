@@ -7,7 +7,7 @@ The toolchain is [Vite+](https://viteplus.dev) (`vp`); all config lives in `vite
 ```bash
 vp install            # Install dependencies (pnpm); also installs the Git hooks
 vp run dev            # Rebuild on change and restart the proxy on port 4142 (PI_SWITCHBOARD_DEV_PORT to change)
-pnpm run check:all    # The gate: format, lint + type check, tests with coverage, fallow, build
+pnpm run check:all    # The gate: format, lint + type check, tests with coverage, fallow, build, smoke (the built CLI starts)
 vp check --fix        # Format and apply lint fixes
 vp test               # Offline tests (unit + integration): no real login, no network beyond 127.0.0.1
 pnpm run test:live    # Live conformance tests against real providers: uses your pi login and quota

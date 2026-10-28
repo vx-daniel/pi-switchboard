@@ -4,7 +4,7 @@
  * environment or the config file does.
  */
 
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -13,17 +13,10 @@ import { loadConfig } from '@proxy/config/env'
 import { configureLogging } from '@proxy/logging'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
+import { writeProxyConfig } from '../fixtures/agent-dir'
+
 let agentDir = ''
 let lines: string[] = []
-
-/**
- * Writes `proxy-config.json` into this test's agent dir.
- *
- * @param contents - the raw config file content
- */
-function writeConfigFile(contents: Record<string, unknown>): void {
-  writeFileSync(join(agentDir, 'proxy-config.json'), JSON.stringify(contents))
-}
 
 beforeEach(() => {
   agentDir = mkdtempSync(join(tmpdir(), 'pi-proxy-log-level-'))
@@ -45,18 +38,18 @@ describe('log level precedence', () => {
   })
 
   test('the config file sets it', () => {
-    writeConfigFile({ logLevel: 'debug' })
+    writeProxyConfig(agentDir, { logLevel: 'debug' })
     expect(loadConfig().logLevel).toBe('debug')
   })
 
   test('PI_SWITCHBOARD_LOG_LEVEL overrides the config file', () => {
-    writeConfigFile({ logLevel: 'debug' })
+    writeProxyConfig(agentDir, { logLevel: 'debug' })
     vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'error')
     expect(loadConfig().logLevel).toBe('error')
   })
 
   test('--log-level overrides the env var and the config file', () => {
-    writeConfigFile({ logLevel: 'debug' })
+    writeProxyConfig(agentDir, { logLevel: 'debug' })
     vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'error')
     expect(loadConfig({ logLevel: 'trace' }).logLevel).toBe('trace')
   })
@@ -65,7 +58,7 @@ describe('log level precedence', () => {
 describe('invalid values', () => {
   // Catches a typo in the environment silently changing the level, or stopping the proxy.
   test('an invalid PI_SWITCHBOARD_LOG_LEVEL falls back to the config file, with a warning', () => {
-    writeConfigFile({ logLevel: 'debug' })
+    writeProxyConfig(agentDir, { logLevel: 'debug' })
     vi.stubEnv('PI_SWITCHBOARD_LOG_LEVEL', 'loud')
 
     expect(loadConfig().logLevel).toBe('debug')
@@ -73,7 +66,7 @@ describe('invalid values', () => {
   })
 
   test('an invalid logLevel in the config file falls back to info', () => {
-    writeConfigFile({ logLevel: 'loud' })
+    writeProxyConfig(agentDir, { logLevel: 'loud' })
     expect(loadConfig().logLevel).toBe('info')
   })
 })

@@ -6,9 +6,6 @@
  * against the mock provider, which answers by model.
  */
 
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-
 import { resetSync } from '@logtape/logtape'
 import { configureLogging } from '@proxy/logging'
 import { clearAllCooldowns } from '@proxy/pi/cooldowns'
@@ -17,7 +14,7 @@ import { fileConfigReader } from '@proxy/server/routes'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { type FixtureAgentDir, loadFixtureAgentDir, setAliases } from '../fixtures/agent-dir'
 import {
   finishChunk,
   httpError,
@@ -26,7 +23,7 @@ import {
   startMockProvider,
   textChunks
 } from '../fixtures/mock-provider'
-import { jsonBody, testConfig } from '../helpers'
+import { jsonBody, testConfig, xPi } from '../helpers'
 
 const MOCK_KEY = 'notarealsecret-mock-provider-key'
 
@@ -91,15 +88,6 @@ afterAll(async () => {
 })
 
 /**
- * Writes the proxy's config file with these aliases.
- *
- * @param aliases - the `aliases` field, as a user would write it
- */
-function setAliases(aliases: Record<string, unknown>): void {
-  writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify({ aliases }))
-}
-
-/**
  * Sends one chat request and records what the upstream was asked.
  *
  * @param model - the request's `model`
@@ -131,27 +119,6 @@ async function ask(
   return { status: response.status, text, upstream }
 }
 
-/**
- * Parses a response's `x_pi`: the body's, or each stream chunk's.
- *
- * @param text - the response body
- * @param stream - whether it is a stream
- * @returns every `x_pi` found, in order
- */
-function xPi(text: string, stream: boolean): unknown[] {
-  if (!stream) {
-    const body: unknown = JSON.parse(text)
-    return [isRecord(body) ? body['x_pi'] : undefined]
-  }
-  return text
-    .split('\n')
-    .filter((line) => line.startsWith('data: {'))
-    .map((line) => {
-      const chunk: unknown = JSON.parse(line.slice('data: '.length))
-      return isRecord(chunk) ? chunk['x_pi'] : undefined
-    })
-}
-
 describe("an alias's effort replaces the request's", () => {
   // Catches the alias's effort ignored (the request's sent upstream) or applied without telling
   // the client, in a body or in any chunk of a stream.
@@ -159,7 +126,7 @@ describe("an alias's effort replaces the request's", () => {
     ['non-streamed', false],
     ['streamed', true]
   ])('%s: the target runs at its effort, and both are reported', async (_mode, stream) => {
-    setAliases({ reviewer: { model: 'alpha/deep-mock', reasoningEffort: 'high' } })
+    setAliases(agentDir.path, { reviewer: { model: 'alpha/deep-mock', reasoningEffort: 'high' } })
 
     const { status, text, upstream } = await ask('reviewer', { reasoningEffort: 'low', stream })
 
@@ -177,7 +144,7 @@ describe("an alias's effort replaces the request's", () => {
 
   // Catches the report left out, or `requested` invented, when the client sent no effort.
   test('a request without reasoning_effort reports requested as null', async () => {
-    setAliases({ reviewer: { model: 'alpha/deep-mock', reasoningEffort: 'high' } })
+    setAliases(agentDir.path, { reviewer: { model: 'alpha/deep-mock', reasoningEffort: 'high' } })
 
     const { text, upstream } = await ask('reviewer')
 
@@ -190,7 +157,9 @@ describe("an alias's effort replaces the request's", () => {
   // Catches the override going unlogged, or logged at info on every request: the first per alias
   // is at info, later ones at debug, and a request already at the alias's effort isn't logged.
   test('a replaced effort is logged at info once per alias, then at debug', async () => {
-    setAliases({ 'reviewer-log': { model: 'alpha/deep-mock', reasoningEffort: 'high' } })
+    setAliases(agentDir.path, {
+      'reviewer-log': { model: 'alpha/deep-mock', reasoningEffort: 'high' }
+    })
 
     await ask('reviewer-log', { reasoningEffort: 'low' })
     await ask('reviewer-log', { reasoningEffort: 'medium' })
@@ -224,7 +193,7 @@ describe('a chain runs each target at its own effort', () => {
   // Catches one effort for the whole chain (the first target's, or the request's) instead of each
   // hop's own, and an attempt that doesn't say what it ran at.
   test('the fallback runs at its effort, and the attempt shows the first one', async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       'builder-high': {
         targets: [
           { model: 'alpha/limited-mock', reasoningEffort: 'high' },
@@ -252,7 +221,7 @@ describe('a chain runs each target at its own effort', () => {
   // Catches a target without an effort picking up a neighbour's: it keeps the request's, clamped
   // as for a model named directly.
   test("a target without an effort keeps the request's", async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       mixed: {
         targets: [{ model: 'alpha/limited-mock', reasoningEffort: 'high' }, 'alpha/quick-mock'],
         fallbackOn: ['rate_limit']
@@ -275,7 +244,7 @@ describe('an effort the target does not support', () => {
   // Catches an unsupported effort clamped (the issue makes it a configuration error) or the alias
   // listed and served anyway, and the operator not told.
   test('leaves the target out, fails /healthz/models and warns', async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       broken: { model: 'alpha/quick-mock', reasoningEffort: 'xhigh' },
       partial: {
         targets: [
@@ -318,7 +287,7 @@ describe('GET /v1/switchboard/models', () => {
   // Catches an alias listed with its model's whole ladder, which tells a client it can choose an
   // effort the alias will replace.
   test('an alias with an effort lists that effort alone, marked fixed', async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       reviewer: { model: 'alpha/deep-mock', reasoningEffort: 'high' },
       plain: 'alpha/deep-mock'
     })

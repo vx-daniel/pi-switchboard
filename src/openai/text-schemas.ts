@@ -9,7 +9,9 @@
  * indentation and trailing newlines. Use {@link textSchema} for message content, text parts,
  * tool results, stop sequences, prediction content, and the `description` of a function tool or a
  * `json_schema` response format (#255): every provider hands those to the model, so they are text
- * it reads, not identifiers. Use it for nothing else.
+ * it reads, not identifiers. The one other use is a reasoning token's thinking text and
+ * signature (`responses-api/reasoning-token.ts`), which go back to the provider as they came.
+ * Use it for nothing else.
  *
  * @packageDocumentation
  */

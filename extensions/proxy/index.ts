@@ -133,8 +133,8 @@ async function openSettingsPanelIfInteractive(
  * Registers the /proxy command and the session lifecycle hooks with pi.
  *
  * @remarks
- * On `session_start` it loads the config, runs Zed auto-sync if enabled, and refreshes the status
- * line; on `session_shutdown` it stops a session-tied proxy.
+ * On `session_start` it refreshes the model registry, loads the config, runs Zed auto-sync if
+ * enabled, and refreshes the status line; on `session_shutdown` it stops a session-tied proxy.
  *
  * @param pi - the pi extension API (only `on` and `registerCommand` are used)
  */

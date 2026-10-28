@@ -101,7 +101,7 @@ export interface AccountLookups {
  * Builds the Accounts view's snapshot: the logins and the selection as given, with each login's
  * quota report and reserve check looked up once.
  *
- * @param base - the logins, the selected row, the labels, the clock and the cooldowns
+ * @param base - the logins, the selected row, the labels, the clock, the cooldowns and the routing
  * @param lookups - where each login's quota and reserve come from
  * @returns the snapshot
  */

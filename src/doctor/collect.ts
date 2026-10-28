@@ -3,9 +3,9 @@
  * pi's model runtime and logins, the health reports, and the stats file, read-only.
  *
  * @remarks
- * Nothing is written: the config is only loaded, the stats file is opened read-only, and pi's
- * runtime is initialized offline. A provider is called only with `verify`, as
- * `/healthz/creds?verify=true` does (it may refresh an OAuth token).
+ * The doctor writes nothing itself: the config is only loaded, the stats file is opened read-only,
+ * and pi's runtime is initialized offline. A provider is called only with `verify`, as
+ * `/healthz/creds?verify=true` does: it may refresh an OAuth token, which pi saves.
  *
  * The console's Doctor tab (#325) judges its live state with the same builders:
  * {@link judgeDoctorInputs} from the running server's settings, the request config and logins the
@@ -134,8 +134,8 @@ function readStats(enabled: boolean, window: StatsWindow, now: number): DoctorSt
 }
 
 /**
- * Reads pi's catalog entry for each available model, by canonical ID: a provider's first login
- * comes first, so its prices stand for the model.
+ * Reads pi's catalog entry for each available model, by canonical ID: a `{provider}-N` login's
+ * models under that login's ID, the first entry for an ID kept.
  *
  * @returns the catalog
  */
@@ -149,7 +149,8 @@ function catalog(): Map<string, CatalogModel> {
 }
 
 /**
- * Lists the aliases with a fallback chain, and the `fallbackOn` each names.
+ * Lists each alias with the `fallbackOn` it names (empty for a single target), and
+ * `routing.logins.fallbackOn`.
  *
  * @param config - the request config
  * @returns the fallback settings

@@ -648,7 +648,7 @@ function prepareSchema(db: DatabaseSync, readOnly: boolean): void {
  * Opens the stats file, creating it and its tables the first time, and migrating an older one in
  * place.
  *
- * @param path - the file, or `:memory:` for a store that lives as long as the process
+ * @param path - the file, or `:memory:` for a store that lives until it closes
  * @param options - whether to open it read-only
  * @returns the store
  * @throws Error when the file can't be opened or created (a read-only directory, say), was

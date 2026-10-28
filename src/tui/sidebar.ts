@@ -114,7 +114,7 @@ export function sidebarWidth(terminalWidth: number): number | undefined {
  * Renders one quota window: its name, a bar, the share used and the time to its reset.
  *
  * @param window - the window
- * @param account - the provider, for its reserve
+ * @param account - the login, for whether it is below its reserve
  * @param input - the snapshot, for the clock
  * @param width - the content's columns
  * @returns the line
@@ -480,7 +480,7 @@ function stack(specs: readonly PanelSpec[], width: number, gaps: boolean): strin
 
 /**
  * Fits the panels to the height: with blank rows between them if they fit so, else without; then
- * without SESSION; then with RECENT's list cut down to its summary; then cut at the bottom.
+ * without SESSION; then with RECENT's list cut, as far as its summary; then cut at the bottom.
  *
  * @param specs - the panels, in order
  * @param size - the space available
@@ -509,7 +509,7 @@ function fitPanels(
 /**
  * Renders the sidebar: QUOTA, IN FLIGHT, RECENT and SESSION panels. Under stress
  * ({@link underStress}) IN FLIGHT and RECENT come before QUOTA, whose quiet logins collapse to one
- * row, and RECENT's title carries the last minute's failures.
+ * row. RECENT's title always carries the last minute's failures, or with none its rejections.
  *
  * @param input - the snapshot
  * @param size - the space available

@@ -15,31 +15,11 @@ import type { ModelExposureConfig } from '@proxy/openai/model-exposure'
 import { computeModelExposure, resolveExposedModel } from '@proxy/openai/model-exposure'
 import { describe, expect, test } from 'vite-plus/test'
 
+import { makeModel } from '../helpers'
+
 // ---------------------------------------------------------------------------
 // Test helpers
 // ---------------------------------------------------------------------------
-
-/**
- * Builds a text-only, zero-cost model on the `openai-completions` API.
- *
- * @param provider - the provider name; also forms the base URL host
- * @param id - the model ID, used as its name too
- * @returns the model
- */
-function makeModel(provider: string, id: string): Model<Api> {
-  return {
-    id,
-    name: id,
-    api: 'openai-completions',
-    provider,
-    baseUrl: `https://${provider}.example.com`,
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096
-  }
-}
 
 /**
  * Builds an exposure config: collision-prefixed IDs, scoped exposure, no patterns, no custom

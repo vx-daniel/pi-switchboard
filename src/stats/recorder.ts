@@ -57,11 +57,11 @@ export interface RecorderOptions {
   readonly flushMs?: number
   /** How many days of rows to keep. */
   readonly retentionDays?: number
-  /** The clock, for the minute an event falls in. */
+  /** The clock, for the minute a route event falls in and the prune cutoff. */
   readonly now?: () => number
 }
 
-/** A recorder's mutable counts, keyed by minute and route as JSON. */
+/** A recorder's mutable counts, each keyed by its row's primary key as JSON. */
 interface Pending {
   readonly requests: Map<string, { -readonly [Field in keyof RequestMinute]: RequestMinute[Field] }>
   readonly attempts: Map<string, { -readonly [Field in keyof AttemptMinute]: AttemptMinute[Field] }>

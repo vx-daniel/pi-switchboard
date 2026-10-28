@@ -5,7 +5,7 @@ name: Claude PR Review
 # its comment-list job (that repository's `scripts/docs/touched-comments.ts` has no counterpart here).
 #
 # BY HAND: Actions → Claude PR Review → Run workflow, with the pull request's number. It reviews the whole
-# pull request. This is not a required status check (ci.yml and secret-scan.yml are).
+# pull request. This is not a required status check (only ci.yml's `gate` is, #200).
 #
 # ⚠ NO `track_progress`. claude-code-action (v1.0.217, `src/modes/detector.ts`) throws when `track_progress`
 # is set on an event other than pull_request or issues, and a manual run is `workflow_dispatch`.
@@ -201,7 +201,7 @@ jobs:
             PR body claims: {one-line summary of the PR's verification claims, or "none stated"}.
 
             ### Constitution
-            {each principle (I–V) the diff affects: complies / conflicts, with the line. OR "No principle affected"}
+            {each principle (I–VI) the diff affects: complies / conflicts, with the line. OR "No principle affected"}
 
             ### Risk Assessment
             Correctness: {one line}

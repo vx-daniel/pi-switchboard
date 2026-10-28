@@ -8,8 +8,8 @@
  * and config fields, never a credential or message content (constitution principle III).
  *
  * The general section repeats what `/healthz/models` and `/healthz/creds` judge, plus config
- * checks; the cache section reads the stats file's tokens and counts against the thresholds below,
- * which `docs/caching.md` explains.
+ * checks; the cache section reads the stats file's tokens and counts against the thresholds below.
+ * `docs/caching.md` explains the checks; it does not give the fallback and keyless shares.
  *
  * @packageDocumentation
  */
@@ -171,7 +171,7 @@ export interface ServerSettings {
 
 /** The failures that move a request on, as the config names them. */
 export interface FallbackSettings {
-  /** Each alias with a fallback chain, and its `fallbackOn`. */
+  /** Each alias with its chain's `fallbackOn`, empty for a single target. */
   readonly aliases: readonly {
     readonly alias: string
     readonly fallbackOn: readonly FailureClass[]

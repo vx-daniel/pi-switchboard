@@ -52,7 +52,7 @@ const SCHEMA_REF_PREFIX = '#/components/schemas/'
  * @param node - a schema node
  * @returns the node, or the schema it references
  */
-export function resolve(node: unknown): Record<string, unknown> {
+function resolve(node: unknown): Record<string, unknown> {
   if (!isRecord(node)) return {}
   const ref = node['$ref']
   if (typeof ref !== 'string' || !ref.startsWith(SCHEMA_REF_PREFIX)) return node

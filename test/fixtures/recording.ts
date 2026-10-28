@@ -24,7 +24,7 @@ import * as z from 'zod'
 import { decodeBody, listenOnLoopback, onRequestBody } from './local-server.ts'
 
 /** Where recordings live: `<api>/<scenario>.json`. */
-export const RECORDINGS_DIR = join(import.meta.dirname, 'recordings')
+const RECORDINGS_DIR = join(import.meta.dirname, 'recordings')
 
 /** The recording format version; {@link loadRecording} rejects any other. */
 const RECORDING_VERSION = 1
@@ -97,7 +97,7 @@ export type CapturedExchange = Pick<Recording, 'request' | 'response'>
  * @param directory - the recordings root; {@link RECORDINGS_DIR} by default
  * @returns `<directory>/<api>/<scenario>.json`
  */
-export function recordingPath(api: string, scenario: string, directory = RECORDINGS_DIR): string {
+function recordingPath(api: string, scenario: string, directory = RECORDINGS_DIR): string {
   return join(directory, api, `${scenario}.json`)
 }
 
@@ -191,7 +191,7 @@ export function saveRecording(
  *   `chatgpt-account-id` are read
  * @returns each such header's value, and the value again without a `Bearer ` prefix
  */
-export function credentialsIn(headers: IncomingHttpHeaders): string[] {
+function credentialsIn(headers: IncomingHttpHeaders): string[] {
   const values: string[] = []
   for (const headerName of ['authorization', 'x-api-key', 'cookie', 'chatgpt-account-id']) {
     const headerValue = headers[headerName]

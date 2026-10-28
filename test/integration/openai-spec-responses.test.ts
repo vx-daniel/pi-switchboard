@@ -14,7 +14,6 @@ import {
   RESPONSES_REJECTED_FIELDS
 } from '@proxy/openai/responses-api/request-schema'
 import { isRecord } from '@proxy/utils/guards'
-import { Ajv2020 } from 'ajv/dist/2020'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
@@ -35,31 +34,10 @@ import {
   requiredOf,
   subset
 } from '../fixtures/openai-spec/schema'
+import { violations } from '../fixtures/openai-spec/violations'
 import { jsonBody, testApp, testConfig } from '../helpers'
 
-/** The `$id` the pinned subset is registered under. */
-const SPEC_ID = 'openai'
 const USAGE = { prompt_tokens: 3, completion_tokens: 2 }
-
-// As in the chat spec check: OpenAPI keywords are not JSON Schema, and formats are not checked.
-const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false, logger: false })
-ajv.addSchema({ $id: SPEC_ID, components: subset.components })
-
-/**
- * Validates a value against one of OpenAI's schemas.
- *
- * @param schemaName - the schema's name under `components.schemas`
- * @param value - the value to validate
- * @returns one line per violation; empty when the value is valid
- */
-function violations(schemaName: string, value: unknown): string[] {
-  const validate = ajv.getSchema(`${SPEC_ID}#/components/schemas/${schemaName}`)
-  if (validate === undefined) throw new Error(`No schema '${schemaName}' in the pinned subset`)
-  if (validate(value) === true) return []
-  return (validate.errors ?? []).map(
-    (error) => `${error.instancePath || '/'} ${error.message ?? error.keyword}`
-  )
-}
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
