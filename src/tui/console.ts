@@ -24,6 +24,7 @@ import {
 import type { ServerConfig } from '@proxy/config/env'
 import { isLoopbackHost } from '@proxy/config/schema'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
+import { DEFAULT_LOGIN_ROUTING } from '@proxy/openai/model-logins'
 import { activeCooldowns, clearCooldownsFor } from '@proxy/pi/cooldowns'
 import { providerQuota } from '@proxy/pi/quota'
 import {
@@ -259,10 +260,10 @@ const NO_STATUS_SETTINGS: Pick<Status, 'reserve' | 'labels'> = { reserve: {}, la
 
 /**
  * Gathers what the Accounts view shows, now: the logins, the selected row, the labels, each
- * login's quota report and reserve check, and the cooldowns.
+ * login's quota report and reserve check, the cooldowns, and the logins' routing order (#233).
  *
  * @param state - the console's state: the accounts, the selected row, and the status with the
- *   reserve per login and the labels
+ *   reserve per login, the labels and the config file
  * @param now - the current time
  * @returns the snapshot
  */
@@ -274,7 +275,8 @@ function accountsView(state: ConsoleState, now: number): AccountsView {
       selected: state.selected,
       labels,
       now,
-      cooldowns: activeCooldowns(now)
+      cooldowns: activeCooldowns(now),
+      routing: state.status?.file.routing.logins ?? DEFAULT_LOGIN_ROUTING
     },
     {
       quota: (login) => providerQuota(login, now),

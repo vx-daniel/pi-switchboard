@@ -106,7 +106,8 @@ export async function buildExposureConfig(state: ProxyState): Promise<ModelExpos
     enabledModels: await getSessionEnabledModels(state),
     customModels: state.config.customModels,
     providerPrefixes: state.config.providerPrefixes,
-    aliases: state.config.aliases
+    aliases: state.config.aliases,
+    loginRouting: state.config.routing.logins
   }
 }
 

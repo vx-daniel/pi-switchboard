@@ -493,7 +493,7 @@ const EDITS: Readonly<Record<Exclude<SettingKey, 'authToken'>, SettingEdit>> = {
     )
     return fallbackOn === undefined
       ? undefined
-      : { ...file, routing: { ...file.routing, logins: { fallbackOn } } }
+      : { ...file, routing: { ...file.routing, logins: { ...file.routing.logins, fallbackOn } } }
   }
 }
 

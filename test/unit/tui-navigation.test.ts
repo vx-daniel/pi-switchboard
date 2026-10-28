@@ -51,17 +51,44 @@ describe('console navigation', () => {
       type,
       availableModelCount: 1
     })
+    const only = { position: 1, count: 1, first: true, disabled: false, lastEnabled: true }
 
-    expect(accountActions(account('oauth')).map((choice) => choice.label)).toEqual([
+    expect(accountActions(account('oauth'), only).map((choice) => choice.label)).toEqual([
       'Verify all logins',
       'Log in again',
       'Set a label',
+      'Disable',
       'Log out of anthropic'
     ])
-    expect(accountActions(account('api_key'))[1]).toEqual({
+    expect(accountActions(account('api_key'), only)[1]).toEqual({
       action: 'login',
       label: 'Enter a new API key'
     })
+  })
+
+  // Catches the routing actions (#233) offered where they do nothing or hidden where they work:
+  // **Use first** only for an enabled login another login comes before, **Enable** for a disabled
+  // one, and a plain **Disable** while another login of the provider stays enabled.
+  test('an account menu offers to call a login first, and to disable or enable it', () => {
+    const second: ProviderCredentialStatus = {
+      provider: 'anthropic-2',
+      type: 'oauth',
+      availableModelCount: 1
+    }
+    const routingActions = (place: Parameters<typeof accountActions>[1]): string[] =>
+      accountActions(second, place)
+        .filter((choice) => ['first', 'disable', 'enable'].includes(choice.action))
+        .map((choice) => choice.label)
+
+    expect(
+      routingActions({ position: 2, count: 2, first: false, disabled: false, lastEnabled: false })
+    ).toEqual(['Use first', 'Disable'])
+    expect(
+      routingActions({ position: 1, count: 2, first: true, disabled: false, lastEnabled: false })
+    ).toEqual(['Disable'])
+    expect(
+      routingActions({ position: 2, count: 2, first: false, disabled: true, lastEnabled: false })
+    ).toEqual(['Enable'])
   })
 
   // Catches the footer offering the sidebar key on a terminal too narrow for the sidebar, where it
