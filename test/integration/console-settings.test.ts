@@ -234,6 +234,23 @@ describe('runSetting', () => {
     })
   })
 
+  // Catches saving the login fallback classes dropping the login order and the disabled logins
+  // set from the Accounts view (#233): they share `routing.logins`.
+  test('keeps the login order and disabled logins when saving the fallback classes', async () => {
+    writeConfig({
+      routing: { logins: { order: { alpha: ['alpha-2'] }, disabled: ['alpha-2'] } }
+    })
+    await runSetting(scripted(['[ ] timeout', 'Done']).editor, 'loginFallbackOn')
+
+    expect(savedConfig()['routing']).toMatchObject({
+      logins: {
+        fallbackOn: ['rate_limit', 'timeout'],
+        order: { alpha: ['alpha-2'] },
+        disabled: ['alpha-2']
+      }
+    })
+  })
+
   // Catches saving another setting writing the loader's repaired '' over a token that is not a
   // string, which would turn auth off for good (#82).
   test('keeps an authToken that is not a string when saving another setting', async () => {

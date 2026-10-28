@@ -88,6 +88,7 @@ function generalInputs(fields: Partial<GeneralInputs> = {}): GeneralInputs {
       exposureError: null,
       scopeDiagnostics: [],
       aliasDiagnostics: [],
+      loginDiagnostics: [],
       modelsJsonError: null
     },
     credentials: {
@@ -142,6 +143,43 @@ describe('the doctor general section', () => {
     expect(findings).toEqual([
       expect.objectContaining({ check: 'alias', severity: 'error', subject: 'alpha/one' }),
       expect.objectContaining({ check: 'alias', severity: 'warning', subject: 'fast' })
+    ])
+  })
+
+  // Catches the login settings (#233) left out of the doctor, or judged unlike /healthz/models:
+  // an unknown name and an all-disabled provider are warnings there, never a failure, and the
+  // latter is why a provider's models are missing.
+  test('warns about an unknown login name and a provider with every login disabled', () => {
+    const findings = general({
+      models: {
+        ...generalInputs().models,
+        loginDiagnostics: [
+          {
+            code: 'unknown-login',
+            setting: 'routing.logins.order',
+            provider: 'alpha',
+            login: 'alpha-9',
+            message: 'no such login'
+          },
+          {
+            code: 'all-logins-disabled',
+            setting: 'routing.logins.disabled',
+            provider: 'beta',
+            login: null,
+            message: 'every login disabled'
+          }
+        ]
+      }
+    })
+
+    expect(findings).toEqual([
+      expect.objectContaining({ check: 'login-routing', severity: 'warning', subject: 'alpha-9' }),
+      expect.objectContaining({
+        check: 'login-routing',
+        severity: 'warning',
+        subject: 'beta',
+        recommendation: expect.stringContaining('Enable one of its logins')
+      })
     ])
   })
 

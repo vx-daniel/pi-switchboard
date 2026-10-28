@@ -318,12 +318,25 @@ export function aliasFallbackOn(target: AliasTarget): readonly FailureClass[] {
  */
 const ReserveShareSchema = z.number().min(0).max(1)
 
+/** A login's provider ID (`anthropic`, `anthropic-2`), as `routing.logins` names it. */
+const LoginNameSchema = z.string().trim().min(1)
+/** Logins in the order routing tries them, first first (`routing.logins.order`'s values). */
+const LoginListSchema = z.array(LoginNameSchema).readonly()
+
 /**
  * How a request moves between a provider's logins (#227): the failure classes that move it from
- * one login of the same model to the next. A rate limit by default: the reason to log in twice.
+ * one login of the same model to the next (a rate limit by default: the reason to log in twice),
+ * the logins a provider tries first (#233), and the logins routing never calls (#233).
  */
 const LoginsConfigSchema = z.object({
-  fallbackOn: z.array(FailureClassSchema).readonly()
+  fallbackOn: z.array(FailureClassSchema).readonly(),
+  /**
+   * Base provider -> its logins to try first, in order (`{ "anthropic": ["anthropic-2"] }`).
+   * Logins left out follow in the usual order: the base, then `-2`, `-3` by number.
+   */
+  order: z.record(z.string().trim().min(1), LoginListSchema).readonly(),
+  /** Logins routing never calls; each keeps its credential in pi's store. */
+  disabled: LoginListSchema
 })
 /** The `routing.logins` section: see {@link LoginsConfigSchema}. */
 export type LoginsConfig = z.infer<typeof LoginsConfigSchema>
@@ -446,7 +459,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   aliases: {},
   labels: {},
   logLevel: 'info',
-  routing: { reserve: {}, logins: { fallbackOn: ['rate_limit'] } },
+  routing: { reserve: {}, logins: { fallbackOn: ['rate_limit'], order: {}, disabled: [] } },
   zed: {
     providerName: 'Pi Proxy',
     autoSync: false
@@ -505,20 +518,28 @@ export const UpstreamTimeoutMsSchema = scaledInt(
 )
 
 /**
- * Keeps the list entries {@link VerbatimNameSchema} accepts.
+ * Returns a repairer that keeps the list entries `schema` accepts.
  *
- * @param value - The field's raw value.
- * @returns The valid entries; empty when `value` is not an array.
+ * @typeParam T - The entry type.
+ * @param schema - The schema each entry must pass.
+ * @returns The repairer: the valid entries, empty when the value is not an array.
  */
-function validNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  const result: string[] = []
-  for (const candidate of value) {
-    const parsed = VerbatimNameSchema.safeParse(candidate)
-    if (parsed.success) result.push(parsed.data)
+function validList<T>(schema: z.ZodType<T>): (value: unknown) => T[] {
+  return (value) => {
+    if (!Array.isArray(value)) return []
+    const result: T[] = []
+    for (const candidate of value) {
+      const parsed = schema.safeParse(candidate)
+      if (parsed.success) result.push(parsed.data)
+    }
+    return result
   }
-  return result
 }
+
+/** Keeps the list entries {@link VerbatimNameSchema} accepts. */
+const validNames = validList(VerbatimNameSchema)
+/** Keeps the login names `routing.logins` accepts: non-empty, trimmed. */
+const validLogins = validList(LoginNameSchema)
 
 /**
  * Keeps the map entries whose value {@link VerbatimNameSchema} accepts.
@@ -561,6 +582,8 @@ const validAliases = validEntries(AliasTargetSchema)
 const validReserves = validEntries(ReserveShareSchema)
 /** Keeps the `labels` entries the schema accepts: a provider and a short, non-empty label. */
 const validLabels = validEntries(LabelSchema)
+/** Keeps the `routing.logins.order` entries with a provider and a list: each list's valid logins. */
+const validLoginOrder = validEntries(z.array(z.unknown()).transform(validLogins))
 
 /** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
 type FieldReader<Key extends string> = <T>(
@@ -645,12 +668,15 @@ function normalizeZedSyncConfig(raw: unknown, corrected: string[]): ZedSyncConfi
  */
 function normalizeLoginsConfig(raw: unknown, corrected: string[]): LoginsConfig {
   const field = fieldReader<keyof LoginsConfig>(raw, corrected, 'routing.logins')
+  const fields = LoginsConfigSchema.shape
   return {
     fallbackOn: field(
       'fallbackOn',
-      LoginsConfigSchema.shape.fallbackOn,
+      fields.fallbackOn,
       () => DEFAULT_CONFIG.routing.logins.fallbackOn
-    )
+    ),
+    order: field('order', fields.order, validLoginOrder),
+    disabled: field('disabled', fields.disabled, validLogins)
   }
 }
 

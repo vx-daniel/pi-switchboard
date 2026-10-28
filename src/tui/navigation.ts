@@ -14,6 +14,7 @@ import {
 } from '@earendil-works/pi-tui'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import { STATS_KEPT_DAYS, STATS_WINDOWS, type StatsWindow } from '@proxy/stats/windows'
+import type { LoginPlace } from '@proxy/tui/login-routing'
 import { keycap, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */
@@ -23,7 +24,7 @@ export const VIEWS = ['logs', 'accounts', 'stats', 'models', 'settings'] as cons
 export type View = (typeof VIEWS)[number]
 
 /** What can be done to one account from its action menu. */
-export type AccountAction = 'verify' | 'login' | 'logout' | 'label'
+export type AccountAction = 'verify' | 'login' | 'logout' | 'label' | 'first' | 'disable' | 'enable'
 
 /** An action on an account, with the label its menu shows. */
 export interface AccountActionChoice {
@@ -70,17 +71,32 @@ export function moveSelection(selected: number, accounts: number, step: number):
 }
 
 /**
- * Lists what can be done to an account, for its action menu.
+ * Lists what can be done to an account, for its action menu: **Use first** while another login
+ * of its provider is called first, and **Disable** or **Enable** (#233).
  *
  * @param account - the account
+ * @param place - where it stands in its provider's routing order
  * @returns the actions, in menu order
  */
-export function accountActions(account: ProviderCredentialStatus): readonly AccountActionChoice[] {
+export function accountActions(
+  account: ProviderCredentialStatus,
+  place: LoginPlace | undefined
+): readonly AccountActionChoice[] {
   const login = account.type === 'oauth' ? 'Log in again' : 'Enter a new API key'
+  const routing: AccountActionChoice[] = []
+  if (place !== undefined && place.count > 1 && !place.first && !place.disabled) {
+    routing.push({ action: 'first', label: 'Use first' })
+  }
+  routing.push(
+    place?.disabled === true
+      ? { action: 'enable', label: 'Enable' }
+      : { action: 'disable', label: 'Disable' }
+  )
   return [
     { action: 'verify', label: 'Verify all logins' },
     { action: 'login', label: login },
     { action: 'label', label: 'Set a label' },
+    ...routing,
     { action: 'logout', label: `Log out of ${account.provider}` }
   ]
 }

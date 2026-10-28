@@ -216,6 +216,54 @@
             },
             "description": "Aliases and alias targets left out (#66): named like an exposed model (`shadows-model`), set to a reasoning effort the model doesn't support (`effort-unsupported`, #230), following a family no rule knows (`family-unknown`, #231) or pinned outside it (`pin-outside-family`), all of which make the check fail; naming no exposed model (`target-not-exposed`); or a family member whose version the rule can't read (`family-unparsed`, never picked)."
           },
+          "loginDiagnostics": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "code": {
+                  "type": "string",
+                  "enum": [
+                    "unknown-login",
+                    "all-logins-disabled"
+                  ]
+                },
+                "setting": {
+                  "type": "string",
+                  "enum": [
+                    "routing.logins.order",
+                    "routing.logins.disabled"
+                  ]
+                },
+                "provider": {
+                  "description": "The base provider: the `routing.logins.order` key, or the provider whose every login is disabled; null for an unknown name in `routing.logins.disabled`.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "login": {
+                  "description": "The name as written; null for `all-logins-disabled`.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "message": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "code",
+                "setting",
+                "provider",
+                "login",
+                "message"
+              ],
+              "additionalProperties": false
+            },
+            "description": "`routing.logins` names that are no login of their provider (`unknown-login`, ignored), and providers whose every login is disabled (`all-logins-disabled`): their models are not listed or served (#233). Neither fails the check."
+          },
           "familyAliases": {
             "type": "array",
             "items": {
@@ -355,6 +403,7 @@
           "exposureError",
           "scopeDiagnostics",
           "aliasDiagnostics",
+          "loginDiagnostics",
           "familyAliases",
           "cooldowns",
           "modelsJsonError"
@@ -856,6 +905,10 @@
                   "type": "string",
                   "description": "The login: the provider, or one of its extra logins (`anthropic-2`, #227)."
                 },
+                "disabled": {
+                  "type": "boolean",
+                  "description": "Whether `routing.logins.disabled` names the login (#233): it keeps its credential, but routing never calls it."
+                },
                 "cooldown": {
                   "anyOf": [
                     {
@@ -996,12 +1049,13 @@
               },
               "required": [
                 "id",
+                "disabled",
                 "cooldown",
                 "quota"
               ],
               "additionalProperties": false
             },
-            "description": "The logins that may serve the model, in the order routing tries them (#227). The model's own `cooldown` and `quota` are the first login's."
+            "description": "The logins that may serve the model, in the order routing tries them (#227), as `routing.logins.order` sets it (#233); then the disabled ones, which it never tries. The model's own `cooldown` and `quota` are the first login's."
           }
         },
         "required": [
@@ -2965,7 +3019,7 @@
             }
           },
           "429": {
-            "description": "The provider rate-limited the request.",
+            "description": "The provider rate-limited the request (`rate_limit`, with `retry-after` and `retry-after-ms` when the provider said when), or the login's usage limit is reached (`insufficient_quota`, with `x-should-retry: false`).",
             "content": {
               "application/json": {
                 "schema": {
@@ -3617,6 +3671,17 @@
                       {
                         "type": "boolean",
                         "const": false
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
+                  "n": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "const": 1
                       },
                       {
                         "type": "null"

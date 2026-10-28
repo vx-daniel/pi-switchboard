@@ -50,7 +50,8 @@ export default defineConfig({
       // Names every naming/* rule accepts. `z`: zod's documented `import * as z` convention.
       // `auth`: pi-ai's `Provider.auth`, a required key of every provider a test builds.
       // `ctx`: pi-ai's `ApiKeyAuth.resolve({ ctx, … })`, the input a test calls a resolver with.
-      naming: { allow: ['z', 'auth', 'ctx'] }
+      // `n`: OpenAI's chat-completions field (choices per request), accepted at `1` (#197).
+      naming: { allow: ['z', 'auth', 'ctx', 'n'] }
     },
     rules: {
       // Viaanix base + type-aware

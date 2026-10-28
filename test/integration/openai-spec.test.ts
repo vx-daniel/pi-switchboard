@@ -58,7 +58,7 @@ const SHORT_UPSTREAM_TIMEOUT_MS = 50
 /** Smaller than any chat request body. */
 const TINY_BODY_LIMIT = 10
 const PROXY_TOKEN = 'notarealsecret-openai-spec-token'
-/** A field the proxy rejects by name; a computed key, since its name is one letter (`n`). */
+/** A field the proxy rejects by name, whatever its value. */
 const REJECTED_FIELD = rejectedFields[0]
 /** The `$id` the pinned subset is registered under. */
 const SPEC_ID = 'openai'

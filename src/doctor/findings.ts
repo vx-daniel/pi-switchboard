@@ -108,6 +108,7 @@ export type ModelsInput = Pick<
   | 'exposureError'
   | 'scopeDiagnostics'
   | 'aliasDiagnostics'
+  | 'loginDiagnostics'
   | 'modelsJsonError'
 >
 
@@ -304,6 +305,26 @@ function aliasFindings(models: ModelsInput): Finding[] {
 }
 
 /**
+ * Reports `routing.logins` settings that do nothing as written (#233): a name that is no login,
+ * or a provider whose every login is disabled, so its models are not served. Warnings, as on
+ * `/healthz/models`, where neither fails the check: disabling a login is a choice.
+ *
+ * @param models - the models report
+ * @returns the findings
+ */
+function loginFindings(models: ModelsInput): Finding[] {
+  return models.loginDiagnostics.map((diagnostic) =>
+    finding('login-routing', 'warning', diagnostic.login ?? diagnostic.provider ?? undefined, {
+      message: `${diagnostic.code}: ${diagnostic.message}`,
+      recommendation:
+        diagnostic.code === 'all-logins-disabled'
+          ? `Enable one of its logins (console, Accounts view) to serve its models again.`
+          : `Remove the name from ${diagnostic.setting}, or log in to it again.`
+    })
+  )
+}
+
+/**
  * Judges the logins as `/healthz/creds` does: none, or one that fails to verify, fails. Without
  * `--verify` nothing is resolved, so a present login is only reported.
  *
@@ -470,6 +491,7 @@ export function generalFindings(
     ...serverFindings(inputs.server, isLoopback),
     ...exposureFindings(inputs.models),
     ...aliasFindings(inputs.models),
+    ...loginFindings(inputs.models),
     ...credentialFindings(inputs.credentials),
     ...fallbackFindings(inputs.fallback, inputs.fallbacksByAlias)
   ])

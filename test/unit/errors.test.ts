@@ -2,10 +2,12 @@ import type { AssistantMessage } from '@earendil-works/pi-ai'
 import {
   forClientKey,
   invalidRequest,
+  limitAnswer,
   mapFailedCall,
   mapUpstreamError,
   modelNotFound,
-  unsupportedParameter
+  unsupportedParameter,
+  USAGE_LIMIT_MIN_WAIT_MS
 } from '@proxy/server/errors'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -372,25 +374,43 @@ describe('mapUpstreamError', () => {
     status: 503,
     body: upstreamBody('Upstream provider is overloaded', 'provider_overloaded')
   }
+  const USAGE_LIMITED = {
+    status: 429,
+    body: {
+      error: {
+        message:
+          "The provider's usage limit for this login is reached; retrying before it resets won't help",
+        type: 'insufficient_quota',
+        param: null,
+        code: 'insufficient_quota'
+      }
+    }
+  }
 
   // Catches a usage limit or a provider out of capacity answered as an outage (502), which no
-  // fallback chain or cooldown acts on (#190). pi reports Codex's 429 for a ChatGPT login over its
-  // limit with no status, so the words decide; a status in the message still decides over them.
+  // fallback chain or cooldown acts on (#190), or a usage limit answered as a rate limit, which
+  // clients retry in seconds (#199). pi reports Codex's 429 for a ChatGPT login over its limit
+  // with no status, so the words decide; a status in the message still decides over them.
   test.each([
     [
       'a Codex usage limit, with plan and wait',
       'You have hit your ChatGPT usage limit (plus plan). Try again in ~42 min.',
-      RATE_LIMITED
+      USAGE_LIMITED
     ],
-    ['a Codex usage limit, no plan', 'You have hit your ChatGPT usage limit.', RATE_LIMITED],
-    ['a Codex stream error event', 'Codex error: usage_limit_reached', RATE_LIMITED],
+    ['a Codex usage limit, no plan', 'You have hit your ChatGPT usage limit.', USAGE_LIMITED],
+    ['a Codex stream error event', 'Codex error: usage_limit_reached', USAGE_LIMITED],
     [
       'a ChatGPT Business workspace limit',
       'subscription_sharing_workplace_individual_usage_limit_exceeded',
-      RATE_LIMITED
+      USAGE_LIMITED
+    ],
+    [
+      'a 429 that names a usage limit',
+      '429 {"error":{"type":"usage_limit_reached","message":"The usage limit has been reached"}}',
+      USAGE_LIMITED
     ],
     ['"usage limitations" is not a limit', 'Read the usage limitations first', PROVIDER_FAILED],
-    ['usage limits, plural', 'You have reached your usage limits for today', RATE_LIMITED],
+    ['usage limits, plural', 'You have reached your usage limits for today', USAGE_LIMITED],
     ['a model at capacity', 'The model is at capacity, please try again later', OVERLOADED],
     ['busy servers', 'Servers are currently busy', OVERLOADED],
     ['a server_busy code', '{"error":{"type":"server_busy"}}', OVERLOADED],
@@ -547,5 +567,50 @@ describe('mapFailedCall', () => {
 
     expect(mapped).toEqual(CONTEXT_OVERFLOW)
     expect(JSON.stringify(mapped)).not.toContain(QUOTED)
+  })
+})
+
+describe('limitAnswer (#199)', () => {
+  const rateLimited = mapUpstreamError(new Error('429 Too Many Requests'))
+  const usageLimited = mapUpstreamError(new Error('You have hit your ChatGPT usage limit.'))
+
+  // Catches a short limit sent without the wait the provider gave (the client retries in its own
+  // backoff, too soon), or with the seconds rounded down to a wait that ends early.
+  test('a rate limit with a known wait says when to retry, rounded up', () => {
+    expect(limitAnswer(rateLimited, 29_500)).toEqual({
+      answer: rateLimited,
+      headers: { 'retry-after': '30', 'retry-after-ms': '29500' }
+    })
+  })
+
+  // Catches a header made up when the provider said nothing.
+  test('a rate limit with no known wait has no retry headers', () => {
+    expect(limitAnswer(rateLimited, undefined)).toEqual({ answer: rateLimited, headers: {} })
+  })
+
+  // Catches the boundary drifting: a wait just under it is a rate limit, at it a usage limit,
+  // which tells the SDKs not to retry and sends no wait of hours for a client to sit out.
+  test('a wait of at least the threshold is a usage limit, with x-should-retry: false', () => {
+    expect(limitAnswer(rateLimited, USAGE_LIMIT_MIN_WAIT_MS - 1).answer).toBe(rateLimited)
+    expect(limitAnswer(rateLimited, USAGE_LIMIT_MIN_WAIT_MS)).toEqual({
+      answer: usageLimited,
+      headers: { 'x-should-retry': 'false' }
+    })
+  })
+
+  // Catches a usage limit recognized by its words answered with a retry wait, or as a rate limit,
+  // when it says no time.
+  test('a usage limit by its words is one whatever the wait', () => {
+    expect(limitAnswer(usageLimited, 10_000)).toEqual({
+      answer: usageLimited,
+      headers: { 'x-should-retry': 'false' }
+    })
+    expect(limitAnswer(usageLimited, undefined).headers).toEqual({ 'x-should-retry': 'false' })
+  })
+
+  // Catches retry headers on a failure that is not a limit.
+  test('any other failure is unchanged, with no headers', () => {
+    const outage = mapUpstreamError(new Error('503: down'))
+    expect(limitAnswer(outage, 60_000)).toEqual({ answer: outage, headers: {} })
   })
 })

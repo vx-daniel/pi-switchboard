@@ -193,7 +193,7 @@ const functionToolSchema = z.object({
   type: z.literal('function'),
   function: z.object({
     name: z.string().trim(),
-    description: z.string().trim().optional(),
+    description: textSchema.optional(),
     parameters: z.record(z.string().trim(), z.unknown()).optional(),
     strict: z.boolean().nullable().optional()
   })
@@ -222,7 +222,7 @@ const jsonSchemaResponseFormatSchema = z.object({
   type: z.literal('json_schema'),
   json_schema: z.object({
     name: z.string().trim(),
-    description: z.string().trim().optional(),
+    description: textSchema.optional(),
     schema: z.record(z.string().trim(), z.unknown()).optional(),
     strict: z.boolean().nullable().optional()
   })
@@ -272,6 +272,13 @@ export const promptCacheKeySchema = z
  */
 export const storeSchema = z.literal(false).nullable().optional()
 
+/**
+ * `n` (#197): the proxy answers with one choice, so `1` (OpenAI's default) is what it already
+ * does. `1` and `null` are accepted and never sent upstream; any other value is a named 422
+ * ({@link N_OTHER_THAN_ONE_REFUSAL}).
+ */
+const nSchema = z.literal(1).nullable().optional()
+
 /** OpenAI's `reasoning_effort` values, lowest first (OpenAI's `ReasoningEffort` schema, #132). */
 export const REASONING_EFFORTS = [
   'none',
@@ -311,6 +318,7 @@ export const chatCompletionRequestSchema = z
     response_format: responseFormatSchema.optional(),
     prompt_cache_key: promptCacheKeySchema,
     store: storeSchema,
+    n: nSchema,
     // Passthrough fields sent by real clients; accepted but not interpreted
     metadata: z.record(z.string().trim(), z.unknown()).optional(),
     prediction: z
@@ -332,20 +340,23 @@ export type ChatCompletionRequest = z.infer<typeof chatCompletionRequestSchema>
 export const STORE_TRUE_REFUSAL =
   "'store: true' is not supported: the proxy stores nothing; send false"
 
+/** The 422 message for an `n` other than `1` (#197). */
+export const N_OTHER_THAN_ONE_REFUSAL =
+  "'n' other than 1 is not supported: the proxy returns one choice; send 1 or leave it out"
+
 // --- Rejected fields ---
 
 /**
  * Fields rejected with a named 422 error instead of the generic unknown-parameter error.
  *
  * @remarks
- * `n`, `logprobs`, `top_logprobs`, `logit_bias`: the proxy returns a single choice with no
- * token probability data, so accepting these would need response-side changes.
+ * `logprobs`, `top_logprobs`, `logit_bias`: the proxy returns no token probability data, so
+ * accepting these would need response-side changes.
  *
  * `functions`, `function_call`: deprecated OpenAI fields, superseded by `tools` and
  * `tool_choice`.
  */
 export const rejectedFields = [
-  'n',
   'logprobs',
   'top_logprobs',
   'logit_bias',

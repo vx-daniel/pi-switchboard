@@ -81,6 +81,7 @@ function view(fields: Partial<AccountsView> = {}): AccountsView {
     quotas: new Map(),
     belowReserve: new Map(),
     cooldowns: [],
+    routing: { order: {}, disabled: [] },
     ...fields
   }
 }
@@ -273,8 +274,30 @@ describe('the console Accounts view', () => {
       '⏸ opus cooling down, 1m05s left',
       '✗ token expired',
       '',
-      '↵ actions: verify all logins, log in again, set a label, log out of anthropic'
+      '↵ actions: verify all logins, log in again, set a label, disable, log out of anthropic'
     ])
+  })
+
+  // Catches the routing order (#233) invisible in the console: the login called first is not
+  // marked (or the base is, out of habit, although the order put another first), a disabled login
+  // looks like any other, or the pane hides the login's place and the actions that change it.
+  test('marks the login called first and the disabled ones, and shows the place in the pane', () => {
+    const rows = rendered(
+      view({
+        accounts: [account('anthropic'), account('anthropic-2'), account('anthropic-3')],
+        routing: { order: { anthropic: ['anthropic-2'] }, disabled: ['anthropic-3'] }
+      })
+    )
+
+    expect(rows[1]).toMatch(/ —$/)
+    expect(rows[2]).toMatch(/ — ▲ first$/)
+    expect(rows[3]).toMatch(/ — disabled$/)
+    expect(detail(rows).map((line) => line.replaceAll(/ {2,}/g, ' '))).toEqual(
+      expect.arrayContaining([
+        'order 2 of 3',
+        '↵ actions: verify all logins, log in again, set a label, use first, disable, log out of anthropic'
+      ])
+    )
   })
 
   // Catches a window name longer than `5h` misaligning the pane's gauges, or the time to reset
@@ -361,7 +384,8 @@ describe('accountsSnapshot', () => {
       selected: 1,
       labels: { alpha: 'a' },
       now: NOW,
-      cooldowns: []
+      cooldowns: [],
+      routing: { order: {}, disabled: [] }
     }
     const snapshot = accountsSnapshot(base, {
       quota: (login) => {

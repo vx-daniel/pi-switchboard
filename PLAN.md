@@ -380,7 +380,7 @@ A string alias, and a request that names a model, never fall back.
 
 | Answer | Class |
 |---|---|
-| 429 | `rate_limit` |
+| 429 (`rate_limit` and `insufficient_quota` alike) | `rate_limit` |
 | 503 (and 529, mapped to 503) | `unavailable` |
 | 504 (and the idle timeout) | `timeout` |
 | 401 `upstream_api_key_invalid`, 502 `upstream_auth_error`, 502 `upstream_credentials_missing` | `auth` |
@@ -663,8 +663,9 @@ credentials outside pi's store, which the Scope rules out.
 base's, so `src/openai/model-logins.ts` groups pi's available models by base provider and model
 before exposure runs: `claude-opus-5-5` is one exposed model, owned by `anthropic`, whose entry
 carries `logins` (`ExposedModel.login` is the serving provider ID; `provider` the base) in the
-order routing tries them, base first, then slots by number. A model only a slot has (logged out
-of the base) stands in under the base's name. `scoped` mode's `enabledModels` patterns match the
+order routing tries them: base first, then slots by number, unless the operator orders them
+(below). A model only a slot has (logged out of the base) stands in under the base's name.
+`scoped` mode's `enabledModels` patterns match the
 base, so they cover every login. A login's ID is not a public or canonical ID: a request naming
 `anthropic-2/claude-opus-5-5` gets 404.
 
@@ -694,6 +695,26 @@ trimmed, 1–40 characters), saved by `saveLoginLabel` (`src/tui/login.ts`) thro
 identity (Anthropic's organization ID on responses, Codex's JWT claims) is deliberately not
 read: #69 keeps no account or organization ID, and a label the operator writes needs nothing from
 the credential.
+
+**Order and disabled logins** (#233). `routing.logins.order` (base provider → logins) puts the
+logins it lists first, in its order, the others after them in the usual order
+(`orderLogins`); `routing.logins.disabled` lists logins routing never calls. Both are read per
+request with the rest of the config (`fileConfigReader` → `ModelExposureConfig.loginRouting`)
+and applied in `groupLogins`, before exposure: a disabled login is left out of a model's
+`logins` and kept as `disabledLogins`, and a model whose every login is disabled is not exposed
+at all, as if it had no credential (principle IV: `/v1/models` lists what can be served). The
+login stays logged in; nothing touches pi's store. Cooldowns, `routing.reserve` and
+`routing.logins.fallbackOn` apply among the enabled logins in that order; an alias target
+expands to its model's logins in that order; a request with its own upstream key keeps the
+first enabled login's model only. A name that is no login of its provider is ignored, never an
+error: `loginDiagnostics` (`unknown-login`) lists it on `/healthz/models`, with a warning once per
+distinct set, and `all-logins-disabled` names a provider whose models left; neither fails the
+check. `/v1/switchboard/models` lists each model's enabled logins in routing order, then its
+disabled ones, each with `disabled`. The console's Accounts view marks the login called first
+(`▲ first`) and the disabled ones, and the account menu's **Use first**, **Disable** and
+**Enable** write the two settings (`src/tui/login-routing.ts`, through `saveConfigToFile`);
+disabling a provider's only enabled login asks first. The Settings view leaves them to the
+Accounts view, as it leaves aliases to the Models view.
 
 - **A fresh built-in, not the composed provider.** The copy is made from a fresh
   `builtinProviders()` instance, not from the runtime's provider: the composed one carries the
@@ -903,7 +924,8 @@ Reason:
 - `metadata`
 - `prediction`
 - `prompt_cache_key` (#39): pi's `sessionId`; 1–64 characters after trimming, `null` the same as none. Over 64 is a `400`, because pi itself cuts a key to 64 (`clampOpenAIPromptCacheKey`), which would silently merge keys sharing their first 64 characters. It is never a raw payload field: pi writes it where the API takes one (OpenAI Responses, Codex, chat completions to `api.openai.com`) and sends Anthropic session-affinity headers only when the model's `compat.sendSessionAffinityHeaders` is on and the login is not OAuth. On Codex pi also keeps one WebSocket per key and login for 5 minutes and sends only the new input with `previous_response_id` when the request extends the previous one exactly; any other request goes whole. A client that sends a new key per request leaves one socket open per key for those 5 minutes, which is acceptable for a local proxy (revisit if the proxy is shared). `prompt_cache_retention` (deprecated) and `prompt_cache_options` (no pi equivalent) stay unknown fields (`422`)
-- `store` (#197): `false` and `null` only. The proxy stores no completion, so "don't store" is what it already does: the request is honored, not ignored, and principle I's list of permitted drops does not apply. The rule: a field is accepted when its only accepted value is what the proxy does anyway. `store` is never a payload field (`OPENAI_PASSTHROUGH_FIELDS` leaves it out): pi sets it itself where the API takes it, and a server that doesn't know it may refuse it. `store: true` is a named 422 (`STORE_TRUE_REFUSAL`, shared with the Responses API). pi's own `openai-completions` adapter sends `store: false` to every host it doesn't recognize (`compat.supportsStore`, guessed from the base URL), so before this every request from pi pointed at the switchboard failed with a 422; `test/integration/pi-client.test.ts` runs pi's adapter against the proxy so the next such field fails a test instead
+- `store` (#197): `false` and `null` only. The proxy stores no completion, so "don't store" is what it already does: an honored value (constitution principle I), not a drop. `store` is never a payload field (`OPENAI_PASSTHROUGH_FIELDS` leaves it out): pi sets it itself where the API takes it, and a server that doesn't know it may refuse it. `store: true` is a named 422 (`STORE_TRUE_REFUSAL`, shared with the Responses API). pi's own `openai-completions` adapter sends `store: false` to every host it doesn't recognize (`compat.supportsStore`, guessed from the base URL), so before this every request from pi pointed at the switchboard failed with a 422; `test/integration/pi-client.test.ts` runs pi's adapter against the proxy so the next such field fails a test instead
+- `n` (#197): `1` and `null` only, OpenAI's default. The proxy returns one choice, so `n: 1` is an honored value (constitution principle I). Never a payload field. Any other value is a named 422 (`N_OTHER_THAN_ONE_REFUSAL`, `param: n`). Elixir's LangChain (`brainlid/langchain`) sends `n: 1` on every request, so before this each one failed with a 422. The honored values live in `HONORED_VALUE_FIELDS` (`src/openai/validate.ts`), which also keeps an accepted value from being blamed for another field's error
 - image content parts (base64 data URIs; remote `http`/`https` URLs only with `remoteImages` on, which is off by default, see "Image URL fetching")
 
 Compatibility preference:
@@ -914,7 +936,7 @@ Compatibility preference:
 
 ### Rejected
 
-- `n > 1`
+- `n` other than `1` or `null`
 - `logprobs`
 - `top_logprobs`
 - `logit_bias`
@@ -936,8 +958,9 @@ strict, #146):
   the first in `param`, as its full dotted path inside a message
   (`messages.0.content.0.cache_control`)
 
-The fields in "Rejected" above (`n`, `logprobs`, `top_logprobs`, `logit_bias`, `functions`,
-`function_call`) get `422` too, with `'<field>' is not supported in this version of the proxy`.
+The fields in "Rejected" above (`logprobs`, `top_logprobs`, `logit_bias`, `functions`,
+`function_call`) get `422` too, with `'<field>' is not supported in this version of the proxy`;
+an `n` other than `1` gets its own named `422`.
 So does a value in an assistant field an OpenAI SDK sends empty when it echoes a reply back in
 history (the Python SDK's `model_dump()` carries every response field), as pi has nowhere to put
 it: `refusal`, `audio` and the deprecated `function_call` are accepted only as `null`, and the
@@ -958,8 +981,10 @@ OpenAI's spec, as `openai-spec.test.ts` does the top level.
 ### Text is kept as sent
 
 Request text whose whitespace is data reaches pi exactly as the client sent it (#145): message
-content of every role, `text` parts, tool results, `stop` sequences and `prediction` content. These
-use the one `textSchema` (`src/openai/text-schemas.ts`). Every other request string (`model`, tool
+content of every role, `text` parts, tool results, `stop` sequences, `prediction` content, and the
+`description` of a function tool or a `json_schema` response format, on chat completions and the
+Responses API (#255: every provider gives them to the model). These use the one `textSchema`
+(`src/openai/text-schemas.ts`). Every other request string (`model`, tool
 and function names, call IDs, `user`, `prompt_cache_key`, image URLs, tool-call `arguments`) is
 trimmed, as the `zod/prefer-string-schema-with-trim` lint rule requires. That rule is off for
 `text-schemas.ts` alone (`vite.config.ts`, with the reason), so no other file can opt out by
@@ -1602,7 +1627,18 @@ Use an OpenAI-style shape:
   over it is refused before reading, and a chunked body is counted as it arrives and refused once
   it passes, without reading the rest (#187)
 - `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
-- `429` upstream rate limit or usage limit (`rate_limit`)
+- `429` upstream rate limit (`rate_limit`) or a plan's usage limit (`insufficient_quota`, #199).
+  A usage limit is one by its wording (Codex's "usage limit", `usage_limit_reached`) or by a wait
+  of at least 5 minutes (`USAGE_LIMIT_MIN_WAIT_MS`); it is answered with OpenAI's
+  `insufficient_quota` type and code and `x-should-retry: false`, which the OpenAI SDKs obey and
+  Codex CLI treats as fatal, and no `retry-after`, so a client that honors one does not sit out a
+  weekly window. A rate limit whose wait the proxy read (`resetAfterMs`, as for cooldowns) carries
+  `retry-after` (seconds, rounded up) and `retry-after-ms`; one with no readable wait carries
+  neither. Routing is unchanged: both are the `rate_limit` class. A stream that already started
+  carries the code in its error event and no headers, and there the wording alone decides: a
+  limit known only by its wait is `rate_limit` mid-stream, as the wait is read from the response
+  that refused the call, which a started stream doesn't have. The threshold is a policy: a
+  provider whose ordinary rate-limit window is longer than 5 minutes would read as a usage limit
 - `500` internal proxy failure, including an invalid model exposure config
 - `502` the provider rejected pi's stored credential (`upstream_auth_error`), pi has no usable
   credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent

@@ -75,7 +75,7 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       cooldown: null,
       quota: null,
       availability: 'unknown',
-      logins: [{ id: 'acme', cooldown: null, quota: null }]
+      logins: [{ id: 'acme', disabled: false, cooldown: null, quota: null }]
     })
   })
 
@@ -104,7 +104,7 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       cooldown: null,
       quota: null,
       availability: 'unknown',
-      logins: [{ id: 'acme', cooldown: null, quota: null }]
+      logins: [{ id: 'acme', disabled: false, cooldown: null, quota: null }]
     })
   })
 })

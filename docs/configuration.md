@@ -55,6 +55,8 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | [Aliases](routing.md#aliases) | — | — | `aliases` | `{}` | Name → a model, a chain (`targets`, `fallbackOn`), a target with its `reasoningEffort`, or a `family` |
 | [Quota reserve](routing.md#quota) | — | — | `routing.reserve` | `{}` | Login → the share of each quota window to keep free, 0–1 |
 | [Moving between logins](logins.md#several-logins-per-provider) | — | — | `routing.logins.fallbackOn` | `["rate_limit"]` | Failure classes: `rate_limit`, `unavailable`, `timeout`, `auth`, `refused`, `upstream_error` |
+| [Login order](logins.md#order-and-disabled-logins) | — | — | `routing.logins.order` | `{}` | Provider → its logins to try first, in order; the others follow |
+| [Disabled logins](logins.md#order-and-disabled-logins) | — | — | `routing.logins.disabled` | `[]` | Logins routing never calls; they stay logged in |
 | [Login labels](logins.md#several-logins-per-provider) | — | — | `labels` | `{}` | Login → the label the console shows |
 | [Lifetime](pi-extension.md#settings-panel) (pi package) | — | — | `lifetime` | `detached` | `detached` (outlives the pi session), `session` |
 | [Zed sync](pi-extension.md#command-family) (pi package) | — | — | `zed.providerName`, `zed.autoSync` | `"Pi Proxy"`, `false` | A name; `true`, `false` |
@@ -99,7 +101,11 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
   },
   "routing": {
     "reserve": { "anthropic": 0.2 },
-    "logins": { "fallbackOn": ["rate_limit"] }
+    "logins": {
+      "fallbackOn": ["rate_limit"],
+      "order": { "anthropic": ["anthropic-2", "anthropic"] },
+      "disabled": []
+    }
   },
   "labels": { "anthropic": "work", "anthropic-2": "personal" },
   "lifetime": "detached",
@@ -151,10 +157,10 @@ pi-switchboard doctor --json          # the report as JSON, for scripts
 
 `pi-switchboard doctor` reads the config (`proxy-config.json`, with the same flags and variables the proxy would apply: it takes the server flags, so `pi-switchboard doctor --host 0.0.0.0` judges that bind address), pi's models and logins, and the stats file, and prints findings in two sections, each with a recommendation. It reports and recommends only: it changes no setting and no file (it opens the stats file read-only and migrates nothing), and calls no provider unless `--verify` asks it to, which may refresh an OAuth token as `/healthz/creds?verify=true` does. Its output names providers, models, aliases and settings, never a credential or message content.
 
-- **General**: what `/healthz/models` and `/healthz/creds` judge (no model exposed, an invalid exposure config, `enabledModels` patterns that match nothing, alias diagnostics, no login, a login that fails `--verify`), a config file that can't be read, proxy auth off or the docs page on while bound to an address other machines reach, stats off, and an alias's or `routing.logins`'s `fallbackOn` naming `upstream_error` or `timeout`, with its fallbacks in the window. Cooldowns are not findings.
+- **General**: what `/healthz/models` and `/healthz/creds` judge (no model exposed, an invalid exposure config, `enabledModels` patterns that match nothing, alias diagnostics, a `routing.logins` name that is no login or a provider whose every login is disabled, no login, a login that fails `--verify`), a config file that can't be read, proxy auth off or the docs page on while bound to an address other machines reach, stats off, and an alias's or `routing.logins`'s `fallbackOn` naming `upstream_error` or `timeout`, with its fallbacks in the window. Cooldowns are not findings.
 - **Cache**: from the stats file, each model with at least 20 calls in the window: a hit rate under 50%, cache writes over 40% of its cost (at catalog prices), whether `PI_CACHE_RETENTION=long` pays against its break-even (Anthropic and Bedrock only), fallbacks over 5% of its calls, and over 10% of its requests without a `prompt_cache_key` on an API that caches by key. [Prompt caching](caching.md) explains each; the doctor reads `PI_CACHE_RETENTION` from its own environment, which may not be the proxy's. Stats that are off, absent or unreadable are said so, not shown as an empty section. The section ends with what the doctor cannot tell.
 
-Each finding has a `check` (`exposure`, `alias`, `credentials`, `proxy-auth`, `docs-ui`, `stats`, `fallback-on`, `config-file`, `models-json`, `enabled-models`, `logins`; `hit-rate`, `cache-write-cost`, `retention`, `fallbacks`, `prompt-cache-key`), a `severity` (`error`, `warning` or `advice`), a `subject` when it is about one model, alias, provider, pattern or address, a `message` and a `recommendation`. `--json` prints:
+Each finding has a `check` (`exposure`, `alias`, `login-routing`, `credentials`, `proxy-auth`, `docs-ui`, `stats`, `fallback-on`, `config-file`, `models-json`, `enabled-models`, `logins`; `hit-rate`, `cache-write-cost`, `retention`, `fallbacks`, `prompt-cache-key`), a `severity` (`error`, `warning` or `advice`), a `subject` when it is about one model, alias, provider, pattern or address, a `message` and a `recommendation`. `--json` prints:
 
 ```json
 {
@@ -201,6 +207,8 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 | `aliases` | `{}` | Alias -> the canonical ID of an exposed model ([Aliases](routing.md#aliases)) |
 | `routing.reserve` | `{}` | Provider -> the share of each quota window, 0–1, that fallback chains keep free ([Quota](routing.md#quota)) |
 | `routing.logins.fallbackOn` | `["rate_limit"]` | The failures that move a request from one login of a model to the next ([Several logins per provider](logins.md#several-logins-per-provider)) |
+| `routing.logins.order` | `{}` | Base provider -> its logins to try first, in order (`{ "anthropic": ["anthropic-2"] }`); logins left out follow in the usual order. Set from the console's Accounts view with **Use first** ([Order and disabled logins](logins.md#order-and-disabled-logins)) |
+| `routing.logins.disabled` | `[]` | Logins routing never calls, though they stay logged in; a model whose every login is disabled leaves `/v1/models`. Set from the Accounts view with **Disable** and **Enable** ([Order and disabled logins](logins.md#order-and-disabled-logins)) |
 | `labels` | `{}` | Provider -> the label the console shows beside the login, in your words ([Several logins per provider](logins.md#several-logins-per-provider)) |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.

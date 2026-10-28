@@ -5,8 +5,10 @@
  *
  * @remarks
  * Rendering and the rows it renders, from a {@link SettingsInput}; the editors behind Enter are
- * `src/tui/console-settings.ts`. Aliases and login labels keep their editors in the Models and
- * Accounts views; `lifetime` and `zed` matter only to the pi package and are left out.
+ * `src/tui/console-settings.ts`. Aliases, login labels and the logins' order and disabled list
+ * (`routing.logins.order` and `.disabled`, #233) keep their editors in the Models and Accounts
+ * views, beside what they name; `lifetime` and `zed` matter only to the pi package and are left
+ * out.
  *
  * @packageDocumentation
  */
