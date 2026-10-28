@@ -1610,7 +1610,10 @@ Use an OpenAI-style shape:
   weekly window. A rate limit whose wait the proxy read (`resetAfterMs`, as for cooldowns) carries
   `retry-after` (seconds, rounded up) and `retry-after-ms`; one with no readable wait carries
   neither. Routing is unchanged: both are the `rate_limit` class. A stream that already started
-  carries the code in its error event and no headers
+  carries the code in its error event and no headers, and there the wording alone decides: a
+  limit known only by its wait is `rate_limit` mid-stream, as the wait is read from the response
+  that refused the call, which a started stream doesn't have. The threshold is a policy: a
+  provider whose ordinary rate-limit window is longer than 5 minutes would read as a usage limit
 - `500` internal proxy failure, including an invalid model exposure config
 - `502` the provider rejected pi's stored credential (`upstream_auth_error`), pi has no usable
   credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent
