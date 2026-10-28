@@ -383,6 +383,23 @@ export function scrollRequestsView(
   return entry === undefined ? undefined : { last: entry.sequence }
 }
 
+/**
+ * Says whether the table follows new requests, for the left of the frame's bottom border: `● live`,
+ * or `‖ paused · 3 newer below · End to follow` while it is pinned.
+ *
+ * @param view - where the view is
+ * @param entries - the rows, requests and events, oldest first ({@link tableEntries})
+ * @returns the text, coloured
+ */
+export function requestsStatus(
+  view: RequestsViewport,
+  entries: readonly { readonly sequence: number }[]
+): string {
+  if (view === undefined) return paint('success', '● live')
+  const newer = Math.max(0, entries.length - 1 - pinnedIndex(view, entries))
+  return `${paint('warning', '‖ paused')}${paint('dim', ` · ${String(newer)} newer below · End to follow`)}`
+}
+
 /** What the Requests table shows. */
 export interface RequestsData {
   /** The HTTP requests, oldest first. */

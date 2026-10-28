@@ -698,6 +698,14 @@ export interface StatsView {
    *   the view shows the totals instead
    */
   frameNote(): string
+  /**
+   * Says how long each of the timeline's bars is, for the tab's context beside the window.
+   *
+   * @param window - the dashboard's window
+   * @param width - the view's columns, as {@link StatsView.rows} takes them
+   * @returns `22 min per bar` while the dashboard is shown; `''` when the view shows the totals
+   */
+  perBar(window: StatsWindow, width: number): string
   /** Closes the stats file, if it is open. */
   close(): void
 }
@@ -737,6 +745,7 @@ function totalsView(note: string): StatsView {
     rows: (_window, size) => totalsRows(note, size),
     todayCostUsd: () => undefined,
     frameNote: () => '',
+    perBar: () => '',
     close: () => undefined
   }
 }
@@ -821,6 +830,11 @@ export function openStatsView(
     frameNote: () =>
       guarded(
         () => KEPT_NOTE,
+        () => ''
+      ),
+    perBar: (window, width) =>
+      guarded(
+        () => perBarLabel(read(window, chartColumns(width)).bucketMinutes),
         () => ''
       ),
     close: () => store.close()

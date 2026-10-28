@@ -86,7 +86,7 @@ export function accountActions(account: ProviderCredentialStatus): readonly Acco
 }
 
 /** A key and what it does, for the footer. */
-type KeyHint = readonly [key: string, action: string]
+export type KeyHint = readonly [key: string, action: string]
 
 /**
  * The Stats view's window keys and what each window is called: in the footer, on the view's
@@ -98,15 +98,26 @@ export const STATS_WINDOW_KEYS: Readonly<Record<StatsWindow, KeyHint>> = {
   all: ['a', `all ${String(STATS_KEPT_DAYS)} days`]
 }
 
-/** Each view's keys, the ones worth learning first at the front: a narrow footer cuts the end. */
-const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
-  logs: [
+/**
+ * Lists the first view's keys: `r` names the view it switches to, the raw log from the Requests
+ * table and the table from the raw log.
+ *
+ * @param raw - whether the raw log is shown
+ * @returns the keys
+ */
+export function logsKeys(raw: boolean): readonly KeyHint[] {
+  return [
     ['↑↓', 'scroll'],
     ['PgUp PgDn', 'page'],
     ['End', 'follow'],
-    ['r', 'requests / raw log'],
+    ['r', raw ? 'requests' : 'raw log'],
     ['n', 'login']
-  ],
+  ]
+}
+
+/** Each view's keys, the ones worth learning first at the front: a narrow footer cuts the end. */
+const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
+  logs: logsKeys(false),
   accounts: [
     ['↑↓', 'select'],
     ['↵', 'actions'],
@@ -163,13 +174,15 @@ function keycaps(hints: readonly KeyHint[], emphasised: boolean): string {
  * @param size - the footer's columns, and whether the sidebar fits the terminal (shown or hidden)
  * @param size.width - the columns
  * @param size.sidebarFits - whether the terminal is wide enough for the sidebar
+ * @param keys - the view's keys, when its state changes them; the view's usual keys otherwise
  * @returns the footer row, `size.width` columns
  */
 export function footerLine(
   view: View,
-  size: { readonly width: number; readonly sidebarFits: boolean }
+  size: { readonly width: number; readonly sidebarFits: boolean },
+  keys: readonly KeyHint[] = VIEW_KEYS[view]
 ): string {
-  const left = [...VIEW_KEYS[view]]
+  const left = [...keys]
   const others = size.sidebarFits ? [SIDEBAR_KEY, ...GLOBAL_KEYS] : [...GLOBAL_KEYS]
   const rightText = (): string => `${keycaps([...others, QUIT_KEY], false)} `
   const overflow = (): number =>

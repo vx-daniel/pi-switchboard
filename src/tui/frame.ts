@@ -2,7 +2,8 @@
  * The frame around the console's view (#61), with its tabs: on a tall terminal folder tabs that
  * open into the frame's top border, the current one in front; on a short one the tabs sit in the
  * top border itself, the current one a pill. The right end of the tab row says a word about the
- * view (`idle`, `4 logins · 0 cooldowns`); the right end of the bottom border notes its size.
+ * view (`idle`, `4 logins · 0 cooldowns`); the right end of the bottom border notes its size, and
+ * its left end the view's state where it has one (`● live`).
  *
  * @remarks
  * Rendering only, from a {@link FrameInput} and the view's rows. Every row comes out exactly
@@ -71,6 +72,11 @@ export interface FrameInput {
   readonly context: string
   /** What the right end of the bottom border says about the view; `''` for nothing. */
   readonly note: string
+  /**
+   * What the left end of the bottom border says about the view's state, coloured by the view
+   * (`● live` on Requests); `''` or absent for nothing. The note gives way to it when both don't fit.
+   */
+  readonly status?: string
 }
 
 /** One tab's place on the row: where it starts and how wide it is. */
@@ -174,6 +180,23 @@ function borderRow(
 }
 
 /**
+ * Lays the bottom border out: the status after the left corner, the note before the right one.
+ * When both don't fit the note gives way, as {@link borderRow} drops it; on a frame too narrow
+ * for the status, the note shows alone.
+ *
+ * @param status - the status with its spaces, after a border character; `''` for none
+ * @param note - the note with its spaces; `''` for none
+ * @param mainWidth - the frame's columns
+ * @returns the row, `mainWidth` columns
+ */
+function bottomBorder(status: string, note: string, mainWidth: number): string {
+  const left = status === '' ? '' : `${border('─')}${status}`
+  // The status needs a border character after it, as the note does before the corner.
+  const fits = CORNERS + visibleWidth(left) + 1 <= mainWidth
+  return borderRow(['╰', '╯'], fits ? left : '', note, mainWidth)
+}
+
+/**
  * Lays a plain row out with text on the left and, when it fits, more text at the right end.
  *
  * @param left - the left text
@@ -272,7 +295,8 @@ export function framedView(input: FrameInput, body: readonly string[]): string[]
     return `${border('│')} ${content} ${border('│')}`
   })
   const note = input.note === '' ? '' : ` ${paint('dim', input.note)} `
-  const bottom = borderRow(['╰', '╯'], '', note, layout.mainWidth)
+  const status = input.status === undefined || input.status === '' ? '' : ` ${input.status} `
+  const bottom = bottomBorder(status, note, layout.mainWidth)
   const top = layout.folderTabs ? folderFrameTop(input) : compactFrameTop(input)
   const above = layout.folderTabs ? folderTabRows(input) : []
   return [...above, top, ...rows, bottom]

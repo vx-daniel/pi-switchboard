@@ -9,7 +9,7 @@
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import { framedView } from '@proxy/tui/frame'
 import type { ConsoleLayout } from '@proxy/tui/layout'
-import { footerLine, type View } from '@proxy/tui/navigation'
+import { footerLine, type KeyHint, type View } from '@proxy/tui/navigation'
 import { besideSidebar } from '@proxy/tui/sidebar'
 import { authOffRow, type StatusStripInput, statusStrip } from '@proxy/tui/status-strip'
 import { chrome, paint, strong } from '@proxy/tui/theme'
@@ -45,6 +45,10 @@ export interface ScreenInput {
   readonly context: string
   /** What the right end of the frame's bottom border says about the view. */
   readonly note: string
+  /** What the left end of the frame's bottom border says about the view's state; none if absent. */
+  readonly status?: string
+  /** The view's footer keys, when its state changes them; the view's usual keys if absent. */
+  readonly keys?: readonly KeyHint[]
   /** The view's rows, rendered for `layout.viewWidth` by `layout.viewHeight`. */
   readonly body: readonly string[]
   /** The sidebar's rows, rendered for `layout.sidebarWidth` by `layout.frameRows`; none when hidden. */
@@ -107,7 +111,13 @@ function sidebarColumn(input: ScreenInput, width: number): string[] {
 export function consoleScreen(input: ScreenInput): string[] {
   const { layout } = input
   const framed = framedView(
-    { view: input.view, layout, context: input.context, note: input.note },
+    {
+      view: input.view,
+      layout,
+      context: input.context,
+      note: input.note,
+      ...(input.status === undefined ? {} : { status: input.status })
+    },
     input.body
   )
   const middle =
@@ -122,7 +132,7 @@ export function consoleScreen(input: ScreenInput): string[] {
     chrome(statusStrip(input.strip, layout.columns), layout.columns),
     ...alert,
     ...middle,
-    footerLine(input.view, { width: layout.columns, sidebarFits: layout.sidebarFits })
+    footerLine(input.view, { width: layout.columns, sidebarFits: layout.sidebarFits }, input.keys)
   ]
   const shown = rows.slice(0, layout.rows)
   while (shown.length < layout.rows) shown.push('')

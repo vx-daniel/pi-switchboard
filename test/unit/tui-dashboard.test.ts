@@ -524,6 +524,25 @@ describe('openStatsView', () => {
     expect(note).toBe('stats kept 30 days')
   })
 
+  // Catches the Stats tab not saying how long a timeline bar is, or saying it while the view shows
+  // the totals and has no timeline.
+  test('gives the tab a bar’s length while the dashboard shows, nothing with the totals', () => {
+    const view = openStatsView(true, () => ({
+      timeline: () => [],
+      models: () => [],
+      aliases: () => [],
+      errors: () => NO_ERRORS,
+      close: () => undefined
+    }))
+    const perBar = view.perBar('week', 100)
+    view.close()
+    const off = openStatsView(false)
+
+    expect(perBar).toMatch(/^\S+ per bar$/u)
+    expect(off.perBar('week', 100)).toBe('')
+    off.close()
+  })
+
   // Catches the strip's cost read on every redraw after the file failed (each try can wait out
   // the busy timeout on the thread that serves requests), or the dashboard trying the file again
   // once the strip's read failed.

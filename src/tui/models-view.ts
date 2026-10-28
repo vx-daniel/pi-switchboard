@@ -382,6 +382,8 @@ interface ViewPart {
   readonly lines: readonly string[]
   /** The line of the selected item, when it is in this part. */
   readonly selectedLine: number | undefined
+  /** The lines that hold a model, in the matrix; none in a box. */
+  readonly modelLines?: readonly number[]
 }
 
 /**
@@ -401,6 +403,7 @@ function matrixPart(view: ModelsView, columns: MatrixColumns, now: number): View
   )
   const lines: string[] = []
   let selectedLine: number | undefined
+  const modelLines: number[] = []
   let position = 0
   for (const [groupIndex, group] of providerGroups(view.models).entries()) {
     if (groupIndex > 0) lines.push('')
@@ -408,12 +411,13 @@ function matrixPart(view: ModelsView, columns: MatrixColumns, now: number): View
     lines.push(`  ${strong(tabAccent(group.provider))}  ${paint('dim', count)}`)
     for (const model of group.models) {
       if (position === view.selected) selectedLine = lines.length
+      modelLines.push(lines.length)
       lines.push(selectable(modelRow(model, columns, now), position === view.selected))
       position += 1
     }
   }
   if (lines.length === 0) lines.push(paint('dim', '  No models exposed.'))
-  return { heading: [heading], lines, selectedLine }
+  return { heading: [heading], lines, selectedLine, modelLines }
 }
 
 /**
@@ -580,9 +584,48 @@ function stackedBoxes(
  * @returns the rows shown
  */
 function scrolled(part: ViewPart, height: number): string[] {
-  const room = Math.max(0, height - part.heading.length)
-  const first = firstShown(part.selectedLine ?? 0, part.lines.length, room)
+  const { first, room } = scrollWindow(part, height)
   return [...part.heading, ...part.lines.slice(first, first + room)].slice(0, Math.max(0, height))
+}
+
+/**
+ * Works out which of a part's lines show in a height: those from `first`, `room` of them.
+ *
+ * @param part - the part
+ * @param height - rows for it, its heading included
+ * @returns the first line shown and how many lines show
+ */
+function scrollWindow(part: ViewPart, height: number): { first: number; room: number } {
+  const room = Math.max(0, height - part.heading.length)
+  return { first: firstShown(part.selectedLine ?? 0, part.lines.length, room), room }
+}
+
+/**
+ * Counts the matrix's models that show in a height.
+ *
+ * @param part - the matrix
+ * @param height - rows for it, its heading included
+ * @returns the models shown
+ */
+function shownModels(part: ViewPart, height: number): number {
+  const { first, room } = scrollWindow(part, height)
+  return (part.modelLines ?? []).filter((line) => line >= first && line < first + room).length
+}
+
+/** The Models view rendered: its rows, and how many of its models show. */
+interface ModelsLayout {
+  readonly rows: string[]
+  readonly shown: number
+}
+
+/** The Models view rendered, with what the frame's bottom border says about it. */
+export interface ModelsRender {
+  readonly rows: string[]
+  /**
+   * `k of N models shown · ↑↓` while the matrix is taller than its space, so some models are cut
+   * off (whether above or below); `''` while every model shows, for the frame's usual note.
+   */
+  readonly note: string
 }
 
 /**
@@ -634,7 +677,7 @@ function sideBySideRows(
   view: ModelsView,
   size: { readonly height: number; readonly width: number },
   now: number
-): string[] {
+): ModelsLayout {
   // Room for a cooldown's reason only while a model is cooling: the box takes it otherwise.
   const cooldownColumns = anyCooling(view.models, now)
     ? COOLDOWN_COLUMNS.most
@@ -649,12 +692,14 @@ function sideBySideRows(
     name: NAME_COLUMNS.most,
     cooldown: cooldownRoom(matrixWidth, NAME_COLUMNS.most)
   }
-  const matrix = scrolled(matrixPart(view, columns, now), size.height)
-  return Array.from(
+  const part = matrixPart(view, columns, now)
+  const matrix = scrolled(part, size.height)
+  const rows = Array.from(
     { length: Math.min(size.height, Math.max(matrix.length, box.length)) },
     (_, row) =>
       `${fitted(matrix[row] ?? '', matrixWidth)}${' '.repeat(PANE_GAP)}${fitted(box[row] ?? '', boxWidth)}`
   )
+  return { rows, shown: shownModels(part, size.height) }
 }
 
 /**
@@ -673,7 +718,7 @@ function stackedRows(
   view: ModelsView,
   size: { readonly height: number; readonly width: number },
   now: number
-): string[] {
+): ModelsLayout {
   const nameColumns = Math.max(
     NAME_COLUMNS.least,
     Math.min(NAME_COLUMNS.most, size.width - MARK_COLUMNS - EFFORTS_WIDTH - COOLDOWN_COLUMNS.least)
@@ -695,7 +740,10 @@ function stackedRows(
     ...scrolled(matrix, matrixHeight),
     ...stackedBoxes(boxes, { height: boxHeight, width: size.width })
   ]
-  return rows.map((row) => fitted(row, size.width))
+  return {
+    rows: rows.map((row) => fitted(row, size.width)),
+    shown: shownModels(matrix, matrixHeight)
+  }
 }
 
 /**
@@ -707,19 +755,26 @@ function stackedRows(
  * @param size.height - rows
  * @param size.width - columns
  * @param now - the time now, for cooldowns
- * @returns the rows; one line saying why when the exposure config is invalid
+ * @returns the rows, one line saying why when the exposure config is invalid, and the note while
+ *   some models are cut off
  */
 export function modelsRows(
   view: ModelsView,
   size: { readonly height: number; readonly width: number },
   now: number = Date.now()
-): string[] {
+): ModelsRender {
   if (view.unavailable !== undefined) {
-    return [fitted(paint('error', `  Models unavailable: ${view.unavailable}`), size.width)]
+    const why = fitted(paint('error', `  Models unavailable: ${view.unavailable}`), size.width)
+    return { rows: [why], note: '' }
   }
   const items = modelsItems(view)
   const selected = Math.min(Math.max(view.selected, 0), items.length - 1)
   const clamped = { ...view, selected }
-  if (size.width >= SIDE_BY_SIDE_LEAST_WIDTH) return sideBySideRows(clamped, size, now)
-  return stackedRows(clamped, size, now)
+  const { rows, shown } =
+    size.width >= SIDE_BY_SIDE_LEAST_WIDTH
+      ? sideBySideRows(clamped, size, now)
+      : stackedRows(clamped, size, now)
+  const total = view.models.length
+  const note = shown < total ? `${String(shown)} of ${String(total)} models shown · ↑↓` : ''
+  return { rows, note }
 }
