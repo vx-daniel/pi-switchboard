@@ -12,10 +12,10 @@ Point any OpenAI client at `http://localhost:4141/v1` (Aider, Continue, Open Web
 - **Your logins, not new API keys.** It uses pi's logins: API keys, and subscriptions such as Claude Pro/Max, ChatGPT and GitHub Copilot. Log in once, with pi or in the proxy's own console.
 - **Routing you control.** Aliases give models the names your team uses, set the reasoning effort they run at, follow a family's newest model, and fall back along a chain on the failures you choose ([Routing](docs/routing.md)).
 - **Several logins per provider.** A second subscription to the same service is a second login; the proxy moves to it when the first hits its limit ([Logins](docs/logins.md)).
-- **Quota and cooldowns.** It reads each subscription's usage windows, keeps a reserve you set, and cools a provider that answered 429 for as long as it said.
+- **Quota and cooldowns.** It reads each subscription's usage windows, keeps a reserve you set, and cools a login that answered 429 for as long as it said.
 - **Honest about what it does.** Responses are checked against OpenAI's published spec, a field it doesn't support is refused with a clear error rather than dropped, and every response says which model and login answered (`x_pi`).
-- **See what's happening.** `pi-switchboard tui` shows every request, your logins and their quota, usage and cost over 30 days, and your aliases, and edits them ([The console](docs/console.md)). `pi-switchboard doctor` checks the config and the prompt cache and says what to change ([Checking the setup](docs/configuration.md#checking-the-setup-pi-switchboard-doctor)).
-- **Local and safe by default.** It listens on `127.0.0.1`. Listening wider without a token logs a warning, and the Docker image won't start without one ([Security](docs/security.md)).
+- **See what's happening.** `pi-switchboard tui` shows every request, your logins and their quota, usage and cost over 30 days, your aliases and settings, and edits them ([The console](docs/console.md)). `pi-switchboard doctor`, and the console's Doctor view, check the config and the prompt cache and say what to change ([Checking the setup](docs/configuration.md#checking-the-setup-pi-switchboard-doctor)).
+- **Local and safe by default.** It listens on `127.0.0.1`. Without a token it warns at startup who can use your logins through it, and the Docker image won't start without one ([Security](docs/security.md)).
 
 ## How it works
 
@@ -68,7 +68,7 @@ A request for `"model": "coding"` goes to Claude Opus, and to Codex when Opus is
 
 ## Documentation
 
-Everything else is in [`docs/`](docs/README.md): installing, configuration, the HTTP API, routing, logins, the console, the pi extension and security.
+Everything else is in [`docs/`](docs/README.md): installing, configuration, the HTTP API, routing, logins, the console, the pi extension, security, and [upgrading](docs/migration.md).
 
 Working on pi-switchboard: [CONTRIBUTING.md](CONTRIBUTING.md), the [releases](https://github.com/vx-daniel/pi-switchboard/releases), [ROADMAP.md](ROADMAP.md), and the principles in [CONSTITUTION.md](CONSTITUTION.md).
 

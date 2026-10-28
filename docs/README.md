@@ -9,6 +9,7 @@ pi-switchboard is a local HTTP API over pi's models, logins and providers that s
 - **Pointing a client at it:** [The HTTP API](api.md), and the [API reference](api-reference.md) for the OpenAPI document and the docs page.
 - **Routing across models and logins:** [Routing](routing.md) and [Several logins per provider](logins.md).
 - **Using it from inside pi:** [Pi Integration](pi-extension.md).
+- **Upgrading from an earlier release:** [Upgrading](migration.md).
 
 ## Pages
 
@@ -22,11 +23,11 @@ pi-switchboard is a local HTTP API over pi's models, logins and providers that s
 | [Routing](routing.md) | Aliases, fallback chains, reasoning effort per alias, family aliases, cooldowns, quota |
 | [Several logins per provider](logins.md) | A second subscription to the same provider, and how the proxy picks the login |
 | [Prompt caching](caching.md) | How each provider caches, reading cache hits and writes, keeping a prompt cacheable, routing's effect on the cache, `PI_CACHE_RETENTION` and when it pays; what `pi-switchboard doctor` checks for you |
-| [The console](console.md) | `pi-switchboard tui`: requests, accounts and logins, stats, models and aliases |
+| [The console](console.md) | `pi-switchboard tui`: requests, accounts and logins, stats, models and aliases, settings, and the doctor's findings |
 | [Pi Integration](pi-extension.md) | The `/proxy` commands and the settings panel inside pi |
 | [Security](security.md) | The defaults: the bind address, remote images, size limits, timeouts |
 | [Architecture](architecture.md) | How it fits together, a chat request end to end, and where the numbers come from, as diagrams; pi's SDK layers |
-| [Coming from pi-openai-proxy](migration.md) | What the rename changed |
+| [Upgrading](migration.md) | From 0.4 to 0.5: what a client or an operator will notice; and what the rename from pi-openai-proxy changed |
 
 ## For contributors
 

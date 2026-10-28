@@ -8,13 +8,13 @@ A provider's prompt cache keeps the start of a prompt it has seen recently, so t
 |---|---|---|
 | Anthropic (`anthropic-messages`), and Claude on Bedrock | Marks the system prompt, the last tool (Anthropic only) and the last user message as cache points (`cache_control`), on every request. Caching is by prefix: no key is needed | `PI_CACHE_RETENTION=long` ([below](#retention)) |
 | OpenAI Responses and chat completions at `api.openai.com` | OpenAI caches long prompts by prefix on its own. pi sends the request's `prompt_cache_key` as the provider's key, which routes requests that share it to the same cache | Send `prompt_cache_key`; `prompt_cache_breakpoint` on a content part ([The HTTP API](api.md#supported-chat-completions-features)); `PI_CACHE_RETENTION=long` |
-| Codex (`openai-codex-responses`) | Sends `prompt_cache_key` as Codex's session key, and keeps one WebSocket per key that sends only the new turns | Send `prompt_cache_key` |
+| Codex (`openai-codex-responses`) | Sends `prompt_cache_key` as Codex's session key. The proxy calls Codex over SSE, not pi's default WebSocket (so it can read rate limits and quota, [Cooldowns](routing.md#cooldowns)), so each request sends the whole conversation | Send `prompt_cache_key` |
 | Mistral | Caches only with a key: no `prompt_cache_key`, no caching | Send `prompt_cache_key` |
 | Other OpenAI-compatible servers | Whatever the server does; pi sends `cache_control` to those that take Anthropic's format | — |
 
 A provider caches a prompt only above a minimum length it sets, so a short request (a title, a one-line classification) reads nothing from the cache whatever you do.
 
-**`pi-switchboard doctor` runs the checks on this page for you** ([Checking the setup](configuration.md#checking-the-setup-pi-switchboard-doctor)): per model with at least 20 calls in a window, a hit rate under 50%, cache writes over 40% of the cost, `cold_pct` against the retention break-even (Anthropic and Bedrock), fallbacks, and, on the APIs above that cache by key, the share of requests sent without a `prompt_cache_key`, which the stats count (a count, never the key; requests recorded before that count existed show as keyless). It recommends; it changes nothing. What it can't do is say *why* a client's prefix changes: that needs the prompt, which the proxy never keeps.
+**`pi-switchboard doctor` runs the checks on this page for you** ([Checking the setup](configuration.md#checking-the-setup-pi-switchboard-doctor)), and so does the console's Doctor view ([The console](console.md)): per model with at least 20 calls in a window, a hit rate under 50%, cache writes over 40% of the cost, `cold_pct` against the retention break-even (Anthropic and Bedrock), fallbacks over 5% of the calls, and, on the APIs above that cache by key, more than 10% of requests sent without a `prompt_cache_key`, which the stats count (a count, never the key; requests recorded before that count existed show as keyless). It recommends; it changes nothing. What it can't do is say *why* a client's prefix changes: that needs the prompt, which the proxy never keeps.
 
 ## Seeing what the cache did
 

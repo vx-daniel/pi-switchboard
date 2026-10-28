@@ -385,7 +385,7 @@
             font-family="'Geist Mono', ui-monospace, monospace"
             text-anchor="middle"
           >
-            401 404 413 422 502
+            400 401 403 404 413 422 502
           </text>
           <rect x="500" y="400" width="160" height="56" rx="20" fill="#e6e7ed" />
           <rect
@@ -417,7 +417,7 @@
             font-family="'Geist Mono', ui-monospace, monospace"
             text-anchor="middle"
           >
-            429 · 502 · 503 · 504
+            400 401 404 429 502 503 504
           </text>
           <rect x="680" y="400" width="160" height="56" rx="20" fill="#e6e7ed" />
           <rect
