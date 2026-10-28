@@ -231,7 +231,8 @@ describe('requests in flight', () => {
   // Catches the stats' count of requests with a `prompt_cache_key` (#299) never set by the chat
   // route, or a `null` key (which pi treats as none) counted as one.
   test.each([
-    { sent: 'a key', promptCacheKey: 'conversation-1', counted: true },
+    // `notarealsecret`: the secret scan reads `promptCacheKey: '…'` as an API key.
+    { sent: 'a key', promptCacheKey: 'notarealsecret-conversation-1', counted: true },
     { sent: 'a null key', promptCacheKey: null, counted: false },
     { sent: 'no key', promptCacheKey: undefined, counted: false }
   ])('records whether a request sent $sent', async ({ promptCacheKey, counted }) => {
