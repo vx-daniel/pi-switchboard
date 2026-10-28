@@ -140,11 +140,41 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 | Remote images | `PI_SWITCHBOARD_REMOTE_IMAGES` | `false` | Fetch remote image URLs server-side and inline them as base64; off, they are rejected with `400`. The proxy then makes requests for its clients, so only public `http`/`https` hosts are allowed (see [Security defaults](security.md#security-defaults)) (`--remote-images`, `remoteImages`) |
 | Responses API | `PI_SWITCHBOARD_RESPONSES_API` | `false` | Answer the experimental `POST /v1/responses` ([Responses API](api.md#responses-api-experimental)) (`--responses-api`, `responsesApi`) |
 | Docs UI | `PI_SWITCHBOARD_DOCS_UI` | `false` | Serve Swagger UI at `/docs` ([API documentation](api.md#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
-| Stats | `PI_SWITCHBOARD_STATS` | `true` | Keep per-minute traffic stats in `pi-switchboard-stats.sqlite` in pi's agent dir for the console's Stats view (#216): requests by model, outcome and status, their timings, attempts, failures by class, fallbacks, tokens and cost. Never message content, the request's `user`, or a credential; a rejected request's model name, which the client chose, is cut to 128 characters, and past 20 names a minute the rest count as `(other)`. Rows older than 30 days are deleted. A write that can't get the file's lock within 250 ms is dropped, so stats never stall requests. A file that can't be opened is a warning, and the proxy runs without stats (`--stats` / `--no-stats`, `stats`) |
+| Stats | `PI_SWITCHBOARD_STATS` | `true` | Keep per-minute traffic stats in `pi-switchboard-stats.sqlite` in pi's agent dir for the console's Stats view (#216) and `pi-switchboard doctor`: requests by model, outcome and status, their timings, how many sent a `prompt_cache_key` (a count, never the key), attempts, failures by class, fallbacks, tokens and cost. Never message content, the request's `user`, or a credential; a rejected request's model name, which the client chose, is cut to 128 characters, and past 20 names a minute the rest count as `(other)`. Rows older than 30 days are deleted. A write that can't get the file's lock within 250 ms is dropped, so stats never stall requests. A file that can't be opened (one from a newer pi-switchboard included) is a warning, and the proxy runs without stats; an older one is migrated in place, keeping its rows ([`doctor`](#checking-the-setup-pi-switchboard-doctor)) (`--stats` / `--no-stats`, `stats`) |
 | Max body size | `PI_SWITCHBOARD_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes, `1048576`–`524288000` (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
 | Upstream timeout | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds, `5000`–`600000` (`--upstream-timeout` in seconds and `upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
 | Log level | `PI_SWITCHBOARD_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
 | Log format | `PI_SWITCHBOARD_LOG_FORMAT` | pretty on a terminal, `json` otherwise | `pretty` or `json` (also `--log-format`; no config-file key) |
+
+## Checking the setup: `pi-switchboard doctor`
+
+```bash
+pi-switchboard doctor                 # the config and the last week's prompt cache
+pi-switchboard doctor --window all    # today, week (the default) or all: the 30 days the stats file keeps
+pi-switchboard doctor --verify        # also resolve each login, as /healthz/creds?verify=true
+pi-switchboard doctor --json          # the report as JSON, for scripts
+```
+
+`pi-switchboard doctor` reads the config (`proxy-config.json`, with the same flags and variables the proxy would apply: it takes the server flags, so `pi-switchboard doctor --host 0.0.0.0` judges that bind address), pi's models and logins, and the stats file, and prints findings in two sections, each with a recommendation. It reports and recommends only: it changes no setting and no file (it opens the stats file read-only and migrates nothing), and calls no provider unless `--verify` asks it to, which may refresh an OAuth token as `/healthz/creds?verify=true` does. Its output names providers, models, aliases and settings, never a credential or message content.
+
+- **General**: what `/healthz/models` and `/healthz/creds` judge (no model exposed, an invalid exposure config, `enabledModels` patterns that match nothing, alias diagnostics, a `routing.logins` name that is no login or a provider whose every login is disabled, no login, a login that fails `--verify`), a config file that can't be read, proxy auth off or the docs page on while bound to an address other machines reach, stats off, and an alias's or `routing.logins`'s `fallbackOn` naming `upstream_error` or `timeout` (an alias's with its fallbacks in the window; the stats can't tell a move between logins from one to another model, so `routing.logins`' has no count). Cooldowns are not findings.
+- **Cache**: from the stats file, each model with at least 20 calls in the window: a hit rate under 50%, cache writes over 40% of its cost (at catalog prices), whether `PI_CACHE_RETENTION=long` pays against its break-even (Anthropic and Bedrock only), fallbacks over 5% of its calls, and over 10% of its requests without a `prompt_cache_key` on an API that caches by key. [Prompt caching](caching.md) explains each; the doctor reads `PI_CACHE_RETENTION` from its own environment, which may not be the proxy's. Stats that are off, absent or unreadable are said so, not shown as an empty section. The section ends with what the doctor cannot tell.
+
+Each finding has a `check` (`exposure`, `alias`, `login-routing`, `credentials`, `proxy-auth`, `docs-ui`, `stats`, `fallback-on`, `config-file`, `models-json`, `enabled-models`, `logins`; `hit-rate`, `cache-write-cost`, `retention`, `fallbacks`, `prompt-cache-key`), a `severity` (`error`, `warning` or `advice`), a `subject` when it is about one model, alias, provider, pattern or address, a `message` and a `recommendation`. `--json` prints:
+
+```json
+{
+  "general": [{ "check": "exposure", "severity": "error", "message": "…", "recommendation": "…" }],
+  "cache": [{ "check": "hit-rate", "severity": "warning", "subject": "anthropic/claude-opus-5-5", "message": "…", "recommendation": "…" }],
+  "window": "week",
+  "statsAvailable": true,
+  "limits": ["…"]
+}
+```
+
+The exit status is `1` when the general section has an error (what makes `/healthz/models` or `/healthz/creds` answer `503`, or the proxy refuse to start), `2` for a usage error (an unknown flag, an argument, a `--window` it doesn't know), and `0` otherwise: warnings and the cache section never fail it. Log lines go to stderr, errors only unless `--log-level` asks for more.
+
+A stats file from before the doctor (schema version 1) can't be read by it until a proxy has started once and migrated the file. In a new agent dir, loading pi's runtime creates pi's empty `auth.json` and `models-store.json`, as any pi start does.
 
 ## Logging
 

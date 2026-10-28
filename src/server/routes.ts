@@ -420,7 +420,9 @@ async function runChat(
     requestId,
     alias: resolved.alias ?? null,
     model: start.candidates[0]?.canonicalId ?? first.canonicalId,
-    stream: request.stream === true
+    stream: request.stream === true,
+    // Whether a key was sent (`null` is none), for the stats' count (#299); never the key itself.
+    promptCacheKey: typeof request.prompt_cache_key === 'string'
   })
   context.set('chatDispatched', true)
   // The client's disconnect only. The dispatch reads it to tell a client that left from an

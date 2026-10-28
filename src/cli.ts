@@ -4,8 +4,8 @@
  *
  * @remarks
  * Config priority: CLI args > env vars > JSON config file > defaults. Evaluating this module runs
- * the CLI on `process.argv`: `pi-switchboard tui` runs the console (#61), anything else the
- * headless proxy.
+ * the CLI on `process.argv`: `pi-switchboard tui` runs the console (#61), `pi-switchboard doctor`
+ * checks the config and the prompt cache (#299), anything else runs the headless proxy.
  *
  * @packageDocumentation
  */
@@ -53,7 +53,7 @@ const main = defineCommand({
     name: 'pi-switchboard',
     version: packageJson.version,
     description:
-      "OpenAI-compatible HTTP API over pi's models, logins and providers. `pi-switchboard tui --help` for the interactive console"
+      "OpenAI-compatible HTTP API over pi's models, logins and providers. `pi-switchboard tui --help` for the interactive console, `pi-switchboard doctor --help` to check the config and the prompt cache"
   },
   args: {
     ...SERVER_ARGS,
@@ -150,14 +150,20 @@ const VALUE_FLAGS: ReadonlySet<string> = new Set([
   '--log-format'
 ])
 
+/** The subcommands, each loaded only when it runs. */
+type Subcommand = 'tui' | 'doctor'
+
 /**
- * Finds `tui` among the arguments: the first one that is neither a flag nor a flag's value, so
- * `pi-switchboard --port 4000 tui` runs the console as `pi-switchboard tui --port 4000` does.
+ * Finds the subcommand among the arguments: the first one that is neither a flag nor a flag's
+ * value, so `pi-switchboard --port 4000 tui` runs the console as `pi-switchboard tui --port 4000`
+ * does.
  *
  * @param args - the arguments after the program name
- * @returns the arguments without `tui` when it is the subcommand, else `undefined`
+ * @returns the subcommand and the arguments without it, or `undefined` for the headless proxy
  */
-function consoleArguments(args: readonly string[]): string[] | undefined {
+function subcommandOf(
+  args: readonly string[]
+): { readonly name: Subcommand; readonly rest: string[] } | undefined {
   let index = 0
   while (args[index]?.startsWith('-') === true) {
     const flag = args[index] ?? ''
@@ -165,18 +171,23 @@ function consoleArguments(args: readonly string[]): string[] | undefined {
     // A flag that takes a value (`--port 4000`, not `--port=4000`) skips that value too.
     if (!flag.includes('=') && VALUE_FLAGS.has(flag)) index += 1
   }
-  return args[index] === 'tui' ? args.toSpliced(index, 1) : undefined
+  const name = args[index]
+  return name === 'tui' || name === 'doctor' ? { name, rest: args.toSpliced(index, 1) } : undefined
 }
 
 /** Where the arguments start in `process.argv`, after node and the script. */
 const FIRST_ARGUMENT = 2
-/** The console's arguments, when the command is `pi-switchboard tui`. */
-const tuiArguments = consoleArguments(process.argv.slice(FIRST_ARGUMENT))
-if (tuiArguments === undefined) {
+/** The subcommand, when the command is `pi-switchboard tui` or `pi-switchboard doctor`. */
+const subcommand = subcommandOf(process.argv.slice(FIRST_ARGUMENT))
+// Each subcommand is loaded dynamically, on purpose: the console brings pi's interactive UI
+// (pi-tui and pi's login screens), which the headless proxy never loads, and the doctor is not
+// needed to serve. citty's subCommands would also run `main` after them.
+if (subcommand === undefined) {
   await runMain(main)
-} else {
-  // Dynamic on purpose: the console brings pi's interactive UI (pi-tui and pi's login screens),
-  // which the headless proxy never loads. citty's subCommands would also run `main` after it.
+} else if (subcommand.name === 'tui') {
   const { tuiCommand } = await import('@proxy/tui/command')
-  await runMain(tuiCommand, { rawArgs: tuiArguments })
+  await runMain(tuiCommand, { rawArgs: subcommand.rest })
+} else {
+  const { doctorCommand } = await import('@proxy/doctor/command')
+  await runMain(doctorCommand, { rawArgs: subcommand.rest })
 }

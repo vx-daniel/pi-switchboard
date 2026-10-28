@@ -41,7 +41,13 @@ describe('a listener that throws (#250)', () => {
       'active requests',
       onActiveRequestsChange,
       () => {
-        beginActiveRequest({ requestId: 'r-250', alias: null, model: 'p/m', stream: false })
+        beginActiveRequest({
+          requestId: 'r-250',
+          alias: null,
+          model: 'p/m',
+          stream: false,
+          promptCacheKey: false
+        })
       }
     ],
     [

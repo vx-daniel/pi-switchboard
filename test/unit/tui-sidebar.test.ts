@@ -51,6 +51,7 @@ function request(fields: Partial<ActiveRequest>, ageMs = 12_000): ActiveRequest 
     model: 'alpha/model',
     attempt: 1,
     stream: true,
+    promptCacheKey: false,
     firstEventAt: undefined,
     startedAt: NOW - ageMs,
     ...fields

@@ -1,4 +1,6 @@
-import { mkdtempSync, rmSync } from 'node:fs'
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
@@ -15,6 +17,44 @@ import { afterEach, describe, expect, test } from 'vite-plus/test'
 const opened: StatsStore[] = []
 /** Directories made by a test, removed after it. */
 const directories: string[] = []
+/** Schema version 1's tables, as pi-switchboard 0.4.0 created them, before the first migration. */
+const V1_SCHEMA = `
+CREATE TABLE request_minutes (
+  minute INTEGER NOT NULL,
+  alias TEXT NOT NULL,
+  model TEXT NOT NULL,
+  outcome TEXT NOT NULL,
+  status INTEGER NOT NULL,
+  requests INTEGER NOT NULL,
+  duration_ms_total INTEGER NOT NULL,
+  duration_ms_max INTEGER NOT NULL,
+  first_event_ms_total INTEGER NOT NULL,
+  first_event_count INTEGER NOT NULL,
+  PRIMARY KEY (minute, alias, model, outcome, status)
+) WITHOUT ROWID;
+CREATE TABLE attempt_minutes (
+  minute INTEGER NOT NULL,
+  alias TEXT NOT NULL,
+  provider TEXT NOT NULL,
+  model TEXT NOT NULL,
+  attempts INTEGER NOT NULL,
+  failures INTEGER NOT NULL,
+  fallbacks INTEGER NOT NULL,
+  input_tokens INTEGER NOT NULL,
+  output_tokens INTEGER NOT NULL,
+  cache_read_tokens INTEGER NOT NULL,
+  cache_write_tokens INTEGER NOT NULL,
+  cost_usd REAL NOT NULL,
+  PRIMARY KEY (minute, alias, model)
+) WITHOUT ROWID;
+CREATE TABLE failure_minutes (
+  minute INTEGER NOT NULL,
+  model TEXT NOT NULL,
+  failure_class TEXT NOT NULL,
+  failures INTEGER NOT NULL,
+  PRIMARY KEY (minute, model, failure_class)
+) WITHOUT ROWID;
+`
 
 afterEach(() => {
   for (const store of opened.splice(0)) store.close()
@@ -50,6 +90,7 @@ function requestRow(
     durationMsMax: 0,
     firstEventMsTotal: 0,
     firstEventCount: 0,
+    promptCacheKeyRequests: 0,
     ...fields
   }
 }
@@ -158,6 +199,7 @@ describe('the stats store', () => {
       {
         model: 'a/fast',
         requests: 5,
+        promptCacheKeyRequests: 0,
         failed: 0,
         left: 1,
         averageMs: 420,
@@ -169,6 +211,7 @@ describe('the stats store', () => {
         outputTokens: 0,
         cacheReadTokens: 40,
         cacheWriteTokens: 15,
+        coldCacheWriteTokens: 0,
         costUsd: 0.75
       },
       expect.objectContaining({
@@ -257,7 +300,139 @@ describe('the stats store', () => {
     const newer = new DatabaseSync(path)
     newer.exec('PRAGMA user_version = 99')
     newer.close()
-    expect(() => openStatsStore(path)).toThrow(/newer/)
+    expect(() => openStatsStore(path)).toThrow(/newer than this pi-switchboard's \(2\): upgrade/)
+    expect(() => openStatsStore(path, { readOnly: true })).toThrow(/upgrade/)
+  })
+
+  // Catches the first migration (#299) losing an existing file's rows, leaving the new column out
+  // (every later write would fail), or not recording the new version (it would run again).
+  test('migrates a version 1 file in place, keeping its rows', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
+    directories.push(directory)
+    const path = join(directory, 'stats.sqlite')
+    const v1 = new DatabaseSync(path)
+    v1.exec(V1_SCHEMA)
+    v1.exec(`INSERT INTO request_minutes VALUES (1, 'coding', 'a/m', 'ok', 0, 4, 400, 200, 0, 0)`)
+    v1.exec('PRAGMA user_version = 1')
+    v1.close()
+    // Read-only, nothing is migrated: the doctor says to start the proxy instead.
+    expect(() => openStatsStore(path, { readOnly: true })).toThrow(/older.*start the proxy/)
+
+    const store = openStatsStore(path)
+    opened.push(store)
+    store.add({
+      requests: [
+        requestRow({ minute: 1, alias: 'coding', model: 'a/m', promptCacheKeyRequests: 1 })
+      ],
+      attempts: [],
+      failures: []
+    })
+
+    expect(store.models({ fromMinute: 0, toMinute: 10 })).toEqual([
+      expect.objectContaining({
+        model: 'a/m',
+        requests: 5,
+        promptCacheKeyRequests: 1,
+        averageMs: 80
+      })
+    ])
+    const check = new DatabaseSync(path, { readOnly: true })
+    expect(check.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 })
+    check.close()
+  })
+
+  // Catches two proxies starting on one older file: both read version 1 before either locks it,
+  // and the second ran the migration the first had just committed (`duplicate column`), so that
+  // proxy lost its stats (#328 review). The other proxy is a child process holding the write lock
+  // while it migrates; this one reads the version, waits for the lock, and must not migrate again.
+  test('opens a file another process migrated while it waited', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
+    directories.push(directory)
+    const path = join(directory, 'stats.sqlite')
+    const v1 = new DatabaseSync(path)
+    v1.exec(V1_SCHEMA)
+    v1.exec('PRAGMA user_version = 1')
+    // A proxy's file is in WAL mode, so a reader isn't blocked by the other proxy's lock.
+    v1.exec('PRAGMA journal_mode = WAL')
+    v1.close()
+    const otherProxy = [
+      "const { DatabaseSync } = require('node:sqlite')",
+      `const db = new DatabaseSync(${JSON.stringify(path)})`,
+      "db.exec('BEGIN IMMEDIATE')",
+      "process.stdout.write('locked\\n')",
+      'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)',
+      "db.exec('ALTER TABLE request_minutes ADD COLUMN prompt_cache_key_requests INTEGER NOT NULL DEFAULT 0')",
+      "db.exec('PRAGMA user_version = 2')",
+      "db.exec('COMMIT')"
+    ].join(';')
+    const child = spawn(process.execPath, ['-e', otherProxy], {
+      stdio: ['ignore', 'pipe', 'inherit']
+    })
+    await once(child.stdout, 'data')
+
+    const store = openStatsStore(path)
+    opened.push(store)
+    const [exitCode] = await once(child, 'exit')
+
+    expect(exitCode).toBe(0)
+    expect(store.models({ fromMinute: 0, toMinute: 10 })).toEqual([])
+  })
+
+  // Catches the doctor's read-only store writing to the file, leaving files beside it (a reader
+  // of a closed WAL file would create `-wal` and `-shm`), or missing rows a running proxy wrote.
+  test('reads a file read-only, beside a writer or alone, and writes nothing', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
+    directories.push(directory)
+    const path = join(directory, 'stats.sqlite')
+    const writer = openStatsStore(path)
+    writer.add({ requests: [requestRow({ minute: 1, model: 'a/m' })], attempts: [], failures: [] })
+    const whileWriting = openStatsStore(path, { readOnly: true })
+    expect(whileWriting.models({ fromMinute: 0, toMinute: 10 })).toEqual([
+      expect.objectContaining({ model: 'a/m', requests: 1 })
+    ])
+    whileWriting.close()
+    writer.close()
+    const files = readdirSync(directory)
+
+    const reader = openStatsStore(path, { readOnly: true })
+    opened.push(reader)
+    expect(reader.models({ fromMinute: 0, toMinute: 10 })).toEqual([
+      expect.objectContaining({ model: 'a/m', requests: 1 })
+    ])
+    expect(() => {
+      reader.add({
+        requests: [requestRow({ minute: 2, model: 'a/m' })],
+        attempts: [],
+        failures: []
+      })
+    }).toThrow(/readonly/i)
+    reader.close()
+    expect(readdirSync(directory)).toEqual(files)
+  })
+
+  // Catches docs/caching.md's `cold_pct` numerator summed over the wrong rows: only the writes of
+  // a minute and route that wrote more than it read are cold.
+  test('adds up the cache writes made in minutes that wrote more than they read', () => {
+    const store = memoryStore()
+    store.add({
+      requests: [],
+      attempts: [
+        attemptRow({ minute: 1, model: 'a/m', cacheReadTokens: 10, cacheWriteTokens: 300 }),
+        attemptRow({ minute: 2, model: 'a/m', cacheReadTokens: 500, cacheWriteTokens: 100 }),
+        attemptRow({
+          minute: 2,
+          model: 'a/m',
+          alias: 'x',
+          cacheReadTokens: 0,
+          cacheWriteTokens: 50
+        })
+      ],
+      failures: []
+    })
+
+    expect(store.models({ fromMinute: 0, toMinute: 10 })).toEqual([
+      expect.objectContaining({ cacheWriteTokens: 450, coldCacheWriteTokens: 350 })
+    ])
   })
 
   // Catches a write that waits seconds for another connection's lock: node:sqlite waits on the

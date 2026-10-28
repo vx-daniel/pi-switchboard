@@ -34,7 +34,7 @@ import {
   familyResolutionSchema,
   MISCONFIGURED_ALIAS
 } from '@proxy/openai/model-aliases'
-import { computeModelExposure } from '@proxy/openai/model-exposure'
+import { computeModelExposure, type ModelExposureConfig } from '@proxy/openai/model-exposure'
 import { loginDiagnosticSchema } from '@proxy/openai/model-logins'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
 import { scopeDiagnosticSchema } from '@proxy/pi/model-scope'
@@ -123,8 +123,8 @@ const modelsHealthSchema = z
   })
   .meta({ id: 'ModelsHealth' })
 
-/** `GET /healthz/models`'s body. */
-type ModelsHealth = z.infer<typeof modelsHealthSchema>
+/** `GET /healthz/models`'s body; `pi-switchboard doctor` (#299) reads the same report. */
+export type ModelsHealth = z.infer<typeof modelsHealthSchema>
 
 /** One provider's quota on `/healthz/creds` (#69). Documents the response; never parsed. */
 const credentialQuotaSchema = z
@@ -175,8 +175,8 @@ const credentialsHealthSchema = z
   })
   .meta({ id: 'CredentialsHealth' })
 
-/** `GET /healthz/creds`'s body. */
-type CredentialsHealth = z.infer<typeof credentialsHealthSchema>
+/** `GET /healthz/creds`'s body; `pi-switchboard doctor` (#299) reads the same report. */
+export type CredentialsHealth = z.infer<typeof credentialsHealthSchema>
 
 /**
  * Reports a provider's quota, as `/healthz/creds` shows it.
@@ -275,20 +275,26 @@ function failedCheck(context: HealthContext, check: string, error: unknown): Res
   )
 }
 
+/** A health report: the body, and whether the check passed (a 200) or not (a 503). */
+interface HealthReport<Body> {
+  readonly body: Body
+  readonly healthy: boolean
+}
+
 /**
- * Answers `GET /healthz/models`: the model runtime and the exposure it gives.
+ * Computes `GET /healthz/models`'s report: the model runtime and the exposure it gives.
  *
- * @param context - the request's Hono context
- * @param configReader - where the model exposure config comes from
- * @returns 200 with the model report, or 503 with the same report when no model is exposed, the
- *   exposure config is invalid, or an alias is misconfigured (named like an exposed model, set to
- *   an effort its model doesn't support, following an unknown family, or pinned outside it)
+ * @remarks
+ * The route and `pi-switchboard doctor` (#299) both read it, so the doctor's verdict is the
+ * route's. It fails when no model is exposed, the exposure config is invalid, or an alias is
+ * misconfigured (named like an exposed model, set to an effort its model doesn't support,
+ * following an unknown family, or pinned outside it).
+ *
+ * @param config - the model exposure config
+ * @returns the report
+ * @throws Error when pi's model runtime is not initialized
  */
-async function checkModels(
-  context: HealthContext,
-  configReader: ExposureConfigReader
-): Promise<Response> {
-  const config = await configReader()
+export function modelsHealthReport(config: ModelExposureConfig): HealthReport<ModelsHealth> {
   const available = getAvailableModels()
   const now = Date.now()
   const exposure = computeModelExposure(available, config, getSupportedThinkingLevels)
@@ -299,10 +305,10 @@ async function checkModels(
   // outside its family (#231). Requests still work, but the config does not do what it says. A
   // target that is not exposed may be on purpose, and an unreadable family member is the
   // catalogue's doing: both are only listed.
-  const misconfiguredAliasCount = aliasDiagnostics.filter((diagnostic) =>
+  const misconfigured = aliasDiagnostics.some((diagnostic) =>
     MISCONFIGURED_ALIAS.has(diagnostic.code)
-  ).length
-  const healthy = exposure.ok && exposedModelCount > 0 && misconfiguredAliasCount === 0
+  )
+  const healthy = exposure.ok && exposedModelCount > 0 && !misconfigured
   const body: ModelsHealth = {
     status: healthy ? 'ok' : 'unavailable',
     availableModelCount: available.length,
@@ -325,14 +331,32 @@ async function checkModels(
     cooldowns: activeCooldowns(now).map((cooldown) => cooldownView(cooldown, now)),
     modelsJsonError: getModelsJsonError() ?? null
   }
+  return { body, healthy }
+}
+
+/**
+ * Answers `GET /healthz/models`: the model runtime and the exposure it gives.
+ *
+ * @param context - the request's Hono context
+ * @param configReader - where the model exposure config comes from
+ * @returns 200 with the model report, or 503 with the same report when it fails
+ *   ({@link modelsHealthReport})
+ */
+async function checkModels(
+  context: HealthContext,
+  configReader: ExposureConfigReader
+): Promise<Response> {
+  const { body, healthy } = modelsHealthReport(await configReader())
   if (!healthy) {
     healthLogger.warn(
       'Model health check failed: {exposedModelCount} of {availableModelCount} models exposed',
       {
-        exposedModelCount,
-        availableModelCount: available.length,
-        exposureValid: exposure.ok,
-        misconfiguredAliasCount
+        exposedModelCount: body.exposedModelCount,
+        availableModelCount: body.availableModelCount,
+        exposureValid: body.exposureError === null,
+        misconfiguredAliasCount: body.aliasDiagnostics.filter((diagnostic) =>
+          MISCONFIGURED_ALIAS.has(diagnostic.code)
+        ).length
       }
     )
     return context.json(body, HTTP_SERVICE_UNAVAILABLE)
@@ -341,17 +365,23 @@ async function checkModels(
 }
 
 /**
- * Answers `GET /healthz/creds`: each provider's credential status, verified when `?verify=true`.
+ * Computes `GET /healthz/creds`'s report: each provider's credential status, verified when asked.
  *
- * @param context - the request's Hono context
- * @param verify - whether `?verify=true` asked pi to resolve each credential now
- * @returns 200 with the provider list, or 503 with the same list when no provider has a credential
- *   or a verified one fails
+ * @remarks
+ * The route and `pi-switchboard doctor --verify` (#299) both read it. It fails when no provider
+ * has a credential, or a verified one fails. Never a credential: provider IDs, how each is
+ * configured, and for a failed verification a summary safe for a response.
+ *
+ * @param verify - whether to resolve each credential now, which may refresh an OAuth token over
+ *   the network
+ * @returns the report
+ * @throws Error when pi's model runtime is not initialized
  */
-async function checkCredentials(context: HealthContext, verify: boolean): Promise<Response> {
+export async function credentialsHealthReport(
+  verify: boolean
+): Promise<HealthReport<CredentialsHealth>> {
   const providers = await getCredentialStatuses(verify)
-  const failed = providers.filter((provider) => provider.verified === false)
-  const healthy = providers.length > 0 && failed.length === 0
+  const healthy = providers.length > 0 && providers.every((provider) => provider.verified !== false)
   const logins = getLoginRegistration()
   const body: CredentialsHealth = {
     status: healthy ? 'ok' : 'unavailable',
@@ -364,10 +394,27 @@ async function checkCredentials(context: HealthContext, verify: boolean): Promis
       quota: credentialQuota(providerQuota(provider.provider))
     }))
   }
+  return { body, healthy }
+}
+
+/**
+ * Answers `GET /healthz/creds`: each provider's credential status, verified when `?verify=true`.
+ *
+ * @param context - the request's Hono context
+ * @param verify - whether `?verify=true` asked pi to resolve each credential now
+ * @returns 200 with the provider list, or 503 with the same list when it fails
+ *   ({@link credentialsHealthReport})
+ */
+async function checkCredentials(context: HealthContext, verify: boolean): Promise<Response> {
+  const { body, healthy } = await credentialsHealthReport(verify)
   if (!healthy) {
     healthLogger.warn(
       'Credential health check failed: {providerCount} providers, {failedCount} failed to verify',
-      { providerCount: providers.length, failedCount: failed.length, verify }
+      {
+        providerCount: body.providers.length,
+        failedCount: body.providers.filter((provider) => provider.verified === false).length,
+        verify
+      }
     )
     return context.json(body, HTTP_SERVICE_UNAVAILABLE)
   }

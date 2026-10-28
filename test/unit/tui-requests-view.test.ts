@@ -60,6 +60,7 @@ function chatFor(request: HttpRequest, fields: Partial<ActiveRequest> = {}): Act
     model: 'alpha/model-one',
     attempt: 1,
     stream: true,
+    promptCacheKey: false,
     startedAt: request.startedAt,
     firstEventAt: undefined,
     ...fields

@@ -67,6 +67,7 @@ function finishedAt(time: number): FinishedRequest {
     model: 'alpha/model',
     attempt: 1,
     stream: false,
+    promptCacheKey: false,
     firstEventAt: undefined,
     startedAt: time - 1000,
     endedAt: time,

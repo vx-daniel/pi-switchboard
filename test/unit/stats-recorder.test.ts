@@ -64,7 +64,7 @@ describe('the stats recorder', () => {
     recordRouteAttempt(next)
     recordRouteUsage(next, usage(100, 0.5))
     const request = beginActiveRequest(
-      { requestId: 'r1', alias: 'coding', model: 'alpha/one', stream: true },
+      { requestId: 'r1', alias: 'coding', model: 'alpha/one', stream: true, promptCacheKey: false },
       NOW - 2000
     )
     request.attempt('beta/two', 2)
@@ -93,6 +93,34 @@ describe('the stats recorder', () => {
     })
     expect(reads.timeline({ fromMinute: 1000, toMinute: 1001 }, 1)).toEqual([
       { minute: 1000, requests: 2, failed: 0, rejected: 1 }
+    ])
+    store.close()
+  })
+
+  // Catches the doctor's share of requests without a `prompt_cache_key` (#299) being wrong: a
+  // request with a key not counted, one without counted, or a rejected one counted as keyless.
+  test('counts the finished requests that sent a prompt_cache_key, and only those', () => {
+    const store = openStatsStore(':memory:')
+    const reads = { models: store.models }
+    const stop = startStatsRecorder({ ...store, close: () => undefined }, { now: () => NOW })
+    for (const [requestId, promptCacheKey] of [
+      ['keyed-1', true],
+      ['keyed-2', true],
+      ['keyless', false]
+    ] as const) {
+      beginActiveRequest(
+        { requestId, alias: null, model: 'alpha/one', stream: false, promptCacheKey },
+        NOW - 1000
+      ).end('ok', NOW)
+    }
+    recordRejectedRequest(
+      { requestId: 'rejected', model: 'alpha/one', status: 400, startedAt: NOW },
+      NOW
+    )
+    stop()
+
+    expect(reads.models(ALL)).toEqual([
+      expect.objectContaining({ model: 'alpha/one', requests: 3, promptCacheKeyRequests: 2 })
     ])
     store.close()
   })
