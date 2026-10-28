@@ -38,6 +38,7 @@ import {
   type ServerSettings,
   type StatsState
 } from '@proxy/doctor/findings'
+import { loginBase } from '@proxy/openai/model-logins'
 import { canonicalModelId } from '@proxy/pi/model-id'
 import { getAvailableModels, initRegistry } from '@proxy/pi/registry'
 import { credentialsHealthReport, modelsHealthReport } from '@proxy/server/health'
@@ -134,15 +135,17 @@ function readStats(enabled: boolean, window: StatsWindow, now: number): DoctorSt
 }
 
 /**
- * Reads pi's catalog entry for each available model, by canonical ID: a `{provider}-N` login's
- * models under that login's ID, the first entry for an ID kept.
+ * Reads pi's catalog entry for each available model, by canonical ID under the login's base
+ * provider (`loginBase`, as exposure groups logins): the stats record a `{provider}-N` login's
+ * calls under its base's ID, which has no entry of its own when only that login has a credential
+ * (#338). The first entry for an ID is kept, since a model's prices don't depend on the login.
  *
  * @returns the catalog
  */
 function catalog(): Map<string, CatalogModel> {
   const byId = new Map<string, CatalogModel>()
   for (const model of getAvailableModels()) {
-    const id = canonicalModelId(model)
+    const id = canonicalModelId({ id: model.id, provider: loginBase(model.provider).base })
     if (!byId.has(id)) byId.set(id, { api: model.api, baseUrl: model.baseUrl, cost: model.cost })
   }
   return byId
