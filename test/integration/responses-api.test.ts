@@ -551,6 +551,34 @@ describe('the Responses API', () => {
     expect(answer.body).toMatchObject({ error: { param: 'input.0.encrypted_content' } })
   })
 
+  // Catches a function tool's or a json_schema format's description trimmed on this route's own
+  // schema (#255): the model reads it, and a list or a trailing example lost its layout.
+  test('keeps the whitespace of tool and json_schema descriptions', async () => {
+    const tool = '  Run it.\n  - once\n'
+    const format = '\n  one field\n'
+    const answer = await post({
+      model: 'mock/text',
+      input: 'Hi',
+      tools: [{ type: 'function', name: 'run', description: tool }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'answer',
+          description: format,
+          schema: { type: 'object' }
+        }
+      }
+    })
+
+    expect(answer.status).toBe(HTTP_OK)
+    expect(lastUpstream()['tools']).toEqual([
+      expect.objectContaining({ function: expect.objectContaining({ description: tool }) })
+    ])
+    expect(lastUpstream()['response_format']).toMatchObject({
+      json_schema: { description: format }
+    })
+  })
+
   // Catches a replayed assistant turn refused for the empty `annotations`/`logprobs` the SDK
   // echoes back, or a non-empty one accepted though the proxy can't send it on.
   test.each(['annotations', 'logprobs'])(

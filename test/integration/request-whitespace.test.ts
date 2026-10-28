@@ -119,6 +119,26 @@ describe('whitespace in request text reaches the provider', () => {
       expect.objectContaining({ role: 'tool', tool_call_id: 'call_1', content: '\n  output\n' })
     ])
   })
+
+  // Catches a tool's or a schema's description trimmed (#255): every provider gives it to the
+  // model, so a description written as a list or with a trailing example lost its layout.
+  test('tool and json_schema descriptions keep their whitespace', async () => {
+    const body = await upstreamBody(CHAT_MODEL, {
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [{ type: 'function', function: { name: 'run', description: INDENTED } }],
+      response_format: {
+        type: 'json_schema',
+        json_schema: { name: 'answer', description: '\n  one field\n', schema: { type: 'object' } }
+      }
+    })
+
+    expect(field(body, 'tools')).toEqual([
+      expect.objectContaining({ function: expect.objectContaining({ description: INDENTED }) })
+    ])
+    expect(field(body, 'response_format')).toMatchObject({
+      json_schema: { description: '\n  one field\n' }
+    })
+  })
 })
 
 describe('a blank system message', () => {

@@ -960,8 +960,10 @@ OpenAI's spec, as `openai-spec.test.ts` does the top level.
 ### Text is kept as sent
 
 Request text whose whitespace is data reaches pi exactly as the client sent it (#145): message
-content of every role, `text` parts, tool results, `stop` sequences and `prediction` content. These
-use the one `textSchema` (`src/openai/text-schemas.ts`). Every other request string (`model`, tool
+content of every role, `text` parts, tool results, `stop` sequences, `prediction` content, and the
+`description` of a function tool or a `json_schema` response format, on chat completions and the
+Responses API (#255: every provider gives them to the model). These use the one `textSchema`
+(`src/openai/text-schemas.ts`). Every other request string (`model`, tool
 and function names, call IDs, `user`, `prompt_cache_key`, image URLs, tool-call `arguments`) is
 trimmed, as the `zod/prefer-string-schema-with-trim` lint rule requires. That rule is off for
 `text-schemas.ts` alone (`vite.config.ts`, with the reason), so no other file can opt out by
