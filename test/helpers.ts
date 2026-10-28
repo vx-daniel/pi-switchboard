@@ -131,7 +131,7 @@ export async function jsonBody(response: Response): Promise<unknown> {
  * environment.
  *
  * @remarks
- * Auth is off and agentic mode is disabled; every other setting is the default from
+ * Auth is off; every other setting is the default from
  * `DEFAULT_CONFIG` (`src/config/schema.ts`).
  *
  * @returns the config
@@ -142,7 +142,6 @@ export function testConfig(): ServerConfig {
     port: 4141,
     proxyAuth: { kind: 'off' },
     hostOriginGuardEnabled: false,
-    agenticEnabled: false,
     remoteImagesEnabled: false,
     docsUiEnabled: false,
     responsesApiEnabled: false,

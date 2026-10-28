@@ -131,15 +131,3 @@ describe('PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS', () => {
     expect(warnings()).toEqual([])
   })
 })
-
-describe('PI_SWITCHBOARD_AGENTIC', () => {
-  // Catches the one boolean env var read without the shared parser: `TRUE` was silently false.
-  test('a value other than true or false is warned about and read as false', () => {
-    vi.stubEnv('PI_SWITCHBOARD_AGENTIC', 'TRUE')
-
-    expect(loadConfig().agenticEnabled).toBe(false)
-    expect(warnings()).toEqual([
-      '"PI_SWITCHBOARD_AGENTIC"="TRUE" is not "true" or "false"; treating it as false'
-    ])
-  })
-})
