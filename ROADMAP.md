@@ -77,7 +77,7 @@ Validate response shapes against the official OpenAI Node SDK to catch field-lev
 - [x] Add `openai` as explicit devDependency
 - [x] Wire-level SSE conformance tests (chunk shape, `finish_reason` lifecycle, tool deltas, usage chunk, `[DONE]`)
 - [x] Non-streaming response conformance tests (`ChatCompletion` shape, `content` nullability, `tool_calls`)
-- [x] SDK round-trip conformance tests using `openai` client with `_strict_response_validation: true`
+- [x] SDK round-trip conformance tests using the `openai` client against the in-process app (without `_strict_response_validation`)
 - [x] Security tests (image URL blocking, oversized payloads)
 - [x] Code audit identified gaps in tool_choice forwarding, strict mode, and PLAN.md drift — tracked in Phase 3C
 
@@ -150,10 +150,12 @@ What the name promises, under constitution principle VI (explicit, visible, expo
 - [x] Aliases: virtual model names (#66)
 - [x] Fallback chains for aliases (#67)
 - [x] Cooldowns after rate limits (#68); pi already makes no hidden SDK retries; ended early by `DELETE /v1/switchboard/cooldowns` or the console's `c` (#182)
-- [x] Quota awareness from provider rate-limit headers (#69): tracked, shown, and kept in reserve by fallback chains (`routing.reserve`); Anthropic recorded, Codex and Copilot in #238
+- [x] Quota awareness from provider rate-limit headers (#69): tracked, shown, and kept in reserve by fallback chains (`routing.reserve`); Anthropic and pi 1.4's ChatGPT sign-in recorded (#238)
+- [ ] Quota for a ChatGPT plan signed in through pi 1.4's `openai` login, which sends no quota headers (#332)
 - [x] Usage and cost by route (#70): log tags, in-memory totals, the stats file and
-      `GET /v1/switchboard/usage` (#225)
-- [x] Several logins per provider (#227): `{provider}-N` logins found in pi's store at startup and added from the console; one model, routing picks the login (constitution 3.6.0); a live recording through a copy, and putting a login first, continue in #233
+      `GET /v1/switchboard/usage` (#224)
+- [x] Several logins per provider (#227): `{provider}-N` logins found in pi's store at startup and added from the console; one model, routing picks the login (constitution 3.6.0); a live recording through a copy, login order and disabled logins (#233)
+- [x] Reasoning effort per alias target (#230), family aliases and the built-in `-latest` aliases (#231)
 
 ## Phase 6 — More of OpenAI's API
 

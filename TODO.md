@@ -414,8 +414,8 @@ since the rename; each issue holds the detailed checklist.
       (amd64, arm64)
 - [x] Standalone binary (#61); a manual check of a real login's token refresh inside the binary is
       tracked in #301
-  - [x] Bun-compiled binary for linux/darwin x64/arm64, tested in CI, uploaded to each release
-        with `SHA256SUMS` (ported from #86)
+  - [x] Bun-compiled binary for linux/darwin/windows x64/arm64, tested in CI, uploaded to each
+        release with `SHA256SUMS` (`SHA256SUMS-windows` for Windows; ported from #86)
   - [x] Opt-in `pi-switchboard tui` console: logs, status, accounts, and logins through pi's own
         screens, in one process with the server
   - [x] The console's per-route stats from #70's totals
@@ -433,9 +433,8 @@ since the rename; each issue holds the detailed checklist.
           diagnostics and family resolutions
     - [x] Phase 5: a Requests table over the log (`r` for the raw log), which needs a registry of
           every route's requests, not only chat
-    - [ ] Left out on purpose, as follow-ups: view state in the chrome (#264), the Models detail
-          pane (#265), startup event rows and an animated in-flight mark in the Requests table
-          (#266)
+    - [x] Follow-ups: view state in the chrome (#264), the Models detail pane (#265), startup
+          event rows and an animated in-flight mark in the Requests table (#266)
 
 ## Phase 5 — Routing across pi's logins
 
@@ -447,7 +446,8 @@ serving model and login reported under `x_pi` and in the log.
 - [x] Cooldowns after rate limits (#68): a 429 cools the provider, a 503 the model, for the time the response gives (else 60 s, 180 s, doubling); chains that name the class skip it; shown on `/healthz/models`, `/v1/switchboard/models` and `x_pi.attempts`
 - [x] Ending cooldowns early (#182): `DELETE /v1/switchboard/cooldowns` (all, `?provider=` a login's, `?model=` a model's own; `404` for an unknown name) and the console's `c` (all), constitution 3.8.0
 - [x] Quota awareness (#69): research, tracking (`/healthz/creds`, `/v1/switchboard/models`, the console's Accounts view), the per-provider reserve a fallback chain keeps (`routing.reserve`), and Anthropic's `quota` recording replayed end to end; pi 1.4's ChatGPT sign-in recorded (#238: it sends no quota headers); the legacy Codex backend and Copilot are not recorded, by decision
-- [ ] Usage and cost by route (#70): done are the `alias` and `attempt` on the upstream log lines, the running totals per alias × provider × model in memory (`src/server/route-totals.ts`) for the console (#61), and per-minute stats kept across restarts in SQLite (`src/stats/`, #216); open is whether to serve them at `GET /healthz/usage`
+- [ ] Quota for a ChatGPT plan signed in through pi 1.4's `openai` login (#332): it sends no quota headers, so it shows `null` quota and `routing.reserve` never skips it
+- [x] Usage and cost by route (#70): the `alias` and `attempt` on the upstream log lines, the running totals per alias × provider × model in memory (`src/server/route-totals.ts`) for the console (#61), per-minute stats kept across restarts in SQLite (`src/stats/`, #216), and served over HTTP at `GET /v1/switchboard/usage` (#224)
 - [x] Stats dashboard (#216): the stats store and recorder, and the console's Stats view rebuilt on its queries (today, week and 30 days; overview, timeline, models, errors)
 - [x] Cache reads and writes apart (#297): `GET /v1/switchboard/usage` reports `cache_read_tokens` and `cache_write_tokens` instead of their sum `cache_tokens`; the console shows the cache hit rate (Stats view `hit`, the in-memory table's `hit`, `cache read` and `cache write`, the sidebar's SESSION panel), from one definition in `src/stats/cache.ts`, and its tokens in are the whole prompt
 - [x] Usage limits told apart (#199): a plan's usage limit (its wording, or a wait of 5 minutes or more) answers `429` with OpenAI's `insufficient_quota` and `x-should-retry: false`; a rate limit whose wait the proxy read carries `retry-after` and `retry-after-ms`; routing still treats both as `rate_limit`

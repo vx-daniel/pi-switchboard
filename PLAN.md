@@ -160,9 +160,9 @@ document is registered before the auth middleware in `createApp`; `/docs` is out
 What the document covers: every route the proxy serves, which a test checks against the app's
 route table.
 
-- the stable routes, `GET /v1/switchboard/models`, `GET /v1/switchboard/usage` and
-  `DELETE /v1/switchboard/cooldowns`, with their request and response schemas, error statuses and
-  the bearer scheme;
+- the stable routes, `POST /v1/responses` (experimental), `GET /v1/switchboard/models`,
+  `GET /v1/switchboard/usage` and `DELETE /v1/switchboard/cooldowns`, with their request and
+  response schemas, error statuses and the bearer scheme;
 - the health endpoints, under "Operational", with their bodies (`/healthz` needs no token);
 - the document and the docs page, under "Documentation". `/docs` is registered whatever the
   config, so the document does not depend on `docsUi`;
@@ -181,6 +181,9 @@ documents it, so no parameter or request body is described by hand:
 |---|---|---|
 | `GET /v1/models/{model}` | path `model` | `modelPathSchema` |
 | `POST /v1/chat/completions` | header `X-Switchboard-Upstream-Api-Key`, JSON body | `chatHeadersSchema`, `chatRequestBodySchema` |
+| `POST /v1/responses` | header `X-Switchboard-Upstream-Api-Key`, JSON body | `chatHeadersSchema`, `responsesRequestBodySchema` (`src/server/responses-route.ts`) |
+| `GET /v1/switchboard/usage` | query `window` | `usageQuerySchema` |
+| `DELETE /v1/switchboard/cooldowns` | query `provider`, `model` | `cooldownsQuerySchema` |
 | `GET /healthz/creds` | query `verify` | `credentialsQuerySchema` |
 
 - **The chat body keeps the proxy's 400/422 split and wording.** The validator's hook answers a
@@ -199,8 +202,10 @@ documents it, so no parameter or request body is described by hand:
 - **Model IDs from the path are trimmed,** as the chat body's `model` already was (the repo's Zod
   lint rule requires `.trim()`): `/v1/models/%20gpt-x` finds `gpt-x`. The exposure config is
   still matched exactly as written (constitution, principle IV).
-- **No failure hooks besides the chat body's.** The path, header and query schemas accept any value
-  the request can carry, so their validators never fail.
+- **No failure hooks besides the request bodies'.** The path and query schemas accept any value
+  the request can carry. The header schema refuses an empty upstream key, but
+  `upstreamKeyHeaderMiddleware` (`src/server/middleware.ts`) answers that with an OpenAI-style
+  400 first (#207), so no validator fails into hono-openapi's own error shape.
 - **No default 400.** `defaultValidationErrorResponse` is off: hono-openapi's default documents a
   400 in its own `{ success, error, data }` shape, which the proxy never sends.
 
@@ -235,6 +240,7 @@ Return OpenAI-style errors for:
 - `POST /v1/audio/*`
 - `POST /v1/images/*`
 - assistants, threads, runs, files, batches, fine-tuning
+- `/v1/responses/*` (the stored-response operations)
 
 Any other request no route matches, a known path with another method included, answers 404 too,
 in OpenAI's error shape and wording: `Invalid URL (<METHOD> <path>)`, `invalid_request_error`
@@ -1302,23 +1308,28 @@ Both fields are only injected for OpenAI-compatible APIs. Other providers are un
 
 ### Resilience architecture — intentional design
 
-The proxy is a stateless translation layer, not a load balancer or API gateway. The
-following are intentionally omitted:
+The proxy is a translation layer with explicit routing (aliases, fallback chains, cooldowns,
+quota reserve, logins; #66–#70, #227), not a load balancer or API gateway. The following are
+intentionally omitted:
 
 - **No concurrency limiter**: The primary deployment model is a local proxy serving one
   client (Zed, Continue, etc.). The client controls its own concurrency. A server-side
   limiter would duplicate client logic and cause confusing double-throttling.
-- **No circuit breaker**: For a single-client local proxy, a circuit breaker would
-  prevent requests after upstream failures even when the upstream has recovered. The
-  client already handles retries.
+- **No circuit breaker beyond cooldowns**: a cooldown (#68, "Cooldowns" above) skips a candidate
+  only where the route names its failure class, and never every candidate: the request still
+  makes one real call (`src/server/route-cooldowns.ts`).
 - **No rate limiting**: Same argument — the client controls its own request rate.
-- **No retry logic**: Retries are the client's responsibility. The proxy never resends
-  a failed upstream request.
+- **No retry of the same candidate**: the proxy never resends a failed upstream request to the
+  model and login that failed. A failure moves the request to the next candidate only when the
+  route names its class (an alias's `fallbackOn`, `routing.logins.fallbackOn`;
+  `src/server/route-hops.ts`).
 
 Upstream overload is handled reactively:
-- `mapUpstreamError()` detects rate limit (429) and overload (503/529) patterns
+- `mapUpstreamError()` (`src/server/errors.ts`) detects rate limit (429) and overload (503/529)
 - A warning-level `server.chat` log line ("Upstream overloaded") is emitted for these events
-- The mapped error propagates to the client as an OpenAI-style error response
+  (`src/server/chat-dispatch.ts`)
+- With no candidate left, the mapped error propagates to the client as an OpenAI-style error
+  response
 
 If the proxy is deployed in a multi-client scenario (e.g., shared team proxy), resilience
 features should be provided by an external reverse proxy (nginx, Caddy, etc.) rather
@@ -1326,7 +1337,8 @@ than built into this translation layer.
 
 ### Stateless architecture — no session continuity
 
-The proxy is fully stateless. Each `POST /v1/chat/completions` request builds a fresh
+The proxy keeps no conversation state (its routing state, cooldowns, quota and availability, is
+per provider and model). Each `POST /v1/chat/completions` request builds a fresh
 `Context` from the `messages` array and discards it after the response. There is no
 session persistence, no conversation memory, and no model-change detection across requests.
 
@@ -1335,8 +1347,8 @@ This is by design (matches the standard OpenAI chat completions contract), but m
 - Switching models between requests is invisible to the proxy
 - There is no server-side context caching or optimization
 
-The pi SDK's stateful `AgentSession` is not used. Phase 4 (experimental agentic mode)
-is intended to address this but is not started.
+The pi SDK's stateful `AgentSession` is not used. Agentic mode, which would, is "Later, not
+planned" (ROADMAP).
 
 ### API-aware payload translation
 
@@ -2001,20 +2013,38 @@ src/
 ├── env.d.ts            -- typed process.env
 ├── config/
 │   ├── schema.ts         -- ProxyConfig Zod schema and types, defaults, repair, JSON I/O (exported via ./config)
-│   └── env.ts            -- ServerConfig from file + env + CLI overrides
+│   ├── env.ts            -- ServerConfig from file + env + CLI overrides
+│   └── agent-dir.ts      -- pi's agent directory, resolved without loading pi (#165)
 ├── doctor/
 │   ├── command.ts        -- `pi-switchboard doctor` (citty): flags, text and JSON output, exit status
 │   ├── collect.ts        -- reads the config, pi's runtime, the health reports and the stats file; judges them
-│   └── findings.ts       -- pure findings and thresholds, for the CLI and the console's Doctor view (#325)
+│   ├── findings.ts       -- pure findings and thresholds, for the CLI and the console's Doctor view (#325)
+│   └── summary.ts        -- the findings summed up in text, for the CLI and the console
 ├── logging/
 │   └── index.ts          -- LogTape setup, categories, level guide, redaction (exported via ./logging)
 ├── server/
 │   ├── app.ts            -- Hono app assembly (middleware + routes)
 │   ├── routes.ts         -- GET /v1/models, GET /v1/models/:model, the /v1/switchboard/ routes, POST /v1/chat/completions
+│   ├── responses-route.ts -- POST /v1/responses (experimental, #140)
+│   ├── chat-dispatch.ts  -- runs a request on its model or an alias's fallback chain (#67), and answers it
+│   ├── answer-formats.ts -- answers a dispatched request as a chat completion or a Responses API response
+│   ├── request-rejection.ts -- answers a body that failed its route's schema (chat and Responses)
+│   ├── route-plan.ts     -- a request's candidates, in order (#67, #227)
+│   ├── route-hops.ts     -- which failures move a request along its candidates
+│   ├── route-cooldowns.ts -- which candidates cooldowns skip, and how a failure starts one (#68)
+│   ├── route-reserve.ts  -- skips a login below its quota reserve (#69)
+│   ├── route-totals.ts   -- running usage totals per alias × provider × served model (#70)
+│   ├── alias-effort.ts   -- an alias target's reasoning effort, per candidate (#230)
 │   ├── usage.ts          -- GET /v1/switchboard/usage: the stats file's usage over a window
 │   ├── cooldowns.ts      -- DELETE /v1/switchboard/cooldowns, and the cooldown shape /healthz/models lists
 │   ├── health.ts         -- GET /healthz, /healthz/models, /healthz/creds
+│   ├── openapi.ts        -- the OpenAPI document, request schemas, the not-supported endpoints (#129)
 │   ├── middleware.ts     -- request-id, proxy-auth, body size limit, disconnect detection
+│   ├── proxy-auth.ts     -- the proxy auth a running server applies; the console changes it live
+│   ├── host-origin-guard.ts -- refuses requests a browser page could send (#188)
+│   ├── active-requests.ts -- chat requests in flight and recently finished, for the console
+│   ├── http-requests.ts  -- every HTTP request answered and in flight, for the console
+│   ├── console-events.ts -- the proxy's lifecycle events, for the console's Requests table (#266)
 │   ├── errors.ts         -- OpenAI-style error helpers, upstream error mapping
 │   ├── request-id.ts     -- piproxy-{random} generation
 │   ├── http-status.ts    -- named HTTP status codes
@@ -2022,25 +2052,46 @@ src/
 │   └── types.ts          -- Hono ProxyEnv type
 ├── openai/
 │   ├── schemas.ts              -- Zod v4 request schemas
+│   ├── text-schemas.ts         -- the string schema for text whose whitespace is data (#145)
 │   ├── validate.ts             -- request validation with rejected-field checks
 │   ├── messages.ts             -- OpenAI messages -> pi Context
 │   ├── remote-images.ts        -- remote image URLs -> data URIs, before conversion (remoteImages on)
 │   ├── remote-image-fetch.ts   -- one SSRF-safe image fetch: address policy, pinned DNS, limits
 │   ├── model-exposure.ts       -- exposure engine: filtering, public IDs, resolution (exported via ./exposure)
+│   ├── model-aliases.ts        -- aliases and fallback chains from proxy-config.json (#66, #67)
+│   ├── model-families.ts       -- model families and the built-in `-latest` aliases (#231)
+│   ├── model-logins.ts         -- a `{provider}-N` login's models are the base's (#227)
 │   ├── models.ts               -- ExposedModel -> OpenAI model object
+│   ├── effort-levels.ts        -- reasoning_effort values <-> pi thinking levels, without loading pi
 │   ├── reasoning-effort.ts     -- reasoning_effort -> pi thinking level
 │   ├── responses.ts            -- pi AssistantMessage -> OpenAI ChatCompletion
 │   ├── sse.ts                  -- pi events -> SSE ChatCompletionChunk frames
 │   ├── tools.ts                -- OpenAI function tools -> pi Tool[]
-│   └── json-schema-to-typebox.ts -- JSON Schema -> TypeBox conversion
+│   ├── json-schema-to-typebox.ts -- JSON Schema -> TypeBox conversion
+│   └── responses-api/          -- the Responses API (#140): request schema and conversion, output, stream, reasoning token, doc schemas
 ├── pi/
 │   ├── registry.ts       -- ModelRuntime + SettingsManager init
 │   ├── complete.ts       -- ModelRuntime streamSimple bridge
+│   ├── model-id.ts       -- the canonical `provider/model-id`
 │   ├── model-scope.ts    -- port of pi's enabledModels pattern resolver
+│   ├── accounts.ts       -- `{provider}-N` logins (#227)
+│   ├── account-provider.ts -- a login slot's provider, a copy of a built-in one (imported by scripts/)
+│   ├── availability.ts   -- models a login refused or answered (#174)
+│   ├── cooldowns.ts      -- cooldown state after rate limits and overload (#68)
+│   ├── reset-time.ts     -- when a limited provider says it takes requests again
+│   ├── quota.ts          -- subscription quota from response headers (#69)
+│   ├── payload-fields.ts -- OpenAI fields -> each pi API's payload
+│   ├── cache-breakpoints.ts -- prompt_cache_breakpoint carried to the APIs that take it
+│   ├── temperature.ts    -- the temperature given to pi, and where it does not reach the provider
+│   ├── upstream-error.ts -- the provider's HTTP status in pi's error messages
 │   └── upstream-idle.ts  -- upstream idle timeout, relayed over pi's event stream
+├── standalone/
+│   ├── main.ts           -- the standalone binary's entry point (#61)
+│   └── sandbox-env.ts    -- recovers process.env where a sandbox empties it for Bun
+├── stats/                -- the stats store (#216): store.ts, recorder.ts, windows.ts, cache.ts
 ├── sync/
 │   └── zed.ts            -- Zed settings.json model sync
-├── tui/
+├── tui/                  -- the console (selected files; see "Console" below)
 │   ├── accounts-view.ts  -- the Accounts view's rows: providers, quota used, the login row
 │   ├── command.ts        -- `pi-switchboard tui` (citty)
 │   ├── console.ts        -- the console: pi-tui screen, server in the same process
@@ -2052,7 +2103,10 @@ src/
 │   ├── status-refresh.ts -- the status and accounts reads: newest wins, no stale verification
 │   └── stderr-capture.ts -- stray stderr writes to the log view, a whole line at a time
 └── utils/
-    └── guards.ts         -- isRecord() and other type guards
+    ├── guards.ts         -- isRecord() and other type guards
+    ├── async-iterables.ts -- async iterator helpers
+    ├── numbers.ts        -- numbers read from provider or operator text
+    └── time.ts           -- time units in milliseconds
 ```
 
 ### Console (`pi-switchboard tui`, #61)
@@ -2387,7 +2441,7 @@ removed.
 
 ### Scaling notes
 
-`routes.ts` is the sole composition root. The chat route validates its body and header with hono-openapi's `validator()`, then `handleChatCompletion` drives the helpers (`inlineImages`, `buildPiContext`, `checkRequestAuth`, `streamChat`, `completeChat`). This is manageable for the current surface but should be decomposed before a second completion route (the Responses API, #140) or routing middleware (#66–#70) is added.
+`createApp` (`src/server/app.ts`) assembles the middleware, the health routes and `createRoutes` (`src/server/routes.ts`), which registers the model, switchboard and chat routes and the Responses route (`registerResponsesRoute`). Both completion routes validate their body and header with hono-openapi's `validator()` and then call `runChat`, which resolves the model or alias, checks upstream credentials (`findCredentialedStart`), inlines remote images (`inlineImages`), builds the pi context (`buildPiContext`), and hands the candidates to `dispatchChat` (`src/server/chat-dispatch.ts`); the route modules (`route-plan.ts`, `route-hops.ts`, `route-cooldowns.ts`, `route-reserve.ts`) decide the order and the hops, and `answer-formats.ts` shapes the answer for each route.
 
 The pi extension lives in `extensions/proxy/`, isolated from the core proxy. pi loads `index.ts` (the `/proxy` command family and lifecycle hooks) as the single extension; the sibling modules split the rest: `state.ts` (shared config/registry state), `process.ts` (PID file, probe, start/stop/status), `reports.ts` (show/models/verify), `zed-sync.ts`, `settings-panel.ts`, and `model-selector.ts`. Add new extension modules there rather than as top-level files in `extensions/`, which pi would load as separate extensions.
 
@@ -2521,7 +2575,7 @@ against the in-process Hono app, without `_strict_response_validation`.
 
 Validate that the proxy produces responses the official OpenAI SDK can parse without errors. This is the single highest-value test investment because it catches the exact field-level bugs that break real clients (Open WebUI, Continue, Aider).
 
-There is no standard conformance test suite for OpenAI-compatible APIs. Every project (LiteLLM, vLLM, Ollama) rolls its own. The approach here uses the official `openai` Node SDK (v6+) as a client with strict response validation enabled.
+There is no standard conformance test suite for OpenAI-compatible APIs. Every project (LiteLLM, vLLM, Ollama) rolls its own. The approach here uses the official `openai` Node SDK (v6+) as a client; the plan was strict response validation, and the built tests run without it (Status above).
 
 Pre-work:
 
@@ -2555,7 +2609,7 @@ Validate the exact `ChatCompletion` shape from `buildChatCompletion` output:
 
 **SDK round-trip conformance (requires one API credential)**
 
-Use `new OpenAI({ baseURL, apiKey: "dummy" })` with `_strict_response_validation: true` against the running proxy:
+Use `new OpenAI({ baseURL, apiKey: "dummy" })` against the in-process app (planned with `_strict_response_validation: true`; built without it):
 
 - `client.models.list()` succeeds and returns iterable model objects
 - `client.models.retrieve(id)` succeeds for an exposed model
@@ -2590,7 +2644,7 @@ Release gate:
 - all response conformance tests pass without credentials
 - all security tests pass without credentials
 - SDK conformance tests pass when credentials are available, skip cleanly otherwise
-- the `openai` Node SDK with `_strict_response_validation: true` parses every response without errors
+- the `openai` Node SDK parses every response without errors (`_strict_response_validation` is not set)
 - typecheck, lint, and tests pass
 
 ### Later, not planned — experimental agentic mode
