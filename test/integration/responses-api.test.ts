@@ -551,6 +551,19 @@ describe('the Responses API', () => {
     expect(answer.body).toMatchObject({ error: { param: 'input.0.encrypted_content' } })
   })
 
+  // Catches an item of a type the proxy doesn't take reported at the whole item instead of its
+  // `type`: every branch's `type` or `role` differs, so all are set aside, and then compared again
+  // as before #318 rather than giving up at the union.
+  test('refuses an input item of an unknown type at its type', async () => {
+    const answer = await post({
+      model: 'mock/text',
+      input: [{ type: 'web_search_call', id: 'ws_1', status: 'completed' }]
+    })
+
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
+    expect(answer.body).toMatchObject({ error: { param: 'input.0.type' } })
+  })
+
   // Catches a function tool's or a json_schema format's description trimmed on this route's own
   // schema (#255): the model reads it, and a list or a trailing example lost its layout.
   test('keeps the whitespace of tool and json_schema descriptions', async () => {
@@ -580,7 +593,8 @@ describe('the Responses API', () => {
   })
 
   // Catches a replayed assistant turn refused for the empty `annotations`/`logprobs` the SDK
-  // echoes back, or a non-empty one accepted though the proxy can't send it on.
+  // echoes back, or a non-empty one accepted though the proxy can't send it on, or refused with
+  // another item type's field named (#318: it said `content.0.type`, "expected reasoning_text").
   test.each(['annotations', 'logprobs'])(
     'takes an empty %s on a replayed output_text, and refuses a non-empty one',
     async (field) => {
@@ -601,8 +615,10 @@ describe('the Responses API', () => {
       const filled = await post(turn([{ token: 'Hello', logprob: 0 }]))
 
       expect(empty.status).toBe(HTTP_OK)
-      // Only the status: the item union reports the wrong `param` for now (#318).
       expect(filled.status).toBe(HTTP_BAD_REQUEST)
+      expect(filled.body).toMatchObject({
+        error: { param: expect.stringMatching(new RegExp(`^input\\.1\\.content\\.0\\.${field}`)) }
+      })
     }
   )
 

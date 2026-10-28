@@ -177,20 +177,44 @@ const MESSAGE_FIELD_DEPTH = 3
  * @remarks
  * A union reports one `invalid_union` issue at its own path, with each branch's issues inside. A
  * user message's parts are a union of a string and an array, so an unknown key on a part would
- * otherwise read as "invalid input" at `messages.0.content`. The branch whose issue has the
- * longest path is the one the input matched the shape of; its issue is reported, at the full path.
- * On a tie the first branch's issue wins: `toSorted` is stable, as the language requires.
+ * otherwise read as "invalid input" at `messages.0.content`. Branches the input says it is not
+ * are set aside first: one whose `type` or `role` the input does not have (#318; a Responses
+ * `assistant` message with a bad `logprobs` was blamed on `reasoning`'s `content.0.type`). Of the
+ * rest, the branch whose issue has the longest path is the one the input matched the shape of;
+ * its issue is reported, at the full path. On a tie the first branch's issue wins: `toSorted` is
+ * stable, as the language requires. When every branch is set aside, all of them are compared.
  *
  * @param issue - a Zod issue
  * @returns the issue to report
  */
 function specificIssue(issue: z.core.$ZodIssue): z.core.$ZodIssue {
   if (issue.code !== 'invalid_union') return issue
-  const deepest = issue.errors
+  const claimed = issue.errors.filter((branch) => !branch.some(isDiscriminatorMismatch))
+  const deepest = (claimed.length > 0 ? claimed : issue.errors)
     .flat()
     .toSorted((left, right) => right.path.length - left.path.length)[0]
   if (deepest === undefined || deepest.path.length === 0) return issue
   return specificIssue({ ...deepest, path: [...issue.path, ...deepest.path] })
+}
+
+/** The keys whose value says which branch of a union an object is. */
+const DISCRIMINATOR_KEYS: ReadonlySet<PropertyKey> = new Set(['type', 'role'])
+
+/**
+ * Checks whether a union branch's issue says the input is not that branch: its own `type` or
+ * `role` has another value.
+ *
+ * @param issue - one issue of a union branch, its path relative to the union
+ * @returns whether it is that mismatch
+ */
+function isDiscriminatorMismatch(issue: z.core.$ZodIssue): boolean {
+  const [key, ...rest] = issue.path
+  return (
+    issue.code === 'invalid_value' &&
+    rest.length === 0 &&
+    key !== undefined &&
+    DISCRIMINATOR_KEYS.has(key)
+  )
 }
 
 /**
