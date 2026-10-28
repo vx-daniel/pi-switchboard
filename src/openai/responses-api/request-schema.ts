@@ -20,9 +20,10 @@
 
 import {
   MAX_TEMPERATURE,
-  PROMPT_CACHE_KEY_MAX_LENGTH,
   promptCacheBreakpointSchema,
-  REASONING_EFFORTS
+  promptCacheKeySchema,
+  REASONING_EFFORTS,
+  storeSchema
 } from '@proxy/openai/schemas'
 import { textSchema } from '@proxy/openai/text-schemas'
 import * as z from 'zod'
@@ -222,15 +223,8 @@ export const createResponseRequestSchema = z
     text: z.object({ format: textFormatSchema.optional() }).strict().optional(),
     metadata: z.record(z.string().trim(), z.string().trim()).nullable().optional(),
     user: z.string().trim().nullable().optional(),
-    prompt_cache_key: z
-      .string()
-      .trim()
-      .min(1)
-      .max(PROMPT_CACHE_KEY_MAX_LENGTH)
-      .nullable()
-      .optional(),
-    // Nothing is stored, so only "don't store" is accepted; `true` is a named 422.
-    store: z.literal(false).nullable().optional(),
+    prompt_cache_key: promptCacheKeySchema,
+    store: storeSchema,
     include: z.array(z.literal('reasoning.encrypted_content')).nullable().optional()
   })
   .strict()

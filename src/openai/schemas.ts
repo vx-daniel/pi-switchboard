@@ -241,7 +241,29 @@ const MAX_PENALTY = 2
  * Longest `prompt_cache_key` accepted: pi-ai's `OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH` (1.3.0), which
  * its root entry point does not export.
  */
-export const PROMPT_CACHE_KEY_MAX_LENGTH = 64
+const PROMPT_CACHE_KEY_MAX_LENGTH = 64
+
+/**
+ * `prompt_cache_key`, on chat completions and the Responses API: becomes pi's `sessionId`
+ * (`buildStreamOptions`), which pi sends as the provider's cache or session key where it has one
+ * (#39). At most {@link PROMPT_CACHE_KEY_MAX_LENGTH} characters, because pi cuts a longer key
+ * itself, silently merging keys that share their first 64.
+ */
+export const promptCacheKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PROMPT_CACHE_KEY_MAX_LENGTH)
+  .nullable()
+  .optional()
+
+/**
+ * `store`, on chat completions and the Responses API (#197): the proxy stores nothing, so "don't
+ * store" is what it already does. `false` and `null` are accepted and never sent upstream (pi sets
+ * `store` itself where the API takes it); `true` is a named 422 ({@link STORE_TRUE_REFUSAL}).
+ * pi's own OpenAI adapter sends `false` to any host it doesn't know, this one included.
+ */
+export const storeSchema = z.literal(false).nullable().optional()
 
 /** OpenAI's `reasoning_effort` values, lowest first (OpenAI's `ReasoningEffort` schema, #132). */
 export const REASONING_EFFORTS = [
@@ -280,16 +302,8 @@ export const chatCompletionRequestSchema = z
     presence_penalty: z.number().min(MIN_PENALTY).max(MAX_PENALTY).optional(),
     seed: z.int().optional(),
     response_format: responseFormatSchema.optional(),
-    // Prompt caching: becomes pi's `sessionId` (`buildStreamOptions`), which pi sends as the
-    // provider's cache or session key where it has one (#39). At most 64 characters because pi
-    // cuts a longer key to 64 itself, silently merging keys that share their first 64.
-    prompt_cache_key: z
-      .string()
-      .trim()
-      .min(1)
-      .max(PROMPT_CACHE_KEY_MAX_LENGTH)
-      .nullable()
-      .optional(),
+    prompt_cache_key: promptCacheKeySchema,
+    store: storeSchema,
     // Passthrough fields sent by real clients; accepted but not interpreted
     metadata: z.record(z.string().trim(), z.unknown()).optional(),
     prediction: z
@@ -306,6 +320,10 @@ export const chatCompletionRequestSchema = z
 
 /** A parsed chat-completions request body. */
 export type ChatCompletionRequest = z.infer<typeof chatCompletionRequestSchema>
+
+/** The 422 message for `store: true`, on chat completions and the Responses API alike (#197). */
+export const STORE_TRUE_REFUSAL =
+  "'store: true' is not supported: the proxy stores nothing; send false"
 
 // --- Rejected fields ---
 
