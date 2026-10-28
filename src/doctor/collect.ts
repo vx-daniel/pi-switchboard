@@ -138,7 +138,8 @@ function readStats(enabled: boolean, window: StatsWindow, now: number): DoctorSt
  * Reads pi's catalog entry for each available model, by canonical ID under the login's base
  * provider (`loginBase`, as exposure groups logins): the stats record a `{provider}-N` login's
  * calls under its base's ID, which has no entry of its own when only that login has a credential
- * (#338). The first entry for an ID is kept, since a model's prices don't depend on the login.
+ * (#338). The first entry for an ID is kept: a built-in provider's logins share its catalog, so
+ * their prices are the same; the base comes first in pi's registry, then `-2`, `-3`.
  *
  * @returns the catalog
  */
