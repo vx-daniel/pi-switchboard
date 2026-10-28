@@ -5,9 +5,6 @@
  * per request) through pi's OpenAI chat completions adapter against the mock provider.
  */
 
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-
 import type { AliasTarget } from '@proxy/config/schema'
 import { clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { createApp } from '@proxy/server/app'
@@ -24,7 +21,12 @@ import {
   vi
 } from 'vite-plus/test'
 
-import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import {
+  type FixtureAgentDir,
+  loadFixtureAgentDir,
+  setAliases,
+  writeProxyConfig
+} from '../fixtures/agent-dir'
 import { FAKE_CODEX_TOKEN } from '../fixtures/codex-token'
 import {
   finishChunk,
@@ -164,15 +166,6 @@ afterAll(async () => {
 })
 
 /**
- * Writes the proxy's config file with these aliases.
- *
- * @param aliases - alias -> target
- */
-function setAliases(aliases: Record<string, AliasTarget>): void {
-  writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify({ aliases }))
-}
-
-/**
  * Sends one chat request and records which models the upstream was asked for.
  *
  * @param model - the request's `model`
@@ -231,7 +224,7 @@ describe('a 429 cools its provider down', () => {
   // Catches every request rediscovering a rate-limited provider: after the 429 says to wait 30 s,
   // the chain goes straight to the next model and reports the skip, until the time is up.
   test('a chain that names rate_limit skips it for as long as the response says', async () => {
-    setAliases({ chain: CHAIN })
+    setAliases(agentDir.path, { chain: CHAIN })
 
     expect((await ask('chain')).upstream).toEqual(['limited-mock', 'answer-mock'])
 
@@ -249,7 +242,7 @@ describe('a 429 cools its provider down', () => {
   // Catches a 429 cooling only its own model, when the account's limit covers the provider: the
   // provider's other model is skipped too.
   test("the provider's other models are skipped too", async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       chain: CHAIN,
       sibling: { targets: ['alpha/sibling-mock', 'beta/answer-mock'], fallbackOn: ['rate_limit'] }
     })
@@ -261,7 +254,7 @@ describe('a 429 cools its provider down', () => {
   // Catches routing a request by a failure the configuration doesn't name (principle VI): a
   // request that names the model, and a chain without rate_limit, still call it.
   test('a request that names the model, or a chain that does not name rate_limit, still calls it', async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       chain: CHAIN,
       plain: { targets: ['alpha/limited-mock', 'beta/answer-mock'], fallbackOn: ['timeout'] }
     })
@@ -274,7 +267,7 @@ describe('a 429 cools its provider down', () => {
   // Catches a cooldown invisible to the operator and to clients that pick models themselves:
   // /healthz/models lists it with the time left, /v1/switchboard/models marks each model under it.
   test('shows on /healthz/models and /v1/switchboard/models', async () => {
-    setAliases({ chain: CHAIN })
+    setAliases(agentDir.path, { chain: CHAIN })
     await ask('chain')
 
     const health = await getJson('/healthz/models')
@@ -315,7 +308,7 @@ describe('what does not cool the shared login', () => {
   // Catches a client's own key cooling the login every other client shares (fourth #181 review):
   // its 429 is about that key, so nothing is recorded, and the chain still calls the provider.
   test('a 429 on a request with its own upstream key', async () => {
-    setAliases({ chain: CHAIN })
+    setAliases(agentDir.path, { chain: CHAIN })
 
     const own = await ask('chain', {
       'X-Switchboard-Upstream-Api-Key': 'notarealsecret-client-key'
@@ -331,7 +324,7 @@ describe("Google's adapter", () => {
   // Catches the capturing fetch passed to pi's Google adapter, which refuses any custom fetch and
   // would fail every Google call; without it, a 429 still cools the provider, for the default 60 s.
   test('cools down for the default time, as the proxy cannot read its response', async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       gchain: { targets: ['google/limited-gemini', 'beta/answer-mock'], fallbackOn: ['rate_limit'] }
     })
 
@@ -354,7 +347,7 @@ describe('a 503 or 529 cools only its model', () => {
     ['503', 'unavailable-mock'],
     ['529', 'overloaded-mock']
   ])('after a %s', async (_status, failing) => {
-    setAliases({
+    setAliases(agentDir.path, {
       overload: { targets: [`gamma/${failing}`, 'beta/answer-mock'], fallbackOn: ['unavailable'] },
       sibling: { targets: ['gamma/steady-mock', 'beta/answer-mock'], fallbackOn: ['unavailable'] }
     })
@@ -380,7 +373,7 @@ describe('a Codex usage limit (#185)', () => {
   // only its own wording, no status), or as a plain rate limit the client retries in seconds
   // (#199): it is OpenAI's insufficient_quota, with x-should-retry: false.
   test('answers 429 insufficient_quota, telling the client not to retry', async () => {
-    setAliases({})
+    setAliases(agentDir.path, {})
 
     const named = await ask('limited-codex')
 
@@ -398,7 +391,7 @@ describe('a Codex usage limit (#185)', () => {
   // Catches the proxy calling Codex over pi's WebSocket, where it sees no response: the 429 body's
   // resets_in_seconds then never reaches the cooldown, which falls back to the 60 s default.
   test('cools the provider for the reset Codex gives, read over SSE', async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       codexChain: {
         targets: ['codex/limited-codex', 'beta/answer-mock'],
         fallbackOn: ['rate_limit']
@@ -424,7 +417,7 @@ describe('what a 429 tells the client (#199)', () => {
   // Catches the provider's wait dropped (the client retries in its own backoff, against a limit
   // still on), or a short limit answered as a usage limit the client then gives up on.
   test('a rate limit with a wait says when to retry', async () => {
-    setAliases({})
+    setAliases(agentDir.path, {})
 
     const named = await ask('alpha/limited-mock')
 
@@ -440,7 +433,7 @@ describe('what a 429 tells the client (#199)', () => {
   // Catches a wait of a day passed on as retry-after, which a client honoring it sits out, or
   // answered as a rate limit the SDKs retry at once.
   test('a wait past the threshold is a usage limit, with no wait to sit out', async () => {
-    setAliases({})
+    setAliases(agentDir.path, {})
 
     const named = await ask('delta/weekly-mock')
 
@@ -455,7 +448,7 @@ describe('what a 429 tells the client (#199)', () => {
 
   // Catches a wait made up when the proxy could not read one: Google's API hides the response.
   test('a rate limit with no readable wait has no retry headers', async () => {
-    setAliases({})
+    setAliases(agentDir.path, {})
 
     const named = await ask('google/limited-gemini')
 
@@ -493,7 +486,7 @@ describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
   // Catches the clear not reaching the state routing reads: after it, the chain must call the
   // login again at once, not wait out the 429's time, and /healthz/models must stop listing it.
   test("clearing a login's cooldown has the next chain request call it again", async () => {
-    setAliases({ chain: CHAIN })
+    setAliases(agentDir.path, { chain: CHAIN })
     await ask('chain')
     limiting = false
 
@@ -520,7 +513,7 @@ describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
   // Catches a public model ID not resolved to the canonical ID the cooldown is kept under, so the
   // clear answers 200 and ends nothing.
   test('a model is named by its public ID as well', async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       overload: {
         targets: ['gamma/unavailable-mock', 'beta/answer-mock'],
         fallbackOn: ['unavailable']
@@ -542,7 +535,7 @@ describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
     ['provider=alhpa', 'provider', 'login_not_found'],
     ['model=alpha/nope', 'model', 'model_not_found']
   ])('?%s is a 404 and clears nothing', async (query, param, code) => {
-    setAliases({ chain: CHAIN })
+    setAliases(agentDir.path, { chain: CHAIN })
     await ask('chain')
 
     const refused = await clearCooldowns(query)
@@ -557,7 +550,7 @@ describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
   // Catches a name checked against the exposure alone: a cooldown on a login or model the
   // exposure config has hidden since would then be a 404, and only clearing everything would end it.
   test('a login or model hidden since it cooled can still be named', async () => {
-    setAliases({
+    setAliases(agentDir.path, {
       chain: CHAIN,
       overload: {
         targets: ['gamma/unavailable-mock', 'beta/answer-mock'],
@@ -566,10 +559,10 @@ describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
     })
     await ask('chain')
     await ask('overload')
-    writeFileSync(
-      join(agentDir.path, 'proxy-config.json'),
-      JSON.stringify({ modelExposureMode: 'custom', customModels: ['beta/answer-mock'] })
-    )
+    writeProxyConfig(agentDir.path, {
+      modelExposureMode: 'custom',
+      customModels: ['beta/answer-mock']
+    })
     const listed = await getJson('/v1/models')
     expect(listed['data']).toEqual([expect.objectContaining({ id: 'answer-mock' })])
 
@@ -591,7 +584,7 @@ describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
     ['provider=alpha&provider=alhpa', 200],
     ['provider=alhpa&provider=alpha', 404]
   ])('?%s counts by the first value', async (query, status) => {
-    setAliases({ chain: CHAIN })
+    setAliases(agentDir.path, { chain: CHAIN })
     await ask('chain')
 
     expect((await clearCooldowns(query)).status).toBe(status)
@@ -599,7 +592,7 @@ describe('DELETE /v1/switchboard/cooldowns (#182)', () => {
 
   // Catches the one route that writes state reachable without the proxy token.
   test('needs the proxy token when auth is on', async () => {
-    setAliases({ chain: CHAIN })
+    setAliases(agentDir.path, { chain: CHAIN })
     await ask('chain')
     const token = 'notarealsecret-cooldowns-token'
     const config = { ...testConfig(), proxyAuth: { kind: 'token', token } as const }

@@ -3,7 +3,6 @@
  * what the user sees (stdout, stderr, exit code) and what the started server answers on loopback.
  */
 
-import { once } from 'node:events'
 import { writeFileSync } from 'node:fs'
 import { createServer } from 'node:http'
 import { join } from 'node:path'
@@ -23,7 +22,7 @@ import {
 
 import packageJson from '../../package.json' with { type: 'json' }
 import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
-import { listenOnLoopback } from '../fixtures/local-server'
+import { freePort, listenOnLoopback } from '../fixtures/local-server'
 
 /**
  * Every `PI_SWITCHBOARD_*` variable the CLI entry reads (`loadConfig`'s, plus `PI_SWITCHBOARD_LOG_FORMAT`):
@@ -114,19 +113,6 @@ function logRecords(): Record<string, unknown>[] {
       assert(isRecord(record), 'a log line is not a JSON object')
       return record
     })
-}
-
-/**
- * Finds a loopback port nothing listens on right now.
- *
- * @returns a port number that was free when its probe server closed
- */
-async function freePort(): Promise<number> {
-  const probe = createServer()
-  const origin = await listenOnLoopback(probe)
-  probe.close()
-  await once(probe, 'close')
-  return Number(new URL(origin).port)
 }
 
 /**

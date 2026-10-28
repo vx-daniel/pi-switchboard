@@ -91,7 +91,7 @@ function proxyCommand(bin: string): { command: string; args: string[] } {
  *
  * @returns the absolute PID file path
  */
-function getPidPath(): string {
+export function getPidPath(): string {
   return resolve(getAgentDir(), 'proxy.pid')
 }
 

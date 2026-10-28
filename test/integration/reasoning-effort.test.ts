@@ -20,7 +20,7 @@ import {
   startMockProvider,
   textChunks
 } from '../fixtures/mock-provider'
-import { jsonBody, testApp, testConfig } from '../helpers'
+import { jsonBody, testApp, testConfig, xPi } from '../helpers'
 
 const MOCK_KEY = 'notarealsecret-mock-provider-key'
 /** pi's thinking budget for "minimal" on Anthropic budget-based models. */
@@ -310,28 +310,7 @@ async function answerXPi(
       messages: [{ role: 'user', content: 'Hi' }]
     })
   })
-  return xPiOf(await response.text(), stream)
-}
-
-/**
- * Parses a response's `x_pi`: the body's, or each stream chunk's.
- *
- * @param text - the response body
- * @param stream - whether it is a stream
- * @returns every `x_pi` found, in order; `undefined` entries where a chunk or body had none
- */
-function xPiOf(text: string, stream: boolean): unknown[] {
-  if (!stream) {
-    const body: unknown = JSON.parse(text)
-    return [isRecord(body) ? body['x_pi'] : undefined]
-  }
-  return text
-    .split('\n')
-    .filter((line) => line.startsWith('data: {'))
-    .map((line) => {
-      const chunk: unknown = JSON.parse(line.slice('data: '.length))
-      return isRecord(chunk) ? chunk['x_pi'] : undefined
-    })
+  return xPi(await response.text(), stream)
 }
 
 describe('x_pi.reasoning_effort reports what the model ran at (#175)', () => {
@@ -399,7 +378,7 @@ describe('x_pi.reasoning_effort reports what the model ran at (#175)', () => {
       })
     })
 
-    const found = xPiOf(await response.text(), stream)
+    const found = xPi(await response.text(), stream)
     expect(found.length).toBeGreaterThan(0)
     for (const fields of found) {
       expect(fields).toMatchObject({ reasoning_effort: { requested: 'xhigh', applied: 'xhigh' } })

@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import type { AliasTarget } from '@proxy/config/schema'
 import { initRegistry } from '@proxy/pi/registry'
 import { vi } from 'vite-plus/test'
 
@@ -91,4 +92,24 @@ export async function loadFixtureAgentDir(
       rmSync(path, { recursive: true, force: true })
     }
   }
+}
+
+/**
+ * Writes the proxy's `proxy-config.json` into an agent directory, replacing any file there.
+ *
+ * @param agentDir - the agent directory's path
+ * @param config - the file's contents, written as JSON as given
+ */
+export function writeProxyConfig(agentDir: string, config: Record<string, unknown>): void {
+  writeFileSync(join(agentDir, 'proxy-config.json'), JSON.stringify(config))
+}
+
+/**
+ * Writes a `proxy-config.json` that sets these aliases and nothing else.
+ *
+ * @param agentDir - the agent directory's path
+ * @param aliases - the `aliases` map, as the config holds it
+ */
+export function setAliases(agentDir: string, aliases: Record<string, AliasTarget>): void {
+  writeProxyConfig(agentDir, { aliases })
 }

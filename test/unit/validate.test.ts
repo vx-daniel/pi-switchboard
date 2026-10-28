@@ -1,25 +1,58 @@
-import { validateChatRequest } from '@proxy/openai/validate'
-import { describe, expect, test } from 'vite-plus/test'
+/**
+ * The chat route's body validation: what `POST /v1/chat/completions` refuses (sent through the
+ * route, so its validator hook is what answers), and what it accepts (parsed with the schema that
+ * validator runs, to check the request the handler gets).
+ */
 
+import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
+
+import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { parseChatBody, postChatBody } from '../helpers'
+
+const HTTP_BAD_REQUEST = 400
+const HTTP_NOT_FOUND = 404
 const HTTP_UNPROCESSABLE = 422
 
-describe('validateChatRequest', () => {
-  test('accepts minimal valid request', () => {
-    const result = validateChatRequest({
+/** An empty agent dir: pi loaded, no model exposed. */
+let agentDir: FixtureAgentDir
+
+beforeAll(async () => {
+  agentDir = await loadFixtureAgentDir()
+})
+
+afterAll(() => {
+  vi.unstubAllEnvs()
+  agentDir.remove()
+})
+
+describe('the chat route accepts', () => {
+  // Catches the route's validator hook answering a valid body with an error, or the route parsing
+  // the body with a different schema than the one these tests check: a body that passes reaches
+  // model resolution, which refuses it here only because no model is exposed.
+  test('a valid body, passing it on to model resolution', async () => {
+    const answer = await postChatBody({
       model: 'openai/gpt-4o',
       messages: [{ role: 'user', content: 'Hello' }]
     })
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.data.model).toBe('openai/gpt-4o')
-    expect(result.data.messages).toHaveLength(1)
+
+    expect(answer).toMatchObject({ status: HTTP_NOT_FOUND, param: 'model' })
+  })
+
+  // Catches the minimal request losing its model or messages on the way to the handler.
+  test('a minimal request', () => {
+    const request = parseChatBody({
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hello' }]
+    })
+    expect(request.model).toBe('openai/gpt-4o')
+    expect(request.messages).toHaveLength(1)
   })
 
   // Catches every docker-agent request to a gpt-* model failing with a 400 at messages.N: it sends
   // system content as text parts, each with a prompt_cache_breakpoint (docker-agent v1.145.0),
   // which is kept for the APIs that take it.
-  test('accepts system and developer content as text parts, keeping prompt_cache_breakpoint', () => {
-    const result = validateChatRequest({
+  test('system and developer content as text parts, keeping prompt_cache_breakpoint', () => {
+    const request = parseChatBody({
       model: 'gpt-6.1-sol',
       messages: [
         {
@@ -30,14 +63,196 @@ describe('validateChatRequest', () => {
         { role: 'user', content: 'Hello' }
       ]
     })
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.data.messages[0]).toEqual({
+    expect(request.messages[0]).toEqual({
       role: 'system',
       content: [{ type: 'text', text: 'Rules.', prompt_cache_breakpoint: { mode: 'explicit' } }]
     })
   })
 
+  // Catches an assistant reply an OpenAI SDK echoes back in history being refused, which would
+  // fail every multi-turn conversation from it: the Python SDK's `model_dump()` of a proxy reply
+  // carries every response field, empty as `null`, and a dump can carry `annotations: []`.
+  test.each([
+    [
+      'the full model_dump() shape',
+      {
+        role: 'assistant',
+        content: 'x',
+        refusal: null,
+        audio: null,
+        function_call: null,
+        annotations: null,
+        tool_calls: null
+      }
+    ],
+    ['empty annotations', { role: 'assistant', content: 'x', annotations: [] }]
+  ])('an echoed assistant reply: %s', (_label, echoed) => {
+    expect(() =>
+      parseChatBody({
+        model: 'gpt-6.1-sol',
+        messages: [{ role: 'user', content: 'hi' }, echoed, { role: 'user', content: 'again' }]
+      })
+    ).not.toThrow()
+  })
+
+  // Catches a Phase 1 field the proxy supports being refused.
+  test('every Phase 1 field', () => {
+    expect(() =>
+      parseChatBody({
+        model: 'openai/gpt-4o',
+        messages: [{ role: 'user', content: 'Hello' }],
+        stream: true,
+        temperature: 0.7,
+        max_tokens: 100,
+        stop: ['\n', 'END'],
+        user: 'test-user',
+        stream_options: { include_usage: true }
+      })
+    ).not.toThrow()
+  })
+
+  // Catches a Phase 2 field the proxy supports being refused.
+  test('every Phase 2 field', () => {
+    expect(() =>
+      parseChatBody({
+        model: 'openai/gpt-4o',
+        messages: [{ role: 'user', content: 'Hello' }],
+        tools: [
+          {
+            type: 'function',
+            function: {
+              name: 'get_weather',
+              description: 'Get the weather',
+              parameters: {
+                type: 'object',
+                properties: { city: { type: 'string' } },
+                required: ['city']
+              }
+            }
+          }
+        ],
+        tool_choice: 'auto',
+        reasoning_effort: 'high',
+        top_p: 0.9,
+        frequency_penalty: 0.5,
+        presence_penalty: 0.5,
+        seed: 42,
+        response_format: { type: 'json_object' }
+      })
+    ).not.toThrow()
+  })
+
+  // Catches max_completion_tokens refused or dropped before the handler reads it.
+  test('max_completion_tokens', () => {
+    const request = parseChatBody({
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hello' }],
+      max_completion_tokens: 256
+    })
+    expect(request.max_completion_tokens).toBe(256)
+  })
+
+  // Catches a reasoning_effort level the proxy maps being refused or dropped.
+  test.each(['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const)(
+    'reasoning_effort %s',
+    (effort) => {
+      const request = parseChatBody({
+        model: 'openai/gpt-4o',
+        messages: [{ role: 'user', content: 'Hello' }],
+        reasoning_effort: effort
+      })
+      expect(request.reasoning_effort).toBe(effort)
+    }
+  )
+
+  // Catches a json_schema response_format refused, or its type lost on the way to the handler.
+  test('response_format json_schema', () => {
+    const request = parseChatBody({
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hello' }],
+      response_format: {
+        type: 'json_schema',
+        json_schema: {
+          name: 'my_schema',
+          description: 'A test schema',
+          schema: {
+            type: 'object',
+            properties: {
+              name: { type: 'string' }
+            }
+          },
+          strict: true
+        }
+      }
+    })
+    expect(request.response_format?.type).toBe('json_schema')
+  })
+
+  // Catches a json_schema response_format refused for leaving out its optional fields.
+  test('response_format json_schema without optional fields', () => {
+    expect(() =>
+      parseChatBody({
+        model: 'openai/gpt-4o',
+        messages: [{ role: 'user', content: 'Hello' }],
+        response_format: {
+          type: 'json_schema',
+          json_schema: {
+            name: 'minimal'
+          }
+        }
+      })
+    ).not.toThrow()
+  })
+
+  // Catches parallel_tool_calls refused, or `false` lost on the way to the handler.
+  test('parallel_tool_calls', () => {
+    const request = parseChatBody({
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hello' }],
+      parallel_tool_calls: false
+    })
+    expect(request.parallel_tool_calls).toBe(false)
+  })
+
+  // Catches metadata refused, or changed before it is passed through.
+  test('metadata', () => {
+    const request = parseChatBody({
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hello' }],
+      metadata: { task: 'autocomplete', chat_id: 'abc-123' }
+    })
+    expect(request.metadata).toEqual({ task: 'autocomplete', chat_id: 'abc-123' })
+  })
+
+  // Catches a string prediction refused, or its type lost before it is passed through.
+  test('prediction with string content', () => {
+    const request = parseChatBody({
+      model: 'openai/gpt-4o',
+      messages: [{ role: 'user', content: 'Hello' }],
+      prediction: {
+        type: 'content',
+        content: 'predicted output text'
+      }
+    })
+    expect(request.prediction?.type).toBe('content')
+  })
+
+  // Catches a prediction given as text parts refused.
+  test('prediction with array content', () => {
+    expect(() =>
+      parseChatBody({
+        model: 'openai/gpt-4o',
+        messages: [{ role: 'user', content: 'Hello' }],
+        prediction: {
+          type: 'content',
+          content: [{ type: 'text', text: 'predicted output' }]
+        }
+      })
+    ).not.toThrow()
+  })
+})
+
+describe('the chat route refuses', () => {
   // Catches a field inside a message or part dropped silently (#146), or refused at the message
   // instead of at its own path: the client must see which field to remove.
   test.each([
@@ -118,38 +333,11 @@ describe('validateChatRequest', () => {
       ],
       'messages.1.annotations'
     ]
-  ])('refuses %s with a 422 at its path', (_label, messages, param) => {
-    expect(validateChatRequest({ model: 'gpt-6.1-sol', messages })).toMatchObject({
-      ok: false,
-      status: 422,
+  ])('%s with a 422 at its path', async (_label, messages, param) => {
+    expect(await postChatBody({ model: 'gpt-6.1-sol', messages })).toMatchObject({
+      status: HTTP_UNPROCESSABLE,
       param
     })
-  })
-
-  // Catches an assistant reply an OpenAI SDK echoes back in history being refused, which would
-  // fail every multi-turn conversation from it: the Python SDK's `model_dump()` of a proxy reply
-  // carries every response field, empty as `null`, and a dump can carry `annotations: []`.
-  test.each([
-    [
-      'the full model_dump() shape',
-      {
-        role: 'assistant',
-        content: 'x',
-        refusal: null,
-        audio: null,
-        function_call: null,
-        annotations: null,
-        tool_calls: null
-      }
-    ],
-    ['empty annotations', { role: 'assistant', content: 'x', annotations: [] }]
-  ])('accepts an echoed assistant reply: %s', (_label, echoed) => {
-    const result = validateChatRequest({
-      model: 'gpt-6.1-sol',
-      messages: [{ role: 'user', content: 'hi' }, echoed, { role: 'user', content: 'again' }]
-    })
-
-    expect(result.ok).toBe(true)
   })
 
   // Catches an error inside a union reported at the wrong field: a user message's content is a
@@ -168,25 +356,25 @@ describe('validateChatRequest', () => {
       [{ type: 'text', text: 5 }],
       'messages.0.content.0.text'
     ]
-  ])('reports %s as a 400 at its own path', (_label, content, param) => {
-    const result = validateChatRequest({
+  ])('%s with a 400 at its own path', async (_label, content, param) => {
+    const answer = await postChatBody({
       model: 'gpt-6.1-sol',
       messages: [{ role: 'user', content }]
     })
 
-    expect(result).toMatchObject({ ok: false, status: 400, param })
+    expect(answer).toMatchObject({ status: HTTP_BAD_REQUEST, param })
   })
 
   // Catches a message with a role the proxy does not take reported at the message, or as a
   // mismatch with some other role's fields: messages are told apart by `role`, so the error names
   // it. The deprecated `function` role is the one clients still send.
-  test.each(['function', 'robot'])('reports role %s as a 400 at the role', (role) => {
-    const result = validateChatRequest({
+  test.each(['function', 'robot'])('role %s with a 400 at the role', async (role) => {
+    const answer = await postChatBody({
       model: 'gpt-6.1-sol',
       messages: [{ role, content: 'x', name: 'f' }]
     })
 
-    expect(result).toMatchObject({ ok: false, status: 400, param: 'messages.0.role' })
+    expect(answer).toMatchObject({ status: HTTP_BAD_REQUEST, param: 'messages.0.role' })
   })
 
   // Catches the new shape letting through what a system message cannot carry: no parts at all,
@@ -194,251 +382,86 @@ describe('validateChatRequest', () => {
   test.each([
     ['an empty part list', []],
     ['an image part', [{ type: 'image_url', image_url: { url: 'data:image/png;base64,AA==' } }]]
-  ])('rejects system content that is %s', (_description, content) => {
-    const result = validateChatRequest({
+  ])('system content that is %s', async (_description, content) => {
+    const answer = await postChatBody({
       model: 'gpt-6.1-sol',
       messages: [
         { role: 'system', content },
         { role: 'user', content: 'Hello' }
       ]
     })
-    expect(result.ok).toBe(false)
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
   })
 
-  test('accepts request with all Phase 1 fields', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      stream: true,
-      temperature: 0.7,
-      max_tokens: 100,
-      stop: ['\n', 'END'],
-      user: 'test-user',
-      stream_options: { include_usage: true }
-    })
-    expect(result.ok).toBe(true)
-  })
-
-  test('rejects empty messages', () => {
-    const result = validateChatRequest({
+  // Catches a request with no messages reaching pi, which has nothing to send.
+  test('empty messages with a 400', async () => {
+    const answer = await postChatBody({
       model: 'openai/gpt-4o',
       messages: []
     })
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    expect(result.status).toBe(400)
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
   })
 
-  test('rejects permanently rejected fields with 422', () => {
-    const permanentlyRejected = [
-      'n',
-      'logprobs',
-      'top_logprobs',
-      'logit_bias',
-      'functions',
-      'function_call'
-    ]
-
-    for (const field of permanentlyRejected) {
-      const body = {
+  // Catches a field the proxy refuses by name answered as a generic invalid value, or at the
+  // wrong `param`.
+  test.each(['n', 'logprobs', 'top_logprobs', 'logit_bias', 'functions', 'function_call'])(
+    'the permanently rejected field %s with a 422 naming it',
+    async (field) => {
+      const answer = await postChatBody({
         model: 'openai/gpt-4o',
         messages: [{ role: 'user', content: 'Hello' }],
         [field]: 'some_value'
-      }
-      const result = validateChatRequest(body)
-      expect(result.ok).toBe(false)
-      if (result.ok) continue
-      expect(result.status).toBe(422)
-      expect(result.param).toBe(field)
+      })
+      expect(answer).toMatchObject({ status: HTTP_UNPROCESSABLE, param: field })
     }
-  })
-
-  test('accepts Phase 2 fields', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      tools: [
-        {
-          type: 'function',
-          function: {
-            name: 'get_weather',
-            description: 'Get the weather',
-            parameters: {
-              type: 'object',
-              properties: { city: { type: 'string' } },
-              required: ['city']
-            }
-          }
-        }
-      ],
-      tool_choice: 'auto',
-      reasoning_effort: 'high',
-      top_p: 0.9,
-      frequency_penalty: 0.5,
-      presence_penalty: 0.5,
-      seed: 42,
-      response_format: { type: 'json_object' }
-    })
-    expect(result.ok).toBe(true)
-  })
+  )
 
   // Catches an unknown-field rejection that loses the 422 status or stops naming the offending
   // field in `param`, which clients use to point at the bad parameter.
-  test('rejects unknown top-level fields with 422 naming the field', () => {
-    const result = validateChatRequest({
+  test('an unknown top-level field with a 422 naming it', async () => {
+    const answer = await postChatBody({
       model: 'openai/gpt-4o',
       messages: [{ role: 'user', content: 'Hello' }],
       unknown_field: 'value'
     })
-    expect(result).toEqual({
-      ok: false,
+    expect(answer).toEqual({
       status: HTTP_UNPROCESSABLE,
       message: 'Unknown parameter(s): unknown_field',
       param: 'unknown_field'
     })
   })
 
-  test('rejects temperature out of range', () => {
-    const result = validateChatRequest({
+  // Catches a temperature outside OpenAI's range reaching the provider.
+  test('temperature out of range with a 400', async () => {
+    const answer = await postChatBody({
       model: 'openai/gpt-4o',
       messages: [{ role: 'user', content: 'Hello' }],
       temperature: 3.0
     })
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    expect(result.status).toBe(400)
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
   })
 
-  test('rejects missing model', () => {
-    const result = validateChatRequest({
+  // Catches a request with no model reaching model resolution.
+  test('a missing model with a 400', async () => {
+    const answer = await postChatBody({
       messages: [{ role: 'user', content: 'Hello' }]
     })
-    expect(result.ok).toBe(false)
-    if (result.ok) return
-    expect(result.status).toBe(400)
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
   })
 
-  test('accepts max_completion_tokens', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      max_completion_tokens: 256
-    })
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.data.max_completion_tokens).toBe(256)
-  })
-
-  test('accepts all reasoning_effort values', () => {
-    for (const effort of ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'] as const) {
-      const result = validateChatRequest({
-        model: 'openai/gpt-4o',
-        messages: [{ role: 'user', content: 'Hello' }],
-        reasoning_effort: effort
-      })
-      expect(result.ok).toBe(true)
-      if (!result.ok) continue
-      expect(result.data.reasoning_effort).toBe(effort)
-    }
-  })
-
-  test('rejects invalid reasoning_effort', () => {
-    const result = validateChatRequest({
+  // Catches a reasoning_effort level the proxy cannot map reaching the provider.
+  test('an invalid reasoning_effort with a 400', async () => {
+    const answer = await postChatBody({
       model: 'openai/gpt-4o',
       messages: [{ role: 'user', content: 'Hello' }],
       reasoning_effort: 'extreme'
     })
-    expect(result.ok).toBe(false)
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
   })
 
-  test('accepts response_format json_schema', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'my_schema',
-          description: 'A test schema',
-          schema: {
-            type: 'object',
-            properties: {
-              name: { type: 'string' }
-            }
-          },
-          strict: true
-        }
-      }
-    })
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.data.response_format?.type).toBe('json_schema')
-  })
-
-  test('accepts response_format json_schema without optional fields', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'minimal'
-        }
-      }
-    })
-    expect(result.ok).toBe(true)
-  })
-
-  test('accepts parallel_tool_calls', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      parallel_tool_calls: false
-    })
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.data.parallel_tool_calls).toBe(false)
-  })
-
-  test('accepts metadata', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      metadata: { task: 'autocomplete', chat_id: 'abc-123' }
-    })
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.data.metadata).toEqual({ task: 'autocomplete', chat_id: 'abc-123' })
-  })
-
-  test('accepts prediction with string content', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      prediction: {
-        type: 'content',
-        content: 'predicted output text'
-      }
-    })
-    expect(result.ok).toBe(true)
-    if (!result.ok) return
-    expect(result.data.prediction?.type).toBe('content')
-  })
-
-  test('accepts prediction with array content', () => {
-    const result = validateChatRequest({
-      model: 'openai/gpt-4o',
-      messages: [{ role: 'user', content: 'Hello' }],
-      prediction: {
-        type: 'content',
-        content: [{ type: 'text', text: 'predicted output' }]
-      }
-    })
-    expect(result.ok).toBe(true)
-  })
-
-  test('rejects prediction with invalid type', () => {
-    const result = validateChatRequest({
+  // Catches a prediction of a type OpenAI does not define being passed through.
+  test('a prediction with an invalid type with a 400', async () => {
+    const answer = await postChatBody({
       model: 'openai/gpt-4o',
       messages: [{ role: 'user', content: 'Hello' }],
       prediction: {
@@ -446,6 +469,6 @@ describe('validateChatRequest', () => {
         content: 'text'
       }
     })
-    expect(result.ok).toBe(false)
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
   })
 })

@@ -15,27 +15,20 @@ import type { RestartReport } from '@proxy/tui/proxy-server'
 import { isRecord } from '@proxy/utils/guards'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
+import { writeProxyConfig } from '../fixtures/agent-dir'
+
 let agentDir: string
 
 beforeEach(() => {
   agentDir = mkdtempSync(join(tmpdir(), 'pi-switchboard-settings-'))
   vi.stubEnv('PI_CODING_AGENT_DIR', agentDir)
-  writeConfig({ port: 4141 })
+  writeProxyConfig(agentDir, { port: 4141 })
 })
 
 afterEach(() => {
   vi.unstubAllEnvs()
   rmSync(agentDir, { recursive: true, force: true })
 })
-
-/**
- * Writes the config file.
- *
- * @param config - its contents
- */
-function writeConfig(config: Record<string, unknown>): void {
-  writeFileSync(join(agentDir, 'proxy-config.json'), JSON.stringify(config))
-}
 
 /**
  * Reads the config file as written.
@@ -163,7 +156,7 @@ describe('runSetting', () => {
   // Catches custom exposure switched on with an empty list (it serves no model) without opening
   // the list, and a listed model that is not available now dropped from the list.
   test('choosing custom exposure with an empty list opens the list, keeping unavailable entries', async () => {
-    writeConfig({ customModels: [] })
+    writeProxyConfig(agentDir, { customModels: [] })
     const { editor } = scripted(['custom', ['alpha/two']])
     await runSetting(editor, 'modelExposureMode')
 
@@ -173,7 +166,7 @@ describe('runSetting', () => {
     })
 
     const offered: string[][] = []
-    writeConfig({ modelExposureMode: 'custom', customModels: ['gone/model'] })
+    writeProxyConfig(agentDir, { modelExposureMode: 'custom', customModels: ['gone/model'] })
     await runSetting(
       {
         ...scripted([]).editor,
@@ -237,7 +230,7 @@ describe('runSetting', () => {
   // Catches saving the login fallback classes dropping the login order and the disabled logins
   // set from the Accounts view (#233): they share `routing.logins`.
   test('keeps the login order and disabled logins when saving the fallback classes', async () => {
-    writeConfig({
+    writeProxyConfig(agentDir, {
       routing: { logins: { order: { alpha: ['alpha-2'] }, disabled: ['alpha-2'] } }
     })
     await runSetting(scripted(['[ ] timeout', 'Done']).editor, 'loginFallbackOn')
@@ -254,7 +247,7 @@ describe('runSetting', () => {
   // Catches saving another setting writing the loader's repaired '' over a token that is not a
   // string, which would turn auth off for good (#82).
   test('keeps an authToken that is not a string when saving another setting', async () => {
-    writeConfig({ authToken: 12_345 })
+    writeProxyConfig(agentDir, { authToken: 12_345 })
     await runSetting(scripted(['On', 'Later (r on this view)']).editor, 'docsUi')
 
     expect(savedConfig()).toMatchObject({ authToken: 12_345, docsUi: true })

@@ -24,6 +24,7 @@ import {
 } from '@proxy/tui/proxy-server'
 import { afterEach, describe, expect, test } from 'vite-plus/test'
 
+import { freePort } from '../fixtures/local-server'
 import { testConfig } from '../helpers'
 
 /** Servers a test opened, closed after it. */
@@ -40,22 +41,6 @@ afterEach(async () => {
     )
   )
 })
-
-/**
- * Finds a port free on loopback now.
- *
- * @returns the port
- */
-async function freePort(): Promise<number> {
-  const probe = createNetServer()
-  probe.listen(0, '127.0.0.1')
-  await once(probe, 'listening')
-  const address = probe.address()
-  probe.close()
-  await once(probe, 'close')
-  if (address === null || typeof address === 'string') throw new Error('probe not on TCP')
-  return address.port
-}
 
 /**
  * Holds a port, so binding it fails with `EADDRINUSE`.
