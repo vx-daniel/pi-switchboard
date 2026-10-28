@@ -47,7 +47,9 @@ const DOCTOR_POINTERS: Readonly<Partial<Record<DoctorCheck, Pointer>>> = {
   'logins': ACCOUNTS,
   'proxy-auth': 'p',
   'docs-ui': SETTINGS,
+  // Stats off, missing or unreadable; too few calls in the window is `window`, a key in this view.
   'stats': SETTINGS,
+  'window': 'a',
   'config-file': SETTINGS,
   'hit-rate': STATS,
   'cache-write-cost': STATS,

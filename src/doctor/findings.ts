@@ -41,6 +41,7 @@ export const DOCTOR_CHECKS = [
   'credentials',
   'logins',
   'fallback-on',
+  'window',
   'hit-rate',
   'cache-write-cost',
   'retention',
@@ -222,6 +223,8 @@ export interface CacheInputs {
   readonly catalog: ReadonlyMap<string, CatalogModel>
   /** Whether `PI_CACHE_RETENTION=long` is set in the doctor's environment. */
   readonly retentionLong: boolean
+  /** The too-few-calls advice's recommendation: the CLI's `--window`, the console's key (#325). */
+  readonly howToWiden: string
 }
 
 /**
@@ -750,9 +753,9 @@ export function cacheFindings(inputs: CacheInputs): Finding[] {
   const judged = inputs.stats.models.filter((stats) => stats.attempts >= MIN_CALLS)
   if (judged.length === 0) {
     return [
-      finding('stats', 'advice', undefined, {
+      finding('window', 'advice', undefined, {
         message: `No model had ${String(MIN_CALLS)} calls in the window, so none was judged.`,
-        recommendation: 'Try a longer window (--window all), or come back after more traffic.'
+        recommendation: inputs.howToWiden
       })
     ]
   }

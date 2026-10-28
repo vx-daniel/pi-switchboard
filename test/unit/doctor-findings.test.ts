@@ -53,6 +53,9 @@ function modelStats(fields: Partial<ModelStats> = {}): ModelStats {
   }
 }
 
+/** A too-few-calls recommendation, as a caller gives it. */
+const WIDEN = 'Widen the window.'
+
 /**
  * Judges one model's numbers.
  *
@@ -69,7 +72,8 @@ function cacheChecks(
   const inputs: CacheInputs = {
     stats: { kind: 'read', models: [modelStats(stats)] },
     catalog: new Map([[MODEL, options.model ?? CLAUDE]]),
-    retentionLong: options.retentionLong === true
+    retentionLong: options.retentionLong === true,
+    howToWiden: WIDEN
   }
   return cacheFindings(inputs).map((found) => found.check)
 }
@@ -275,7 +279,7 @@ describe('the doctor cache section', () => {
   test('judges a model from 20 calls, not 19', () => {
     const lowHits = { inputTokens: 1000, cacheReadTokens: 0 }
 
-    expect(cacheChecks({ ...lowHits, attempts: 19 })).toEqual(['stats'])
+    expect(cacheChecks({ ...lowHits, attempts: 19 })).toEqual(['window'])
     expect(cacheChecks({ ...lowHits, attempts: 20 })).toEqual(['hit-rate'])
   })
 
@@ -326,7 +330,8 @@ describe('the doctor cache section', () => {
     const [advice] = cacheFindings({
       stats: { kind: 'read', models: [modelStats(under)] },
       catalog: new Map([[MODEL, CLAUDE]]),
-      retentionLong: true
+      retentionLong: true,
+      howToWiden: WIDEN
     })
     expect(advice?.recommendation).toMatch(/^Remove PI_CACHE_RETENTION=long/)
   })
@@ -380,7 +385,7 @@ describe('the doctor cache section', () => {
   ])('says so when the stats are $state.kind', ({ state, severity }) => {
     const report = doctorReport(
       generalInputs(),
-      { stats: state, catalog: new Map(), retentionLong: false },
+      { stats: state, catalog: new Map(), retentionLong: false, howToWiden: WIDEN },
       { window: 'week', isLoopback: isLoopbackHost }
     )
 
@@ -398,7 +403,8 @@ describe('the doctor report', () => {
       {
         stats: { kind: 'read', models: [modelStats({ inputTokens: 1000, cacheReadTokens: 0 })] },
         catalog: new Map([[MODEL, CLAUDE]]),
-        retentionLong: false
+        retentionLong: false,
+        howToWiden: WIDEN
       },
       { window: 'today', isLoopback: isLoopbackHost }
     )
@@ -445,7 +451,8 @@ describe('the doctor report', () => {
               models: [modelStats({ inputTokens: 1000, cacheReadTokens: 0 })]
             },
             catalog: new Map(),
-            retentionLong: false
+            retentionLong: false,
+            howToWiden: WIDEN
           },
           { window: 'week', isLoopback: isLoopbackHost }
         )

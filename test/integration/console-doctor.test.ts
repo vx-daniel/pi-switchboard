@@ -14,7 +14,7 @@ import { createProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { createDoctorSource, type DoctorConsole } from '@proxy/tui/console-doctor'
 import { initialState, readStatus } from '@proxy/tui/console-state'
 import { openStatsView } from '@proxy/tui/dashboard'
-import { doctorRows } from '@proxy/tui/doctor-view'
+import { doctorPointer, doctorRows } from '@proxy/tui/doctor-view'
 import { pickedWindow } from '@proxy/tui/navigation'
 import { createRefresh } from '@proxy/tui/status-refresh'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
@@ -85,8 +85,9 @@ async function openConsole(): Promise<Console> {
 
 describe('the console’s Doctor view', () => {
   // Catches the view calling a provider (verifying a login may refresh an OAuth token) or writing
-  // to the agent dir, and the logins it could not verify itself shown as fine instead of pointing
-  // at the Accounts view's v.
+  // to the agent dir, the logins it could not verify itself shown as fine instead of pointing at
+  // the Accounts view's v, and too few calls answered with the CLI's --window flag (or Settings)
+  // instead of this view's window key.
   test('renders the findings from the console’s state, calling and writing nothing', async () => {
     const { context, agentDir, mock } = await openConsole()
     const fetched = vi.spyOn(globalThis, 'fetch')
@@ -110,6 +111,13 @@ describe('the console’s Doctor view', () => {
     )
     expect(shown[0]).toMatch(/^› ADVICE {2}credentials {6}1 provider has .* → 2 Accounts, v {2}╭/u)
     expect(report?.statsAvailable).toBe(true)
+    expect(report?.cache).toEqual([
+      expect.objectContaining({
+        check: 'window',
+        recommendation: 'Try a longer window (a: all 30 days), or come back after more traffic.'
+      })
+    ])
+    expect(report?.cache.map(doctorPointer)).toEqual(['a'])
     expect(fetched).not.toHaveBeenCalled()
     expect(mock.requests).toHaveLength(0)
     expect(snapshot(agentDir.path)).toEqual(before)

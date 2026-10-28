@@ -77,7 +77,12 @@ export interface DoctorInputs {
   readonly stats: DoctorStats
   /** The window the stats were read over. */
   readonly window: StatsWindow
+  /** The too-few-calls advice's recommendation, when not the CLI's {@link WINDOW_FLAG_ADVICE}. */
+  readonly howToWiden?: string
 }
+
+/** The too-few-calls advice's recommendation in the CLI. */
+const WINDOW_FLAG_ADVICE = 'Try a longer window (--window all), or come back after more traffic.'
 
 /**
  * Reads the doctor's stats over the window from an open stats store: each served model's numbers,
@@ -215,7 +220,8 @@ export function judgeDoctorInputs(inputs: DoctorInputs): DoctorReport {
   const cache: CacheInputs = {
     stats: inputs.stats.state,
     catalog: catalog(),
-    retentionLong: process.env.PI_CACHE_RETENTION === 'long'
+    retentionLong: process.env.PI_CACHE_RETENTION === 'long',
+    howToWiden: inputs.howToWiden ?? WINDOW_FLAG_ADVICE
   }
   return doctorReport(general, cache, { window: inputs.window, isLoopback: isLoopbackHost })
 }

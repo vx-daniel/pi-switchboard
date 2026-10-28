@@ -37,6 +37,9 @@ const REPORT_MS = SNAPSHOT_MS
 const HOW_TO_VERIFY =
   'Verify the logins in the Accounts view (v; as /healthz/creds?verify=true, it may refresh an OAuth token).'
 
+/** The too-few-calls advice's recommendation in the console: the window keys. */
+const HOW_TO_WIDEN = 'Try a longer window (a: all 30 days), or come back after more traffic.'
+
 /**
  * Builds the credentials the doctor judges from the logins the console last read, each with the
  * Accounts view's last verification merged in (`status-refresh.ts`). No credential is resolved.
@@ -73,7 +76,8 @@ function doctorInputs(context: DoctorConsole, status: Status): DoctorInputs {
     credentials: consoleCredentials(state.accounts, getLoginRegistration()),
     configFileProblem: status.fileProblem,
     stats: context.statsView.doctorStats(state.statsWindow),
-    window: state.statsWindow
+    window: state.statsWindow,
+    howToWiden: HOW_TO_WIDEN
   }
 }
 
