@@ -535,7 +535,9 @@ async function openUpstream(
   } catch (error) {
     idle?.dispose()
     // Nothing was sent, but it is logged as the call's throw all the same: the route logs no
-    // upstream failure's text, so this is the only place it is.
+    // upstream failure's text, so this is the only place it is. Its options were never built, so
+    // the call carries only the signal: `logUpstreamThrow` reads nothing else of `opts`, while
+    // `logUpstreamStart` (which reads the rest) never sees this call.
     logUpstreamThrow(
       { model, options, opts: signal === undefined ? {} : { signal }, stream, startedAt },
       error

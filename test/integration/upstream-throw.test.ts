@@ -241,6 +241,7 @@ async function dispatchDirect(dispatch: DirectDispatch): Promise<{ status: numbe
 }
 
 describe('a provider that throws when the call starts', () => {
+  // Catches a throw from pi's `streamSimple` escaping as the proxy's own 500, mapped apart from an
   // error event, or quoting the provider's text to the client; the throw going unlogged
   // (`logUpstreamThrow`), or its text logged above debug; and its text logged twice, by the call
   // and again by the route (#339).
