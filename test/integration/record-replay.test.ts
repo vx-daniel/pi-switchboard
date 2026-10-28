@@ -200,6 +200,30 @@ describe('record and replay', () => {
     ).toThrow('contains a credential')
   })
 
+  // Catches the ChatGPT user's ID reaching a committed fixture: OpenAI's Responses API echoes it
+  // as `safety_identifier` in every response (#238).
+  test('saves an echoed safety_identifier as user-redacted', async () => {
+    await useProvider(`${recorder.baseUrl}/v1`, 'two-tools')
+    await chat('two-tools')
+    const captured = recorder.exchanges.at(-1)
+    if (captured === undefined) throw new Error('the recorder captured nothing')
+    const echoed = {
+      ...captured.exchange,
+      response: {
+        ...captured.exchange.response,
+        chunks: ['data: {"response":{"safety_identifier":"user-AbC123xyz"}}\n\n']
+      }
+    }
+
+    const saved = readFileSync(
+      saveRecording(named(echoed, 'safety-id'), captured.secrets, recordingsDir),
+      'utf8'
+    )
+
+    expect(saved).not.toContain('user-AbC123xyz')
+    expect(saved).toContain('user-redacted')
+  })
+
   // Catches the quota headers lost on the way into a recording or out of a replay (the quota
   // tests replay them, #69), or an identifying header (organization, cookie, turn token) kept.
   test('keeps only the quota headers, and replay sends them back', async () => {

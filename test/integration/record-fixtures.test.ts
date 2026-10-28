@@ -1,7 +1,7 @@
 /**
  * `scripts/record-fixtures.ts`, run offline: its recorders forward to the mock provider (standing
- * in for Anthropic and Codex, `PI_SWITCHBOARD_RECORD_UPSTREAM`), its logins are a fixture agent
- * dir with fake API keys and fake Codex tokens, for each base and its second login
+ * in for Anthropic, Codex and OpenAI, `PI_SWITCHBOARD_RECORD_UPSTREAM`), its logins are a fixture
+ * agent dir with fake API keys and fake ChatGPT tokens, for each base and its second login
  * (`PI_SWITCHBOARD_RECORD_AGENT_DIR`), and its recordings go to a temp dir
  * (`PI_SWITCHBOARD_RECORD_OUT_DIR`) instead of the committed `test/fixtures/recordings`. The
  * script runs `main()` on import, so each test imports it afresh.
@@ -24,6 +24,8 @@ import { loadRecording, type Recording, replay } from '../fixtures/recording'
 
 const ANTHROPIC = 'anthropic-messages'
 const CODEX = 'openai-codex-responses'
+/** pi's `openai` provider signed in with ChatGPT, over the Responses API. */
+const OPENAI = 'openai-responses'
 const MODEL_ID = 'claude-haiku-5-5'
 const MISSING_MODEL_ID = 'claude-recorder-no-such-model'
 const CODEX_MODEL_ID = 'gpt-5.6-luna'
@@ -42,13 +44,16 @@ const ALL_RECORDINGS = [
   ...ANTHROPIC_SCENARIOS.map((scenario) => `${ANTHROPIC}/${scenario}`),
   `${ANTHROPIC}/${SECOND_LOGIN}`,
   `${CODEX}/quota`,
-  `${CODEX}/${SECOND_LOGIN}`
+  `${CODEX}/${SECOND_LOGIN}`,
+  `${OPENAI}/quota`
 ]
 /** The Anthropic requests: one per recording, plus the cache-read repeat. */
 const ANTHROPIC_REQUESTS = ANTHROPIC_SCENARIOS.length + 2
 const API_KEY = 'notarealsecret-record-fixtures-key'
 /** `anthropic-2`'s own key, which its second-login request must carry instead of the base's. */
 const SECOND_API_KEY = 'notarealsecret-record-fixtures-key-2'
+/** The fake ChatGPT sign-in token of the `openai` login: no `sk-` key, as pi tells them apart. */
+const OPENAI_TOKEN = 'notarealsecret-openai-chatgpt-access'
 const EXIT_FAILURE = 1
 /** How long the fixture's Codex login stays valid: an hour, longer than any test run. */
 const CODEX_LOGIN_LIFETIME_MS = 3_600_000
@@ -140,8 +145,9 @@ type Logins = 'all' | 'bases' | 'none'
 /**
  * Creates a fixture agent dir for the script to record with, removed in `afterAll`.
  *
- * @param logins - which logins auth.json holds: a fake Anthropic key and a fake Codex token for
- *   each base, and for `all` its second login (`anthropic-2` with its own key, `openai-codex-2`)
+ * @param logins - which logins auth.json holds: a fake Anthropic key, a fake Codex token and a
+ *   fake ChatGPT sign-in for `openai` for the bases, and for `all` each second login
+ *   (`anthropic-2` with its own key, `openai-codex-2`)
  * @returns the agent dir's path
  */
 async function recordingAgentDir(logins: Logins): Promise<string> {
@@ -152,7 +158,17 @@ async function recordingAgentDir(logins: Logins): Promise<string> {
     refresh: 'notarealsecret-codex-refresh',
     expires: Date.now() + CODEX_LOGIN_LIFETIME_MS
   }
-  const bases = { 'anthropic': { type: 'api_key', key: API_KEY }, 'openai-codex': codex }
+  const bases = {
+    'anthropic': { type: 'api_key', key: API_KEY },
+    'openai-codex': codex,
+    // pi 1.4's "Sign in with ChatGPT" on the `openai` provider: OAuth, sent as a bearer token.
+    'openai': {
+      type: 'oauth',
+      access: OPENAI_TOKEN,
+      refresh: 'notarealsecret-openai-refresh',
+      expires: Date.now() + CODEX_LOGIN_LIFETIME_MS
+    }
+  }
   const all = {
     ...bases,
     'anthropic-2': { type: 'api_key', key: SECOND_API_KEY },
@@ -294,15 +310,16 @@ describe('recording every scenario', () => {
   })
 
   // Catches the cache-read repeat dropped, which records a cache write instead of a cache read,
-  // or Codex sent over WebSocket (which bypasses the recorder and carries no quota headers) or to
-  // the wrong path.
-  test('sends each scenario once, cache-read twice, and Codex over SSE to its path', () => {
+  // Codex sent over WebSocket (which bypasses the recorder and carries no quota headers), or Codex
+  // or the ChatGPT sign-in sent to the wrong path.
+  test('sends each scenario once, cache-read twice, Codex over SSE, each to its path', () => {
     expect(
       upstream.requests.slice(requestsBefore).map((request) => request.path.split('?')[0])
     ).toEqual([
       ...Array.from({ length: ANTHROPIC_REQUESTS }, () => '/v1/messages'),
       '/backend-api/codex/responses',
-      '/backend-api/codex/responses'
+      '/backend-api/codex/responses',
+      '/v1/responses'
     ])
   })
 
@@ -357,6 +374,17 @@ describe('recording every scenario', () => {
     }
   )
 
+  // Catches the ChatGPT sign-in's call not recorded, recorded under another API or path, or with
+  // another model.
+  test('saves the ChatGPT sign-in quota call as a loadable recording', () => {
+    expect(withJoinedBody(loadRecording(OPENAI, 'quota', saveDir))).toMatchObject({
+      api: OPENAI,
+      model: CODEX_MODEL_ID,
+      request: { path: '/v1/responses', body: { model: CODEX_MODEL_ID } },
+      response: { status: 429, headers: quotaOnly(CODEX_QUOTA_HEADERS), body: CODEX_LIMIT_BODY }
+    })
+  })
+
   // Catches a login's key, Codex token or ChatGPT account ID, or an identifying response header,
   // reaching a committed fixture.
   test.each(ALL_RECORDINGS)('keeps credentials and identifying headers out of %s', (recording) => {
@@ -365,6 +393,7 @@ describe('recording every scenario', () => {
       API_KEY,
       SECOND_API_KEY,
       FAKE_CODEX_TOKEN,
+      OPENAI_TOKEN,
       'notarealsecret-account',
       'x-api-key',
       'anthropic-organization-id',

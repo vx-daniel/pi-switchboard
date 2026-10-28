@@ -129,11 +129,19 @@ export function loadRecording(
 const CREDENTIAL_PATTERN = /sk-ant-[a-z]{3}\d{2}-|Bearer\s+\S{20,}/
 
 /**
+ * An account identifier a provider echoes in every response body, in its serialized form: OpenAI's
+ * Responses API names the ChatGPT user as `safety_identifier: "user-…"` (#238). Not a credential,
+ * and on every response of that route, so it is replaced, not refused.
+ */
+const ACCOUNT_ID_PATTERN = /(safety_identifier\\*":\s*\\*")user-[A-Za-z0-9]+/g
+
+/**
  * Saves a recording, unless it contains a credential: any of `secrets` (the values the request's
- * auth headers carried) or anything shaped like one.
+ * auth headers carried) or anything shaped like one. An account identifier the response echoes
+ * ({@link ACCOUNT_ID_PATTERN}) is replaced by `user-redacted` first.
  *
  * @remarks
- * Refuses rather than redacts, so a leak is noticed instead of silently patched.
+ * Refuses a credential rather than redacting it, so a leak is noticed instead of silently patched.
  *
  * @param recording - the recording to save
  * @param secrets - credential values that must not appear in it; empty strings are ignored
@@ -146,7 +154,10 @@ export function saveRecording(
   secrets: readonly string[],
   directory = RECORDINGS_DIR
 ): string {
-  const text = `${JSON.stringify(recording, null, JSON_INDENT)}\n`
+  const text = `${JSON.stringify(recording, null, JSON_INDENT)}\n`.replace(
+    ACCOUNT_ID_PATTERN,
+    '$1user-redacted'
+  )
   const leaked = secrets.filter((secret) => secret !== '' && text.includes(secret))
   if (leaked.length > 0 || CREDENTIAL_PATTERN.test(text)) {
     throw new Error(

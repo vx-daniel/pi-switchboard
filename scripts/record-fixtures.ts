@@ -1,7 +1,7 @@
 /**
  * Records real provider traffic as replay fixtures (`test/fixtures/recordings/<api>`): Anthropic
- * (`anthropic-messages`), ChatGPT's Codex (`openai-codex-responses`), and a second login of each
- * (`<api>/second-login`, #233).
+ * (`anthropic-messages`), ChatGPT's Codex (`openai-codex-responses`), a second login of each
+ * (`<api>/second-login`, #233), and pi 1.4's ChatGPT sign-in on OpenAI (`openai-responses`, #238).
  * On demand only: `pnpm run test:live:record [<api>/<scenario> | <api> ...]` records the named
  * scenarios, or all of them. It spends a few cents of quota on the logins used.
  *
@@ -215,6 +215,21 @@ const TARGETS: readonly Target[] = [
     provider: 'openai-codex-2',
     label: 'ChatGPT (Codex) 2',
     scenarios: [{ ...QUOTA_SCENARIO, name: SECOND_LOGIN }]
+  },
+  {
+    // pi 1.4's own route to a ChatGPT subscription ("Sign in with ChatGPT" on the `openai`
+    // provider): the Responses API at api.openai.com, where `openai-codex` is pi's legacy route to
+    // ChatGPT's Codex backend. Recorded for the headers it carries (#238).
+    provider: 'openai',
+    label: 'OpenAI (ChatGPT sign-in)',
+    api: 'openai-responses',
+    // A model a ChatGPT plan serves: `gpt-5.4-mini`, `gpt-5.5` and `gpt-5.3-codex` were refused
+    // ("not supported when using Codex with a ChatGPT account").
+    modelId: 'gpt-5.6-luna',
+    upstream: 'https://api.openai.com',
+    basePath: '/v1',
+    options: {},
+    scenarios: [QUOTA_SCENARIO]
   }
 ]
 
