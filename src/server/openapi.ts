@@ -4,13 +4,14 @@
  *
  * @remarks
  * Two hono-openapi pieces feed the document. `describeRoute` takes the descriptions here: summary,
- * tags and each status's response schema. `validator()` takes the request schemas here
- * (`modelPathSchema`, `chatHeadersSchema`, `chatRequestBodySchema`, `credentialsQuerySchema`):
- * it checks the request and documents the parameter or body from the same schema, so neither is
- * written by hand. The chat body's 400/422 split and wording stay the proxy's: the route's
- * validator hook answers a failed body with `chatRequestRejection`. The response schemas are the
- * ones the handlers type their bodies with, so the document cannot describe a field the code does
- * not send.
+ * tags and each status's response schema. `validator()` takes the request schemas (here
+ * `modelPathSchema`, `chatHeadersSchema`, `chatRequestBodySchema`, `credentialsQuerySchema`,
+ * `usageQuerySchema` and `cooldownsQuerySchema`; the Responses body in `responses-route.ts`): it
+ * checks the request and documents the parameter or body from the same schema, so neither is
+ * written by hand. The bodies' 400/422 split and wording stay the proxy's: each body's validator
+ * hook answers a failed body through `rejectionResponse` (`chatRequestRejection` for chat). The
+ * response schemas are the ones the handlers type their bodies with, so the document cannot
+ * describe a field the code does not send.
  *
  * Documented: every route the proxy serves. The OpenAI endpoints it answers with 404 are written
  * in by hand (`unsupportedPaths`), since hono-openapi leaves wildcard and `ALL` routes out.
@@ -36,7 +37,8 @@ import * as z from 'zod'
 // described where it is read and nowhere else. The path, header and query schemas accept any
 // value the request can carry (a path parameter and a header are always one string, a query may
 // repeat), so their validators never fail and need no hook: hono-openapi's own failure answer is
-// not in OpenAI's error shape. Only the chat body can fail, and its hook answers in OpenAI's.
+// not in OpenAI's error shape. Only the chat and Responses bodies can fail, and their hooks answer
+// in OpenAI's.
 
 /**
  * The model detail route's path: the model ID, which may span slashes. Surrounding spaces are

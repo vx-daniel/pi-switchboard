@@ -1715,7 +1715,7 @@
               "cache_write_tokens"
             ],
             "additionalProperties": false,
-            "description": "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias and fallback attempts that led to the answer."
+            "description": "Not OpenAI's: pi's cost (USD) and cache token counts, and the alias, login, effort report and fallback attempts that led to the answer."
           }
         },
         "required": [
@@ -1931,7 +1931,7 @@
             ]
           },
           "x_pi": {
-            "description": "Not OpenAI's: in every chunk, only when the request named an alias or an alias fell back (#67).",
+            "description": "Not OpenAI's: in every chunk, only when there is an alias (#66), failed attempts (#67), a login of a model with more than one (#227), or an effort report (#175).",
             "type": "object",
             "properties": {
               "alias": {
@@ -2568,7 +2568,7 @@
         "summary": "The model runtime and the exposure it gives",
         "responses": {
           "200": {
-            "description": "At least one model is exposed.",
+            "description": "At least one model is exposed, the exposure config is valid and no alias is misconfigured.",
             "content": {
               "application/json": {
                 "schema": {
@@ -2588,7 +2588,7 @@
             }
           },
           "503": {
-            "description": "No model is exposed or the exposure config is invalid (the same report), or the check threw.",
+            "description": "No model is exposed, the exposure config is invalid, or an alias is misconfigured (the same report), or the check threw.",
             "content": {
               "application/json": {
                 "schema": {

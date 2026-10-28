@@ -11,7 +11,8 @@
  *   rebinding), while the Host header and the TLS name checks stay on the URL's host name;
  * - redirects are followed by hand, at most {@link MAX_REDIRECTS}, each target checked again;
  * - a connect timeout ({@link CONNECT_TIMEOUT_MS}) and a total deadline ({@link TOTAL_TIMEOUT_MS});
- * - a byte cap ({@link MAX_REMOTE_IMAGE_BYTES}) enforced while the body streams;
+ * - a byte cap ({@link MAX_REMOTE_IMAGE_BYTES}) enforced while the body streams, and a budget for
+ *   all of a request's images together ({@link MAX_REMOTE_IMAGE_BYTES_PER_REQUEST});
  * - the response's content type must be one the proxy accepts in a data URI;
  * - a plain GET with the proxy's user agent: no client header, cookie or credential is sent.
  *
@@ -161,7 +162,7 @@ export interface RemoteImageFetchOptions {
   readonly classifyAddress: (address: string) => AddressClass
   /** Resolves a host name to all its addresses. */
   readonly resolveHost: HostResolver
-  /** The limits of one fetch. */
+  /** The limits of one fetch, and of all a request's fetches together. */
   readonly limits: RemoteImageLimits
 }
 

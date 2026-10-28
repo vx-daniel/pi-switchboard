@@ -3,7 +3,7 @@
  *
  * @remarks
  * Parameter schemas go through `json-schema-to-typebox`, which rejects unsupported JSON Schema
- * constructs. `tool_choice` is not converted here; `src/pi/complete.ts` maps it per API.
+ * constructs. `tool_choice` is not converted here; `src/pi/payload-fields.ts` maps it per API.
  *
  * @packageDocumentation
  */

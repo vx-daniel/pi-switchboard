@@ -117,7 +117,8 @@ function isFinished(chat: ChatRequest): chat is FinishedRequest {
 }
 
 /**
- * Picks a status's color: green for a success, yellow for a client error, red for a server error.
+ * Picks a status's color: success for a success, accent for a redirect, warning for a client
+ * error, error for a server error.
  *
  * @param status - the status
  * @returns the color
@@ -177,8 +178,8 @@ function endedAt(request: HttpRequest, chat: ChatRequest | undefined): number | 
 }
 
 /**
- * Picks a finished request's gauge color: red when its chat request failed, yellow when it was
- * slow, blue otherwise.
+ * Picks a finished request's gauge color: error when its chat request failed, warning when it was
+ * slow, accent otherwise.
  *
  * @param took - how long it took, in milliseconds
  * @param chat - its chat request, if it is one

@@ -13,7 +13,7 @@ export type Verification = Pick<ProviderCredentialStatus, 'verified' | 'error'>
 export interface RefreshState<Status> {
   status: Status | undefined
   accounts: readonly ProviderCredentialStatus[]
-  /** The last verification of each provider (`v`), kept until its next login or logout. */
+  /** Each provider's result from the last `v`; a login or logout drops its own. */
   verification: Map<string, Verification>
   /** How many times each provider's credential changed (a login or logout) while running. */
   readonly credentialChanges: Map<string, number>

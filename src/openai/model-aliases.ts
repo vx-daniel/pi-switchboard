@@ -201,7 +201,8 @@ function warnOnce(
 /**
  * Exposes the configured aliases with an exposed target.
  *
- * @param aliases - alias -> one canonical ID, or `{ targets, fallbackOn }`, from the config
+ * @param aliases - alias -> one target (a model or a family), or `{ targets, fallbackOn }`, from
+ *   the config
  * @param lookup - the exposed models, every available model's ID, and pi's thinking levels
  * @returns the exposed aliases, a diagnostic for each alias or target left out, and what each
  *   family target resolves to

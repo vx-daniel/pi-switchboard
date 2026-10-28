@@ -402,7 +402,7 @@ const MARK_COLUMNS = 2
 const LABEL_COLUMNS = 24
 /** The value column at its widest; the note after it takes the rest. */
 const VALUE_COLUMNS = 34
-/** Rows kept under the list for the selected setting's help, its blank row included. */
+/** The most lines of the selected setting's help shown under the list, after a blank row. */
 const HELP_ROWS = 3
 
 /**

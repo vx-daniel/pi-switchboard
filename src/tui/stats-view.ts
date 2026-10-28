@@ -37,9 +37,10 @@ type Counts = Pick<
 >
 
 /**
- * The number columns, in order: the most telling first (requests, failures, cost, the cache hit
- * rate), so a narrow terminal cuts the token counts, not the cost. `uncached` is the input not
- * read from or written to the cache; the prompt is it plus `cache read` and `cache write`.
+ * The number columns, in order: the most telling first (requests, failures, cost, fallbacks, the
+ * cache hit rate), so a narrow terminal cuts the token counts, not the cost. `uncached` is the
+ * input not read from or written to the cache; the prompt is it plus `cache read` and
+ * `cache write`.
  */
 const COLUMNS: readonly {
   readonly title: string

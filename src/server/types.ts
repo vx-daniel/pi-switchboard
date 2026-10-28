@@ -3,8 +3,9 @@
  *
  * @remarks
  * `requestIdMiddleware` sets `requestId`, `clientRequestId` and `upstreamApiKey`;
- * `disconnectMiddleware` sets `abortController` (both in `server/middleware.ts`). The chat route
- * sets `chatModel` and `chatDispatched`, which `rejectedChatMiddleware` reads.
+ * `disconnectMiddleware` sets `abortController` (both in `server/middleware.ts`). `runChat` (the
+ * chat and Responses routes) sets `chatModel` and `chatDispatched`, which `rejectedChatMiddleware`
+ * reads.
  */
 
 export interface ProxyEnv {

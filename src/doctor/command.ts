@@ -3,9 +3,10 @@
  * findings with a recommendation each, as text or, with `--json`, as {@link DoctorReport}.
  *
  * @remarks
- * It reports and recommends only: it changes no file and no setting, and calls no provider unless
- * `--verify` asks it to. It takes the server flags, so it judges the config `pi-switchboard` with
- * the same flags would run with.
+ * It reports and recommends only: it changes no setting, and calls no provider unless `--verify`
+ * asks it to. An OAuth login that `--verify` refreshes is written back to pi's `auth.json`, as any
+ * refresh is. It takes the server flags, so it judges the config `pi-switchboard` with the same
+ * flags would run with.
  *
  * Exit status: 0 with no general error, 1 with one ({@link doctorExitCode}), 2 for a usage error
  * (an unknown flag, an argument, or a value a flag does not take). The proxy's own CLI answers an
@@ -182,7 +183,7 @@ export const doctorCommand = defineCommand({
     name: 'pi-switchboard doctor',
     description:
       'Check the configuration and the prompt cache, and recommend changes. Reads proxy-config.json, ' +
-      "pi's logins and the stats file; changes nothing. Exit status: 1 when the general section has " +
+      "pi's logins and the stats file and changes no setting (a login --verify refreshes is saved by pi). Exit status: 1 when the general section has " +
       'an error (as /healthz/models or /healthz/creds would answer 503), 2 for a usage error, else 0'
   },
   args: DOCTOR_ARGS,

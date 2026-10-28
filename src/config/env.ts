@@ -4,7 +4,7 @@
  * @remarks
  * Priority: CLI args > env vars > JSON config file > defaults. Not every setting has every
  * source: agentic mode is env-only (`PI_SWITCHBOARD_AGENTIC`), and model exposure, public model
- * IDs, custom models and provider prefixes come from the config file only.
+ * IDs, custom models, provider prefixes and aliases come from the config file only.
  *
  * The env vars were `PI_PROXY_*` before the rename to pi-switchboard (#65). The old names are not
  * read; one that is still set is warned about, and an old auth token refuses to start
@@ -161,7 +161,7 @@ export interface ServerConfig {
   readonly proxyAuthOverride?: OverrideSource
   /** Whether requests a web page could send are refused (`hostOriginGuard`, #188). */
   readonly hostOriginGuardEnabled: boolean
-  /** Whether agentic mode is enabled. */
+  /** Whether `PI_SWITCHBOARD_AGENTIC` is `true`; agentic mode is not built, so only logged. */
   readonly agenticEnabled: boolean
   /** Whether remote image URL fetching is enabled. */
   readonly remoteImagesEnabled: boolean

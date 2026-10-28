@@ -17,7 +17,10 @@ import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 
 import { getSessionAvailableModels, type ProxyState } from './state'
 
-/** Rows the list needs beyond one per model. */
+/**
+ * Added to the model count when sizing the list. SettingsList's `maxVisible` counts model rows
+ * only, so below {@link MODEL_SELECTOR_MAX_ROWS} every model shows with or without it.
+ */
 const MODEL_SELECTOR_EXTRA_ROWS = 2
 /** Cap on visible rows in the selector. */
 const MODEL_SELECTOR_MAX_ROWS = 20
@@ -28,9 +31,9 @@ const settingsLogger = proxyLogger('extension', 'settings')
 /** Direction of a provider jump: Left is `prev`, Right is `next`. */
 type JumpDirection = 'prev' | 'next'
 
-// HACK: SettingsList (pi-tui 1.3.0) can move the selection (`selectItem`) but has no public way to
+// HACK: SettingsList (pi-tui 1.4.0) can move the selection (`selectItem`) but has no public way to
 // read it, or to read the rows a search shows. Provider jumping needs both, so they are read from
-// private fields through Reflect, pinned to pi-tui 1.3.0 (`settings-list.js`: `selectedIndex`,
+// private fields through Reflect, pinned to pi-tui 1.4.0 (`settings-list.js`: `selectedIndex`,
 // `items`, `filteredItems`, `searchEnabled`). Writes go through `selectItem` only. Remove the reads
 // when SettingsList exposes the selected item and the displayed rows.
 // The unsafe access is isolated here so jumpProvider itself is fully type-safe.

@@ -1,8 +1,9 @@
 # CI — the enforced quality gate.
 #
 # Runs the SAME gate as the local pre-commit hook (`check:all` = scripts/gate.ts: oxfmt → oxlint with
-# the type check → vitest → the tsdown build), so "green" means one thing whether it ran on a machine
-# or here. A commit made with `--no-verify`, or by someone without the hooks installed, is caught at
+# the type check → vitest with coverage → fallow → the tsdown build → a smoke run of the built CLI),
+# so "green" means one thing whether it ran on a machine or here. A commit made with `--no-verify`,
+# or by someone without the hooks installed, is caught at
 # the pull request instead of slipping into `dev`.
 #
 # Pull requests into `dev` (the integration branch) and `main` (the release branch) are gated, and so

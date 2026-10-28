@@ -56,9 +56,9 @@ function perLogin(exposed: ExposedModel): readonly ExposedModel[] {
  *
  * @remarks
  * An image request skips the chain's text-only models when another one takes images; with none,
- * the request goes to the first candidate as it always has. A per-request upstream key keeps the
- * first candidate only (see the module notes): the key is the client's own, so no login of the
- * proxy's is chosen.
+ * it keeps the whole chain. A per-request upstream key keeps the first target only, with no
+ * fallback and no login expansion: the key is the client's own, so no login of the proxy's is
+ * chosen.
  *
  * @param resolved - the exposed model or alias the request named
  * @param request - the validated request

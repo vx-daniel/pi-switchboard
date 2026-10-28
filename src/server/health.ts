@@ -8,14 +8,17 @@
  *                         healthcheck every few seconds.
  *   GET /healthz/models   The model runtime: models.json load error, available and exposed model
  *                         counts, exposure modes, the exposure error, `enabledModels` scope
- *                         diagnostics, alias diagnostics (#66) and login diagnostics (#233). 503
- *                         when no model is exposed, the exposure config is invalid, or an alias
- *                         is named like an exposed model.
+ *                         diagnostics, alias diagnostics (#66), login diagnostics (#233), family
+ *                         alias resolutions (#231) and active cooldowns (#68). 503 when no model
+ *                         is exposed, the exposure config is invalid, or an alias is
+ *                         misconfigured (`MISCONFIGURED_ALIAS`: named like an exposed model, an
+ *                         unsupported effort, an unknown family or a pin outside it).
  *   GET /healthz/creds    Per provider: how pi is authenticated (OAuth or API key, and where the
- *                         credential came from) and how many of its models are available. Local
- *                         state only; `?verify=true` asks pi to resolve each credential now, which
- *                         may refresh an OAuth token over the network. 503 when no provider has a
- *                         credential, or a verified one fails.
+ *                         credential came from), how many of its models are available, and its
+ *                         latest subscription quota (#69); whether the `{provider}-N` logins were
+ *                         registered. Local state only; `?verify=true` asks pi to resolve each
+ *                         credential now, which may refresh an OAuth token over the network. 503
+ *                         when no provider has a credential, or a verified one fails.
  *
  * A detail check that throws (an unreadable config file, say) answers 503 rather than 500: it is a
  * failed check. Its message goes to the log, not the response.
@@ -226,10 +229,13 @@ const modelsHealthDescription: DescribeRouteOptions = {
   tags: [OPERATIONAL_TAG],
   summary: 'The model runtime and the exposure it gives',
   responses: {
-    200: jsonResponse('At least one model is exposed.', modelsHealthSchema),
+    200: jsonResponse(
+      'At least one model is exposed, the exposure config is valid and no alias is misconfigured.',
+      modelsHealthSchema
+    ),
     401: UNAUTHORIZED,
     503: jsonResponse(
-      'No model is exposed or the exposure config is invalid (the same report), or the check threw.',
+      'No model is exposed, the exposure config is invalid, or an alias is misconfigured (the same report), or the check threw.',
       z.union([modelsHealthSchema, failedCheckSchema])
     )
   }

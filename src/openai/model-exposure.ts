@@ -124,7 +124,10 @@ export interface ModelExposureConfig {
   /** The proxy's own canonical IDs, used when modelExposureMode is "custom"; empty exposes none. */
   readonly customModels: readonly string[]
   readonly providerPrefixes: Readonly<Record<string, string>>
-  /** Alias -> one canonical ID, or targets with the failures that move between them (#66, #67). */
+  /**
+   * Alias -> one target (a model or a family), or targets with the failures that move between
+   * them (#66, #67, #231).
+   */
   readonly aliases: Readonly<Record<string, AliasTarget>>
   /** `routing.logins.order` and `.disabled` (#233); the usual order, none disabled, when left out. */
   readonly loginRouting?: LoginRouting | undefined
@@ -145,7 +148,10 @@ export interface ModelExposureResult {
   readonly aliases: readonly ExposedModel[]
   /** Alias -> its entry in {@link aliases}. */
   readonly byAlias: ReadonlyMap<string, ExposedModel>
-  /** Configured aliases left out: named like an exposed model, or naming no exposed model. */
+  /**
+   * Aliases and targets left out, and family members whose version can't be read (#66, #230,
+   * #231).
+   */
   readonly aliasDiagnostics: readonly AliasDiagnostic[]
   /** Login settings that name no login, and providers whose every login is disabled (#233). */
   readonly loginDiagnostics: readonly LoginDiagnostic[]
@@ -549,8 +555,8 @@ export function computeModelExposure(
   config: ModelExposureConfig,
   thinkingLevels: ThinkingLevelsOf
 ): ModelExposureOutcome {
-  // 0. One model per provider, whatever its logins (#227): a login slot's models are the base's.
-  // A disabled login is left out, and a model with no other login with it (#233).
+  // 0. One entry per base provider's model, whatever its logins (#227): a login slot's models are
+  // the base's. A disabled login is left out, and so is a model whose every login is (#233).
   const loginRouting = config.loginRouting ?? DEFAULT_LOGIN_ROUTING
   const groups = groupLogins(available, loginRouting)
   const groupOf = new Map(groups.map((group) => [group.primary, group]))

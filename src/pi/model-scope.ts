@@ -1,5 +1,5 @@
 /**
- * pi's `enabledModels` pattern resolution, ported from pi-coding-agent 1.3.0.
+ * pi's `enabledModels` pattern resolution, ported from pi-coding-agent 1.4.0.
  *
  * @remarks
  * The source is `dist/core/model-resolver.js`: `resolveModelScopeFromModels` (line 225) and the
@@ -271,7 +271,7 @@ function resolveReference(
 type AmbiguousReporter = (pattern: string, candidates: readonly Model<Api>[]) => void
 
 /**
- * Says whether two models are the same, as pi-ai 1.3.0's `modelsAreEqual` decides it: the same
+ * Says whether two models are the same, as pi-ai 1.4.0's `modelsAreEqual` decides it: the same
  * model type, ID and provider. The type is left out: for a `Model<Api>` it can only be `chat`.
  *
  * @remarks

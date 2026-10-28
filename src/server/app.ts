@@ -43,9 +43,10 @@ const lifecycleLogger = proxyLogger('server')
 const httpLogger = proxyLogger('server', 'http')
 
 /**
- * Builds the proxy's Hono app: request ID, disconnect and body size middleware on every path,
- * the OpenAPI document and the docs page, proxy auth on `/v1/*` and the `/healthz/<check>` detail
- * endpoints, then the health and OpenAI routes, and an OpenAI-style 404 for anything else.
+ * Builds the proxy's Hono app: request ID, request log, disconnect, host/origin guard (when on)
+ * and body size middleware on every path, the OpenAPI document and the docs page, proxy auth on
+ * `/v1/*` and the `/healthz/<check>` detail endpoints, then the health and OpenAI routes, and an
+ * OpenAI-style 404 for anything else.
  *
  * @remarks
  * Three paths skip proxy auth: `GET /healthz`, so liveness probes need no token, and the OpenAPI

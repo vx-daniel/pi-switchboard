@@ -26,7 +26,10 @@ import type { View } from '@proxy/tui/navigation'
 import type { RequestsViewport } from '@proxy/tui/requests-view'
 import type { RefreshState } from '@proxy/tui/status-refresh'
 
-/** What the status line shows; read every few seconds, never the credentials themselves. */
+/**
+ * What the status read every few seconds holds, for the status strip and the views; never the
+ * credentials themselves.
+ */
 export interface Status {
   readonly available: number
   /** Exposed model count, or the exposure config's error. */
@@ -119,9 +122,9 @@ function configFileStatus(): Pick<Status, 'file' | 'labels' | 'authInvalid' | 'f
 }
 
 /**
- * Reads the status line's data: available and exposed models, cooldowns, the models.json error,
- * the config file as the Settings view and the login labels need it, and the request config the
- * Doctor view judges.
+ * Reads the status: available and exposed models, cooldowns, the models.json error, the reserve,
+ * the exposure and the aliases, the config file as the Settings view and the login labels need it,
+ * and the request config the Doctor view judges.
  *
  * @returns the status
  */

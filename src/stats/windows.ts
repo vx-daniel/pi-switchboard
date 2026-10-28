@@ -1,6 +1,7 @@
 /**
  * The windows the stats are read over (#216, #224): today, the last week, or all 30 days the
- * stats file keeps. The console's Stats view and `GET /v1/switchboard/usage` both use them.
+ * stats file keeps. The console's Stats view, `GET /v1/switchboard/usage` and
+ * `pi-switchboard doctor` use them.
  *
  * @packageDocumentation
  */

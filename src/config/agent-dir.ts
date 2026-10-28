@@ -4,8 +4,8 @@
  * @remarks
  * The pi extension loads this package's library entry points inside pi's own process. Importing
  * `getAgentDir` from `@earendil-works/pi-coding-agent` there loaded this package's installed copy of
- * pi next to the host's: a second pi runtime in pi's process, which pi warns about. This is pi
- * 1.3.0's `getAgentDir`, Windows shell paths included, and `test/unit/agent-dir.test.ts` checks it
+ * pi next to the host's: a second pi runtime in pi's process, which pi warns about. This is pi's
+ * `getAgentDir` (1.4.0), Windows shell paths included, and `test/unit/agent-dir.test.ts` checks it
  * against pi's own for each case.
  *
  * @packageDocumentation

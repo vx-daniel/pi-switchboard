@@ -6,11 +6,15 @@
  * Every error body has OpenAI's shape: `{ error: { message, type, param, code } }`.
  *
  * Statuses the proxy answers with:
- * - 400: invalid JSON or request field, failed message conversion, context overflow, a request
- *   the provider refused as invalid (its 400 or 422)
+ * - 400: invalid JSON or request field, failed message conversion, a refused remote image,
+ *   context overflow, a request the provider refused as invalid (its 400 or 422), the old or an
+ *   empty upstream key header (#65, #207)
  * - 401: proxy auth failure, the provider refused the client's own key
  *   (`X-Switchboard-Upstream-Api-Key`, `upstream_api_key_invalid`)
- * - 404: model not found, unsupported endpoint, any other route (`Invalid URL (<method> <path>)`)
+ * - 403: the host/origin guard refused the request (`invalid_host`, `invalid_origin`; #188)
+ * - 404: model not found, a model the provider refuses for the proxy's login (#156), login not
+ *   found (#182), unsupported endpoint, the Responses API or docs page turned off, any other
+ *   route (`Invalid URL (<method> <path>)`)
  * - 413: request body over the size limit
  * - 422: unsupported or unknown request field, unsupported tool
  * - 429: upstream rate limit (`rate_limit`, with `retry-after` when the provider said when), or a
@@ -19,7 +23,8 @@
  *   (`internalError`, answered by `app.onError`)
  * - 502: upstream refused pi's stored credential (401, 403), pi has no credential for the model's
  *   provider (`upstream_credentials_missing`), any other upstream error
- * - 503: upstream unavailable (503), overloaded (529) or out of capacity, failed health check
+ * - 503: upstream unavailable (503), overloaded (529) or out of capacity, failed health check,
+ *   usage stats off or unreadable (`stats_unavailable`)
  * - 504: upstream timeout (408, 504, idle timeout)
  *
  * @packageDocumentation

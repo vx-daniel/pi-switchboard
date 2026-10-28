@@ -11,8 +11,8 @@
  * registers it first ({@link registerAccountProvider}); logging out of a slot drops it again
  * ({@link unregisterAccountProvider}), so the slot is reused. Cooldowns, quota, the reserve,
  * `x_pi` and the log are all keyed by provider, so each login gets them separately; routing
- * moves a model's request from one login to the next on a rate limit
- * (`src/server/route-plan.ts`).
+ * moves a model's request from one login to the next on the failures `routing.logins.fallbackOn`
+ * names, a rate limit by default (`src/server/route-plan.ts`).
  *
  * A copy is made from a fresh built-in provider (`builtinProviders()`), not from the composed one
  * the runtime holds: the composed provider carries the base's `models.json` overrides, including
@@ -117,7 +117,7 @@ export function registerAccountProvider(runtime: AccountRuntime, providerId: str
  * Drops an account slot's provider, if it is one and is registered.
  *
  * @param runtime - pi's model runtime
- * @param providerId - the slot, `{base}-N`
+ * @param providerId - the slot, `{base}-N` or `{base}-account-N`
  */
 export function unregisterAccountProvider(runtime: AccountRuntime, providerId: string): void {
   if (parseAccountProviderId(providerId) === undefined) return
@@ -174,11 +174,11 @@ export type StoredAccountsResult =
  *
  * @remarks
  * Runs at startup, so a login made in an earlier run, or through pi-rotator or pi-multi-account,
- * is served again. A credential whose base is no built-in provider is left as it is, with a
- * warning. A store that cannot be listed (unreadable, or not within `signal`) registers nothing,
- * is logged as a warning and is reported as `listed: false`, so the caller can tell it from a store
- * with no slot credentials: the proxy starts with pi's base providers, as it did before slots
- * existed, rather than not at all.
+ * is served again. A credential whose base is no built-in provider is left as it is; only the
+ * `{base}-account-N` form is warned about. A store that cannot be listed (unreadable, or not
+ * within `signal`) registers nothing, is logged as a warning and is reported as `listed: false`,
+ * so the caller can tell it from a store with no slot credentials: the proxy starts with pi's base
+ * providers, as it did before slots existed, rather than not at all.
  *
  * @param runtime - pi's model runtime
  * @param signal - bounds the credential listing

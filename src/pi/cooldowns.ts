@@ -8,11 +8,13 @@
  * - **Length.** The time the failed response gives (`src/pi/reset-time.ts`), however long. When it
  *   gives none, a growing default: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each
  *   failure in a row, until a time is given or a call succeeds.
- * - **Recorded from every request; applied only by routing.** Every 429 or 503 is recorded,
- *   whichever request met it, so `/healthz/models` and `/v1/switchboard/models` show it. Only an
- *   alias's fallback chain skips a cooling model, and only when its `fallbackOn` names the class
- *   (principle VI): a request that names a model still calls it.
- * - **Ended by a success.** A call that succeeds clears its provider's and its model's cooldowns.
+ * - **Recorded from every request; applied only by routing.** Every 429, 503 or 529 is recorded,
+ *   whichever request met it, so `/healthz/models` and `/v1/switchboard/models` show it. Routing
+ *   skips a cooling candidate only when the hop past it names the class (principle VI): an
+ *   alias's `fallbackOn` between models, `routing.logins.fallbackOn` between a model's logins
+ *   (`src/server/route-cooldowns.ts`). With neither, the model is still called.
+ * - **Ended by a success.** A call that succeeds clears its login's and its model's cooldowns,
+ *   when they started before the call was sent ({@link clearCooldowns}).
  * - **Ended by the operator** (#182): `DELETE /v1/switchboard/cooldowns` and the console's `c`
  *   ({@link clearCooldownsFor}), for a limit the operator knows has lifted.
  *

@@ -7,11 +7,13 @@
  *   stream_options
  * - Tools: tools, tool_choice, parallel_tool_calls
  * - Model control: reasoning_effort, top_p, frequency_penalty, presence_penalty, seed,
- *   response_format
+ *   response_format, prompt_cache_key
+ * - Honored values only: store (`false` or `null`), n (`1` or `null`) (#197)
  * - Client interop (accepted, not interpreted): metadata, prediction
  *
  * Unknown top-level fields fail the strict schema (422 in `validate.ts`). Explicitly rejected
- * with a named error: n, logprobs, top_logprobs, logit_bias, functions, function_call.
+ * with a named error: logprobs, top_logprobs, logit_bias, functions, function_call, and any
+ * `store` or `n` value other than the honored one.
  *
  * @packageDocumentation
  */
@@ -245,7 +247,7 @@ const MIN_PENALTY = -2
 const MAX_PENALTY = 2
 
 /**
- * Longest `prompt_cache_key` accepted: pi-ai's `OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH` (1.3.0), which
+ * Longest `prompt_cache_key` accepted: pi-ai's `OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH` (1.4.0), which
  * its root entry point does not export.
  */
 const PROMPT_CACHE_KEY_MAX_LENGTH = 64

@@ -243,7 +243,7 @@ describe('refreshDescriptions', () => {
     expect(rows).toEqual(
       described(
         'Short names; adds provider/ prefix only when models collide',
-        "Expose models from pi's configured auth (default)",
+        "Expose the models pi's enabledModels setting selects; every model when it has none (default)",
         "Switch exposure mode to 'custom' to select models",
         'Require bearer token for all requests'
       )

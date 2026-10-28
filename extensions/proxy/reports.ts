@@ -161,9 +161,9 @@ function formatServerSettings(config: ProxyConfig): string[] {
 }
 
 /**
- * Returns the `/proxy show` exposure-policy fields: ID and exposure mode, then the pi pattern
- * count, custom model count (custom mode only), and provider prefixes and aliases (#66) when there
- * are any.
+ * Returns the `/proxy show` exposure-policy fields: ID and exposure mode, then, when there are
+ * any, the pi pattern count (scoped mode only), custom model count (custom mode only), provider
+ * prefixes, and aliases with their fallback chains (#66, #67).
  *
  * @param config - the loaded proxy config
  * @param enabledModels - pi's `enabledModels` setting; the caller reads it only in scoped mode

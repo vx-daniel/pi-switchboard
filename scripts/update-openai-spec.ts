@@ -1,7 +1,8 @@
 /**
- * Vendors the part of OpenAI's published OpenAPI spec that the stable surface is checked against
- * (#132): `test/integration/openai-spec.test.ts` validates the proxy's real responses, and the
- * fields and enums its request schema accepts, against it.
+ * Vendors the part of OpenAI's published OpenAPI spec that the stable surface and the experimental
+ * Responses API (#140) are checked against (#132): `test/integration/openai-spec.test.ts` and
+ * `test/integration/openai-spec-responses.test.ts` validate the proxy's real responses, and the
+ * fields and enums its request schemas accept, against it.
  *
  * USAGE: `pnpm run openai-spec:update <commit>`, with a full 40-character commit SHA of
  * [`openai/openai-openapi`](https://github.com/openai/openai-openapi). The spec changes almost
@@ -13,7 +14,8 @@
  * the commit. The file is formatted with `vp fmt` after writing, so the gate's format check
  * passes.
  *
- * Runs under Node directly (`node scripts/update-openai-spec.ts`), so imports are relative.
+ * Runs under Node directly (`node scripts/update-openai-spec.ts`), without the `@proxy/*` alias; it
+ * imports only packages and Node built-ins.
  *
  * @packageDocumentation
  */

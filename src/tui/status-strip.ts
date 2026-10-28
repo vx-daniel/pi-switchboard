@@ -7,10 +7,10 @@
  * @remarks
  * Rendering only: the console gathers a {@link StatusStripInput} snapshot and redraws. When the
  * row is too narrow, the left details drop from the end down to the address and the auth, then the
- * right group drops from its start, then the rest is cut. An error (the exposure config, pi's
- * `models.json`) is never dropped: it comes right after the auth. Proxy auth off is a badge that
- * says so in its text, in the warning color on loopback and the error color beyond it (#287);
- * beyond loopback the screen also gives it a row of its own ({@link authOffRow}).
+ * right group drops from its start, then the version, then the rest is cut. An error (the
+ * exposure config, pi's `models.json`) is never dropped: it comes right after the auth. Proxy auth
+ * off is a badge that says so in its text, in the warning color on loopback and the error color
+ * beyond it (#287); beyond loopback the screen also gives it a row of its own ({@link authOffRow}).
  *
  * @packageDocumentation
  */

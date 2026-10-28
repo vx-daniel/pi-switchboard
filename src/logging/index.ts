@@ -18,9 +18,11 @@
  *   openai.sse         streaming responses         openai.responses   non-streaming responses
  *   openai.exposure    model exposure and IDs      openai.validate    request validation
  *   openai.schema      JSON Schema → TypeBox       openai.images      remote image fetches
+ *   openai.responses-api   the Responses API (`POST /v1/responses`): request and stream
  *   pi.registry        pi's model runtime          pi.complete        upstream calls
  *   sync.zed           Zed settings sync
  *   stats              the stats store and recorder (src/stats/)
+ *   tui                the console (src/tui/)      tui.login          the console's logins
  *   extension          the pi extension's command handler (extensions/proxy/index.ts)
  *   extension.*        the pi extension's parts (process, settings, reports, zed-sync)
  *

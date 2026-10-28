@@ -9,6 +9,8 @@
  * - `GET  /v1/switchboard/usage` (not OpenAI's: usage from the stats file)
  * - `DELETE /v1/switchboard/cooldowns` (not OpenAI's: ends cooldowns early, #182)
  * - `POST /v1/chat/completions`
+ * - `POST /v1/responses` (experimental, off unless `responsesApi` is on, #140;
+ *   `responses-route.ts`)
  * - a fixed list of OpenAI endpoints the proxy does not implement, answered with 404
  *
  * All of them sit behind proxy auth, applied to `/v1/*` in `createApp`. Each documented one
@@ -290,7 +292,7 @@ function buildPiContext(honoContext: ProxyContext, request: ChatRequest): Step<P
 
 /** What the chat handler needs from the app beyond the request: set once when routes are built. */
 export interface ChatRouteSettings {
-  /** The server config; `upstreamTimeoutMs` and `remoteImagesEnabled` are read. */
+  /** The server config: `upstreamTimeoutMs`, `remoteImagesEnabled`, `responsesApiEnabled`. */
   readonly config: ServerConfig
   /** Where the exposure config comes from. */
   readonly configReader: ExposureConfigReader

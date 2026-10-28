@@ -2,13 +2,16 @@
  * Runs a chat request on its model, or on an alias's fallback chain (#67), and answers it.
  *
  * @remarks
- * A request names one model, or an alias whose `{ targets, fallbackOn }` lists several. Each
- * candidate gets one attempt. A failure *before the response starts* moves to the next candidate
- * only when the alias's `fallbackOn` names its class ({@link failureClass}): principle VI says
- * fallback follows only the failures the configuration names. Anything else is answered as the
- * single-model path always has. That covers a 400 (the request's own fault), the client leaving, a
- * class the alias does not name, the last candidate's failure, and any failure after a stream
- * started, which ends the stream with an error event.
+ * A request names one model, or an alias whose `{ targets, fallbackOn }` lists several; a model
+ * served by several logins is one candidate per login (#227, `route-plan.ts`). Each candidate gets
+ * one attempt. A failure *before the response starts* moves to the next candidate only when the
+ * hop names its class ({@link failureClass}, `route-hops.ts`): the alias's `fallbackOn` between
+ * models, `routing.logins.fallbackOn` between a model's logins. Principle VI says fallback follows
+ * only the failures the configuration names. Anything else is answered as the single-model path
+ * always has. That covers a 400 (the request's own fault), the client leaving, a class the hop
+ * does not name, the last candidate's failure, and any failure after a stream started, which ends
+ * the stream with an error event. A candidate cooling down (#68) or below its quota reserve (#69)
+ * is skipped before it is called (`route-cooldowns.ts`, `route-reserve.ts`).
  *
  * Every hop is visible:
  * - a warning per failed attempt, naming the alias, the model, the class and the next model;
@@ -16,9 +19,9 @@
  * - each attempt's alias and number on its upstream log lines, and the route's running totals
  *   (`route-totals.ts`, #70): its attempts, failures, fallbacks, tokens and cost.
  *
- * A request without an alias chain, or an alias with one target, behaves exactly as before #67.
- * With a per-request upstream key (`X-Switchboard-Upstream-Api-Key`) nothing falls back: the key is
- * one provider's, and trying another provider would send it there.
+ * A request with one candidate behaves exactly as before #67. With a per-request upstream key
+ * (`X-Switchboard-Upstream-Api-Key`) nothing falls back: the key is one provider's, and trying
+ * another provider would send it there.
  *
  * @packageDocumentation
  */
@@ -230,7 +233,7 @@ async function checkCredential(
 interface FallbackHop {
   readonly failed: ExposedModel
   readonly next: ExposedModel
-  /** The failure class, which the alias's `fallbackOn` names. */
+  /** The failure class, which the hop's `fallbackOn` names (the alias's, or the logins'). */
   readonly failure: FailureClass
   /** The attempt number, from 1. */
   readonly attempt: number
@@ -267,7 +270,7 @@ export type CredentialedStart =
   | { readonly kind: 'refused'; readonly answer: FailedAnswer }
 
 /**
- * Finds the first candidate whose credential resolves, moving past the others when the alias's
+ * Finds the first candidate whose credential resolves, moving past the others when the hop's
  * `fallbackOn` names `auth`. Run before remote images are fetched, so a request no provider can
  * take fetches nothing (#109 review).
  *
@@ -556,8 +559,8 @@ interface AttemptStep {
 
 /**
  * Runs one candidate: its credential check (the first's was done before images were fetched),
- * then the streamed or non-streamed call, keeping a copy of a 429 or 503 response for its reset
- * time (#68) and adding each upstream call's usage to the route's totals (#70).
+ * then the streamed or non-streamed call, keeping a copy of a 429, 503 or 529 response for its
+ * reset time (#68) and adding each upstream call's usage to the route's totals (#70).
  *
  * @param honoContext - the request's Hono context
  * @param candidate - the model to call

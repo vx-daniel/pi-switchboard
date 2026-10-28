@@ -1,5 +1,6 @@
 /**
- * The console's log buffer: the last formatted log lines, kept in memory for the Logs view.
+ * The console's log buffer: the last formatted log lines, kept in memory for the raw log (`r` on
+ * the Requests view).
  *
  * @remarks
  * The console owns the terminal, so LogTape writes here instead of to stderr. Lines arrive already

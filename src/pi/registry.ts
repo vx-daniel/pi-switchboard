@@ -4,7 +4,7 @@
  * @remarks
  * Initializes pi's model runtime (file-based auth and models.json storage), reads the global
  * `enabledModels` setting from pi's SettingsManager, and exposes lookup functions used by the
- * proxy routes. pi 1.x's async `ModelRuntime` owns credentials, catalogs and request
+ * proxy routes. pi's async `ModelRuntime` (pi 1.x) owns credentials, catalogs and request
  * authentication in one place.
  *
  * @packageDocumentation
@@ -135,8 +135,8 @@ export async function initRegistry(): Promise<string | undefined> {
     runtime,
     AbortSignal.timeout(CREDENTIAL_LIST_TIMEOUT_MS)
   )
-  // Nothing re-runs the listing after startup (the availability snapshot is taken once, below), so
-  // a failed one stands until restart; `/healthz/creds` says so rather than reading as "no logins".
+  // Nothing re-runs the listing after startup, so a failed one stands until restart;
+  // `/healthz/creds` says so rather than reading as "no logins".
   loginListingFailure = stored.listed ? undefined : stored.reason
   if (stored.listed && stored.accounts.length > 0) {
     // A registered provider is only provisionally available until the next availability pass;
@@ -221,9 +221,10 @@ export function getLoginDeviceId(): string {
  * Returns every model available (with auth configured).
  *
  * @remarks
- * Reads the runtime's availability snapshot, taken when `initRegistry()` ran: a model whose
- * credentials were added afterwards appears after a restart. Listing stays synchronous and cheap,
- * as pi 0.x's synchronous `getAvailable()` was.
+ * Reads the runtime's availability snapshot. pi updates it when this process logs in or out
+ * (`ModelRuntime.login`, `logout`) or refreshes availability; a credential another process adds,
+ * such as pi's own `/login`, appears after a restart. Listing stays synchronous and cheap, as pi
+ * 0.x's synchronous `getAvailable()` was.
  *
  * @returns a copy of the available models
  * @throws Error when {@link initRegistry} has not run

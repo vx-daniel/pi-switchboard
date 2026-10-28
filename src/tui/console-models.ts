@@ -387,7 +387,7 @@ function targetActions(target: AliasModel | undefined): string[] {
 }
 
 /**
- * Shows an alias's targets, each with its effort, and the menu's other rows.
+ * Labels an alias's targets for the targets menu, each numbered with its effort.
  *
  * @param models - the targets
  * @returns one label per target, in order

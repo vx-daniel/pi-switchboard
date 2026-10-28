@@ -266,7 +266,8 @@ function recordingAgentDir(): string {
  * @param recording.target - the provider the scenario is sent to
  * @param recording.scenario - the exchange to record
  * @returns the path of the saved recording, and every response header's name (never a value)
- * @throws Error from `saveRecording` when the recording still contains a credential
+ * @throws Error from `saveRecording` when the recording still contains a credential or an account
+ *   ID
  */
 async function recordScenario(
   runtime: ModelRuntime,

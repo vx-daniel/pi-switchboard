@@ -27,7 +27,7 @@ const OPENAI_FULL_PASSTHROUGH_APIS = new Set([
  *
  * @remarks
  * The Codex Responses API rejects other standard fields (top_p, seed, stop, user,
- * frequency_penalty, etc.) with "Unsupported parameter". pi 1.3.0 sends
+ * frequency_penalty, etc.) with "Unsupported parameter". pi 1.4.0 sends
  * `tool_choice: options.toolChoice ?? "auto"` and hardcodes `parallel_tool_calls: true`;
  * onPayload overrides both when the client sends explicit values.
  */
@@ -215,7 +215,7 @@ function translateToolChoiceForGoogle(
  * Patches the translated passthrough fields into Google's payload, in place.
  *
  * @remarks
- * pi 1.3.0 builds `{ model, contents, config }`, with its own generation fields (temperature,
+ * pi 1.4.0 builds `{ model, contents, config }`, with its own generation fields (temperature,
  * maxOutputTokens) flat on `config` and `toolConfig` beside them (pi-ai
  * dist/api/google-generative-ai.js and google-vertex.js, `buildParams`). `@google/genai` turns
  * those flat keys into the wire request's `generationConfig`; it does not read a nested
@@ -224,8 +224,9 @@ function translateToolChoiceForGoogle(
  *   (`topP`, `stopSequences`, `seed`, `frequencyPenalty`, `presencePenalty`)
  * - tool_choice → `config.toolConfig.functionCallingConfig.mode`
  *
- * A request field overrides a same-named key pi set: the client asked for that value. pi 1.3.0
- * sets none of these keys, so nothing is overridden today.
+ * A request field overrides a same-named key pi set: the client asked for that value. pi 1.4.0
+ * sets none of the generation keys, but sets `toolConfig.functionCallingConfig.mode` whenever the
+ * request has tools (the proxy passes it no `toolChoice`), so `tool_choice` replaces that mode.
  *
  * Skipped silently: response_format, metadata, prediction, parallel_tool_calls, user.
  *

@@ -1,5 +1,6 @@
 /**
- * The console's dialogs: pi's own selector and input, shown in the middle of the screen.
+ * The console's dialogs: pi's own selector and input, and pi-tui's settings list as a tick list,
+ * shown in the middle of the screen.
  *
  * @packageDocumentation
  */

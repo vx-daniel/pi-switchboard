@@ -1,6 +1,6 @@
 /**
- * What the console's sidebar and Stats dashboard draw with: framed panels, lines with a label and a
- * value, and compact numbers and times.
+ * What the console's views, sidebar and status strip draw with: framed panels, lines with a label
+ * and a value, gauges, and compact numbers and times.
  *
  * @packageDocumentation
  */

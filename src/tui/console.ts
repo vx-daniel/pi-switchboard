@@ -99,7 +99,7 @@ import packageJson from '../../package.json' with { type: 'json' }
 const STATUS_REFRESH_MS = 5000
 /** How often the sidebar's clocks (uptime, elapsed, time left) and connection count move on. */
 const TICK_MS = 1000
-/** Lines a page key scrolls the raw log or the Requests table by. */
+/** Lines a page key scrolls the first view by, or rows it moves a view's selection by. */
 const PAGE_LINES = 10
 /** What the key handlers and the login flow need. */
 export interface ConsoleContext {
@@ -220,9 +220,10 @@ const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext, size: ViewSiz
 
 /**
  * What the right end of the frame's bottom border notes about each view, unless its render says
- * otherwise ({@link ViewBody}): how many log lines, logins or exposed models it holds, on Stats
- * how long the stats file keeps its history (nothing while the view shows the totals instead),
- * on Settings the file they are saved to, and on Doctor the calls a model is judged from.
+ * otherwise ({@link ViewBody}): how many requests or raw log lines, logins or exposed models it
+ * holds, on Stats how long the stats file keeps its history (nothing while the view shows the
+ * totals instead), on Settings the file they are saved to, and on Doctor the calls a model is
+ * judged from.
  */
 const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
   logs: ({ logs, state }) =>

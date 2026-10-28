@@ -189,8 +189,8 @@ function removePid(): void {
  * {@link PROBE_TIMEOUT_MS}.
  *
  * @param state - the extension state; its config supplies the URL and token
- * @returns reachable with the model count on HTTP 2xx (count 0 for an unexpected body), otherwise
- *   unreachable with 0 models
+ * @returns reachable with the model count on HTTP 2xx (count 0 for a JSON body without a `data`
+ *   array), otherwise unreachable with 0 models; a 2xx body that is not JSON counts as unreachable
  */
 async function probe(state: ProxyState): Promise<RuntimeStatus> {
   const url = `${proxyUrl(state.config)}/v1/models`

@@ -7,7 +7,7 @@
  * `reasoning` items), `instructions`, function `tools`, `tool_choice`, `parallel_tool_calls`,
  * `temperature`, `top_p`, `max_output_tokens`, `reasoning` (`effort`, and `summary` as `auto`),
  * `text.format`, `stream`, `stream_options` (no obfuscation), `metadata`, `user`,
- * `prompt_cache_key`, `store` (`false` only: nothing is stored) and `include`
+ * `prompt_cache_key`, `store` (`false` or `null` only: nothing is stored) and `include`
  * (`reasoning.encrypted_content` only).
  *
  * Every object is strict, as chat completions' are: a field OpenAI defines that the proxy does not

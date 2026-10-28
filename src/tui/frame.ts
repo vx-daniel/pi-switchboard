@@ -2,9 +2,10 @@
  * The frame around the console's view (#61), with its tabs: on a tall terminal folder tabs that
  * open into the frame's top border, the current one in front; on a short one the tabs sit in the
  * top border itself, the current one a pill. The right end of the tab row says a word about the
- * view (`idle`, `4 logins · 0 cooldowns`); the right end of the bottom border notes its size, and
- * its left end the view's state where it has one (`● live`). A tab may carry a count after its
- * label (`Doctor 2`, #325), kept on a narrow row before the tabs without one.
+ * view (`idle`, `4 logins · 0 cooldowns`); the right end of the bottom border holds a note on it
+ * (`raw log · 120 lines`, `proxy-config.json`), and its left end the view's state where it has
+ * one (`● live`). A tab may carry a count after its label (`Doctor 2`, #325), kept on a narrow
+ * row before the tabs without one.
  *
  * @remarks
  * Rendering only, from a {@link FrameInput} and the view's rows. Every row comes out exactly

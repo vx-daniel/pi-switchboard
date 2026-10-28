@@ -1,6 +1,6 @@
 /**
- * Hono middleware: request IDs and request logging, client disconnect detection, proxy auth, body
- * size limits.
+ * Hono middleware: request IDs and request logging, the upstream key header, client disconnect
+ * detection, proxy auth, rejected chat requests, JSON bodies and body size limits.
  *
  * @packageDocumentation
  */
@@ -282,11 +282,11 @@ export function disconnectMiddleware(): MiddlewareHandler<ProxyEnv> {
  * as rejected, for the console (#214).
  *
  * @remarks
- * Mounted on `POST /v1/chat/completions` ahead of the body size limit and proxy auth, so it sees
- * their answers too. The chat route marks a request that reaches the dispatch (`chatDispatched`),
- * which `active-requests.ts` follows from there; any other answer is recorded with its status and
- * the model the request named, if the route read that far (`chatModel`). Nothing else from the
- * request is kept.
+ * Mounted on `POST /v1/chat/completions` and `POST /v1/responses` ahead of the body size limit and
+ * proxy auth, so it sees their answers too. The chat route marks a request that reaches the
+ * dispatch (`chatDispatched`), which `active-requests.ts` follows from there; any other answer is
+ * recorded with its status and the model the request named, if the route read that far
+ * (`chatModel`). Nothing else from the request is kept.
  *
  * @returns the middleware
  */
@@ -318,9 +318,10 @@ const JSON_MEDIA_TYPE = /^application\/([a-z-.]+\+)?json/i
  * request's `Content-Type` to `application/json` when it is anything else. A body that is not
  * JSON still fails, as invalid JSON.
  *
- * The rewrite is deliberate and local: only the chat route mounts this, after the request line is
- * logged and auth has run, and nothing after it reads the declared type. Both `app.request` (the
- * tests) and `@hono/node-server` (production) give a Request whose headers can be set.
+ * The rewrite is deliberate and local: only the chat and Responses routes mount this, after the
+ * request line is logged and auth has run, and nothing after it reads the declared type. Both
+ * `app.request` (the tests) and `@hono/node-server` (production) give a Request whose headers can
+ * be set.
  *
  * @returns the middleware
  */

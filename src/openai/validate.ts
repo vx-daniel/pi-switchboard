@@ -2,8 +2,9 @@
  * Validates chat-completion request bodies and turns schema failures into OpenAI-style errors.
  *
  * @remarks
- * Explicitly rejected fields and unknown top-level fields get 422; any other schema failure
- * (wrong type, out-of-range value, missing field) gets 400.
+ * Explicitly rejected fields, a value other than an honored one (`store: true`, `n: 2`), a value
+ * in an assistant field accepted only empty, and unknown fields get 422; any other schema
+ * failure (wrong type, out-of-range value, missing field) gets 400.
  *
  * @packageDocumentation
  */
@@ -23,7 +24,7 @@ import type * as z from 'zod'
 const validateLogger = proxyLogger('openai', 'validate')
 
 /**
- * Accepted fields the proxy does not interpret; `src/pi/complete.ts` forwards them to
+ * Accepted fields the proxy does not interpret; `src/pi/payload-fields.ts` forwards them to
  * OpenAI-compatible APIs only. Listed here for the debug log.
  */
 const PASSTHROUGH_FIELDS = ['metadata', 'prediction'] as const

@@ -33,8 +33,8 @@ export type ModelsItem =
   | { readonly kind: 'latest'; readonly name: string; readonly target: FamilyTarget }
 
 /**
- * Renders a model's cooldown, if it has one: the time left (`42s`, `3m00s`), and the reason when it fits too,
- * so a narrow cell keeps the countdown.
+ * Renders a model's cooldown, if it has one: the time left (`cooling 42s`, `cooling 3m00s`), and
+ * the reason when it fits too, so a narrow cell keeps the countdown.
  *
  * @param model - the exposed model
  * @param now - the time now, in milliseconds since the epoch
@@ -202,7 +202,8 @@ function aliasDetailLines(
 }
 
 /**
- * Frames the detail pane for the selected item: a model, an alias, or the new-alias row.
+ * Frames the detail pane for the selected item: a model, an alias, the new-alias row, or a
+ * built-in alias.
  *
  * @param item - the selected item
  * @param families - what the family targets resolve to now

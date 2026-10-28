@@ -57,7 +57,7 @@ const UNIX: TargetSet = {
   flags: []
 }
 
-/** The Windows targets: built by hand (`binary.yml` with `platforms: windows`), not per release. */
+/** The Windows targets: built on a Windows runner (`binary.yml` with `platforms: windows`). */
 const WINDOWS: TargetSet = {
   targets: ['windows-x64', 'windows-arm64'],
   extension: '.exe',

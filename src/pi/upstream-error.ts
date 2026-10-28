@@ -3,7 +3,7 @@
  * provider's body starts after it.
  *
  * @remarks
- * pi 1.3.0 words an upstream failure as a plain message, with the status in one of these
+ * pi 1.4.0 words an upstream failure as a plain message, with the status in one of these
  * positions. This module is the only place that knows them, so a change in pi's wording is found
  * once. Callers: `upstreamStatusIn` (`@proxy/server/errors`, behind `mapUpstreamError` and
  * `mapFailedCall`) wants the status; `retryWithoutBreakpoints` (`@proxy/pi/cache-breakpoints`)
