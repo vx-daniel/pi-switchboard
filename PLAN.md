@@ -1748,7 +1748,9 @@ credentials, a provider that never answers) gets its HTTP status and JSON body, 
 streaming request it refuses. Once the stream has started its status is `200`, and a failure ends it
 with an error event carrying the same mapped `{ message, type, param, code }` as the non-streaming
 answer, then `[DONE]` (#54). A client that leaves during the wait is not logged as an upstream
-failure. The raw upstream text is logged at debug only, in all paths.
+failure. The raw upstream text is logged at debug only, in all paths, and once per failure (#339):
+by `pi.complete`, beside the line that names the call's model, alias and attempt. The route and the
+SSE writer log the mapped failure, not the text again.
 
 Error rules:
 

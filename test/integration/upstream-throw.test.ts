@@ -1,13 +1,14 @@
 /**
- * A provider that throws instead of reporting a failed call: what the client gets, what is logged,
- * and what is counted. pi's adapters report failures as an `error` event, so every other failure
- * test goes that way; these make pi's `streamSimple` throw, when the call starts and once its
- * stream has started.
+ * A provider whose call fails: what the client gets, what is logged, and what is counted. pi's
+ * adapters report failures as an `error` event, so every other failure test goes that way; most of
+ * these make pi's `streamSimple` throw, when the call starts and once its stream has started. The
+ * provider's raw text is logged once per failure, at debug, whichever way it failed (#339).
  */
 
-import type { AssistantMessage, AssistantMessageEvent } from '@earendil-works/pi-ai'
+import type { AssistantMessage, AssistantMessageEvent, Context } from '@earendil-works/pi-ai'
 import { AssistantMessageEventStream } from '@earendil-works/pi-ai/utils/event-stream'
 import { resetSync } from '@logtape/logtape'
+import type { FailureClass } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
 import { convertMessages } from '@proxy/openai/messages'
 import { clearAllCooldowns } from '@proxy/pi/cooldowns'
@@ -89,6 +90,22 @@ function atDefaultLevel(): typeof records {
 }
 
 /**
+ * Lists the log records that quote the provider's text.
+ *
+ * @returns those records
+ */
+function quoting(): typeof records {
+  return records.filter((record) => record.line.includes(QUOTED))
+}
+
+/** The record a failed call's provider text must be logged as, once: `pi.complete` at debug. */
+const LOGGED_DETAIL = {
+  logger: 'pi-switchboard.pi.complete',
+  level: 'DEBUG',
+  message: expect.stringContaining('Upstream error detail') as unknown
+}
+
+/**
  * Builds the partial message a stream's `start` event carries: nothing generated yet.
  *
  * @returns the message
@@ -128,10 +145,105 @@ class ThrowingAfterStart extends AssistantMessageEventStream {
   }
 }
 
+/**
+ * Builds a pi event stream that ends with a provider's `error` event quoting {@link QUOTED}, as
+ * pi's adapters report a failed call.
+ *
+ * @param started - whether a `start` event comes first, as when the failure is mid-stream
+ * @returns the stream, with all its events pushed
+ */
+function failingStream(started: boolean): AssistantMessageEventStream {
+  const stream = new AssistantMessageEventStream()
+  if (started) stream.push({ type: 'start', partial: emptyPartial() })
+  stream.push({
+    type: 'error',
+    reason: 'error',
+    error: {
+      ...emptyPartial(),
+      stopReason: 'error',
+      errorMessage: `OpenAI API error (503): overloaded while answering "${QUOTED}"`
+    }
+  })
+  return stream
+}
+
+/**
+ * Posts a chat request to the full app.
+ *
+ * @param stream - whether to ask for a stream
+ * @returns the response's status and body
+ */
+async function postChat(stream: boolean): Promise<{ status: number; text: string }> {
+  const response = await testApp().request('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ model: MODEL, stream, messages: [{ role: 'user', content: 'Hi' }] })
+  })
+  return { status: response.status, text: await response.text() }
+}
+
+/** A streamed chat request dispatched straight to its candidates, without the route before it. */
+interface DirectDispatch {
+  /** The models to try, in order. */
+  readonly candidates: readonly { readonly provider: string; readonly id: string }[]
+  /** The failure classes that move on to the next candidate. */
+  readonly fallbackOn: ReadonlySet<FailureClass>
+  /** A per-request upstream key: the candidates after the first need no credential check. */
+  readonly upstreamApiKey?: string
+}
+
+/**
+ * Dispatches a streamed chat request with no idle timeout, as `CompletionOptions` allows: with
+ * one, pi's stream is relayed and a throw becomes an error event.
+ *
+ * @param dispatch - the candidates, fallback classes and upstream key
+ * @returns the response's status and body
+ */
+async function dispatchDirect(dispatch: DirectDispatch): Promise<{ status: number; text: string }> {
+  const request = parseChatBody({
+    model: MODEL,
+    stream: true,
+    messages: [{ role: 'user', content: 'Hi' }]
+  })
+  const conversion = convertMessages(request.messages)
+  if (!conversion.ok) throw new Error('messages did not convert')
+  const context: Context = conversion.context
+  const requestId = 'chatcmpl-thrown'
+  const app = new Hono<ProxyEnv>().post('/', (honoContext) =>
+    dispatchChat(honoContext, {
+      requestId,
+      alias: undefined,
+      candidates: dispatch.candidates.map(({ provider, id }) => exposed(provider, id)),
+      fallbackOn: dispatch.fallbackOn,
+      loginFallbackOn: new Set(),
+      reserve: {},
+      attempts: [],
+      context,
+      request,
+      format: chatFormat(requestId, request),
+      options: {
+        signal: new AbortController().signal,
+        ...(dispatch.upstreamApiKey === undefined
+          ? {}
+          : { upstreamApiKey: dispatch.upstreamApiKey })
+      },
+      active: beginActiveRequest({
+        requestId,
+        alias: null,
+        model: MODEL,
+        stream: true,
+        promptCacheKey: false
+      })
+    })
+  )
+  const response = await app.request('/', { method: 'POST' })
+  return { status: response.status, text: await response.text() }
+}
+
 describe('a provider that throws when the call starts', () => {
-  // Catches a throw from pi's `streamSimple` escaping as the proxy's own 500, mapped apart from an
-  // error event, or quoting the provider's text to the client; and the throw going unlogged
-  // (`logUpstreamThrow`), or its text logged above debug.
+  // error event, or quoting the provider's text to the client; the throw going unlogged
+  // (`logUpstreamThrow`), or its text logged above debug; and its text logged twice, by the call
+  // and again by the route (#339).
   test.each([
     ['non-streaming', false],
     ['streaming', true]
@@ -140,14 +252,9 @@ describe('a provider that throws when the call starts', () => {
       throw new Error(`OpenAI API error (429): Rate limit reached for "${QUOTED}"`)
     })
 
-    const response = await testApp().request('/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: MODEL, stream, messages: [{ role: 'user', content: 'Hi' }] })
-    })
-    const text = await response.text()
+    const { status, text } = await postChat(stream)
 
-    expect(response.status).toBe(429)
+    expect(status).toBe(429)
     expect(JSON.parse(text)).toEqual({
       error: {
         message: 'Upstream rate limit exceeded',
@@ -165,54 +272,84 @@ describe('a provider that throws when the call starts', () => {
       })
     )
     for (const record of atDefaultLevel()) expect(record.line).not.toContain(QUOTED)
-    expect(records.some((record) => record.level === 'DEBUG' && record.line.includes(QUOTED))).toBe(
-      true
-    )
+    expect(quoting()).toEqual([expect.objectContaining(LOGGED_DETAIL)])
+  })
+})
+
+describe('a provider that reports a failure before the stream starts', () => {
+  // Catches the provider's text for a failed call logged twice at debug, by the call (`pi.complete`)
+  // and again by the route (`server.chat`) as it answers the failure (#339); or logged above debug.
+  test.each([
+    ['non-streaming', false],
+    ['streaming', true]
+  ])('%s: logs the provider text once, at debug', async (_mode, stream) => {
+    vi.spyOn(getRuntime(), 'streamSimple').mockImplementation(() => failingStream(false))
+
+    const { status, text } = await postChat(stream)
+
+    expect(status).toBe(503)
+    expect(text).not.toContain(QUOTED)
+    for (const record of atDefaultLevel()) expect(record.line).not.toContain(QUOTED)
+    expect(quoting()).toEqual([expect.objectContaining(LOGGED_DETAIL)])
+  })
+
+  // Catches the provider's text for an attempt a chain moves on from logged twice, by the call and
+  // again beside the fallback warning (#339): each attempt's text is logged once, by its call.
+  test('logs each failed attempt of a chain once, with its attempt number', async () => {
+    vi.spyOn(getRuntime(), 'streamSimple').mockImplementation(() => failingStream(false))
+
+    const { status } = await dispatchDirect({
+      candidates: [
+        { provider: 'thrower', id: 'model' },
+        { provider: 'thrower', id: 'other' }
+      ],
+      fallbackOn: new Set(['unavailable']),
+      upstreamApiKey: 'notarealsecret-client-upstream-key'
+    })
+
+    expect(status).toBe(503)
+    const logged = quoting()
+    expect(logged).toEqual([
+      expect.objectContaining(LOGGED_DETAIL),
+      expect.objectContaining(LOGGED_DETAIL)
+    ])
+    expect(logged.map((record) => JSON.parse(record.line) as unknown)).toEqual([
+      expect.objectContaining({ properties: expect.objectContaining({ attempt: 1 }) as unknown }),
+      expect.objectContaining({ properties: expect.objectContaining({ attempt: 2 }) as unknown })
+    ])
+  })
+})
+
+describe('a provider that reports a failure once the stream has started', () => {
+  // Catches the provider's text for a mid-stream error event logged twice at debug, by the call
+  // (`pi.complete`) and again by the SSE writer (`openai.sse`) (#339); or logged above debug.
+  test('ends the stream with the error frame, and logs the provider text once', async () => {
+    vi.spyOn(getRuntime(), 'streamSimple').mockImplementation(() => failingStream(true))
+
+    const { status, text } = await postChat(true)
+
+    expect(status).toBe(200)
+    expect(text).toContain('provider_unavailable')
+    expect(text).not.toContain(QUOTED)
+    for (const record of atDefaultLevel()) expect(record.line).not.toContain(QUOTED)
+    expect(quoting()).toEqual([expect.objectContaining(LOGGED_DETAIL)])
   })
 })
 
 describe('a provider whose stream throws once it has started', () => {
   // Catches a throw out of a started stream (`reportThrownFailure`) leaving the client a stream
-  // with no error frame and no `[DONE]`, quoting the provider's text, going unlogged, or not
-  // counted as the attempt's failure in the route totals. Dispatched without an idle timeout, as
-  // `CompletionOptions` allows: with one, pi's stream is relayed and a throw becomes an error event.
+  // with no error frame and no `[DONE]`, quoting the provider's text, going unlogged or logged
+  // more than once, or not counted as the attempt's failure in the route totals. pi's call never
+  // ends, so the route is the one that logs the text.
   test('ends the stream with the mapped error frame, logs it, and counts the failure', async () => {
     vi.spyOn(getRuntime(), 'streamSimple').mockImplementation(() => new ThrowingAfterStart())
-    const request = parseChatBody({
-      model: MODEL,
-      stream: true,
-      messages: [{ role: 'user', content: 'Hi' }]
+
+    const { status, text } = await dispatchDirect({
+      candidates: [{ provider: 'thrower', id: 'model' }],
+      fallbackOn: new Set()
     })
-    const conversion = convertMessages(request.messages)
-    if (!conversion.ok) throw new Error('messages did not convert')
-    const requestId = 'chatcmpl-thrown'
-    const app = new Hono<ProxyEnv>().post('/', (context) =>
-      dispatchChat(context, {
-        requestId,
-        alias: undefined,
-        candidates: [exposed('thrower', 'model')],
-        fallbackOn: new Set(),
-        loginFallbackOn: new Set(),
-        reserve: {},
-        attempts: [],
-        context: conversion.context,
-        request,
-        format: chatFormat(requestId, request),
-        options: { signal: new AbortController().signal },
-        active: beginActiveRequest({
-          requestId,
-          alias: null,
-          model: MODEL,
-          stream: true,
-          promptCacheKey: false
-        })
-      })
-    )
 
-    const response = await app.request('/', { method: 'POST' })
-    const text = await response.text()
-
-    expect(response.status).toBe(200)
+    expect(status).toBe(200)
     const frames = text.split('\n\n').filter((frame) => frame !== '')
     expect(frames.slice(-2)).toEqual([
       `data: ${JSON.stringify({
@@ -234,15 +371,39 @@ describe('a provider whose stream throws once it has started', () => {
       })
     )
     for (const record of atDefaultLevel()) expect(record.line).not.toContain(QUOTED)
-    expect(records.some((record) => record.level === 'DEBUG' && record.line.includes(QUOTED))).toBe(
-      true
-    )
+    expect(quoting()).toEqual([
+      expect.objectContaining({
+        logger: 'pi-switchboard.server.chat',
+        level: 'DEBUG',
+        message: expect.stringContaining('Upstream error detail') as unknown
+      })
+    ])
     expect(routeTotals()).toEqual([
       expect.objectContaining({
         model: MODEL,
         requests: 1,
         failures: 1,
         failuresByClass: { unavailable: 1 }
+      })
+    ])
+  })
+
+  // Catches the provider's text for a stream that throws once started logged more than once when
+  // the idle timeout relays the stream (as the server always does): the relay logs the text, and
+  // the error event it sends on carries only fixed wording, so nothing logs the text again (#339).
+  test('relayed by the idle timeout: logs the provider text once, at debug', async () => {
+    vi.spyOn(getRuntime(), 'streamSimple').mockImplementation(() => new ThrowingAfterStart())
+
+    const { status, text } = await postChat(true)
+
+    expect(status).toBe(200)
+    expect(text).not.toContain(QUOTED)
+    for (const record of atDefaultLevel()) expect(record.line).not.toContain(QUOTED)
+    expect(quoting()).toEqual([
+      expect.objectContaining({
+        logger: 'pi-switchboard.pi.complete',
+        level: 'DEBUG',
+        message: expect.stringContaining('Upstream stream failure detail') as unknown
       })
     ])
   })

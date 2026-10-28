@@ -384,17 +384,25 @@ function logUpstreamStart(
 }
 
 /**
- * Logs the provider's raw error text at debug only.
+ * Logs the provider's raw error text at debug only, with the call's properties, beside the warning
+ * that names the call.
  *
  * @remarks
  * Some providers quote parts of the request back, and request content is never logged at a level
- * a default deployment writes.
+ * a default deployment writes. This is where a failed call's text is logged, once (#339): the
+ * route and the SSE writer log what the failure maps to, never the text again. A provider stream
+ * that throws once it has started ends no call: the idle-timeout relay logs that text instead
+ * ({@link relayUpstreamActivity}), or the route when there is no idle timeout.
  *
+ * @param call - the upstream call
  * @param detail - the raw error text; nothing is logged when `undefined`
  */
-function logUpstreamErrorDetail(detail: string | undefined): void {
+function logUpstreamErrorDetail(call: UpstreamCall, detail: string | undefined): void {
   if (detail !== undefined) {
-    completeLogger.debug('Upstream error detail: {detail}', { detail })
+    completeLogger.debug('Upstream error detail: {detail}', () => ({
+      ...callProperties(call),
+      detail
+    }))
   }
 }
 
@@ -411,7 +419,7 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
       stopReason: message.stopReason,
       rawStopReason: message.rawStopReason
     }))
-    logUpstreamErrorDetail(message.errorMessage)
+    logUpstreamErrorDetail(call, message.errorMessage)
     return
   }
   if (message.stopReason === 'aborted') {
@@ -423,7 +431,7 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
         abortCause: abortCause(call.options.signal, call.opts.signal)
       })
     )
-    logUpstreamErrorDetail(message.errorMessage)
+    logUpstreamErrorDetail(call, message.errorMessage)
     return
   }
   // A provider that accepted an over-long prompt and answered anyway (input beyond the context
@@ -473,7 +481,7 @@ function logUpstreamThrow(call: UpstreamCall, error: unknown): void {
     abortCause: aborted ? abortCause(call.options.signal, call.opts.signal) : undefined,
     errorName: error instanceof Error ? error.name : typeof error
   }))
-  logUpstreamErrorDetail(errorMessage(error))
+  logUpstreamErrorDetail(call, errorMessage(error))
 }
 
 /** What one upstream call needs: the model, pi's context, the OpenAI request and its options. */
@@ -501,12 +509,14 @@ function endUpstream(call: UpstreamCall, message: AssistantMessage): void {
  * watches it.
  *
  * @remarks
- * The result is logged once the stream ends with done or error.
+ * The result is logged once the stream ends with done or error; a throw is logged before it is
+ * rethrown. Either way the provider's text is logged here, once ({@link logUpstreamErrorDetail}).
  *
  * @param input - the model, pi context, request and per-request options
  * @param stream - whether the client asked for a stream; used for logging only
  * @returns pi's event stream, relayed through the idle timeout when there is one
- * @throws whatever building the options or `streamSimple` throws, after disposing the timeout
+ * @throws whatever building the options or `streamSimple` throws, after disposing the timeout and
+ *   logging the throw
  */
 async function openUpstream(
   input: UpstreamInput,
@@ -517,16 +527,19 @@ async function openUpstream(
     options.upstreamTimeoutMs === undefined
       ? undefined
       : startUpstreamIdleTimeout(options.upstreamTimeoutMs)
+  const signal = combineSignals(options.signal, idle?.signal)
+  const startedAt = performance.now()
   let opts: SimpleStreamOptions
   try {
-    opts = await buildStreamOptions(
-      model,
-      request,
-      options,
-      combineSignals(options.signal, idle?.signal)
-    )
+    opts = await buildStreamOptions(model, request, options, signal)
   } catch (error) {
     idle?.dispose()
+    // Nothing was sent, but it is logged as the call's throw all the same: the route logs no
+    // upstream failure's text, so this is the only place it is.
+    logUpstreamThrow(
+      { model, options, opts: signal === undefined ? {} : { signal }, stream, startedAt },
+      error
+    )
     throw error
   }
   // Every raw provider event restarts the wait, including those pi makes no event of (#50). The
@@ -536,7 +549,7 @@ async function openUpstream(
       idle.touch()
     }
   }
-  const call: UpstreamCall = { model, options, opts, stream, startedAt: performance.now() }
+  const call: UpstreamCall = { model, options, opts, stream, startedAt }
   logUpstreamStart(call, context, request)
   let eventStream: AssistantMessageEventStream
   try {

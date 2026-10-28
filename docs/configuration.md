@@ -216,6 +216,8 @@ Every line a request causes carries its `requestId` (and `clientRequestId` when 
 
 Message content and credentials are never logged. Credential-named properties are redacted as a backstop.
 
+A failed upstream call's raw error text can quote the request back, so it is logged at `debug` only, once per failure, by `pi-switchboard.pi.complete`: as "Upstream error detail", with the call's `provider`, `modelId`, `alias` and `attempt`, after the warning that the call failed or threw; or, for a provider stream that throws once it has started, as "Upstream stream failure detail", after the warning that reading it failed. The route (`server.chat`) and the stream writer (`openai.sse`) log what the failure was mapped to, not the text again.
+
 The pi extension logs nothing by default, because output would corrupt pi's terminal UI. To capture its logs, set `PI_SWITCHBOARD_EXTENSION_LOG_FILE=/path/to/extension.log` before starting pi; the extension then appends JSON Lines there at the configured log level.
 
 ## Proxy authentication
