@@ -13,7 +13,8 @@
  * - 404: model not found, unsupported endpoint, any other route (`Invalid URL (<method> <path>)`)
  * - 413: request body over the size limit
  * - 422: unsupported or unknown request field, unsupported tool
- * - 429: upstream rate limit or usage limit
+ * - 429: upstream rate limit (`rate_limit`, with `retry-after` when the provider said when), or a
+ *   plan's usage limit (OpenAI's `insufficient_quota`, with `x-should-retry: false`; #199)
  * - 500: anything thrown inside the proxy, an invalid model exposure config included
  *   (`internalError`, answered by `app.onError`)
  * - 502: upstream refused pi's stored credential (401, 403), pi has no credential for the model's
@@ -41,6 +42,7 @@ import {
   HTTP_UNPROCESSABLE_ENTITY
 } from '@proxy/server/http-status'
 import { parseJsonOrUndefined } from '@proxy/utils/guards'
+import { MS_PER_SECOND } from '@proxy/utils/time'
 import * as z from 'zod'
 
 /** OpenAI's error response body. Documents the response; never parsed. */
@@ -228,6 +230,20 @@ const RATE_LIMITED: MappedUpstreamError = {
   status: HTTP_TOO_MANY_REQUESTS,
   body: upstreamError('Upstream rate limit exceeded', 'rate_limit')
 }
+/**
+ * A plan's usage limit (#199): 429 with OpenAI's `insufficient_quota` type and code, which tells a
+ * client that retrying before the reset won't help (Codex CLI stops on it). Still the `rate_limit`
+ * class for routing: fallback and cooldowns go by the status.
+ */
+const USAGE_LIMITED: MappedUpstreamError = {
+  status: HTTP_TOO_MANY_REQUESTS,
+  body: makeError(
+    "The provider's usage limit for this login is reached; retrying before it resets won't help",
+    'insufficient_quota',
+    null,
+    'insufficient_quota'
+  )
+}
 /** Upstream timeout: 504 `timeout`. */
 const TIMED_OUT: MappedUpstreamError = {
   status: HTTP_GATEWAY_TIMEOUT,
@@ -376,22 +392,26 @@ function upstreamStatusIn(message: string): number | undefined {
 }
 
 /**
+ * A plan's usage limit in a provider's words: Codex's "You have hit your ChatGPT usage limit" and
+ * `usage_limit_reached` (#185). No leading word boundary, so it also matches
+ * `subscription_sharing_usage_limit_exceeded`; it ends where a letter would follow, so "usage
+ * limitations" is not one.
+ */
+const USAGE_LIMIT_WORDING = /usage[\s_-]?limits?(?![a-z])/i
+
+/**
  * Wording that identifies a failure when the message carries no status: Bedrock, network
  * failures, the proxy's own upstream idle timeout, pi's Codex adapter, which throws a usage limit
  * as "You have hit your ChatGPT usage limit" with no status (#185), and capacity messages.
  * Checked in this order.
  *
  * @remarks
- * The usage-limit pattern has no leading word boundary, so it also matches `usage_limit_reached` and
- * `subscription_sharing_usage_limit_exceeded`; it ends where a letter would follow, so "usage
- * limitations" is not one. The capacity wordings are the ones pi's own retry classifier treats as
- * transient (`pi-ai/utils/retry`).
+ * The capacity wordings are the ones pi's own retry classifier treats as transient
+ * (`pi-ai/utils/retry`).
  */
 const BY_WORDING: readonly (readonly [RegExp, MappedUpstreamError])[] = [
-  [
-    /\brate[\s_-]?limit|\btoo many requests\b|\bresource[\s_-]?exhausted\b|usage[\s_-]?limits?(?![a-z])/i,
-    RATE_LIMITED
-  ],
+  [USAGE_LIMIT_WORDING, USAGE_LIMITED],
+  [/\brate[\s_-]?limit|\btoo many requests\b|\bresource[\s_-]?exhausted\b/i, RATE_LIMITED],
   [/\btime[ds]?[\s_-]?out\b|\bETIMEDOUT\b/i, TIMED_OUT],
   [/\bunauthori[sz]ed\b/i, AUTH_FAILED],
   [
@@ -436,6 +456,7 @@ export function mapUpstreamError(err: unknown): MappedUpstreamError {
   const statusAllowsRefusal = status === undefined || status === HTTP_BAD_REQUEST
   if (statusAllowsRefusal && MODEL_REFUSED_WORDING.test(message)) return MODEL_UNAVAILABLE
   if (status === HTTP_BAD_REQUEST && CREDENTIAL_WORDING.test(message)) return AUTH_FAILED
+  if (status === HTTP_TOO_MANY_REQUESTS && USAGE_LIMIT_WORDING.test(message)) return USAGE_LIMITED
   if (status !== undefined) {
     return BY_STATUS.get(status) ?? PROVIDER_FAILED
   }
@@ -482,4 +503,47 @@ export function mapFailedCall(message: AssistantMessage): MappedUpstreamError {
  */
 export function forClientKey(mapped: MappedUpstreamError): MappedUpstreamError {
   return mapped.body.error.code === AUTH_FAILED.body.error.code ? CLIENT_KEY_REJECTED : mapped
+}
+
+/**
+ * A wait at least this long makes a 429 a usage limit (#199): past what a client's own retries
+ * span (the OpenAI SDKs wait seconds), so retrying before then only fails again.
+ */
+export const USAGE_LIMIT_MIN_WAIT_MS = 300_000
+
+/** A 429 as the client gets it: the body and status, and the headers that say when to retry. */
+export interface LimitAnswer {
+  readonly answer: MappedUpstreamError
+  readonly headers: Readonly<Record<string, string>>
+}
+
+/**
+ * Shapes a failure the client gets with how long the provider said to wait (#199).
+ *
+ * @remarks
+ * Only a 429 changes. A usage limit (its wording, or a wait of at least
+ * {@link USAGE_LIMIT_MIN_WAIT_MS}) is {@link USAGE_LIMITED} with `x-should-retry: false`, which the
+ * OpenAI SDKs obey, and no `retry-after`: a client that honors a wait of days would sit idle
+ * instead of failing. A rate limit with a known wait gets `retry-after` (seconds) and
+ * `retry-after-ms`, as OpenAI sends them, so the client waits that long rather than its own
+ * backoff.
+ *
+ * @param mapped - the failure as mapped
+ * @param waitMs - how long the provider said to wait, or `undefined` when it said nothing readable
+ * @returns the answer and its headers
+ */
+export function limitAnswer(mapped: MappedUpstreamError, waitMs: number | undefined): LimitAnswer {
+  if (mapped.status !== HTTP_TOO_MANY_REQUESTS) return { answer: mapped, headers: {} }
+  const usageLimit =
+    mapped.body.error.code === USAGE_LIMITED.body.error.code ||
+    (waitMs !== undefined && waitMs >= USAGE_LIMIT_MIN_WAIT_MS)
+  if (usageLimit) return { answer: USAGE_LIMITED, headers: { 'x-should-retry': 'false' } }
+  if (waitMs === undefined) return { answer: mapped, headers: {} }
+  return {
+    answer: mapped,
+    headers: {
+      'retry-after': String(Math.ceil(waitMs / MS_PER_SECOND)),
+      'retry-after-ms': String(Math.ceil(waitMs))
+    }
+  }
 }

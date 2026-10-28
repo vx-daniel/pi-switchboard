@@ -36,13 +36,14 @@ import { clearCooldowns, loginSubject } from '@proxy/pi/cooldowns'
 import { canonicalModelId } from '@proxy/pi/model-id'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
-import type { FailedResponse } from '@proxy/pi/reset-time'
+import { type FailedResponse, resetAfterMs } from '@proxy/pi/reset-time'
 import { type ActiveRequestHandle, requestOutcome } from '@proxy/server/active-requests'
 import { answeredEffort, withAliasEffort } from '@proxy/server/alias-effort'
 import type { AnswerFormat } from '@proxy/server/answer-formats'
 import {
   CREDENTIALS_MISSING,
   forClientKey,
+  limitAnswer,
   type MappedUpstreamError,
   mapFailedCall,
   mapUpstreamError,
@@ -737,11 +738,13 @@ async function tryCandidate(
   // Only a call that ran says anything; a credential refused before it is the `auth` class.
   noteAvailability(candidate.canonicalId, job.options, failed)
   recordRouteFailure(key, failed)
-  if (sharedLogin) recordCooldown(candidate, failed, captured)
+  const waitMs = captured === undefined ? undefined : resetAfterMs(captured)
+  if (sharedLogin) recordCooldown(candidate, failed, waitMs)
   const next = moveOn(job, position, { failed, detail: outcome.detail }, attempts)
   if (next !== undefined) return { next }
   outcome.report()
-  return { response: honoContext.json(outcome.answer.body, outcome.answer.status) }
+  const { answer, headers } = limitAnswer(outcome.answer, waitMs)
+  return { response: honoContext.json(answer.body, answer.status, headers) }
 }
 
 /**

@@ -12,6 +12,7 @@ import { proxyLogger } from '@proxy/logging'
 import {
   type ChatCompletionRequest,
   chatCompletionRequestSchema,
+  N_OTHER_THAN_ONE_REFUSAL,
   rejectedFields,
   STORE_TRUE_REFUSAL
 } from '@proxy/openai/schemas'
@@ -26,6 +27,20 @@ const validateLogger = proxyLogger('openai', 'validate')
  * OpenAI-compatible APIs only. Listed here for the debug log.
  */
 const PASSTHROUGH_FIELDS = ['metadata', 'prediction'] as const
+
+/**
+ * Fields accepted only at the value the proxy honors (constitution principle I), and the named
+ * 422 for any other value. `store: true` is refused the same way on the Responses API
+ * (`responsesRequestRejection`), with the same message.
+ */
+const HONORED_VALUE_FIELDS = [
+  { field: 'store', refuses: (value: unknown) => value === true, message: STORE_TRUE_REFUSAL },
+  {
+    field: 'n',
+    refuses: (value: unknown) => value !== undefined && value !== null && value !== 1,
+    message: N_OTHER_THAN_ONE_REFUSAL
+  }
+] as const
 
 /** Successful validation: the parsed request body. */
 export interface ValidationSuccess {
@@ -84,8 +99,10 @@ export function logValidatedChatRequest(data: ChatCompletionRequest): void {
  *
  * @remarks
  * Fields in {@link rejectedFields} are checked first so they get a named 422 instead of the
- * generic unknown-parameter error, and so is `store: true` ({@link STORE_TRUE_REFUSAL}), which
- * the schema refuses as a mere invalid value. Only the first Zod issue is reported.
+ * generic unknown-parameter error, and so is a value other than the one a field in
+ * {@link HONORED_VALUE_FIELDS} accepts (`store: true`, `n: 2`), which the schema refuses as a
+ * mere invalid value. An accepted value (`n: 1`) is not blamed for another field's error. Only
+ * the first Zod issue is reported.
  *
  * @param body - the parsed JSON request body, which does not match the schema
  * @returns a 422 for rejected/unknown fields, or a 400 for any other invalid value (with the
@@ -115,17 +132,19 @@ export function schemaRejection(schema: z.ZodType, body: unknown): ValidationErr
 }
 
 /**
- * Finds the first field in {@link rejectedFields} the body sets.
+ * Finds the first field the body sets at a value the proxy refuses by name: any value of a field
+ * in {@link rejectedFields}, or a value other than the honored one of a field in
+ * {@link HONORED_VALUE_FIELDS}.
  *
  * @param body - the parsed JSON request body
  * @returns its named 422, or `undefined` when the body sets none
  */
 function rejectedFieldRejection(body: unknown): ValidationError | undefined {
   if (!isRecord(body)) return undefined
-  // The Responses API refuses it the same way (`responsesRequestRejection`); both use one message.
-  if (body['store'] === true) {
-    validateLogger.warn('Rejected unsupported field {field}', { field: 'store' })
-    return { ok: false, status: 422, message: STORE_TRUE_REFUSAL, param: 'store' }
+  const honored = HONORED_VALUE_FIELDS.find(({ field, refuses }) => refuses(body[field]))
+  if (honored !== undefined) {
+    validateLogger.warn('Rejected unsupported field {field}', { field: honored.field })
+    return { ok: false, status: 422, message: honored.message, param: honored.field }
   }
   const field = rejectedFields.find((rejectedField) => body[rejectedField] !== undefined)
   if (field === undefined) return undefined

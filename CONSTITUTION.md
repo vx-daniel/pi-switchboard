@@ -1,24 +1,24 @@
 <!--
 Sync Impact Report
-Version change: 3.10.0 → 3.11.0 (MINOR)
-Rationale: a family alias (#231) had to be written into `proxy-config.json` before `opus-latest`
-existed, which defeated its point: naming "the newest Opus" without editing anything when a new
-model arrives. Every family the exposed models name now has a built-in `-latest` alias, computed
-with the exposure. Principle VI's "configured explicitly" gains this second recorded default, and
-keeps what makes it safe: it reaches exposed models only, a move is logged at warning, the
-response names the model and the alias, and a configured alias of its name replaces it.
-MINOR: materially changed guidance in principle VI (a second recorded default); no principle
-added or removed.
+Version change: 3.11.0 → 3.12.0 (MINOR)
+Rationale: #197 accepted `store: false`, which asks for what the proxy does anyway, and recorded
+why that is not a drop in PLAN only. A reviewer flagged it as an interpretation of principle I
+living outside the constitution, and `n: 1` needed the same reasoning. Principle I now names
+honored values: a field accepted at the one value that asks for what the proxy already does, and
+refused by name at any other, with no amendment per field. Pi's own adapter sends `store: false`,
+and Elixir's LangChain sends `n: 1`, on every request.
+MINOR: materially expanded guidance in principle I; no principle added or removed.
 Modified sections:
-- VI. Routing Transparency: the built-in `-latest` family aliases, beside
-  `routing.logins.fallbackOn`, as the recorded defaults a request with no routing configured can
-  meet
+- I. OpenAI Compatibility: honored values, beside the exceptions
 Templates requiring updates:
-- ✅ AGENTS.md: the routing bullet under "Core constraints"
-- ✅ PLAN.md: aliases and family aliases
-- ✅ docs/routing.md: family aliases; docs/console.md: the Models view
+- ✅ AGENTS.md: the "Reject unsupported parameters" bullet under "Core constraints"
+- ✅ PLAN.md: "Supported fields" (`store`, `n`) and the rejected fields
+- ✅ docs/api.md; docs/reference/claude-openai-compatibility.md
 Follow-up TODOs:
 - None.
+
+3.11.0 (2026-10-26): every family the exposed models name has a built-in `-latest` alias
+(principle VI's second recorded default, #231).
 
 3.10.0 (2026-10-26): releases are cut by hand on `main` (principle V); semantic-release is gone.
 3.9.0 (2026-10-23): principle III's exception names a `proxy-config.json` that exists but cannot
@@ -103,6 +103,8 @@ The stable HTTP surface is the set of routes `PLAN.md` lists under "Stable surfa
 - README and PLAN document what it accepts and answers.
 
 A route can start as experimental, opt-in and outside the stable surface, and be promoted once it meets these. Responses on the stable surface MUST stay close to OpenAI's schema; pi-specific data on a stable response MUST be namespaced under `x_pi` and documented. Unsupported routes or parameters MUST fail with clear OpenAI-style errors rather than being silently ignored.
+
+Honored values are not drops: a request field MAY be accepted at the one value that asks for what the proxy does anyway, where that value is also OpenAI's default or OpenAI's way of saying "don't", and is then answered as asked. Every other value of the field MUST be refused with a named `422` (`param` the field) that says which value is accepted. A field accepted this way is listed in `PLAN.md` ("Supported fields") with the value and why the proxy already honors it, and an accepted value is never blamed for another field's error. Today: `store: false` or `null` (the proxy stores no completion, #197) and `n: 1` or `null` (the proxy returns one choice, #197). Unlike the exceptions below, this needs no amendment per field; a value the proxy would have to pretend to honor is not one.
 
 Exceptions: a request field MAY be dropped instead of rejected only where it is listed here, with its reason, and documented where operators read the contract. Any other silent drop is a violation, and a new one needs an amendment.
 - `temperature` where it cannot reach the provider, both logged (the first per model at `info`, later ones at `debug`):
@@ -208,4 +210,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.11.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-26
+**Version**: 3.12.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-28

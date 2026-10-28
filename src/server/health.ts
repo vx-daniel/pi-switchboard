@@ -8,9 +8,9 @@
  *                         healthcheck every few seconds.
  *   GET /healthz/models   The model runtime: models.json load error, available and exposed model
  *                         counts, exposure modes, the exposure error, `enabledModels` scope
- *                         diagnostics and alias diagnostics (#66). 503 when no model is exposed,
- *                         the exposure config is invalid, or an alias is named like an exposed
- *                         model.
+ *                         diagnostics, alias diagnostics (#66) and login diagnostics (#233). 503
+ *                         when no model is exposed, the exposure config is invalid, or an alias
+ *                         is named like an exposed model.
  *   GET /healthz/creds    Per provider: how pi is authenticated (OAuth or API key, and where the
  *                         credential came from) and how many of its models are available. Local
  *                         state only; `?verify=true` asks pi to resolve each credential now, which
@@ -35,6 +35,7 @@ import {
   MISCONFIGURED_ALIAS
 } from '@proxy/openai/model-aliases'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
+import { loginDiagnosticSchema } from '@proxy/openai/model-logins'
 import { activeCooldowns } from '@proxy/pi/cooldowns'
 import { scopeDiagnosticSchema } from '@proxy/pi/model-scope'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
@@ -99,6 +100,12 @@ const modelsHealthSchema = z
         '(`pin-outside-family`), all of which make the check fail; naming no exposed model ' +
         "(`target-not-exposed`); or a family member whose version the rule can't read " +
         '(`family-unparsed`, never picked).'
+    }),
+    loginDiagnostics: z.array(loginDiagnosticSchema).meta({
+      description:
+        '`routing.logins` names that are no login of their provider (`unknown-login`, ignored), ' +
+        'and providers whose every login is disabled (`all-logins-disabled`): their models are ' +
+        'not listed or served (#233). Neither fails the check.'
     }),
     familyAliases: z.array(familyResolutionSchema).meta({
       description:
@@ -308,6 +315,10 @@ async function checkModels(
     scopeDiagnostics: exposure.ok ? [...exposure.scopeDiagnostics] : [],
     // Alias names and their targets come from the config file: model names, not secrets.
     aliasDiagnostics,
+    // Login and provider names from the config file and pi's catalogue, never a credential. They
+    // do not fail the check: a disabled login is a choice, and an unknown name may be a login
+    // logged out since (#233).
+    loginDiagnostics: exposure.ok ? [...exposure.loginDiagnostics] : [],
     // Model names from the config and pi's catalogue, not secrets.
     familyAliases: exposure.ok ? [...exposure.familyResolutions] : [],
     // Provider and model names only, never a credential.

@@ -55,6 +55,8 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | [Aliases](routing.md#aliases) | — | — | `aliases` | `{}` | Name → a model, a chain (`targets`, `fallbackOn`), a target with its `reasoningEffort`, or a `family` |
 | [Quota reserve](routing.md#quota) | — | — | `routing.reserve` | `{}` | Login → the share of each quota window to keep free, 0–1 |
 | [Moving between logins](logins.md#several-logins-per-provider) | — | — | `routing.logins.fallbackOn` | `["rate_limit"]` | Failure classes: `rate_limit`, `unavailable`, `timeout`, `auth`, `refused`, `upstream_error` |
+| [Login order](logins.md#order-and-disabled-logins) | — | — | `routing.logins.order` | `{}` | Provider → its logins to try first, in order; the others follow |
+| [Disabled logins](logins.md#order-and-disabled-logins) | — | — | `routing.logins.disabled` | `[]` | Logins routing never calls; they stay logged in |
 | [Login labels](logins.md#several-logins-per-provider) | — | — | `labels` | `{}` | Login → the label the console shows |
 | [Lifetime](pi-extension.md#settings-panel) (pi package) | — | — | `lifetime` | `detached` | `detached` (outlives the pi session), `session` |
 | [Zed sync](pi-extension.md#command-family) (pi package) | — | — | `zed.providerName`, `zed.autoSync` | `"Pi Proxy"`, `false` | A name; `true`, `false` |
@@ -99,7 +101,11 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
   },
   "routing": {
     "reserve": { "anthropic": 0.2 },
-    "logins": { "fallbackOn": ["rate_limit"] }
+    "logins": {
+      "fallbackOn": ["rate_limit"],
+      "order": { "anthropic": ["anthropic-2", "anthropic"] },
+      "disabled": []
+    }
   },
   "labels": { "anthropic": "work", "anthropic-2": "personal" },
   "lifetime": "detached",
@@ -171,6 +177,8 @@ Model exposure settings are configured via the JSON config file (`~/.pi/agent/pr
 | `aliases` | `{}` | Alias -> the canonical ID of an exposed model ([Aliases](routing.md#aliases)) |
 | `routing.reserve` | `{}` | Provider -> the share of each quota window, 0–1, that fallback chains keep free ([Quota](routing.md#quota)) |
 | `routing.logins.fallbackOn` | `["rate_limit"]` | The failures that move a request from one login of a model to the next ([Several logins per provider](logins.md#several-logins-per-provider)) |
+| `routing.logins.order` | `{}` | Base provider -> its logins to try first, in order (`{ "anthropic": ["anthropic-2"] }`); logins left out follow in the usual order. Set from the console's Accounts view with **Use first** ([Order and disabled logins](logins.md#order-and-disabled-logins)) |
+| `routing.logins.disabled` | `[]` | Logins routing never calls, though they stay logged in; a model whose every login is disabled leaves `/v1/models`. Set from the Accounts view with **Disable** and **Enable** ([Order and disabled logins](logins.md#order-and-disabled-logins)) |
 | `labels` | `{}` | Provider -> the label the console shows beside the login, in your words ([Several logins per provider](logins.md#several-logins-per-provider)) |
 
 When used as a pi package, all settings are persisted in `~/.pi/agent/proxy-config.json` and applied when the extension spawns the proxy.

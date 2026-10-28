@@ -272,7 +272,11 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
     ),
     413: errorResponse('The body is over the size limit.'),
     422: errorResponse('A field the proxy does not accept (`unsupported_parameter`).'),
-    429: errorResponse('The provider rate-limited the request.'),
+    429: errorResponse(
+      'The provider rate-limited the request (`rate_limit`, with `retry-after` and ' +
+        "`retry-after-ms` when the provider said when), or the login's usage limit is reached " +
+        '(`insufficient_quota`, with `x-should-retry: false`).'
+    ),
     502: errorResponse(
       "The provider refused pi's stored credential (`upstream_auth_error`), pi has no " +
         "credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent " +

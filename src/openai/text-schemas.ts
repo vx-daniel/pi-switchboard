@@ -7,7 +7,9 @@
  * file only (`vite.config.ts`, "Repo overrides"), because for text the model reads, trimming
  * changes the request: a `"\n"` stop sequence became `""`, and a message lost its leading
  * indentation and trailing newlines. Use {@link textSchema} for message content, text parts,
- * tool results, stop sequences and prediction content, and nothing else.
+ * tool results, stop sequences, prediction content, and the `description` of a function tool or a
+ * `json_schema` response format (#255): every provider hands those to the model, so they are text
+ * it reads, not identifiers. Use it for nothing else.
  *
  * @packageDocumentation
  */

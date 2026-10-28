@@ -121,6 +121,7 @@ export async function fileConfigReader(): Promise<RequestConfig> {
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
     aliases: file.aliases,
+    loginRouting: file.routing.logins,
     reserve: file.routing.reserve,
     loginFallbackOn: file.routing.logins.fallbackOn
   }
