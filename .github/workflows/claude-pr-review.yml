@@ -44,11 +44,8 @@ concurrency:
   group: claude-pr-review-${{ inputs.pull_request }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
-  id-token: write
+# Nothing by default: each job asks for what it uses (#207 spike, zizmor `excessive-permissions`).
+permissions: {}
 
 jobs:
   # A manual run carries no pull request event, so the fields the review needs are read here, once.
@@ -83,6 +80,13 @@ jobs:
       needs.pull-request.outputs.draft == 'false' &&
       needs.pull-request.outputs.author_type != 'Bot'
     timeout-minutes: 10
+    # The review reads the checkout, posts its comment (`pull-requests`, `issues`) and authenticates
+    # the action (`id-token`); only this job holds those.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
 
     steps:
       # THE MISSING-TOKEN GUARD, and it must be a step rather than a job-level `if:` — GitHub does not make
