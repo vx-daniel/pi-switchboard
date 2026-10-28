@@ -6,6 +6,7 @@
 import { resetSync } from '@logtape/logtape'
 import { configureLogging } from '@proxy/logging'
 import { beginActiveRequest, onActiveRequestsChange } from '@proxy/server/active-requests'
+import { onConsoleEventsChange, recordConsoleEvent } from '@proxy/server/console-events'
 import { beginHttpRequest, onHttpRequestsChange } from '@proxy/server/http-requests'
 import { onRouteTotalsChange, recordRouteAttempt } from '@proxy/server/route-totals'
 import { afterEach, beforeEach, describe, expect, test } from 'vite-plus/test'
@@ -62,6 +63,13 @@ describe('a listener that throws (#250)', () => {
       onHttpRequestsChange,
       () => {
         beginHttpRequest({ requestId: 'r-250', method: 'GET', path: '/v1/models' })
+      }
+    ],
+    [
+      'console events',
+      onConsoleEventsChange,
+      () => {
+        recordConsoleEvent('Restarting on 127.0.0.1:4142')
       }
     ]
   ])('the %s listener failure message reaches a debug record', (_name, subscribe, change) => {

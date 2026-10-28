@@ -31,7 +31,7 @@ import * as z from 'zod'
  * The schemas the stable surface and the experimental Responses API are checked against; each brings
  * every schema it references.
  */
-export const ROOT_SCHEMAS = [
+const ROOT_SCHEMAS = [
   'CreateChatCompletionRequest',
   'CreateChatCompletionResponse',
   'CreateChatCompletionStreamResponse',
@@ -70,7 +70,7 @@ const specSchema = z.object({
  * @param value - a schema, or any part of one
  * @param into - the set the names are added to
  */
-export function collectSchemaRefs(value: unknown, into: Set<string>): void {
+function collectSchemaRefs(value: unknown, into: Set<string>): void {
   if (Array.isArray(value)) {
     for (const schemaPart of value) collectSchemaRefs(schemaPart, into)
     return

@@ -18,7 +18,7 @@
  */
 
 import { proxyLogger } from '@proxy/logging'
-import { errorMessage } from '@proxy/utils/guards'
+import { notifyListeners } from '@proxy/utils/listeners'
 
 /** Logger for a listener that throws: the chat route's category, as the dispatcher records here. */
 const activeLogger = proxyLogger('server', 'chat')
@@ -152,18 +152,7 @@ let nextKey = 0
  * @param finishedRequest - the request that just finished, when that is the change
  */
 function notify(finishedRequest?: FinishedRequest): void {
-  for (const listener of listeners) {
-    try {
-      listener(finishedRequest)
-    } catch (error) {
-      activeLogger.warn('An active requests listener threw: {errorName}', {
-        errorName: error instanceof Error ? error.name : typeof error
-      })
-      activeLogger.debug('Active requests listener failure detail: {detail}', {
-        detail: errorMessage(error)
-      })
-    }
-  }
+  notifyListeners(listeners, [finishedRequest], activeLogger, 'active requests')
 }
 
 /**

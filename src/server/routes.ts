@@ -23,7 +23,7 @@ import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type { ServerConfig } from '@proxy/config/env'
 import { type FailureClass, loadConfigFromFile, type Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
-import { type ConversionSuccess, convertMessages } from '@proxy/openai/messages'
+import { convertMessages } from '@proxy/openai/messages'
 import {
   computeModelExposure,
   type ModelExposureConfig,
@@ -42,7 +42,12 @@ import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/val
 import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
 import { beginActiveRequest, requestOutcome } from '@proxy/server/active-requests'
 import { type AnswerFormat, chatFormat } from '@proxy/server/answer-formats'
-import { dispatchChat, findCredentialedStart } from '@proxy/server/chat-dispatch'
+import {
+  dispatchChat,
+  findCredentialedStart,
+  type PiContext,
+  type ProxyContext
+} from '@proxy/server/chat-dispatch'
 import { clearCooldownsAnswer } from '@proxy/server/cooldowns'
 import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
@@ -132,12 +137,8 @@ export async function fileConfigReader(): Promise<RequestConfig> {
 /** The chat completions path. */
 const CHAT_PATH = '/v1/chat/completions'
 
-/** The Hono context a route handler gets. */
-type ProxyContext = Context<ProxyEnv>
 /** A validated chat completion request body. */
 type ChatRequest = ChatCompletionRequest
-/** A pi `Context`: system prompt, messages and tools. */
-type PiContext = ConversionSuccess['context']
 
 /**
  * Either a successfully produced value or an early error response.

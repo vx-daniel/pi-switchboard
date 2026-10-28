@@ -14,6 +14,7 @@
  */
 
 import { proxyLogger } from '@proxy/logging'
+import { notifyListeners } from '@proxy/utils/listeners'
 
 /** The most events kept: a lifecycle is a handful; a burst of logins can't grow it without end. */
 export const EVENTS_KEPT = 100
@@ -70,15 +71,7 @@ export function recordConsoleEvent(
 ): void {
   events.push({ kind: 'event', sequence: takeSequence(), at: now, level, text })
   if (events.length > EVENTS_KEPT) events.shift()
-  for (const listener of listeners) {
-    try {
-      listener()
-    } catch (error) {
-      eventsLogger.warn('A console events listener threw: {errorName}', {
-        errorName: error instanceof Error ? error.name : typeof error
-      })
-    }
-  }
+  notifyListeners(listeners, [], eventsLogger, 'console events')
 }
 
 /**

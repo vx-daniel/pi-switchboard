@@ -82,9 +82,9 @@ import { stream as honoStream } from 'hono/streaming'
 const chatLogger = proxyLogger('server', 'chat')
 
 /** The Hono context a route handler gets. */
-type ProxyContext = Context<ProxyEnv>
+export type ProxyContext = Context<ProxyEnv>
 /** A pi `Context`: system prompt, messages and tools. */
-type PiContext = ConversionSuccess['context']
+export type PiContext = ConversionSuccess['context']
 
 /**
  * An answer the client gets when a call fails: a mapped upstream error, the 401 for a client key
