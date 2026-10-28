@@ -25,9 +25,11 @@ import {
 } from '../fixtures/mock-provider'
 import { jsonBody, testApp, testConfig } from '../helpers'
 
+const HTTP_OK = 200
 const HTTP_BAD_REQUEST = 400
 const HTTP_NOT_FOUND = 404
 const HTTP_UNPROCESSABLE_ENTITY = 422
+const HTTP_INTERNAL_SERVER_ERROR = 500
 const USAGE = { prompt_tokens: 3, completion_tokens: 2 }
 /** A one-pixel PNG, for the image request. */
 const PNG_DATA_URI =
@@ -534,6 +536,33 @@ describe('the Responses API', () => {
     expect(answer.status).toBe(HTTP_BAD_REQUEST)
     expect(answer.body).toMatchObject({ error: { param: 'input.0.encrypted_content' } })
   })
+
+  // Catches a replayed assistant turn refused for the empty `annotations`/`logprobs` the SDK
+  // echoes back, or a non-empty one accepted though the proxy can't send it on.
+  test.each(['annotations', 'logprobs'])(
+    'takes an empty %s on a replayed output_text, and refuses a non-empty one',
+    async (field) => {
+      const turn = (value: unknown[]): unknown => ({
+        model: 'mock/text',
+        input: [
+          { role: 'user', content: 'Hi' },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'Hello', [field]: value }]
+          },
+          { role: 'user', content: 'Again' }
+        ]
+      })
+
+      const empty = await post(turn([]))
+      const filled = await post(turn([{ token: 'Hello', logprob: 0 }]))
+
+      expect(empty.status).toBe(HTTP_OK)
+      expect(filled.status).toBeGreaterThanOrEqual(HTTP_BAD_REQUEST)
+      expect(filled.status).toBeLessThan(HTTP_INTERNAL_SERVER_ERROR)
+    }
+  )
 
   // Catches the stored-response operations answering the generic unknown-route 404, or worse,
   // falling through to another route.
