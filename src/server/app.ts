@@ -18,8 +18,8 @@ import {
   disconnectMiddleware,
   proxyAuthMiddleware,
   rejectedChatMiddleware,
-  renamedHeaderMiddleware,
-  requestIdMiddleware
+  requestIdMiddleware,
+  upstreamKeyHeaderMiddleware
 } from '@proxy/server/middleware'
 import {
   DOCS_PATH,
@@ -111,10 +111,11 @@ export function createApp(
 
   const authMiddleware = proxyAuthMiddleware(proxyAuth)
   app.use('/v1/*', authMiddleware)
-  // The old upstream key header (#65), on the one route that reads the key, after proxy auth: an
-  // unauthenticated caller gets the 401 first, and probes of the open paths are not affected.
-  app.use('/v1/chat/completions', renamedHeaderMiddleware())
-  app.use('/v1/responses', renamedHeaderMiddleware())
+  // The upstream key header (old name #65, empty #207), on the routes that read the key, after
+  // proxy auth: an unauthenticated caller gets the 401 first, and probes of the open paths are
+  // not affected.
+  app.use('/v1/chat/completions', upstreamKeyHeaderMiddleware())
+  app.use('/v1/responses', upstreamKeyHeaderMiddleware())
   // `/healthz` itself stays open for liveness probes; its detail endpoints name providers and
   // models. Not `/healthz/*`: Hono's wildcard also matches the bare `/healthz`.
   app.use('/healthz/:check{.+}', authMiddleware)

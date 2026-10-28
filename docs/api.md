@@ -262,6 +262,8 @@ curl http://localhost:4141/v1/chat/completions \
 
 If the provider rejects that key, the proxy answers `401` `authentication_error` with code `upstream_api_key_invalid` and a fixed message naming the header: the key is yours to fix. A rejected stored pi login stays `502` `upstream_auth_error`, as the client did nothing wrong.
 
+An empty header (`X-Switchboard-Upstream-Api-Key:` with no value, or only spaces) is refused with `400` before anything is called: leave the header out to use pi's stored login.
+
 ## API compatibility
 
 The proxy implements a subset of the [OpenAI Chat Completions API](https://platform.openai.com/docs/api-reference/chat/create). Request and response shapes match the OpenAI specification for supported fields. Unsupported fields are rejected with `422` and an OpenAI-style error body naming the offending parameter.

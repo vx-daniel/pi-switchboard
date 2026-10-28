@@ -196,6 +196,21 @@ describe('the Responses API', () => {
     expect(JSON.stringify(await jsonBody(without))).not.toContain('responses-api')
   })
 
+  // Catches the empty-key check left off this route: the empty key would reach the provider and
+  // come back as a 502 blaming it (#207).
+  test('refuses an empty X-Switchboard-Upstream-Api-Key with 400, calling nothing', async () => {
+    const before = mock.requests.length
+    const response = await app().request('/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Switchboard-Upstream-Api-Key': '' },
+      body: JSON.stringify({ model: 'mock/text', input: 'Hi' })
+    })
+
+    expect(response.status).toBe(HTTP_BAD_REQUEST)
+    expect(JSON.stringify(await jsonBody(response))).toContain('header is empty')
+    expect(mock.requests.length).toBe(before)
+  })
+
   // Catches a response the SDK can't read: `output_text` is the SDK's own join of the message
   // items, so it is empty unless the items are shaped as OpenAI's.
   test('answers text, non-streamed', async () => {

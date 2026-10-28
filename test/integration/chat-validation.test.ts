@@ -521,6 +521,25 @@ describe('POST /v1/chat/completions - upstream API key override', () => {
       `Bearer ${upstreamKey}`
     )
   })
+
+  // Catches an empty header sent to the provider as the key: the call fails upstream and the
+  // client gets a 502 blaming the provider for its own mistake (#207). It must be a 400, before
+  // any upstream request.
+  test.each(['', '   '])('refuses an empty key (%j) with 400, calling nothing', async (key) => {
+    const before = mock.requests.length
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Switchboard-Upstream-Api-Key': key },
+      body: JSON.stringify({ model: MOCK_MODEL, messages: [{ role: 'user', content: 'Hello' }] })
+    })
+    const body = await jsonBody(response)
+
+    expect(response.status).toBe(400)
+    expect(isErrorBody(body) ? body.error.message : undefined).toContain(
+      'X-Switchboard-Upstream-Api-Key header is empty'
+    )
+    expect(mock.requests.length).toBe(before)
+  })
 })
 
 describe('unsupported endpoints', () => {
