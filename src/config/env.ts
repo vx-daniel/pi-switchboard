@@ -3,8 +3,8 @@
  *
  * @remarks
  * Priority: CLI args > env vars > JSON config file > defaults. Not every setting has every
- * source: agentic mode is env-only (`PI_SWITCHBOARD_AGENTIC`), and model exposure, public model
- * IDs, custom models, provider prefixes and aliases come from the config file only.
+ * source: model exposure, public model IDs, custom models, provider prefixes and aliases come
+ * from the config file only.
  *
  * The env vars were `PI_PROXY_*` before the rename to pi-switchboard (#65). The old names are not
  * read; one that is still set is warned about, and an old auth token refuses to start
@@ -161,8 +161,6 @@ export interface ServerConfig {
   readonly proxyAuthOverride?: OverrideSource
   /** Whether requests a web page could send are refused (`hostOriginGuard`, #188). */
   readonly hostOriginGuardEnabled: boolean
-  /** Whether `PI_SWITCHBOARD_AGENTIC` is `true`; agentic mode is not built, so only logged. */
-  readonly agenticEnabled: boolean
   /** Whether remote image URL fetching is enabled. */
   readonly remoteImagesEnabled: boolean
   /** Whether the Swagger UI docs page is served. */
@@ -212,7 +210,6 @@ const RUNTIME_ENV_SUFFIXES = [
   'STATS',
   'MAX_BODY_SIZE',
   'UPSTREAM_TIMEOUT_MS',
-  'AGENTIC',
   'LOG_LEVEL',
   'LOG_FORMAT',
   'EXTENSION_LOG_FILE'
@@ -437,19 +434,12 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
         )
       : cli.upstreamTimeoutSec * MS_PER_SECOND
 
-  const agenticEnabled = parseBoolean(
-    'PI_SWITCHBOARD_AGENTIC',
-    process.env.PI_SWITCHBOARD_AGENTIC,
-    false
-  )
-
   return {
     host,
     port,
     proxyAuth,
     ...(override === undefined ? {} : { proxyAuthOverride: override.source }),
     ...resolveSwitches(cli, file),
-    agenticEnabled,
     maxBodySize,
     upstreamTimeoutMs,
     publicModelIdMode: file.publicModelIdMode,

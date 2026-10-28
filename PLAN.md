@@ -1992,7 +1992,6 @@ release workflow, never in `check:all` or the pre-commit hook.
 ### Agentic mode
 
 Later, not planned (ROADMAP "Later, not planned"). Agentic mode is experimental and not built.
-`PI_SWITCHBOARD_AGENTIC=true` sets a flag that only the startup log reads.
 
 Security defaults for any future agentic mode:
 
