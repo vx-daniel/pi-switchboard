@@ -2,12 +2,12 @@ import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import type { ErrorStats, ModelStats, StatsStore, TimelineBucket } from '@proxy/stats/store'
 import {
   createDashboardSource,
-  createTodayCostSource,
   type DashboardData,
   dashboardRows,
   openStatsView,
   windowRange
 } from '@proxy/tui/dashboard'
+import { createTodayCostSource } from '@proxy/tui/stats-snapshots'
 import { activeTab, installConsoleTheme, paint } from '@proxy/tui/theme'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 

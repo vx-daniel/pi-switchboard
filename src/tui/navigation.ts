@@ -6,6 +6,7 @@
  */
 
 import {
+  type KeyId,
   KeybindingsManager,
   setKeybindings,
   TUI_KEYBINDINGS,
@@ -18,7 +19,7 @@ import type { LoginPlace } from '@proxy/tui/login-routing'
 import { keycap, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */
-export const VIEWS = ['logs', 'accounts', 'stats', 'models', 'settings'] as const
+export const VIEWS = ['logs', 'accounts', 'stats', 'models', 'settings', 'doctor'] as const
 
 /** One of the console's views. */
 export type View = (typeof VIEWS)[number]
@@ -45,6 +46,32 @@ export const LOGIN_ROW = '+ Log in to a provider…'
 export function stepView(view: View, step: 1 | -1): View {
   const index = (VIEWS.indexOf(view) + step + VIEWS.length) % VIEWS.length
   return VIEWS[index] ?? view
+}
+
+/** The digit that jumps to each view: its place in {@link VIEWS}, as its tab shows it. */
+export const VIEW_DIGIT: Readonly<Record<View, KeyId>> = {
+  logs: '1',
+  accounts: '2',
+  stats: '3',
+  models: '4',
+  settings: '5',
+  doctor: '6'
+}
+
+/** The views whose footer lists the window keys: both read the one window those keys set (#325). */
+const WINDOW_VIEWS: ReadonlySet<View> = new Set(['stats', 'doctor'])
+
+/**
+ * Works out the stats window after a window key: the key sets it on the Stats and Doctor views,
+ * the one window both show, and does nothing elsewhere.
+ *
+ * @param view - the view shown
+ * @param current - the window now
+ * @param picked - the window the key names
+ * @returns the window from now on
+ */
+export function pickedWindow(view: View, current: StatsWindow, picked: StatsWindow): StatsWindow {
+  return WINDOW_VIEWS.has(view) ? picked : current
 }
 
 /**
@@ -105,8 +132,8 @@ export function accountActions(
 export type KeyHint = readonly [key: string, action: string]
 
 /**
- * The Stats view's window keys and what each window is called: in the footer, on the view's
- * window pills and in its tab's context.
+ * The window keys and what each window is called: in the Stats and Doctor views' footers, on the
+ * Stats view's window pills and in both tabs' context.
  */
 export const STATS_WINDOW_KEYS: Readonly<Record<StatsWindow, KeyHint>> = {
   today: ['t', 'today'],
@@ -131,6 +158,9 @@ export function logsKeys(raw: boolean): readonly KeyHint[] {
   ]
 }
 
+/** The window keys, in the Stats and Doctor views' footers. */
+const WINDOW_KEYS: readonly KeyHint[] = STATS_WINDOWS.map((window) => STATS_WINDOW_KEYS[window])
+
 /** Each view's keys, the ones worth learning first at the front: a narrow footer cuts the end. */
 const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
   logs: logsKeys(false),
@@ -142,7 +172,7 @@ const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
     ['x', 'log out'],
     ['c', 'clear cooldowns']
   ],
-  stats: STATS_WINDOWS.map((window) => STATS_WINDOW_KEYS[window]),
+  stats: WINDOW_KEYS,
   models: [
     ['↑↓', 'select'],
     ['↵', 'edit or add an alias'],
@@ -152,11 +182,12 @@ const VIEW_KEYS: Readonly<Record<View, readonly KeyHint[]>> = {
     ['↑↓', 'select'],
     ['↵', 'change'],
     ['r', 'restart the server']
-  ]
+  ],
+  doctor: [['↑↓', 'select'], ...WINDOW_KEYS]
 }
 /** The keys that work on every view, besides quitting; a narrow footer drops them from the front. */
 const GLOBAL_KEYS: readonly KeyHint[] = [
-  ['1-5 ←→', 'views'],
+  [`1-${String(VIEWS.length)} ←→`, 'views'],
   ['p', 'proxy auth']
 ]
 /** Quitting stops the proxy: the one key the footer always shows, at its right end. */

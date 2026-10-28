@@ -159,6 +159,12 @@ export async function initRegistry(): Promise<string | undefined> {
 }
 
 /**
+ * Whether the startup registration of `{provider}-N` logins ran: `registered: false` with the
+ * failure's code or name (never its message, which can quote a path).
+ */
+export type LoginRegistration = { registered: true } | { registered: false; reason: string }
+
+/**
  * Says whether the startup registration of `{provider}-N` logins was skipped because pi's
  * credential store could not be listed.
  *
@@ -166,12 +172,9 @@ export async function initRegistry(): Promise<string | undefined> {
  * Not the same as having no such login. The listing is not retried, so a failure stands until the
  * proxy restarts.
  *
- * @returns `registered: true`, or `registered: false` with the failure's code or name (never its
- *   message, which can quote a path)
+ * @returns `registered: true`, or `registered: false` with the failure's code or name
  */
-export function getLoginRegistration():
-  | { registered: true }
-  | { registered: false; reason: string } {
+export function getLoginRegistration(): LoginRegistration {
   return loginListingFailure === undefined
     ? { registered: true }
     : { registered: false, reason: loginListingFailure }

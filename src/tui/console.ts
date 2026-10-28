@@ -11,7 +11,6 @@
  * @packageDocumentation
  */
 
-import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   type Component,
   Key,
@@ -23,16 +22,12 @@ import {
 } from '@earendil-works/pi-tui'
 import type { ServerConfig } from '@proxy/config/env'
 import { isLoopbackHost } from '@proxy/config/schema'
-import { computeModelExposure } from '@proxy/openai/model-exposure'
+import { type DoctorReport, MIN_CALLS } from '@proxy/doctor/findings'
+import { findingsBySeverity } from '@proxy/doctor/summary'
 import { DEFAULT_LOGIN_ROUTING } from '@proxy/openai/model-logins'
 import { activeCooldowns, clearCooldownsFor } from '@proxy/pi/cooldowns'
 import { providerQuota } from '@proxy/pi/quota'
-import {
-  getAvailableModels,
-  getCredentialStatuses,
-  getModelsJsonError,
-  initRegistry
-} from '@proxy/pi/registry'
+import { getCredentialStatuses, initRegistry } from '@proxy/pi/registry'
 import {
   activeRequests,
   finishedRequests,
@@ -43,10 +38,10 @@ import { httpRequests, onHttpRequestsChange } from '@proxy/server/http-requests'
 import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { providerBelowReserve } from '@proxy/server/route-reserve'
 import { onRouteTotalsChange, routeTotals } from '@proxy/server/route-totals'
-import { fileConfigReader } from '@proxy/server/routes'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { accountRows, accountsSnapshot, type AccountsView } from '@proxy/tui/accounts-view'
 import { inBackground, openLogin, openLogout, openSelected } from '@proxy/tui/console-accounts'
+import { createDoctorSource } from '@proxy/tui/console-doctor'
 import { openSelectedModelsItem } from '@proxy/tui/console-models'
 import {
   currentSettingRows,
@@ -54,14 +49,10 @@ import {
   openSelectedSetting,
   settingsContext
 } from '@proxy/tui/console-settings'
-import {
-  configFileStatus,
-  type ConsoleState,
-  initialState,
-  type Status
-} from '@proxy/tui/console-state'
+import { type ConsoleState, initialState, readStatus, type Status } from '@proxy/tui/console-state'
 import { consoleStop, listenForStops } from '@proxy/tui/console-stops'
 import { openStatsView, type StatsView } from '@proxy/tui/dashboard'
+import { doctorBadge, doctorContext, doctorRows } from '@proxy/tui/doctor-view'
 import { exposedModelsLabel } from '@proxy/tui/frame'
 import { consoleLayout, type ConsoleLayout } from '@proxy/tui/layout'
 import type { LogBuffer } from '@proxy/tui/log-buffer'
@@ -72,9 +63,12 @@ import {
   type KeyHint,
   logsKeys,
   moveSelection,
+  pickedWindow,
   STATS_WINDOW_KEYS,
   stepView,
-  type View
+  type View,
+  VIEW_DIGIT,
+  VIEWS
 } from '@proxy/tui/navigation'
 import { openAuthMenu, openAuthOffPrompt } from '@proxy/tui/proxy-auth-menu'
 import {
@@ -134,30 +128,15 @@ export interface ConsoleContext {
    * @returns what the restart did
    */
   restart(): Promise<RestartReport>
+  /**
+   * Judges the running proxy as `pi-switchboard doctor` does, for the Doctor view and its tab's
+   * count (#325); reused while nothing it reads has changed.
+   *
+   * @returns the report; `undefined` before the first status read
+   */
+  doctorReport(): DoctorReport | undefined
   /** Stops the console and the proxy. */
   quit(): void
-}
-
-/**
- * Reads the status line's data: available and exposed models, cooldowns, the models.json error,
- * and the config file as the Settings view and the login labels need it.
- *
- * @returns the status
- */
-async function readStatus(): Promise<Status> {
-  const available = getAvailableModels()
-  const config = await fileConfigReader()
-  const exposure = computeModelExposure(available, config, getSupportedThinkingLevels)
-  return {
-    available: available.length,
-    exposed: exposure.ok ? exposure.models.length : exposure.message,
-    cooldowns: activeCooldowns().length,
-    modelsJsonError: getModelsJsonError(),
-    reserve: config.reserve ?? {},
-    exposure: exposure.ok ? exposure : undefined,
-    aliases: config.aliases,
-    ...configFileStatus()
-  }
 }
 
 /**
@@ -218,7 +197,7 @@ function statsContext({ state, statsView }: ConsoleContext, width: number): stri
 /**
  * What the right end of the tab row says about each view: what is in flight on Requests, the logins
  * and cooldowns on Accounts, the window and a bar's length on Stats, the models and aliases on
- * Models, and on Settings whether a restart is due.
+ * Models, on Settings whether a restart is due, and on Doctor the window and the findings counted.
  */
 const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext, size: ViewSize) => string>> = {
   logs: () => {
@@ -235,14 +214,15 @@ const TAB_CONTEXT: Readonly<Record<View, (context: ConsoleContext, size: ViewSiz
       latest: Object.keys(latest ?? {}).length
     })
   },
-  settings: settingsContext
+  settings: settingsContext,
+  doctor: (context) => doctorContext(context.state.statsWindow, context.doctorReport())
 }
 
 /**
  * What the right end of the frame's bottom border notes about each view, unless its render says
  * otherwise ({@link ViewBody}): how many log lines, logins or exposed models it holds, on Stats
  * how long the stats file keeps its history (nothing while the view shows the totals instead),
- * and on Settings the file they are saved to.
+ * on Settings the file they are saved to, and on Doctor the calls a model is judged from.
  */
 const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = {
   logs: ({ logs, state }) =>
@@ -252,7 +232,8 @@ const FRAME_NOTE: Readonly<Record<View, (context: ConsoleContext) => string>> = 
   accounts: ({ state }) => `${String(state.accounts.length)} logins`,
   stats: ({ statsView }) => statsView.frameNote(),
   models: ({ state }) => exposedModelsLabel(state.status?.exposed),
-  settings: () => 'proxy-config.json'
+  settings: () => 'proxy-config.json',
+  doctor: () => `a model is judged from ${String(MIN_CALLS)} calls`
 }
 
 /** What the Accounts view takes from the status before the first read: no reserve, no labels. */
@@ -365,6 +346,12 @@ const VIEW_BODY: Readonly<Record<View, (context: ConsoleContext, size: ViewSize)
       size,
       context.state.status?.fileProblem
     )
+  }),
+  doctor: (context, size) => ({
+    rows: doctorRows(
+      { report: context.doctorReport(), selected: context.state.doctorSelected },
+      size
+    )
   })
 }
 
@@ -432,6 +419,7 @@ function screenRows(
   const { view } = context.state
   const size = { height: layout.viewHeight, width: layout.viewWidth }
   const { rows, note, ...chrome } = VIEW_BODY[view](context, size)
+  const doctor = doctorBadge(context.doctorReport())
   return consoleScreen({
     view,
     layout,
@@ -442,6 +430,7 @@ function screenRows(
     body: rows,
     sidebar,
     authOffAt: alertAt,
+    ...(doctor === undefined ? {} : { badges: { doctor } }),
     ...chrome
   })
 }
@@ -497,8 +486,21 @@ function moveModelsSelection(state: ConsoleState, step: number): number {
 }
 
 /**
+ * Moves the selection in the Doctor view, stopping at its ends.
+ *
+ * @param context - the console: its report and the selected finding
+ * @param step - rows to move: negative moves up
+ * @returns the row moved to
+ */
+function moveDoctorSelection(context: ConsoleContext, step: number): number {
+  const report = context.doctorReport()
+  const count = report === undefined ? 0 : findingsBySeverity(report).length
+  return moveSelection(context.state.doctorSelected, Math.max(0, count - 1), step)
+}
+
+/**
  * How `↑` `↓` and the page keys move within each view: scroll the logs, or move the selection in
- * the accounts, the models or the settings; nothing on Stats.
+ * the accounts, the models, the settings or the findings; nothing on Stats.
  */
 const MOVES: Readonly<Record<View, (context: ConsoleContext, step: number) => void>> = {
   logs: (context, step) => scrollLogs(context, -step),
@@ -511,6 +513,9 @@ const MOVES: Readonly<Record<View, (context: ConsoleContext, step: number) => vo
   },
   settings: ({ state }, step) => {
     state.settingsSelected = moveSelection(state.settingsSelected, SETTING_KEYS.length - 1, step)
+  },
+  doctor: (context, step) => {
+    context.state.doctorSelected = moveDoctorSelection(context, step)
   }
 }
 
@@ -522,9 +527,9 @@ const MOVES: Readonly<Record<View, (context: ConsoleContext, step: number) => vo
  */
 function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => void])[] {
   const { state } = context
-  // The window keys act on the Stats view only, where the footer lists them.
+  // The window keys act on the Stats and Doctor views, which share the window and list the keys.
   const pickWindow = (window: StatsWindow) => (): void => {
-    if (state.view === 'stats') state.statsWindow = window
+    state.statsWindow = pickedWindow(state.view, state.statsWindow, window)
   }
   // Ends every cooldown (#182), in the views whose footer lists the key; the route ends one.
   const clearCooldowns = (): void => {
@@ -535,11 +540,7 @@ function keyActions(context: ConsoleContext): readonly (readonly [KeyId, () => v
   return [
     ['q', () => context.quit()],
     [Key.ctrl('c'), () => context.quit()],
-    ['1', () => (state.view = 'logs')],
-    ['2', () => (state.view = 'accounts')],
-    ['3', () => (state.view = 'stats')],
-    ['4', () => (state.view = 'models')],
-    ['5', () => (state.view = 'settings')],
+    ...VIEWS.map((view) => [VIEW_DIGIT[view], () => (state.view = view)] as const),
     [Key.tab, () => (state.view = stepView(state.view, 1))],
     [Key.right, () => (state.view = stepView(state.view, 1))],
     [Key.shift('tab'), () => (state.view = stepView(state.view, -1))],
@@ -660,6 +661,7 @@ export async function runConsole(
     { status: readStatus, accounts: getCredentialStatuses },
     () => tui.requestRender()
   )
+  const readDoctor = createDoctorSource()
   const context: ConsoleContext = {
     get config() {
       return server.config()
@@ -682,6 +684,7 @@ export async function runConsole(
       crashed: end.crashed,
       refresh: () => refresh()
     }),
+    doctorReport: () => readDoctor(context),
     quit: end.stop
   }
   const actions = keyActions(context)

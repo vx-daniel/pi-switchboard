@@ -7,7 +7,7 @@
  */
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
-import { framedView } from '@proxy/tui/frame'
+import { framedView, type TabBadges } from '@proxy/tui/frame'
 import type { ConsoleLayout } from '@proxy/tui/layout'
 import { footerLine, type KeyHint, type View } from '@proxy/tui/navigation'
 import { besideSidebar } from '@proxy/tui/sidebar'
@@ -47,6 +47,8 @@ export interface ScreenInput {
   readonly note: string
   /** What the left end of the frame's bottom border says about the view's state; none if absent. */
   readonly status?: string
+  /** The tabs' counts (the Doctor tab's, #325); none if absent. */
+  readonly badges?: TabBadges
   /** The view's footer keys, when its state changes them; the view's usual keys if absent. */
   readonly keys?: readonly KeyHint[]
   /** The view's rows, rendered for `layout.viewWidth` by `layout.viewHeight`. */
@@ -116,7 +118,8 @@ export function consoleScreen(input: ScreenInput): string[] {
       layout,
       context: input.context,
       note: input.note,
-      ...(input.status === undefined ? {} : { status: input.status })
+      ...(input.status === undefined ? {} : { status: input.status }),
+      ...(input.badges === undefined ? {} : { badges: input.badges })
     },
     input.body
   )

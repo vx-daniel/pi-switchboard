@@ -101,7 +101,7 @@ export function targetCell(target: AliasModel, resolution: FamilyResolution | un
  * @param width - the pane's content columns
  * @returns the field's lines
  */
-function detailField(name: string, value: string, width: number): string[] {
+export function detailField(name: string, value: string, width: number): string[] {
   const indent = name.length + 1
   const [first = '', ...rest] = wrapTextWithAnsi(value, Math.max(1, width - indent))
   return [`${paint('dim', name)} ${first}`, ...rest.map((line) => `${' '.repeat(indent)}${line}`)]

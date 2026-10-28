@@ -6,7 +6,9 @@ import {
   footerLine,
   logsKeys,
   moveSelection,
+  pickedWindow,
   stepView,
+  VIEW_DIGIT,
   VIEWS
 } from '@proxy/tui/navigation'
 import { describe, expect, test } from 'vite-plus/test'
@@ -19,14 +21,16 @@ describe('console navigation', () => {
       'stats',
       'models',
       'settings',
+      'doctor',
       'logs'
     ])
     expect(VIEWS.map((view) => stepView(view, -1))).toEqual([
-      'settings',
+      'doctor',
       'logs',
       'accounts',
       'stats',
-      'models'
+      'models',
+      'settings'
     ])
   })
 
@@ -131,5 +135,24 @@ describe('console navigation', () => {
     expect(onTable).toMatch(/ r {2}raw log /u)
     expect(onRaw).toMatch(/ r {2}requests /u)
     expect(onRaw).not.toContain('raw log')
+  })
+
+  // Catches the Doctor tab (#325) out of reach by its digit, a digit that jumps to another tab
+  // than the one its tab shows, or the footer still saying `1-5`.
+  test('6 jumps to the Doctor tab, and the footer names every digit', () => {
+    const footer = stripTerminalSequences(footerLine('doctor', { width: 160, sidebarFits: true }))
+
+    expect(VIEW_DIGIT.doctor).toBe('6')
+    for (const view of VIEWS) expect(VIEW_DIGIT[view]).toBe(String(VIEWS.indexOf(view) + 1))
+    expect(footer).toContain('1-6 ←→')
+    expect(footer).toMatch(/^ {2}↑↓ {2}select {3}t {2}today {3}w {2}week {3}a {2}all 30 days/u)
+  })
+
+  // Catches the window keys acting on one of the two views that share the window (#325), so `w`
+  // in Stats and in Doctor disagree, or acting on a view whose footer does not list them.
+  test('the window keys set the one window from Stats and from Doctor, and nowhere else', () => {
+    expect(pickedWindow('stats', 'today', 'week')).toBe('week')
+    expect(pickedWindow('doctor', 'week', 'all')).toBe('all')
+    expect(pickedWindow('models', 'today', 'week')).toBe('today')
   })
 })

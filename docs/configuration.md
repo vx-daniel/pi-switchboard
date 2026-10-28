@@ -176,6 +176,8 @@ The exit status is `1` when the general section has an error (what makes `/healt
 
 A stats file from before the doctor (schema version 1) can't be read by it until a proxy has started once and migrated the file. In a new agent dir, loading pi's runtime creates pi's empty `auth.json` and `models-store.json`, as any pi start does.
 
+The console (`pi-switchboard tui`) shows the same findings, for the proxy it runs, in its Doctor view (tab `6`): [The console](console.md#the-console-logs-logins-and-status-at-a-terminal).
+
 ## Logging
 
 The proxy logs with [LogTape](https://logtape.org) to stderr:

@@ -2004,8 +2004,8 @@ src/
 │   └── env.ts            -- ServerConfig from file + env + CLI overrides
 ├── doctor/
 │   ├── command.ts        -- `pi-switchboard doctor` (citty): flags, text and JSON output, exit status
-│   ├── collect.ts        -- reads the config, pi's runtime, the health reports and the stats file
-│   └── findings.ts       -- pure findings and thresholds, for the CLI and later the console (#325)
+│   ├── collect.ts        -- reads the config, pi's runtime, the health reports and the stats file; judges them
+│   └── findings.ts       -- pure findings and thresholds, for the CLI and the console's Doctor view (#325)
 ├── logging/
 │   └── index.ts          -- LogTape setup, categories, level guide, redaction (exported via ./logging)
 ├── server/
@@ -2044,6 +2044,8 @@ src/
 │   ├── accounts-view.ts  -- the Accounts view's rows: providers, quota used, the login row
 │   ├── command.ts        -- `pi-switchboard tui` (citty)
 │   ├── console.ts        -- the console: pi-tui screen, server in the same process
+│   ├── console-doctor.ts -- the Doctor view's report, judged from the console's live state (#325)
+│   ├── doctor-view.ts    -- the Doctor view's rows, detail pane, pointers and tab count (#325)
 │   ├── log-buffer.ts     -- the log view's bounded line buffer
 │   ├── log-view.ts       -- the log view's position: following, or pinned when scrolled back
 │   ├── login.ts          -- pi's login flow routed to pi's own screens
@@ -2154,8 +2156,24 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   finish on the old server. Stats are recorded from process-wide events, so `listen`'s
   stop-on-close would have two recorders count the same requests during the handover: the console
   starts the server with `openServer` and moves the recorder itself, one at a time. The log level
-  and the Stats view follow the new config once it listens. A frame too narrow for five tabs
-  drops the last ones but never the current view's.
+  and the Stats view follow the new config once it listens. A frame too narrow for six tabs
+  drops the last ones but never the current view's, and a tab with a count (Doctor's) only after
+  the others.
+- **Doctor** (#325; `doctor-view.ts`, `console-doctor.ts`). View `6` shows what
+  `pi-switchboard doctor` would print, judged by the same pure `findings.ts` through
+  `collect.ts`' `judgeDoctorInputs`, from the console's live state: the running `ServerConfig`
+  and the auth the `ProxyAuthSwitch` applies now, the request config and logins of the last
+  status read, and the stats through the Stats view's open connection (`doctorStats`, its own
+  5 s snapshot per window), never a second open. Credentials come from the Accounts view's last
+  `v` (`status-refresh.ts`): a login never verified is the CLI's not-verified advice, pointing at
+  `v`; a failed one is an error; the view itself calls no provider and writes nothing.
+  `PI_CACHE_RETENTION` is the proxy's own environment. Findings are listed errors first, one row
+  each with a pointer to the view or key that acts on them (`DOCTOR_POINTERS`, a test holds it to
+  `DOCTOR_CHECKS`), the selected one's message and recommendation in a detail pane beside the list
+  (the Models view's gate) or under it, and the limits at the end. The report is judged again
+  when what it reads changes (a status read, `v`, `p`, the window, a restart) and at most every
+  5 s otherwise, so the tab's count (`Doctor 2`: errors and warnings, error-coloured when any is an
+  error) costs nothing per redraw. `t` `w` `a` set one window for Stats and Doctor.
 - **Sidebar** (`sidebar.ts`). On a terminal at least 100 columns wide, the right 30% (34 to 48
   columns) shows four panels beside the frame, from its top border to its bottom border, with the
   date and time over them on a tall terminal; `s` hides and shows it. QUOTA (each login with its
@@ -2335,8 +2353,8 @@ default (`stats`, `--no-stats`, `PI_SWITCHBOARD_STATS=false`).
 ### Doctor (`pi-switchboard doctor`, #299)
 
 A local subcommand that checks the configuration and the prompt cache and prints findings, each
-with a recommendation. No HTTP route serves it (principle I's surface is unchanged); a console
-view is #325.
+with a recommendation. No HTTP route serves it (principle I's surface is unchanged); the
+console's Doctor view (#325, under Console) shows the same findings.
 
 - **Entry.** `src/cli.ts` finds `doctor` as it finds `tui` and loads `src/doctor/command.ts`
   dynamically. It takes the server flags, so it judges the config `pi-switchboard` with the same

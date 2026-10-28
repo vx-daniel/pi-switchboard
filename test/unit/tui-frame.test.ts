@@ -69,20 +69,20 @@ describe('framedView', () => {
   test('folder tabs: the current one opens into the frame, the others stand closed on it', () => {
     const rows = plain(frame({ columns: 100, rows: 40 }, { view: 'accounts' }))
 
-    expect(rows[0]).toMatch(/^ {2}╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ *$/)
+    expect(rows[0]).toMatch(/^ {2}╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ *$/)
     expect(rows[1]).toMatch(
-      /^ {2}│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 4 Models │ │ 5 Settings │ +idle *$/
+      /^ {2}│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 4 Models │ │ 5 Settings │ │ 6 Doctor │ +idle *$/
     )
-    expect(rows[2]).toMatch(/^╭─┴─+┴─┘ {12}└─┴─+┴─┴─+┴─┴─+┴─+╮$/)
+    expect(rows[2]).toMatch(/^╭─┴─+┴─┘ {12}└─┴─+┴─┴─+┴─┴─+┴─┴─+┴─+╮$/)
   })
 
   // Catches the tabs in the border on a short terminal losing a digit, the current one unmarked,
   // or the context pushed off the border.
   test('compact tabs sit in the top border with the context at its right end', () => {
-    const rows = plain(frame({ columns: 80, rows: 24 }, { view: 'stats', context: 'today' }))
+    const rows = plain(frame({ columns: 90, rows: 24 }, { view: 'stats', context: 'today' }))
 
     expect(rows[0]).toMatch(
-      /^╭─ 1 Requests ─ 2 Accounts ─ 3 Stats ─ 4 Models ─ 5 Settings ─+ today ─╮$/
+      /^╭─ 1 Requests ─ 2 Accounts ─ 3 Stats ─ 4 Models ─ 5 Settings ─ 6 Doctor ─+ today ─╮$/
     )
   })
 
@@ -93,6 +93,19 @@ describe('framedView', () => {
 
     expect(rows[1]).toMatch(/│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 5 Settings │/)
     expect(rows[1]).not.toContain('Models')
+  })
+
+  // Catches the Doctor tab's count (#325) missing from either kind of tab, or its tab left out
+  // on a narrow row before tabs that count nothing, where its errors would go unseen.
+  test('a tab carries its count, and is kept before the tabs without one', () => {
+    const badges = { doctor: { count: 2, level: 'error' } } as const
+    const folder = plain(frame({ columns: 100, rows: 40 }, { badges }))
+    const compact = plain(frame({ columns: 90, rows: 24 }, { badges, context: '' }))
+    const narrow = plain(frame({ columns: 66, rows: 40 }, { view: 'settings', badges }))
+
+    expect(folder[1]).toContain('│ 6 Doctor 2 │')
+    expect(compact[0]).toContain('─ 6 Doctor 2 ─')
+    expect(narrow[1]).toMatch(/│ 1 Requests │ │ 2 Accounts │ │ 5 Settings │ │ 6 Doctor 2 │/)
   })
 
   // Catches the view's rows unpadded or uncut inside the borders, or a short body leaving the

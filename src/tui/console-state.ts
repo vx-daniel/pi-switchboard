@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import {
   type AliasTarget,
   configFileAuthTokenInvalid,
@@ -15,7 +16,10 @@ import {
   type ProxyConfig,
   type Reserve
 } from '@proxy/config/schema'
-import type { ModelExposureResult } from '@proxy/openai/model-exposure'
+import { computeModelExposure, type ModelExposureResult } from '@proxy/openai/model-exposure'
+import { activeCooldowns } from '@proxy/pi/cooldowns'
+import { getAvailableModels, getModelsJsonError } from '@proxy/pi/registry'
+import { fileConfigReader, type RequestConfig } from '@proxy/server/routes'
 import type { StatsWindow } from '@proxy/stats/windows'
 import type { LogViewport } from '@proxy/tui/log-view'
 import type { View } from '@proxy/tui/navigation'
@@ -43,6 +47,8 @@ export interface Status {
   readonly authInvalid: boolean
   /** Why the config file can't be used (`is not valid JSON`); `undefined` when it can (#288). */
   readonly fileProblem: string | undefined
+  /** The request config, as a request reads it now: what the Doctor view judges (#325). */
+  readonly requestConfig: RequestConfig
 }
 
 /** The console's state, which every render reads. */
@@ -60,11 +66,13 @@ export interface ConsoleState extends RefreshState<Status> {
   modelsSelected: number
   /** The selected setting of the Settings view (#288). */
   settingsSelected: number
+  /** The selected finding of the Doctor view (#325). */
+  doctorSelected: number
   /** Open client connections, counted every tick; `undefined` before the first count. */
   connections: number | undefined
   /** Whether the operator hid the sidebar (`s`). */
   sidebarHidden: boolean
-  /** The window the Stats dashboard shows. */
+  /** The window the Stats dashboard and the Doctor view read (`t`, `w`, `a` in either, #325). */
   statsWindow: StatsWindow
 }
 
@@ -86,6 +94,7 @@ export function initialState(): ConsoleState {
     selected: 0,
     modelsSelected: 0,
     settingsSelected: 0,
+    doctorSelected: 0,
     connections: undefined,
     sidebarHidden: false,
     statsWindow: 'today'
@@ -98,10 +107,7 @@ export function initialState(): ConsoleState {
  *
  * @returns those fields of the status
  */
-export function configFileStatus(): Pick<
-  Status,
-  'file' | 'labels' | 'authInvalid' | 'fileProblem'
-> {
+function configFileStatus(): Pick<Status, 'file' | 'labels' | 'authInvalid' | 'fileProblem'> {
   const file = loadConfigFromFile()
   const problem = configFileProblem()
   return {
@@ -109,5 +115,29 @@ export function configFileStatus(): Pick<
     labels: file.labels,
     authInvalid: configFileAuthTokenInvalid(),
     fileProblem: problem === undefined ? undefined : describeConfigFileProblem(problem)
+  }
+}
+
+/**
+ * Reads the status line's data: available and exposed models, cooldowns, the models.json error,
+ * the config file as the Settings view and the login labels need it, and the request config the
+ * Doctor view judges.
+ *
+ * @returns the status
+ */
+export async function readStatus(): Promise<Status> {
+  const available = getAvailableModels()
+  const config = await fileConfigReader()
+  const exposure = computeModelExposure(available, config, getSupportedThinkingLevels)
+  return {
+    available: available.length,
+    exposed: exposure.ok ? exposure.models.length : exposure.message,
+    cooldowns: activeCooldowns().length,
+    modelsJsonError: getModelsJsonError(),
+    reserve: config.reserve ?? {},
+    exposure: exposure.ok ? exposure : undefined,
+    aliases: config.aliases,
+    requestConfig: config,
+    ...configFileStatus()
   }
 }
