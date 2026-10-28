@@ -136,9 +136,17 @@ const CREDENTIAL_PATTERN = /sk-ant-[a-z]{3}\d{2}-|Bearer\s+\S{20,}/
 const ACCOUNT_ID_PATTERN = /(safety_identifier\\*":\s*\\*")user-[A-Za-z0-9]+/g
 
 /**
- * Saves a recording, unless it contains a credential: any of `secrets` (the values the request's
- * auth headers carried) or anything shaped like one. An account identifier the response echoes
- * ({@link ACCOUNT_ID_PATTERN}) is replaced by `user-redacted` first.
+ * An OpenAI user or organization ID anywhere else in a recording (`user-…`, `org-…`), which
+ * {@link ACCOUNT_ID_PATTERN} did not replace: a field this recorder has not met yet. Refused, as a
+ * credential is, so a new echoed identifier is noticed rather than committed.
+ */
+const OTHER_ACCOUNT_ID_PATTERN = /\b(?:user|org)-(?!redacted\b)[A-Za-z0-9]{16,}/
+
+/**
+ * Saves a recording, unless it contains a credential (any of `secrets`, the values the request's
+ * auth headers carried, or anything shaped like one) or an account ID. An account identifier the
+ * response echoes in a known field ({@link ACCOUNT_ID_PATTERN}) is replaced by `user-redacted`
+ * first; any other ({@link OTHER_ACCOUNT_ID_PATTERN}) is refused.
  *
  * @remarks
  * Refuses a credential rather than redacting it, so a leak is noticed instead of silently patched.
@@ -147,7 +155,7 @@ const ACCOUNT_ID_PATTERN = /(safety_identifier\\*":\s*\\*")user-[A-Za-z0-9]+/g
  * @param secrets - credential values that must not appear in it; empty strings are ignored
  * @param directory - the recordings root; {@link RECORDINGS_DIR} by default
  * @returns the path the recording was written to
- * @throws Error when the recording contains a credential
+ * @throws Error when the recording contains a credential or an account ID
  */
 export function saveRecording(
   recording: Recording,
@@ -162,6 +170,11 @@ export function saveRecording(
   if (leaked.length > 0 || CREDENTIAL_PATTERN.test(text)) {
     throw new Error(
       `Refusing to save ${recording.api}/${recording.scenario}: it contains a credential`
+    )
+  }
+  if (OTHER_ACCOUNT_ID_PATTERN.test(text)) {
+    throw new Error(
+      `Refusing to save ${recording.api}/${recording.scenario}: it contains an account ID`
     )
   }
   const path = recordingPath(recording.api, recording.scenario, directory)

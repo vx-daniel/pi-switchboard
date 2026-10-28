@@ -200,28 +200,49 @@ describe('record and replay', () => {
     ).toThrow('contains a credential')
   })
 
-  // Catches the ChatGPT user's ID reaching a committed fixture: OpenAI's Responses API echoes it
-  // as `safety_identifier` in every response (#238).
-  test('saves an echoed safety_identifier as user-redacted', async () => {
+  /**
+   * Records one exchange and gives it a body that echoes an account ID in a field.
+   *
+   * @param field - the field, quoted as JSON
+   * @param id - the account ID
+   * @returns the exchange, and the secrets its request carried
+   */
+  async function echoing(
+    field: string,
+    id: string
+  ): Promise<{ recording: Recording; secrets: readonly string[] }> {
     await useProvider(`${recorder.baseUrl}/v1`, 'two-tools')
     await chat('two-tools')
     const captured = recorder.exchanges.at(-1)
     if (captured === undefined) throw new Error('the recorder captured nothing')
-    const echoed = {
-      ...captured.exchange,
-      response: {
-        ...captured.exchange.response,
-        chunks: ['data: {"response":{"safety_identifier":"user-AbC123xyz"}}\n\n']
-      }
+    const response = { ...captured.exchange.response, chunks: [`data: {${field}:"${id}"}\n\n`] }
+    return {
+      recording: named({ ...captured.exchange, response }, 'account-id'),
+      secrets: captured.secrets
     }
+  }
 
-    const saved = readFileSync(
-      saveRecording(named(echoed, 'safety-id'), captured.secrets, recordingsDir),
-      'utf8'
-    )
+  // Catches the ChatGPT user's ID reaching a committed fixture: OpenAI's Responses API echoes it
+  // as `safety_identifier` in every response (#238).
+  test('saves an echoed safety_identifier as user-redacted', async () => {
+    const id = 'user-AbC123xyzAbC123xyz1234'
+    const { recording, secrets } = await echoing('"safety_identifier"', id)
 
-    expect(saved).not.toContain('user-AbC123xyz')
+    const saved = readFileSync(saveRecording(recording, secrets, recordingsDir), 'utf8')
+
+    expect(saved).not.toContain(id)
     expect(saved).toContain('user-redacted')
+  })
+
+  // Catches a user or organization ID in a field the recorder doesn't know being committed: a
+  // provider that starts echoing one must stop the save, not slip past the known-field redaction.
+  test.each([
+    ['"owner"', 'user-AbC123xyzAbC123xyz1234'],
+    ['"organization"', 'org-AbC123xyzAbC123xyz1234']
+  ])('refuses %s holding %s', async (field, id) => {
+    const { recording, secrets } = await echoing(field, id)
+
+    expect(() => saveRecording(recording, secrets, recordingsDir)).toThrow('contains an account ID')
   })
 
   // Catches the quota headers lost on the way into a recording or out of a replay (the quota
