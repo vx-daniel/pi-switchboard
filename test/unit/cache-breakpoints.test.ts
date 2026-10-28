@@ -10,10 +10,11 @@ import { streamSimple as streamCompletions } from '@earendil-works/pi-ai/api/ope
 import { streamSimple as streamResponses } from '@earendil-works/pi-ai/api/openai-responses'
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript'
 import { convertMessages } from '@proxy/openai/messages'
-import { validateChatRequest } from '@proxy/openai/validate'
 import { breakpointPatch, retryWithoutBreakpoints } from '@proxy/pi/cache-breakpoints'
 import { isRecord } from '@proxy/utils/guards'
 import { describe, expect, test } from 'vite-plus/test'
+
+import { parseChatBody, postChatBody } from '../helpers'
 
 /** OpenAI's own API, where breakpoints are forwarded. */
 const OPENAI_BASE_URL = 'https://api.openai.com/v1'
@@ -64,9 +65,8 @@ async function sentPayload(
   baseUrl: string,
   messages: unknown[]
 ): Promise<Record<string, unknown>> {
-  const validation = validateChatRequest({ model: 'gpt-test', messages })
-  if (!validation.ok) throw new Error(`request did not validate: ${validation.message}`)
-  const conversion = convertMessages(validation.data.messages)
+  const request = parseChatBody({ model: 'gpt-test', messages })
+  const conversion = convertMessages(request.messages)
   if (!conversion.ok) throw new Error('messages did not convert')
   // What pi's ModelRuntime does before calling an API: the system prompt becomes a leading
   // system message.
@@ -77,7 +77,7 @@ async function sentPayload(
     onPayload: (payload: unknown) => {
       if (isRecord(payload)) {
         const model = makeModel(api, baseUrl)
-        breakpointPatch(model, validation.data.messages)?.(payload)
+        breakpointPatch(model, request.messages)?.(payload)
         captured = payload
       }
       throw new Error(STOP)
@@ -206,8 +206,8 @@ describe('OpenAI at api.openai.com gets the breakpoints', () => {
 describe('a malformed breakpoint', () => {
   // Catches any object accepted as a breakpoint and then forwarded to OpenAI, which defines one
   // mode only; and the error naming the whole message instead of the field (#146).
-  test('is rejected with 400 at the breakpoint mode', () => {
-    const result = validateChatRequest({
+  test('is rejected with 400 at the breakpoint mode', async () => {
+    const answer = await postChatBody({
       model: 'gpt-test',
       messages: [
         {
@@ -218,8 +218,7 @@ describe('a malformed breakpoint', () => {
       ]
     })
 
-    expect(result).toMatchObject({
-      ok: false,
+    expect(answer).toMatchObject({
       status: 400,
       param: 'messages.0.content.0.prompt_cache_breakpoint.mode'
     })
@@ -266,17 +265,13 @@ function failedCall(errorMessage: string): AssistantMessage {
   }
 }
 
-/** A user message with a breakpoint on its one part, validated as the route validates it. */
-const WITH_BREAKPOINT = (() => {
-  const validation = validateChatRequest({
-    model: 'gpt-test',
-    messages: [
-      { role: 'user', content: [{ type: 'text', text: 'Hi', prompt_cache_breakpoint: BREAKPOINT }] }
-    ]
-  })
-  if (!validation.ok) throw new Error('request did not validate')
-  return validation.data.messages
-})()
+/** A user message with a breakpoint on its one part, parsed as the chat route parses it. */
+const WITH_BREAKPOINT = parseChatBody({
+  model: 'gpt-test',
+  messages: [
+    { role: 'user', content: [{ type: 'text', text: 'Hi', prompt_cache_breakpoint: BREAKPOINT }] }
+  ]
+}).messages
 
 describe('a model that refuses the field (#163)', () => {
   // Catches the Responses wording of the refusal going unrecognized: this is pi's exact message for
@@ -291,6 +286,54 @@ describe('a model that refuses the field (#163)', () => {
     // A refusal that comes back after the model is remembered is from a request already in flight,
     // which did send the field: it is retried too (#166 review).
     expect(retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(refusal))).toBe(true)
+  })
+
+  /** The refusal body OpenAI sends, as pi puts it after the status prefix. */
+  const REFUSAL_BODY =
+    '{"error":{"message":"prompt_cache_breakpoint is not supported on this model","type":"invalid_request_error","param":"prompt_cache_breakpoint","code":"invalid_parameter"}}'
+
+  // Catches a 400 prefix shape the refusal arrives in going unrecognized (#253), so the client
+  // gets the 400 instead of the retry: chat completions' `400: {…}` (formatProviderError with no
+  // prefix), the OpenAI SDK's `400 {…}`, whose `{` the body must keep to parse, and the label
+  // with no space before the body; on both APIs that take the field.
+  test.each<[string, PayloadApi, string]>([
+    ['400: {…}', 'openai-completions', `400: ${REFUSAL_BODY}`],
+    ['400: {…}', 'openai-responses', `400: ${REFUSAL_BODY}`],
+    ['400 {…}', 'openai-completions', `400 ${REFUSAL_BODY}`],
+    ['400 {…}', 'openai-responses', `400 ${REFUSAL_BODY}`],
+    ['label (400):{…}', 'openai-responses', `OpenAI API error (400):${REFUSAL_BODY}`],
+    ['400: then a newline', 'openai-completions', `400:\n${REFUSAL_BODY}`]
+  ])('%s on %s is retried', (shape, api, errorMessage) => {
+    const model = { ...makeModel(api, OPENAI_BASE_URL), id: `refuses-${api}-${shape}` }
+
+    expect(retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(errorMessage))).toBe(true)
+    expect(breakpointPatch(model, WITH_BREAKPOINT)).toBeUndefined()
+  })
+
+  // Catches the retry widened past a 400 prefix (#253): a 400 that is not where pi puts the status
+  // is the failure it is, and the model is not remembered as refusing the field.
+  test.each<[string, string]>([
+    ['`400:` with no space', `400:${REFUSAL_BODY}`],
+    ['a 4000', `4000: ${REFUSAL_BODY}`],
+    ['a 400 not at the start', `upstream 400: ${REFUSAL_BODY}`]
+  ])('%s is not retried', (label, errorMessage) => {
+    const model = { ...makeModel('openai-completions', OPENAI_BASE_URL), id: `kept-shape-${label}` }
+
+    expect(retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(errorMessage))).toBe(false)
+    expect(breakpointPatch(model, WITH_BREAKPOINT)).toBeDefined()
+  })
+
+  // Catches the retry widened past OpenAI's own host (#253): another server never received the
+  // field, so its refusal-shaped 400 is the failure it is.
+  test('a refusal body from another host is not retried', () => {
+    const model = {
+      ...makeModel('openai-completions', OTHER_BASE_URL),
+      id: 'kept-shape-other-host'
+    }
+
+    expect(
+      retryWithoutBreakpoints(model, WITH_BREAKPOINT, failedCall(`400: ${REFUSAL_BODY}`))
+    ).toBe(false)
   })
 
   // Catches the retry widened past the field: another param, another status, or a message that
@@ -316,14 +359,10 @@ describe('a model that refuses the field (#163)', () => {
   // model is not remembered and the 400 stands.
   test('a request without breakpoints is not retried', () => {
     const model = { ...makeModel('openai-responses', OPENAI_BASE_URL), id: 'refuses-unsent' }
-    const plain = (() => {
-      const validation = validateChatRequest({
-        model: 'gpt-test',
-        messages: [{ role: 'user', content: 'Hi' }]
-      })
-      if (!validation.ok) throw new Error('request did not validate')
-      return validation.data.messages
-    })()
+    const plain = parseChatBody({
+      model: 'gpt-test',
+      messages: [{ role: 'user', content: 'Hi' }]
+    }).messages
     const refusal =
       'OpenAI API error (400): {"message":"prompt_cache_breakpoint is not supported on this model","param":"prompt_cache_breakpoint"}'
 

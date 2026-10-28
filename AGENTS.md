@@ -12,20 +12,27 @@ Before changing code:
 
 1. Read [`CONSTITUTION.md`](CONSTITUTION.md) for the principles every change is checked against.
 2. Read [`PLAN.md`](PLAN.md) for architecture, API compatibility policy, and security boundaries.
-3. Skim [`README.md`](README.md) for public contract and operator-facing behavior.
+3. Skim [`README.md`](README.md) and the user docs it links ([`docs/README.md`](docs/README.md)) for public contract and operator-facing behavior.
 4. Check `package.json`, `vite.config.ts` (fmt, lint, test, pack, staged), `lint/repo-rules.ts`, `.vite-hooks/`, and `tsconfig.json` before changing tooling.
 5. Use recent git history when behavior or workflow intent is unclear: `git log --oneline -20`.
 
 ## Repo shape
 
-- `src/server/` — Hono HTTP app, middleware, routes, request/response handling
-- `src/openai/` — OpenAI request schemas, message conversion, tool conversion, SSE/response shaping
-- `src/pi/` — pi SDK integration and model registry resolution
+- `src/server/` — Hono HTTP app, middleware, routes, routing (`route-*.ts`, `chat-dispatch.ts`), request/response handling
+- `src/openai/` — OpenAI request schemas, message conversion, tool conversion, SSE/response shaping, model exposure and aliases; `responses-api/` for `POST /v1/responses`
+- `src/pi/` — pi SDK integration, model registry resolution, logins, cooldowns, quota
 - `src/config/` — env/config parsing and validation
+- `src/logging/` — LogTape setup and categories
+- `src/stats/` — the SQLite stats store and recorder
+- `src/doctor/` — `pi-switchboard doctor`
+- `src/tui/` — the opt-in console (`pi-switchboard tui`)
+- `src/standalone/` — the Bun binary's entry point
 - `src/sync/` — external/editor sync integrations
-- `extensions/` — Pi extension surface for the package
-- `test/unit/`, `test/integration/`, `test/conformance/` — behavior checks
-- `docs/` — supporting analysis and client research, not the main source of truth; `docs/reference/` compares the proxy with other implementations; `docs/archive/` holds the March 2026 plans that were not carried out
+- `src/utils/` — type guards and small shared helpers
+- `extensions/proxy/` — Pi extension surface for the package
+- `scripts/` — the gate, fixture recording, spec pinning, binary build (plain Node)
+- `test/unit/`, `test/integration/`, `test/conformance/` — behavior checks; `test/binary/` runs the built binary (not in the gate)
+- `docs/` — the user documentation, from [`docs/README.md`](docs/README.md): install, configuration, the HTTP API, routing, the console, the pi extension; under it, supporting analysis and research that is not the main source of truth: `docs/reference/` compares the proxy with other implementations, `docs/engineering/` and `docs/discovery/` hold past analysis and client research, and `docs/archive/` holds the March 2026 plans that were not carried out
 
 ## Core constraints
 
@@ -39,8 +46,8 @@ Treat these as stable unless the user explicitly changes direction:
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
 - Reserve `Authorization` for proxy auth compatibility. Do **not** repurpose it for upstream provider override headers.
 - Keep stable responses close to OpenAI's schema. If pi-specific metadata is exposed, namespace it under `x_pi`.
-- Reject unsupported parameters clearly, top level and inside messages and parts (their schemas are strict). Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (`temperature` on Codex and where pi leaves it out for Claude; passthrough fields a provider has no equivalent for; `prompt_cache_breakpoint` where the API has no slot for it or the model refuses it; `name` on messages and `image_url.detail`; `reasoning_effort` replaced by an alias target's `reasoningEffort`, reported as `x_pi.reasoning_effort`); any other needs an amendment.
-- Routing (aliases, fallback, cooldowns, quota, a provider's logins; #66–#70, #227) follows constitution principle VI: configured explicitly, never reaching a model the exposure config hides, and the serving model and login reported under `x_pi` and in the log. A `{provider}-N` login is not a model (principle IV): its models are the base's, listed once, and the login is chosen by routing (`routing.logins.fallbackOn`, the one recorded default: `["rate_limit"]`).
+- Reject unsupported parameters clearly, top level and inside messages and parts (their schemas are strict). Do **not** silently ignore them. The only permitted drops are the ones `CONSTITUTION.md` principle I lists (`temperature` on Codex and where pi leaves it out for Claude; passthrough fields a provider has no equivalent for; `prompt_cache_breakpoint` where the API has no slot for it or the model refuses it; `name` on messages and `image_url.detail`; `reasoning_effort` replaced by an alias target's `reasoningEffort`, reported as `x_pi.reasoning_effort`); any other needs an amendment. Not a drop: a field accepted at the one value that asks for what the proxy does anyway (principle I's honored values, today `store: false` and `n: 1`), every other value refused with a named 422.
+- Routing (aliases, fallback, cooldowns, quota, a provider's logins; #66–#70, #227) follows constitution principle VI: configured explicitly, never reaching a model the exposure config hides, and the serving model and login reported under `x_pi` and in the log. Two defaults are recorded: `routing.logins.fallbackOn: ["rate_limit"]`, and the built-in `-latest` alias of each family the exposed models name (`opus-latest`, #231), which a configured alias of its name replaces. A `{provider}-N` login is not a model (principle IV): its models are the base's, listed once, and the login is chosen by routing.
 - Agentic mode is a "Later, not planned" idea. Do not build it under an OpenAI route.
 - Default network posture should remain local-first and safe by default.
 - pi runs every login and stores every credential. The proxy may present pi's own login flow (pi's screens driving `ModelRuntime.login`) in a local terminal only, never over HTTP or any other network surface (constitution Scope and principle III).
@@ -51,12 +58,12 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 
 - Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4 + TypeBox**. Bun is a build tool for the standalone binary only; the binary's tests run in their own CI job, never in the gate or a hook.
 - Tests import from `vite-plus/test`, not `vitest` or `bun:test`.
-- Use import alias `@proxy/*` for `src/*`. Do **not** introduce relative imports across the source tree.
+- Use import alias `@proxy/*` for `src/*`. Do **not** introduce relative imports across the source tree. The one exception is `scripts/`, which runs under plain Node (no alias): it imports `src/` by relative `.ts` path, and a module it imports (`src/pi/account-provider.ts`) may import only packages and Node built-ins, which lint enforces (`vite.config.ts`).
 - Use `import type` where required.
 - Use `node:` protocol for Node built-ins.
 - Use `import * as z from "zod"`; do not use named Zod imports.
 - Validate untrusted input with Zod at boundaries.
-- Request text whose whitespace is data (message content, text parts, tool results, `stop`, `prediction` content) uses `textSchema` from `@proxy/openai/text-schemas`; every other string is `z.string().trim()`. Never trim text the model reads (#145).
+- Request text whose whitespace is data (message content, text parts, tool results, `stop`, `prediction` content, tool and `json_schema` descriptions) uses `textSchema` from `@proxy/openai/text-schemas`; every other string is `z.string().trim()`. Never trim text the model reads (#145, #255).
 - Prefer `safeParse()` over assertion-based parsing.
 - No `any`, no `@ts-ignore`, no unsafe `as Type` casts.
 - Use repo type guards such as `isRecord()` instead of ad-hoc unsafe narrowing.
@@ -80,7 +87,7 @@ fallow (`.fallowrc.jsonc`) checks dead code, duplication and complexity, with CR
 Common commands:
 
 ```bash
-pnpm run check:all  # the gate: format → lint + type check → tests with coverage → fallow → build (scripts/gate.ts)
+pnpm run check:all  # the gate: format → lint + type check → tests with coverage → fallow → build → smoke (scripts/gate.ts)
 vp check --fix      # apply formatting and lint fixes
 vp test             # offline tests: unit + integration, no real login (test:ci runs them with coverage, for fallow)
 pnpm run test:live  # live provider conformance tests: real login, spends quota; on demand only
@@ -91,7 +98,7 @@ vp pack             # build
 
 `scripts/gate.ts` is the single definition of "green": the pre-commit hook, CI (`.github/workflows/ci.yml`) and the release workflow all run `check:all`. Add a check there, not in a hook or a workflow.
 
-Offline tests never read the developer's pi login or provider credentials: `test/setup/offline.ts` points pi at an empty agent dir and removes credential env vars. A test that needs models or an upstream uses `loadFixtureAgentDir` (`test/fixtures/agent-dir.ts`) and `startMockProvider` (`test/fixtures/mock-provider.ts`), with scripted replies or `replay(loadRecording(...))` of recorded real traffic (`test/fixtures/recording.ts`). Never test or record against a copy of a live login: resolving an expired OAuth credential refreshes it and rotates the refresh token under every other copy.
+Offline tests never read the developer's pi login or provider credentials: `test/setup/offline.ts` points pi at an empty agent dir and removes credential env vars. Nor do they reach the developer's own proxy: the setup's `fetch` guard refuses the default port (4141) on loopback, so a test that starts a proxy picks a free port. A test that needs models or an upstream uses `loadFixtureAgentDir` (`test/fixtures/agent-dir.ts`) and `startMockProvider` (`test/fixtures/mock-provider.ts`), with scripted replies or `replay(loadRecording(...))` of recorded real traffic (`test/fixtures/recording.ts`). Never test or record against a copy of a live login: resolving an expired OAuth credential refreshes it and rotates the refresh token under every other copy.
 
 Expected discipline in this repo:
 
@@ -105,7 +112,9 @@ Hook-backed workflow already exists (`.vite-hooks/`, installed by `vp config` on
 - `pre-commit` -> `pnpm run check:all` over the working tree
 - `pre-push` -> lockfile sync check
 
-CI (`.github/workflows/`): `ci.yml` (`gate`, pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks over every pushed commit), `claude-pr-review.yml` (manual Claude review; needs the `CLAUDE_CODE_OAUTH_TOKEN` secret), `publish.yml` (release on `main`, then `image.yml` and `package.yml` for the new tag).
+CI (`.github/workflows/`): `ci.yml` (`gate`, pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks over every pushed commit), `claude-pr-review.yml` (manual Claude review; needs the `CLAUDE_CODE_OAUTH_TOKEN` secret), `publish.yml` (the release, run by hand on `main` with the version; then `image.yml`, `package.yml` and `binary.yml` for the new tag).
+
+`gate` must pass before a pull request merges into `dev` (repository ruleset "dev: gate must pass", #200; the repository admin can bypass it). `binary` and `secret-scan` run but are advisory, and `main` has no rule: the release workflow pushes its own commit there. `ci.yml` runs on a pull request's open, push and reopen, not on a change of base, so a stacked pull request retargeted to `dev` gets its `gate` only after a new push or a close and reopen.
 
 Do not weaken these hooks or workflows unless the user asks.
 
@@ -116,7 +125,7 @@ Repository preference:
 - Make **frequent small commits** for logical slices.
 - Use **Conventional Commits**.
 - Normal collaboration model is **feature branches + PRs into `dev`**. Pushing feature branches is safe once the task is complete and verified.
-- **Never push or merge to `main` directly.** Every push to `main` runs the release workflow (semantic-release). Releases happen only when `dev` is merged into `main`, and that merge is the user's decision.
+- **Never push or merge to `main` directly.** `dev` is merged into `main` by the user, and a release is cut only when the user runs the release workflow (`publish.yml`) on `main` with a version; both are the user's decision.
 
 Practical guidance:
 
@@ -133,7 +142,7 @@ Keep durable docs aligned with implementation:
 - Update [`PLAN.md`](PLAN.md) when architecture, constraints, compatibility policy, or security boundaries change.
 - Update [`TODO.md`](TODO.md) when execution status or next tasks change.
 - Update [`ROADMAP.md`](ROADMAP.md) when the current phase summary changes.
-- Update [`README.md`](README.md) when user-facing behavior, installation, configuration, or public API examples change.
+- Update [`README.md`](README.md) and the user docs in [`docs/`](docs/README.md) when user-facing behavior, installation, configuration, or public API examples change.
 - Prefer linking to those docs from here instead of copying large sections into `AGENTS.md`.
 
 ## When to stop and ask

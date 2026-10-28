@@ -2,8 +2,9 @@
  * Validates chat-completion request bodies and turns schema failures into OpenAI-style errors.
  *
  * @remarks
- * Explicitly rejected fields and unknown top-level fields get 422; any other schema failure
- * (wrong type, out-of-range value, missing field) gets 400.
+ * Explicitly rejected fields, a value other than an honored one (`store: true`, `n: 2`), a value
+ * in an assistant field accepted only empty, and unknown fields get 422; any other schema
+ * failure (wrong type, out-of-range value, missing field) gets 400.
  *
  * @packageDocumentation
  */
@@ -12,7 +13,9 @@ import { proxyLogger } from '@proxy/logging'
 import {
   type ChatCompletionRequest,
   chatCompletionRequestSchema,
-  rejectedFields
+  N_OTHER_THAN_ONE_REFUSAL,
+  rejectedFields,
+  STORE_TRUE_REFUSAL
 } from '@proxy/openai/schemas'
 import { isRecord } from '@proxy/utils/guards'
 import type * as z from 'zod'
@@ -21,16 +24,24 @@ import type * as z from 'zod'
 const validateLogger = proxyLogger('openai', 'validate')
 
 /**
- * Accepted fields the proxy does not interpret; `src/pi/complete.ts` forwards them to
+ * Accepted fields the proxy does not interpret; `src/pi/payload-fields.ts` forwards them to
  * OpenAI-compatible APIs only. Listed here for the debug log.
  */
 const PASSTHROUGH_FIELDS = ['metadata', 'prediction'] as const
 
-/** Successful validation: the parsed request body. */
-export interface ValidationSuccess {
-  readonly ok: true
-  readonly data: ChatCompletionRequest
-}
+/**
+ * Fields accepted only at the value the proxy honors (constitution principle I), and the named
+ * 422 for any other value. `store: true` is refused the same way on the Responses API
+ * (`responsesRequestRejection`), with the same message.
+ */
+const HONORED_VALUE_FIELDS = [
+  { field: 'store', refuses: (value: unknown) => value === true, message: STORE_TRUE_REFUSAL },
+  {
+    field: 'n',
+    refuses: (value: unknown) => value !== undefined && value !== null && value !== 1,
+    message: N_OTHER_THAN_ONE_REFUSAL
+  }
+] as const
 
 /** Failed validation: the HTTP status, a client-facing message, and the offending parameter. */
 export interface ValidationError {
@@ -38,28 +49,6 @@ export interface ValidationError {
   readonly status: number
   readonly message: string
   readonly param: string | null
-}
-
-/** Outcome of {@link validateChatRequest}, discriminated on `ok`. */
-export type ValidationResult = ValidationSuccess | ValidationError
-
-/**
- * Validates a raw request body against {@link chatCompletionRequestSchema}.
- *
- * @remarks
- * The chat route validates with hono-openapi's `validator()`, which runs the same schema, then
- * calls {@link chatRequestRejection} only for a body that failed, and
- * {@link logValidatedChatRequest} for one that passed. This function is the two together.
- *
- * @param body - the parsed JSON request body, of any shape
- * @returns the parsed request, or a 422 for rejected/unknown fields, or a 400 for any other
- *   invalid value (with the dotted path as `param`, or `null` at the root)
- */
-export function validateChatRequest(body: unknown): ValidationResult {
-  const result = chatCompletionRequestSchema.safeParse(body)
-  if (!result.success) return chatRequestRejection(body)
-  logValidatedChatRequest(result.data)
-  return { ok: true, data: result.data }
 }
 
 /**
@@ -83,7 +72,10 @@ export function logValidatedChatRequest(data: ChatCompletionRequest): void {
  *
  * @remarks
  * Fields in {@link rejectedFields} are checked first so they get a named 422 instead of the
- * generic unknown-parameter error. Only the first Zod issue is reported.
+ * generic unknown-parameter error, and so is a value other than the one a field in
+ * {@link HONORED_VALUE_FIELDS} accepts (`store: true`, `n: 2`), which the schema refuses as a
+ * mere invalid value. An accepted value (`n: 1`) is not blamed for another field's error. Only
+ * the first Zod issue is reported.
  *
  * @param body - the parsed JSON request body, which does not match the schema
  * @returns a 422 for rejected/unknown fields, or a 400 for any other invalid value (with the
@@ -113,13 +105,20 @@ export function schemaRejection(schema: z.ZodType, body: unknown): ValidationErr
 }
 
 /**
- * Finds the first field in {@link rejectedFields} the body sets.
+ * Finds the first field the body sets at a value the proxy refuses by name: any value of a field
+ * in {@link rejectedFields}, or a value other than the honored one of a field in
+ * {@link HONORED_VALUE_FIELDS}.
  *
  * @param body - the parsed JSON request body
  * @returns its named 422, or `undefined` when the body sets none
  */
 function rejectedFieldRejection(body: unknown): ValidationError | undefined {
   if (!isRecord(body)) return undefined
+  const honored = HONORED_VALUE_FIELDS.find(({ field, refuses }) => refuses(body[field]))
+  if (honored !== undefined) {
+    validateLogger.warn('Rejected unsupported field {field}', { field: honored.field })
+    return { ok: false, status: 422, message: honored.message, param: honored.field }
+  }
   const field = rejectedFields.find((rejectedField) => body[rejectedField] !== undefined)
   if (field === undefined) return undefined
   validateLogger.warn('Rejected unsupported field {field}', { field })
@@ -151,20 +150,44 @@ const MESSAGE_FIELD_DEPTH = 3
  * @remarks
  * A union reports one `invalid_union` issue at its own path, with each branch's issues inside. A
  * user message's parts are a union of a string and an array, so an unknown key on a part would
- * otherwise read as "invalid input" at `messages.0.content`. The branch whose issue has the
- * longest path is the one the input matched the shape of; its issue is reported, at the full path.
- * On a tie the first branch's issue wins: `toSorted` is stable, as the language requires.
+ * otherwise read as "invalid input" at `messages.0.content`. Branches the input says it is not
+ * are set aside first: one whose `type` or `role` the input does not have (#318; a Responses
+ * `assistant` message with a bad `logprobs` was blamed on `reasoning`'s `content.0.type`). Of the
+ * rest, the branch whose issue has the longest path is the one the input matched the shape of;
+ * its issue is reported, at the full path. On a tie the first branch's issue wins: `toSorted` is
+ * stable, as the language requires. When every branch is set aside, all of them are compared.
  *
  * @param issue - a Zod issue
  * @returns the issue to report
  */
 function specificIssue(issue: z.core.$ZodIssue): z.core.$ZodIssue {
   if (issue.code !== 'invalid_union') return issue
-  const deepest = issue.errors
+  const claimed = issue.errors.filter((branch) => !branch.some(isDiscriminatorMismatch))
+  const deepest = (claimed.length > 0 ? claimed : issue.errors)
     .flat()
     .toSorted((left, right) => right.path.length - left.path.length)[0]
   if (deepest === undefined || deepest.path.length === 0) return issue
   return specificIssue({ ...deepest, path: [...issue.path, ...deepest.path] })
+}
+
+/** The keys whose value says which branch of a union an object is. */
+const DISCRIMINATOR_KEYS: ReadonlySet<PropertyKey> = new Set(['type', 'role'])
+
+/**
+ * Checks whether a union branch's issue says the input is not that branch: its own `type` or
+ * `role` has another value.
+ *
+ * @param issue - one issue of a union branch, its path relative to the union
+ * @returns whether it is that mismatch
+ */
+function isDiscriminatorMismatch(issue: z.core.$ZodIssue): boolean {
+  const [key, ...rest] = issue.path
+  return (
+    issue.code === 'invalid_value' &&
+    rest.length === 0 &&
+    key !== undefined &&
+    DISCRIMINATOR_KEYS.has(key)
+  )
 }
 
 /**

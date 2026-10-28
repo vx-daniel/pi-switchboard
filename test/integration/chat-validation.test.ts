@@ -229,23 +229,93 @@ describe('POST /v1/chat/completions - validation', () => {
     expect(body.error.code).toBe('unsupported_parameter')
   })
 
-  test('rejects permanently rejected fields with 422', async () => {
-    // OpenAI's `n` (choices per request), which the proxy rejects
-    const choicesParameter = 'n'
+  // Catches `n: 1` refused again: OpenAI's default, which clients such as Elixir's LangChain send
+  // on every request (#197). The proxy returns one choice, so it is answered as asked.
+  test.each([1, null])('n: %s is answered', async (choices) => {
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'openai/gpt-4o',
-        messages: [{ role: 'user', content: 'Hello' }],
-        [choicesParameter]: 2
+        model: MOCK_MODEL,
+        messages: [{ role: 'user', content: 'Hi' }],
+        n: choices
+      })
+    })
+    expect(response.status).toBe(HTTP_OK)
+    expect(await jsonBody(response)).toEqual(okCompletion(response))
+  })
+
+  // Catches several choices asked for and one returned as if that were the answer, or the refusal
+  // not naming `n`.
+  test.each([2, 0, '1'])('n: %j is a named 422', async (choices) => {
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MOCK_MODEL,
+        messages: [{ role: 'user', content: 'Hi' }],
+        n: choices
       })
     })
     expect(response.status).toBe(422)
     const body = await jsonBody(response)
-    expect(isErrorLike(body)).toBe(true)
-    if (!isErrorLike(body)) return
-    expect(body.error['param']).toBe(choicesParameter)
+    expect(isErrorLike(body) ? body.error['param'] : undefined).toBe('n')
+  })
+
+  // Catches an accepted value blamed for another field's error: the client would be told to drop
+  // `n: 1`, which is not what is wrong.
+  test.each([{ n: 1 }, { store: false }])(
+    '%j beside an invalid field reports that field',
+    async (honored) => {
+      const response = await app.request('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: MOCK_MODEL,
+          messages: [{ role: 'user', content: 'Hi' }],
+          temperature: 'hot',
+          ...honored
+        })
+      })
+      expect(response.status).toBe(400)
+      const body = await jsonBody(response)
+      expect(isErrorLike(body) ? body.error['param'] : undefined).toBe('temperature')
+    }
+  )
+
+  // Catches `store: false` refused again: pi's OpenAI adapter sends it to this host on every
+  // request (#197). The proxy stores nothing, so "don't store" is answered as asked.
+  test.each([false, null])('store: %s is answered', async (store) => {
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MOCK_MODEL,
+        messages: [{ role: 'user', content: 'Hi' }],
+        store
+      })
+    })
+    expect(response.status).toBe(HTTP_OK)
+    expect(await jsonBody(response)).toEqual(okCompletion(response))
+  })
+
+  // Catches `store: true` accepted as if the proxy stored completions, or refused without naming
+  // the field, or its name lost to a generic 400 when another field is invalid too (the named
+  // refusal is checked before the schema).
+  test.each([{}, { temperature: 'hot' }])('store: true is a named 422 (with %j)', async (extra) => {
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MOCK_MODEL,
+        messages: [{ role: 'user', content: 'Hi' }],
+        store: true,
+        ...extra
+      })
+    })
+    expect(response.status).toBe(422)
+    const body = await jsonBody(response)
+    expect(isErrorLike(body) ? body.error['param'] : undefined).toBe('store')
   })
 
   test('rejects unknown fields with 422', async () => {
@@ -485,6 +555,25 @@ describe('POST /v1/chat/completions - upstream API key override', () => {
     expect(present(mock.requests.at(-1), 'an upstream request').headers.authorization).toBe(
       `Bearer ${upstreamKey}`
     )
+  })
+
+  // Catches an empty header sent to the provider as the key: the call fails upstream and the
+  // client gets a 502 blaming the provider for its own mistake (#207). It must be a 400, before
+  // any upstream request.
+  test.each(['', '   '])('refuses an empty key (%j) with 400, calling nothing', async (key) => {
+    const before = mock.requests.length
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Switchboard-Upstream-Api-Key': key },
+      body: JSON.stringify({ model: MOCK_MODEL, messages: [{ role: 'user', content: 'Hello' }] })
+    })
+    const body = await jsonBody(response)
+
+    expect(response.status).toBe(400)
+    expect(isErrorBody(body) ? body.error.message : undefined).toContain(
+      'X-Switchboard-Upstream-Api-Key header is empty'
+    )
+    expect(mock.requests.length).toBe(before)
   })
 })
 

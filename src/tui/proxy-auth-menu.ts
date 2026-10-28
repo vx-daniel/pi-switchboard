@@ -20,11 +20,15 @@ import { randomBytes } from 'node:crypto'
 import { copyToClipboard } from '@earendil-works/pi-coding-agent'
 import type { TuiAltScreen } from '@earendil-works/pi-tui'
 import type { OverrideSource, ServerConfig } from '@proxy/config/env'
-import { getConfigPath, loadConfigFromFile, saveConfigToFile } from '@proxy/config/schema'
+import {
+  authOffRisk,
+  getConfigPath,
+  loadConfigFromFile,
+  saveConfigToFile
+} from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
-import { isLoopbackHost } from '@proxy/server/startup'
-import { askLine, pickLabel } from '@proxy/tui/dialogs'
+import { askLine, pickAlert, pickLabel } from '@proxy/tui/dialogs'
 import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for proxy auth decisions. */
@@ -43,6 +47,14 @@ export interface AuthScreens {
    * @returns the chosen label, or `undefined` when cancelled
    */
   select(title: string, options: readonly string[]): Promise<string | undefined>
+  /**
+   * Shows a choice as a warning that must not be missed: the console's red alert panel.
+   *
+   * @param title - the warning and the question
+   * @param options - the options' labels
+   * @returns the chosen label, or `undefined` when cancelled
+   */
+  warn(title: string, options: readonly string[]): Promise<string | undefined>
   /**
    * Asks for a line of text.
    *
@@ -66,8 +78,10 @@ export interface AuthTarget {
   readonly override: OverrideSource | undefined
   /** The token the flag or env var set, to tell it from one set since. */
   readonly overrideToken: string | undefined
-  /** The bind address, to warn when auth goes off beyond this machine. */
+  /** The bind address: who can use the proxy with auth off depends on it. */
   readonly host: string
+  /** Whether the host/origin guard is on, which keeps web pages out with auth off (#188). */
+  readonly hostOriginGuard: boolean
   /** `host:port`, for the menu's title. */
   readonly address: string
 }
@@ -96,7 +110,8 @@ const ACTIONS = {
   enterNew: 'Enter a new token',
   show: 'Show the token',
   off: 'Turn auth off',
-  offForSession: 'Turn auth off until the proxy restarts'
+  offForSession: 'Turn auth off until the proxy restarts',
+  keepOff: 'Keep auth off for now'
 } as const
 
 /** Labels of the dialog that shows a token. */
@@ -186,12 +201,11 @@ function turnOff(
       source: override
     })
   }
-  if (!isLoopbackHost(target.host)) {
-    authLogger.warn(
-      'The proxy listens on {host}: any client that can reach it can use your provider credentials',
-      { host: target.host }
-    )
-  }
+  // Wherever it listens (#188): on loopback too, web pages can reach it.
+  authLogger.warn('Proxy auth is off on {host}: {risk}', {
+    host: target.host,
+    risk: authOffRisk(target.host, target.hostOriginGuard)
+  })
 }
 
 /**
@@ -247,7 +261,7 @@ export async function runAuthMenu(
   const current = target.proxyAuth.current()
   if (current.kind === 'off') {
     const choice = await screens.select(
-      `Proxy auth is off: any client that can reach ${target.address} can use the proxy.`,
+      `Proxy auth is off on ${target.address}: ${authOffRisk(target.host, target.hostOriginGuard)}.`,
       [ACTIONS.generate, ACTIONS.enter]
     )
     if (choice === ACTIONS.generate) await generate(target, screens, save)
@@ -307,6 +321,77 @@ async function enter(
 }
 
 /**
+ * Asks, while proxy auth is off, whether to set a token now (#287): the popup the console opens
+ * when it starts with auth off. It says who can use the proxy, and offers the menu's own ways to
+ * set a token, or to keep auth off; cancelling keeps it off too. With auth on it shows nothing.
+ *
+ * @param target - the proxy
+ * @param screens - the dialogs
+ * @param save - writes the config file's token; by default {@link saveAuthToken}
+ */
+export async function runAuthOffPrompt(
+  target: AuthTarget,
+  screens: AuthScreens,
+  save: (token: string) => boolean = saveAuthToken
+): Promise<void> {
+  if (target.proxyAuth.current().kind !== 'off') return
+  const who = authOffRisk(target.host, target.hostOriginGuard)
+  const choice = await screens.warn(
+    `⚠ Proxy auth is off on ${target.address}: ${who}. Set a token now?`,
+    [ACTIONS.generate, ACTIONS.enter, ACTIONS.keepOff]
+  )
+  if (choice === ACTIONS.generate) await generate(target, screens, save)
+  else if (choice === ACTIONS.enter) await enter(target, screens, save)
+}
+
+/**
+ * Builds the menu's proxy and pi's dialogs for the console.
+ *
+ * @param tui - the screen
+ * @param config - the server config: where the startup token came from, and the address
+ * @param proxyAuth - the server's proxy auth
+ * @returns the proxy and the dialogs
+ */
+function consoleAuth(
+  tui: TuiAltScreen,
+  config: ServerConfig,
+  proxyAuth: ProxyAuthSwitch
+): { target: AuthTarget; screens: AuthScreens } {
+  return {
+    target: {
+      proxyAuth,
+      override: config.proxyAuthOverride,
+      overrideToken: config.proxyAuth.kind === 'token' ? config.proxyAuth.token : undefined,
+      host: config.host,
+      hostOriginGuard: config.hostOriginGuardEnabled,
+      address: `${config.host}:${String(config.port)}`
+    },
+    screens: {
+      select: (title, labels) => pickLabel(tui, title, labels),
+      warn: (title, labels) => pickAlert(tui, title, labels),
+      input: (title) => askLine(tui, title),
+      copy: copyToClipboard
+    }
+  }
+}
+
+/**
+ * Opens the auth-off popup ({@link runAuthOffPrompt}) on pi's dialogs.
+ *
+ * @param tui - the screen
+ * @param config - the server config
+ * @param proxyAuth - the server's proxy auth
+ */
+export async function openAuthOffPrompt(
+  tui: TuiAltScreen,
+  config: ServerConfig,
+  proxyAuth: ProxyAuthSwitch
+): Promise<void> {
+  const { target, screens } = consoleAuth(tui, config, proxyAuth)
+  await runAuthOffPrompt(target, screens)
+}
+
+/**
  * Opens the proxy auth menu (`p`) on pi's dialogs.
  *
  * @param tui - the screen
@@ -318,18 +403,6 @@ export async function openAuthMenu(
   config: ServerConfig,
   proxyAuth: ProxyAuthSwitch
 ): Promise<void> {
-  await runAuthMenu(
-    {
-      proxyAuth,
-      override: config.proxyAuthOverride,
-      overrideToken: config.proxyAuth.kind === 'token' ? config.proxyAuth.token : undefined,
-      host: config.host,
-      address: `${config.host}:${String(config.port)}`
-    },
-    {
-      select: (title, labels) => pickLabel(tui, title, labels),
-      input: (title) => askLine(tui, title),
-      copy: copyToClipboard
-    }
-  )
+  const { target, screens } = consoleAuth(tui, config, proxyAuth)
+  await runAuthMenu(target, screens)
 }

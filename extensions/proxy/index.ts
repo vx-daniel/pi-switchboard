@@ -98,8 +98,9 @@ const SUBCOMMAND_HANDLERS: Record<string, SubcommandHandler> = {
   },
   'reset': (state, context) => {
     state.config = { ...DEFAULT_CONFIG }
-    // A reset is an explicit choice: it may replace an invalid authToken with the default, off (#82).
-    saveConfigToFile(state.config, { replaceInvalidAuthToken: true })
+    // A reset is an explicit choice: it may replace an invalid authToken with the default, off
+    // (#82), and a file that can't be read or parsed with the defaults (#288).
+    saveConfigToFile(state.config, { replaceInvalidAuthToken: true, replaceUnusableFile: true })
     extensionLogger.info('Proxy settings reset to defaults and saved to {configPath}', {
       configPath: getConfigPath()
     })
@@ -132,8 +133,8 @@ async function openSettingsPanelIfInteractive(
  * Registers the /proxy command and the session lifecycle hooks with pi.
  *
  * @remarks
- * On `session_start` it loads the config, runs Zed auto-sync if enabled, and refreshes the status
- * line; on `session_shutdown` it stops a session-tied proxy.
+ * On `session_start` it refreshes the model registry, loads the config, runs Zed auto-sync if
+ * enabled, and refreshes the status line; on `session_shutdown` it stops a session-tied proxy.
  *
  * @param pi - the pi extension API (only `on` and `registerCommand` are used)
  */

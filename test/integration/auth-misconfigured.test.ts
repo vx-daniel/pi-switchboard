@@ -20,7 +20,12 @@ import {
 import { createApp } from '@proxy/server/app'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
+import {
+  type FixtureAgentDir,
+  loadFixtureAgentDir,
+  offlineProvider,
+  writeProxyConfig
+} from '../fixtures/agent-dir'
 import { jsonBody } from '../helpers'
 
 const HTTP_OK = 200
@@ -39,15 +44,6 @@ afterEach(() => {
   vi.unstubAllEnvs()
   agentDir.remove()
 })
-
-/**
- * Writes proxy-config.json into the fixture agent dir.
- *
- * @param config - the raw file contents, serialized as JSON as given
- */
-function writeProxyConfig(config: Record<string, unknown>): void {
-  writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify(config))
-}
 
 /**
  * Reads proxy-config.json as it is on disk now.
@@ -93,7 +89,7 @@ describe('a non-string authToken refuses to start', () => {
   test.each([12345, true, null, { token: 'notarealsecret-in-an-object' }])(
     '%j: loading the config refuses',
     (authToken) => {
-      writeProxyConfig({ authToken })
+      writeProxyConfig(agentDir.path, { authToken })
 
       expect(refusal()).toEqual({ cause: 'file-token-not-string' })
     }
@@ -102,7 +98,7 @@ describe('a non-string authToken refuses to start', () => {
   // Catches a flag or env token not winning over the broken file, which would leave an operator
   // with no way to run the proxy short of editing the file.
   test('a token from the environment wins, and works', async () => {
-    writeProxyConfig({ authToken: 12345 })
+    writeProxyConfig(agentDir.path, { authToken: 12345 })
     vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', ENV_TOKEN)
 
     expect((await ask('/v1/models', ENV_TOKEN)).status).toBe(HTTP_OK)
@@ -111,14 +107,14 @@ describe('a non-string authToken refuses to start', () => {
 
   // Catches the fix spreading to the documented way to turn auth off.
   test("'' is still auth off", async () => {
-    writeProxyConfig({ authToken: '' })
+    writeProxyConfig(agentDir.path, { authToken: '' })
 
     expect((await ask('/v1/models')).status).toBe(HTTP_OK)
   })
 
   // Catches a missing authToken (the default) being read as invalid.
   test('no authToken at all is auth off', async () => {
-    writeProxyConfig({ port: 4141 })
+    writeProxyConfig(agentDir.path, { port: 4141 })
 
     expect((await ask('/v1/models')).status).toBe(HTTP_OK)
   })
@@ -188,7 +184,7 @@ describe('an empty token override refuses to start (#99)', () => {
     },
     { label: "--auth-token ''", env: undefined, cli: { authToken: '' }, source: '--auth-token' }
   ])('$label refuses, the file token unused', ({ env, cli, source }) => {
-    writeProxyConfig({ authToken: 'notarealsecret-file-token' })
+    writeProxyConfig(agentDir.path, { authToken: 'notarealsecret-file-token' })
     vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', env)
 
     expect(refusal(cli)).toEqual({ cause: 'empty-override', source })
@@ -218,7 +214,7 @@ describe('the pre-rename PI_PROXY_AUTH_TOKEN (#65)', () => {
       file: { authToken: 'notarealsecret-file-token' }
     }
   ])('$label, it refuses to start', ({ old, file }) => {
-    writeProxyConfig(file)
+    writeProxyConfig(agentDir.path, file)
     vi.stubEnv('PI_PROXY_AUTH_TOKEN', old)
 
     expect(refusal()).toEqual({ cause: 'renamed-env-var' })
@@ -240,18 +236,21 @@ describe('the pre-rename PI_PROXY_AUTH_TOKEN (#65)', () => {
 describe('saving the config keeps an invalid authToken', () => {
   // Catches the second fail-open path: a config loaded from the broken file carries the repaired
   // '', so saving any other setting (the settings panel, the model selector) would write '' and
-  // turn auth off for good.
-  test('saving another setting writes the invalid value back', () => {
-    writeProxyConfig({ authToken: 12345, port: 4141 })
+  // turn auth off for good. `null` is the case a check of "set" by `undefined` alone lets through.
+  test.each([
+    ['a number', 12345],
+    ['null', null]
+  ])('saving another setting writes the invalid value back: %s', (_label, authToken) => {
+    writeProxyConfig(agentDir.path, { authToken, port: 4141 })
 
     saveConfigToFile({ ...loadConfigFromFile(), port: 5151 })
 
-    expect(proxyConfigOnDisk()).toEqual({ ...DEFAULT_CONFIG, port: 5151, authToken: 12345 })
+    expect(proxyConfigOnDisk()).toEqual({ ...DEFAULT_CONFIG, port: 5151, authToken })
   })
 
   // Catches the explicit choices (disabling auth, a reset) being unable to clear it.
   test('an explicit replace writes the new value', () => {
-    writeProxyConfig({ authToken: 12345 })
+    writeProxyConfig(agentDir.path, { authToken: 12345 })
 
     saveConfigToFile(loadConfigFromFile(), { replaceInvalidAuthToken: true })
 
@@ -260,7 +259,7 @@ describe('saving the config keeps an invalid authToken', () => {
 
   // Catches the guard keeping a value over a real new token.
   test('a new token replaces it', () => {
-    writeProxyConfig({ authToken: 12345 })
+    writeProxyConfig(agentDir.path, { authToken: 12345 })
 
     saveConfigToFile({ ...loadConfigFromFile(), authToken: 'notarealsecret-new-token' })
 
@@ -280,11 +279,41 @@ describe('saving the config keeps an invalid authToken', () => {
   })
 })
 
+describe('saving the config never writes over a file that cannot be used (#288)', () => {
+  const BROKEN = '{"authToken": "notarealsecret-file-token", "port": 51'
+
+  // Catches a save (the console's settings, aliases or labels, the settings panel) writing the
+  // defaults the broken file loads as over it: the token it holds would be lost, and the next
+  // start or console restart would run with auth off.
+  test('a save leaves a file that is not valid JSON as it is', () => {
+    const path = join(agentDir.path, 'proxy-config.json')
+    writeFileSync(path, BROKEN)
+
+    const written = saveConfigToFile({ ...loadConfigFromFile(), port: 5151 })
+
+    expect(written).toBe(false)
+    expect(readFileSync(path, 'utf8')).toBe(BROKEN)
+  })
+
+  // Catches `/proxy reset`, the explicit way out, unable to replace the broken file.
+  test('a reset writes over it', () => {
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), BROKEN)
+
+    const written = saveConfigToFile(DEFAULT_CONFIG, {
+      replaceInvalidAuthToken: true,
+      replaceUnusableFile: true
+    })
+
+    expect(written).toBe(true)
+    expect(proxyConfigOnDisk()).toEqual(DEFAULT_CONFIG)
+  })
+})
+
 describe('where the token came from', () => {
   // Catches the console misjudging a flag or env token as the file's: turning it off would then be
   // saved, yet come back at the next start, or the file's token treated as the flag's.
   test('a flag or env token is recorded as such, the file’s is not', () => {
-    writeProxyConfig({ authToken: 'notarealsecret-file-token' })
+    writeProxyConfig(agentDir.path, { authToken: 'notarealsecret-file-token' })
     expect(loadConfig().proxyAuthOverride).toBeUndefined()
 
     vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', ENV_TOKEN)

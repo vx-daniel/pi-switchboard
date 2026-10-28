@@ -8,6 +8,7 @@ import { type Api, getSupportedThinkingLevels, type Model } from '@earendil-work
 import type { ExtensionContext } from '@earendil-works/pi-coding-agent'
 import {
   aliasFallbackOn,
+  authOffRisk,
   aliasModels,
   configFileAuthTokenInvalid,
   isAliasChain,
@@ -95,16 +96,18 @@ export async function buildConfigReport(state: ProxyState): Promise<string> {
  * not a string, which the proxy refuses to start with (#82) rather than turning auth off.
  *
  * @param config - the loaded proxy config
- * @returns `enabled (token: <preview>; /proxy token shows it)`, `disabled`, or the `invalid`
- *   explanation
+ * @returns `enabled (token: <preview>; /proxy token shows it)`, the `disabled` warning (who can use
+ *   the proxy without a token, by where it listens and whether the host/origin guard is on), or the
+ *   `invalid` explanation
  */
 function authSummary(config: ProxyConfig): string {
   if (configFileAuthTokenInvalid()) {
     return 'invalid (authToken in proxy-config.json is not a string: the proxy refuses to start)'
   }
-  return config.authToken.length > 0
-    ? `enabled (token: ${tokenPreview(config.authToken)}; /proxy token shows it)`
-    : 'disabled'
+  if (config.authToken.length > 0) {
+    return `enabled (token: ${tokenPreview(config.authToken)}; /proxy token shows it)`
+  }
+  return `disabled (${authOffRisk(config.host, config.hostOriginGuard)}; set a token in /proxy config)`
 }
 
 // --- /proxy token ---
@@ -148,6 +151,7 @@ function formatServerSettings(config: ProxyConfig): string[] {
     `host: ${config.host}`,
     `port: ${String(config.port)}`,
     `auth: ${authDisplay}`,
+    `host/origin guard: ${config.hostOriginGuard ? 'on' : 'off'}`,
     `remote images: ${String(config.remoteImages)}`,
     `docs ui: ${String(config.docsUi)}`,
     `stats: ${String(config.stats)}`,
@@ -157,9 +161,9 @@ function formatServerSettings(config: ProxyConfig): string[] {
 }
 
 /**
- * Returns the `/proxy show` exposure-policy fields: ID and exposure mode, then the pi pattern
- * count, custom model count (custom mode only), and provider prefixes and aliases (#66) when there
- * are any.
+ * Returns the `/proxy show` exposure-policy fields: ID and exposure mode, then, when there are
+ * any, the pi pattern count (scoped mode only), custom model count (custom mode only), provider
+ * prefixes, and aliases with their fallback chains (#66, #67).
  *
  * @param config - the loaded proxy config
  * @param enabledModels - pi's `enabledModels` setting; the caller reads it only in scoped mode

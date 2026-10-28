@@ -9,6 +9,8 @@
  * - `GET  /v1/switchboard/usage` (not OpenAI's: usage from the stats file)
  * - `DELETE /v1/switchboard/cooldowns` (not OpenAI's: ends cooldowns early, #182)
  * - `POST /v1/chat/completions`
+ * - `POST /v1/responses` (experimental, off unless `responsesApi` is on, #140;
+ *   `responses-route.ts`)
  * - a fixed list of OpenAI endpoints the proxy does not implement, answered with 404
  *
  * All of them sit behind proxy auth, applied to `/v1/*` in `createApp`. Each documented one
@@ -21,7 +23,7 @@ import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
 import type { ServerConfig } from '@proxy/config/env'
 import { type FailureClass, loadConfigFromFile, type Reserve } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
-import { type ConversionSuccess, convertMessages } from '@proxy/openai/messages'
+import { convertMessages } from '@proxy/openai/messages'
 import {
   computeModelExposure,
   type ModelExposureConfig,
@@ -40,7 +42,12 @@ import { chatRequestRejection, logValidatedChatRequest } from '@proxy/openai/val
 import { getAvailableModels, getEnabledModels } from '@proxy/pi/registry'
 import { beginActiveRequest, requestOutcome } from '@proxy/server/active-requests'
 import { type AnswerFormat, chatFormat } from '@proxy/server/answer-formats'
-import { dispatchChat, findCredentialedStart } from '@proxy/server/chat-dispatch'
+import {
+  dispatchChat,
+  findCredentialedStart,
+  type PiContext,
+  type ProxyContext
+} from '@proxy/server/chat-dispatch'
 import { clearCooldownsAnswer } from '@proxy/server/cooldowns'
 import { invalidRequest, modelNotFound, unsupportedParameter } from '@proxy/server/errors'
 import {
@@ -121,6 +128,7 @@ export async function fileConfigReader(): Promise<RequestConfig> {
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
     aliases: file.aliases,
+    loginRouting: file.routing.logins,
     reserve: file.routing.reserve,
     loginFallbackOn: file.routing.logins.fallbackOn
   }
@@ -129,12 +137,8 @@ export async function fileConfigReader(): Promise<RequestConfig> {
 /** The chat completions path. */
 const CHAT_PATH = '/v1/chat/completions'
 
-/** The Hono context a route handler gets. */
-type ProxyContext = Context<ProxyEnv>
 /** A validated chat completion request body. */
 type ChatRequest = ChatCompletionRequest
-/** A pi `Context`: system prompt, messages and tools. */
-type PiContext = ConversionSuccess['context']
 
 /**
  * Either a successfully produced value or an early error response.
@@ -289,7 +293,7 @@ function buildPiContext(honoContext: ProxyContext, request: ChatRequest): Step<P
 
 /** What the chat handler needs from the app beyond the request: set once when routes are built. */
 export interface ChatRouteSettings {
-  /** The server config; `upstreamTimeoutMs` and `remoteImagesEnabled` are read. */
+  /** The server config: `upstreamTimeoutMs`, `remoteImagesEnabled`, `responsesApiEnabled`. */
   readonly config: ServerConfig
   /** Where the exposure config comes from. */
   readonly configReader: ExposureConfigReader
@@ -419,7 +423,9 @@ async function runChat(
     requestId,
     alias: resolved.alias ?? null,
     model: start.candidates[0]?.canonicalId ?? first.canonicalId,
-    stream: request.stream === true
+    stream: request.stream === true,
+    // Whether a key was sent (`null` is none), for the stats' count (#299); never the key itself.
+    promptCacheKey: typeof request.prompt_cache_key === 'string'
   })
   context.set('chatDispatched', true)
   // The client's disconnect only. The dispatch reads it to tell a client that left from an

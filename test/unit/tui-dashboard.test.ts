@@ -2,12 +2,12 @@ import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import type { ErrorStats, ModelStats, StatsStore, TimelineBucket } from '@proxy/stats/store'
 import {
   createDashboardSource,
-  createTodayCostSource,
   type DashboardData,
   dashboardRows,
   openStatsView,
   windowRange
 } from '@proxy/tui/dashboard'
+import { createTodayCostSource } from '@proxy/tui/stats-snapshots'
 import { activeTab, installConsoleTheme, paint } from '@proxy/tui/theme'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -25,6 +25,7 @@ const NO_ERRORS: ErrorStats = { failures: [], rejected: [] }
 function modelStats(fields: Partial<ModelStats> & Pick<ModelStats, 'model'>): ModelStats {
   return {
     requests: 0,
+    promptCacheKeyRequests: 0,
     failed: 0,
     left: 0,
     averageMs: undefined,
@@ -34,7 +35,9 @@ function modelStats(fields: Partial<ModelStats> & Pick<ModelStats, 'model'>): Mo
     fallbacks: 0,
     inputTokens: 0,
     outputTokens: 0,
-    cacheTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    coldCacheWriteTokens: 0,
     costUsd: 0,
     ...fields
   }
@@ -258,8 +261,8 @@ describe('dashboardRows', () => {
     for (const row of rows) expect(visibleWidth(row)).toBe(width)
   })
 
-  // Catches the tiles summing the wrong fields, averaging per model instead of per request, or a
-  // rate per hour taken over the wrong minutes.
+  // Catches the tiles summing the wrong fields, averaging per model instead of per request, a rate
+  // per hour taken over the wrong minutes, or tokens in counting only the uncached input.
   test('the tiles sum the models and weight the averages by requests', () => {
     const data = snapshot({
       models: [
@@ -271,6 +274,8 @@ describe('dashboardRows', () => {
           slowestMs: 4000,
           averageFirstEventMs: 500,
           inputTokens: 1500,
+          cacheReadTokens: 3000,
+          cacheWriteTokens: 500,
           outputTokens: 300,
           costUsd: 1.5
         }),
@@ -282,7 +287,7 @@ describe('dashboardRows', () => {
     expect(tilesOf(plainRows(data, { height: 40, width: 120 }))).toStrictEqual([
       ['REQUESTS', 'FAILED', 'AVG TIME', '1ST EVENT', 'TOKENS OUT', 'COST'],
       ['10', '2', '1.2s', '500ms', '300', '$1.75'],
-      ['10.0 per hour', '3 rejected', 'slowest 4.0s', 'average wait', '1.5K in', '$0.175 each']
+      ['10.0 per hour', '3 rejected', 'slowest 4.0s', 'average wait', '5K in', '$0.175 each']
     ])
   })
 
@@ -379,20 +384,20 @@ describe('dashboardRows', () => {
   })
 
   // Catches a number column narrower than its widest value, which pushes the cost off the row.
-  test('a model row keeps its cost whole at the widest token counts', () => {
+  test('a model row keeps its cost whole at the widest token counts and hit rate', () => {
     const data = snapshot({
       models: [
         modelStats({
           model: 'p/busy',
           requests: 999,
-          inputTokens: 999_900,
+          cacheReadTokens: 999_900,
           outputTokens: 999_900,
           costUsd: 1234.56
         })
       ]
     })
     const row = plainRows(data, { height: 40, width: 100 }).find((line) => line.includes('p/busy'))
-    expect(row).toContain('999.9K/999.9K $1234.56 │')
+    expect(row).toContain(' 100% 999.9K/999.9K $1234.56 │')
   })
 
   describe('with colors on', () => {
@@ -519,6 +524,25 @@ describe('openStatsView', () => {
     view.close()
     expect(cost).toBe(0.42)
     expect(note).toBe('stats kept 30 days')
+  })
+
+  // Catches the Stats tab not saying how long a timeline bar is, or saying it while the view shows
+  // the totals and has no timeline.
+  test('gives the tab a bar’s length while the dashboard shows, nothing with the totals', () => {
+    const view = openStatsView(true, () => ({
+      timeline: () => [],
+      models: () => [],
+      aliases: () => [],
+      errors: () => NO_ERRORS,
+      close: () => undefined
+    }))
+    const perBar = view.perBar('week', 100)
+    view.close()
+    const off = openStatsView(false)
+
+    expect(perBar).toMatch(/^\S+ per bar$/u)
+    expect(off.perBar('week', 100)).toBe('')
+    off.close()
   })
 
   // Catches the strip's cost read on every redraw after the file failed (each try can wait out

@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite'
 
 import type { Usage } from '@earendil-works/pi-ai'
 import { beginActiveRequest, recordRejectedRequest } from '@proxy/server/active-requests'
+import { consoleEvents } from '@proxy/server/console-events'
 import {
   recordRouteAttempt,
   recordRouteFailure,
@@ -40,8 +41,8 @@ function usage(input: number, cost: number): Usage {
     input,
     output: 10,
     cacheRead: 5,
-    cacheWrite: 0,
-    totalTokens: input + 15,
+    cacheWrite: 3,
+    totalTokens: input + 18,
     cost: { input: cost, output: 0, cacheRead: 0, cacheWrite: 0, total: cost }
   }
 }
@@ -63,7 +64,7 @@ describe('the stats recorder', () => {
     recordRouteAttempt(next)
     recordRouteUsage(next, usage(100, 0.5))
     const request = beginActiveRequest(
-      { requestId: 'r1', alias: 'coding', model: 'alpha/one', stream: true },
+      { requestId: 'r1', alias: 'coding', model: 'alpha/one', stream: true, promptCacheKey: false },
       NOW - 2000
     )
     request.attempt('beta/two', 2)
@@ -80,7 +81,8 @@ describe('the stats recorder', () => {
         averageFirstEventMs: 500,
         attempts: 1,
         inputTokens: 100,
-        cacheTokens: 5,
+        cacheReadTokens: 5,
+        cacheWriteTokens: 3,
         costUsd: 0.5
       }),
       expect.objectContaining({ model: 'alpha/one', requests: 0, attempts: 1, fallbacks: 1 })
@@ -91,6 +93,34 @@ describe('the stats recorder', () => {
     })
     expect(reads.timeline({ fromMinute: 1000, toMinute: 1001 }, 1)).toEqual([
       { minute: 1000, requests: 2, failed: 0, rejected: 1 }
+    ])
+    store.close()
+  })
+
+  // Catches the doctor's share of requests without a `prompt_cache_key` (#299) being wrong: a
+  // request with a key not counted, one without counted, or a rejected one counted as keyless.
+  test('counts the finished requests that sent a prompt_cache_key, and only those', () => {
+    const store = openStatsStore(':memory:')
+    const reads = { models: store.models }
+    const stop = startStatsRecorder({ ...store, close: () => undefined }, { now: () => NOW })
+    for (const [requestId, promptCacheKey] of [
+      ['keyed-1', true],
+      ['keyed-2', true],
+      ['keyless', false]
+    ] as const) {
+      beginActiveRequest(
+        { requestId, alias: null, model: 'alpha/one', stream: false, promptCacheKey },
+        NOW - 1000
+      ).end('ok', NOW)
+    }
+    recordRejectedRequest(
+      { requestId: 'rejected', model: 'alpha/one', status: 400, startedAt: NOW },
+      NOW
+    )
+    stop()
+
+    expect(reads.models(ALL)).toEqual([
+      expect.objectContaining({ model: 'alpha/one', requests: 3, promptCacheKeyRequests: 2 })
     ])
     store.close()
   })
@@ -186,8 +216,8 @@ describe('the stats recorder', () => {
   })
 
   // Catches an agent dir the proxy can't write to stopping the proxy, instead of running it
-  // without stats.
-  test('runs without stats when the file cannot be opened', () => {
+  // without stats, or doing so without the console's Requests table saying why (#266).
+  test('runs without stats when the file cannot be opened, and says so in the console', () => {
     const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
     directories.push(directory)
     const notADirectory = join(directory, 'file')
@@ -195,5 +225,9 @@ describe('the stats recorder', () => {
     vi.stubEnv('PI_CODING_AGENT_DIR', join(notADirectory, 'agent'))
 
     expect(recordStatsToFile()).toBeUndefined()
+    expect(consoleEvents().at(-1)).toMatchObject({
+      level: 'warning',
+      text: expect.stringMatching(/^Stats are off: could not open .*pi-switchboard-stats\.sqlite$/u)
+    })
   })
 })

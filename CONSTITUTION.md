@@ -1,22 +1,28 @@
 <!--
 Sync Impact Report
-Version change: 3.8.0 → 3.9.0 (MINOR)
-Rationale: a `proxy-config.json` that existed but could not be read or parsed was replaced by the
-defaults, whose `authToken` is `''`: a token the file held became auth off, logged at `warn`, and
-the next save wrote `''` over the file. Principle III's exception now names this case: with no
-flag or env var token, such a file refuses to start, as the other unusable-auth causes do. A
-missing file still starts with the defaults.
-MINOR: materially expanded guidance (a fourth cause that refuses to start); no principle added or
-removed.
+Version change: 3.11.0 → 3.12.0 (MINOR)
+Rationale: #197 accepted `store: false`, which asks for what the proxy does anyway, and recorded
+why that is not a drop in PLAN only. A reviewer flagged it as an interpretation of principle I
+living outside the constitution, and `n: 1` needed the same reasoning. Principle I now names
+honored values: a field accepted at the one value that asks for what the proxy already does, and
+refused by name at any other, with no amendment per field. Pi's own adapter sends `store: false`,
+and Elixir's LangChain sends `n: 1`, on every request.
+MINOR: materially expanded guidance in principle I; no principle added or removed.
 Modified sections:
-- II. Validate at Boundaries: the operator-configuration exception lists a config file that
-  exists but cannot be read or is not valid JSON, with no override token
+- I. OpenAI Compatibility: honored values, beside the exceptions
 Templates requiring updates:
-- ✅ PLAN.md: "Proxy authentication" names the cause and `configFileProblem`
-- ✅ README.md: the config file paragraph and "Proxy authentication"
-- ✅ AGENTS.md: no change needed; it does not list the causes
+- ✅ AGENTS.md: the "Reject unsupported parameters" bullet under "Core constraints"
+- ✅ PLAN.md: "Supported fields" (`store`, `n`) and the rejected fields
+- ✅ docs/api.md; docs/reference/claude-openai-compatibility.md
 Follow-up TODOs:
 - None.
+
+3.11.0 (2026-10-26): every family the exposed models name has a built-in `-latest` alias
+(principle VI's second recorded default, #231).
+
+3.10.0 (2026-10-26): releases are cut by hand on `main` (principle V); semantic-release is gone.
+3.9.0 (2026-10-23): principle III's exception names a `proxy-config.json` that exists but cannot
+be read or parsed, with no override token: it refuses to start, where it used to turn auth off.
 
 3.8.0 (2026-10-23): #182's `DELETE /v1/switchboard/cooldowns`, the first non-standard route that
 writes state, and what it may change.
@@ -98,6 +104,8 @@ The stable HTTP surface is the set of routes `PLAN.md` lists under "Stable surfa
 
 A route can start as experimental, opt-in and outside the stable surface, and be promoted once it meets these. Responses on the stable surface MUST stay close to OpenAI's schema; pi-specific data on a stable response MUST be namespaced under `x_pi` and documented. Unsupported routes or parameters MUST fail with clear OpenAI-style errors rather than being silently ignored.
 
+Honored values are not drops: a request field MAY be accepted at the one value that asks for what the proxy does anyway, where that value is also OpenAI's default or OpenAI's way of saying "don't", and is then answered as asked. Every other value of the field MUST be refused with a named `422` (`param` the field) that says which value is accepted. A field accepted this way is listed in `PLAN.md` ("Supported fields") with the value and why the proxy already honors it, and an accepted value is never blamed for another field's error. Today: `store: false` or `null` (the proxy stores no completion, #197) and `n: 1` or `null` (the proxy returns one choice, #197). Unlike the exceptions below, this needs no amendment per field; a value the proxy would have to pretend to honor is not one.
+
 Exceptions: a request field MAY be dropped instead of rejected only where it is listed here, with its reason, and documented where operators read the contract. Any other silent drop is a violation, and a new one needs an amendment.
 - `temperature` where it cannot reach the provider, both logged (the first per model at `info`, later ones at `debug`):
   - Codex (`openai-codex-responses`): the Codex backend refuses any request that carries it, and widely used clients send one on every request, so a `422` would make every Codex model unusable from them (#49, #80). The proxy drops it. Documented in `PLAN.md`'s Codex table and in `README.md`.
@@ -149,7 +157,7 @@ Rationale: model identity and auth headers are the two places where ambiguity ca
 ### V. Release Hygiene and Traceability
 Behavior changes MUST be reflected in the same change in the durable project docs that their guidance touches: `README.md` (operator-facing behavior), `PLAN.md` (architecture, compatibility policy, security boundaries), `TODO.md`, `ROADMAP.md`, and `AGENTS.md` (the always-loaded agent rules; `CLAUDE.md` is a symlink to it).
 
-Commits SHOULD stay small and reviewable and MUST follow Conventional Commits. The commit type MUST match the change, because semantic-release derives versions from it: a behavior change is `fix` or `feat` (or carries `BREAKING CHANGE`), never `refactor` or `chore`. Releases follow semantic versioning, happen only when `dev` is merged into `main`, and that merge is the maintainer's decision.
+Commits SHOULD stay small and reviewable and MUST follow Conventional Commits. The commit type MUST match the change, because the maintainer picks each release's version from the commit types since the last one: a behavior change is `fix` or `feat` (or carries `BREAKING CHANGE`), never `refactor` or `chore`. Releases follow semantic versioning; while on 0.x a breaking change bumps the minor version. A release is cut only from `main`, after `dev` is merged into it, by running the release workflow with the version; the merge and the release are the maintainer's decisions.
 
 Rationale: the proxy's public contract is documentation-heavy. If behavior changes without synchronized docs and verification, downstream users and agents will diverge from the real system.
 
@@ -157,7 +165,7 @@ Rationale: the proxy's public contract is documentation-heavy. If behavior chang
 Routing (aliases, fallback chains, cooldowns, quota awareness, a provider's logins; #66–#70, #227) MUST be configured explicitly and MUST be visible to the client and the operator:
 - A request is only ever routed to models the exposure config exposes; an alias or fallback never reaches a hidden model (principle IV). Every login of an exposed model's provider may serve it.
 - A response says which model and login served it, under `x_pi` (`model`, and `x_pi.login` when the model has more than one login), and the log records every hop (the requested model, each model and login tried, and why it moved on), by name, never credential.
-- A request with no routing configured behaves exactly as without routing: the model it names, or an error. The one recorded default is `routing.logins.fallbackOn: ["rate_limit"]`: a second login to a provider serves a rate-limited model's request without further configuration, which is why a second login exists.
+- A request with no routing configured behaves exactly as without routing: the model it names, or an error. Two defaults are recorded. `routing.logins.fallbackOn: ["rate_limit"]`: a second login to a provider serves a rate-limited model's request without further configuration, which is why a second login exists. And the built-in `-latest` aliases (#231): each family the exposed models name (`anthropic/claude-opus`) has one (`opus-latest`) that follows its newest exposed model, so a client can name "the newest Opus" without config; it is listed and resolved like a configured family alias, its moves are logged at warning, and a configured alias of its name replaces it.
 - Fallback only follows failures the configuration names (for example a rate limit or an outage), never a client error such as an invalid request. A request that names a model never moves to another model; it moves to another login of the same provider only on the classes `routing.logins.fallbackOn` names, or past a login below the share its `routing.reserve` entry keeps free.
 
 Rationale: routing changes which model and account a client is billed on. Doing that silently would break the predictability principle I protects and the trust the operator places in the exposure config.
@@ -202,4 +210,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.9.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-23
+**Version**: 3.12.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-28

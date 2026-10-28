@@ -7,6 +7,7 @@ import {
 } from '@earendil-works/pi-tui'
 import {
   activeTab,
+  alertPanel,
   badge,
   chrome,
   highlight,
@@ -99,6 +100,22 @@ describe('the console theme', () => {
     const body = painted.slice(0, -'\u001b[49m'.length)
     for (const end of ['\u001b[0m', '\u001b[49m']) {
       for (const part of body.split(end).slice(1)) expect(part.startsWith(background)).toBe(true)
+    }
+  })
+
+  // Catches the red alert panel (#287) drawing rows wider or narrower than the dialog, which
+  // breaks the overlay, or content lost for a styled line, with colors on or off.
+  test.each(['', '1'])('the alert panel is exactly as wide as asked (NO_COLOR=%j)', (noColor) => {
+    vi.stubEnv('NO_COLOR', noColor)
+    installConsoleTheme()
+    const lines = [strong('⚠ Proxy auth is off'), `${paint('accent', '→')} Generate a token`, '']
+
+    for (const width of [20, 60, 96]) {
+      const rows = alertPanel(lines, width)
+
+      expect(rows).toHaveLength(lines.length + 2)
+      for (const row of rows) expect(visibleWidth(row)).toBe(width)
+      expect(stripTerminalSequences(rows[1] ?? '')).toMatch(/^│ ⚠ Proxy auth is .*│$/)
     }
   })
 })

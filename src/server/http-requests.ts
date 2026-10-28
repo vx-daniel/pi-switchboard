@@ -24,6 +24,7 @@
 
 import { proxyLogger } from '@proxy/logging'
 import { FINISHED_KEPT, REJECTED_KEPT } from '@proxy/server/active-requests'
+import { takeSequence } from '@proxy/server/console-events'
 import {
   HTTP_BAD_REQUEST,
   HTTP_INTERNAL_SERVER_ERROR,
@@ -31,6 +32,7 @@ import {
 } from '@proxy/server/http-status'
 import { isHealthPath } from '@proxy/server/middleware'
 import type { ProxyEnv } from '@proxy/server/types'
+import { notifyListeners } from '@proxy/utils/listeners'
 import type { MiddlewareHandler } from 'hono'
 
 /**
@@ -44,6 +46,8 @@ const httpRequestsLogger = proxyLogger('server', 'http')
 
 /** One HTTP request, in flight or answered. */
 export interface HttpRequest {
+  /** Tells a request from a lifecycle event among the console table's rows (#266). */
+  readonly kind: 'request'
   /** Its place in the order the requests arrived: a view pinned to one stays on it. */
   readonly sequence: number
   /** The proxy's request ID (`X-Request-Id`). */
@@ -65,8 +69,8 @@ const inFlight = new Map<number, HttpRequest>()
 const answered: HttpRequest[] = []
 /** The client errors, oldest first, at most {@link REJECTED_KEPT}. */
 const clientErrors: HttpRequest[] = []
-/** The next request's place in the order. */
-let nextSequence = 0
+// The places in the order come from `console-events.ts`, shared with the lifecycle events the
+// table shows among the requests (#266).
 /** Who is told after each change. */
 const listeners = new Set<() => void>()
 
@@ -75,15 +79,7 @@ const listeners = new Set<() => void>()
  * request that caused the change must not fail for it.
  */
 function notify(): void {
-  for (const listener of listeners) {
-    try {
-      listener()
-    } catch (error) {
-      httpRequestsLogger.warn('An HTTP requests listener threw: {errorName}', {
-        errorName: error instanceof Error ? error.name : typeof error
-      })
-    }
-  }
+  notifyListeners(listeners, [], httpRequestsLogger, 'HTTP requests')
 }
 
 /**
@@ -100,11 +96,11 @@ export function beginHttpRequest(
   start: { readonly requestId: string; readonly method: string; readonly path: string },
   now: number = Date.now()
 ): number {
-  const sequence = nextSequence
-  nextSequence += 1
+  const sequence = takeSequence()
   const path = start.path.length > PATH_KEPT ? `${start.path.slice(0, PATH_KEPT)}…` : start.path
   inFlight.set(sequence, {
     ...start,
+    kind: 'request',
     path,
     sequence,
     startedAt: now,

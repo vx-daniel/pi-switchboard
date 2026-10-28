@@ -93,8 +93,8 @@ export const sseChunkSchema = z
       .optional()
       .meta({
         description:
-          "Not OpenAI's: in every chunk, only when the request named an alias or an alias fell " +
-          'back (#67).'
+          "Not OpenAI's: in every chunk, only when there is an alias (#66), failed attempts " +
+          '(#67), a login of a model with more than one (#227), or an effort report (#175).'
       })
   })
   .meta({ id: 'ChatCompletionChunk', description: 'One `data:` event of a streamed completion.' })
@@ -126,12 +126,13 @@ interface ChunkMeta {
   readonly id: string
   readonly created: number
   readonly model: string
-  /** The alias and failed attempts (#66, #67): sent under `x_pi` in every chunk. */
+  /** The alias, attempts, login and effort report: sent under `x_pi` in every chunk. */
   readonly route: ResponseRoute
 }
 
 /**
- * Returns the `x_pi` a chunk carries: the alias and the failed attempts, when there are any.
+ * Returns the `x_pi` a chunk carries: the route's alias, failed attempts, login and effort
+ * report, when there are any.
  *
  * @param meta - the shared chunk fields
  * @returns `{ x_pi: … }`, or nothing to add
@@ -434,7 +435,7 @@ function closingFrames(
 export interface StreamIdentity {
   /** The chunk `id`. */
   readonly requestId: string
-  /** The model that answers, reported in each chunk, and the alias and attempts (#66, #67). */
+  /** The model that answers, reported in each chunk, and the `x_pi` route fields. */
   readonly route: ResponseRoute
 }
 

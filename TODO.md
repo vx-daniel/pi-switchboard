@@ -40,7 +40,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 ### Security policy
 
 - [x] Decide whether remote image URLs are enabled in the stable proxy (behind the remote-images setting, off by default; [#109](https://github.com/vx-daniel/pi-switchboard/issues/109))
-- [x] If enabled, document SSRF protections and size limits (PLAN.md, "Image URL fetching"; README, "Security defaults")
+- [x] If enabled, document SSRF protections and size limits (PLAN.md, "Image URL fetching"; docs/security.md, "Security defaults")
 - [x] Document bind-host defaults
 - [x] Document any future remote exposure guidance
 - [x] Mark agentic mode experimental and disabled by default
@@ -85,6 +85,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] Decide and document what `created` means for pi-backed models
 - [x] Implement `GET /v1/models/{model}` with encoded ID support
 - [x] Return OpenAI-style `404` when a model is not found
+- [x] Report on `/v1/switchboard/models` whether the login refused or answered each model (#174)
 
 ### Request parsing and validation
 
@@ -406,13 +407,15 @@ since the rename; each issue holds the detailed checklist.
 
 ## Phase 4 — Distribution
 
-- [x] The pi package on GitHub Packages, `pi install npm:@vx-daniel/pi-switchboard` (#59)
+- [x] The pi package on GitHub Packages, `pi install npm:@vx-daniel/pi-switchboard` (#59); an
+      install on a clean machine, checked by hand, is tracked in #301
 - [ ] The pi package on npmjs, so installing needs no token (later, by choice)
 - [x] Docker image (#60): built from source, published to Docker Hub and GHCR on each release
       (amd64, arm64)
-- [ ] Standalone binary (#61)
-  - [x] Bun-compiled binary for linux/darwin x64/arm64, tested in CI, uploaded to each release
-        with `SHA256SUMS` (ported from #86)
+- [x] Standalone binary (#61); a manual check of a real login's token refresh inside the binary is
+      tracked in #301
+  - [x] Bun-compiled binary for linux/darwin/windows x64/arm64, tested in CI, uploaded to each
+        release with `SHA256SUMS` (`SHA256SUMS-windows` for Windows; ported from #86)
   - [x] Opt-in `pi-switchboard tui` console: logs, status, accounts, and logins through pi's own
         screens, in one process with the server
   - [x] The console's per-route stats from #70's totals
@@ -430,9 +433,8 @@ since the rename; each issue holds the detailed checklist.
           diagnostics and family resolutions
     - [x] Phase 5: a Requests table over the log (`r` for the raw log), which needs a registry of
           every route's requests, not only chat
-    - [ ] Left out on purpose, as follow-ups: view state in the chrome (#264), the Models detail
-          pane (#265), startup event rows and an animated in-flight mark in the Requests table
-          (#266)
+    - [x] Follow-ups: view state in the chrome (#264), the Models detail pane (#265), startup
+          event rows and an animated in-flight mark in the Requests table (#266)
 
 ## Phase 5 — Routing across pi's logins
 
@@ -443,14 +445,25 @@ serving model and login reported under `x_pi` and in the log.
 - [x] Fallback chains (#67): `{ targets, fallbackOn }` aliases, fallback only on the named failure classes before the response starts, `x_pi.attempts`, every hop logged
 - [x] Cooldowns after rate limits (#68): a 429 cools the provider, a 503 the model, for the time the response gives (else 60 s, 180 s, doubling); chains that name the class skip it; shown on `/healthz/models`, `/v1/switchboard/models` and `x_pi.attempts`
 - [x] Ending cooldowns early (#182): `DELETE /v1/switchboard/cooldowns` (all, `?provider=` a login's, `?model=` a model's own; `404` for an unknown name) and the console's `c` (all), constitution 3.8.0
-- [x] Quota awareness (#69): research, tracking (`/healthz/creds`, `/v1/switchboard/models`, the console's Accounts view), the per-provider reserve a fallback chain keeps (`routing.reserve`), and Anthropic's `quota` recording replayed end to end; Codex's recording and a Copilot probe are #238
-- [ ] Usage and cost by route (#70): done are the `alias` and `attempt` on the upstream log lines, the running totals per alias × provider × model in memory (`src/server/route-totals.ts`) for the console (#61), and per-minute stats kept across restarts in SQLite (`src/stats/`, #216); open is whether to serve them at `GET /healthz/usage`
+- [x] Quota awareness (#69): research, tracking (`/healthz/creds`, `/v1/switchboard/models`, the console's Accounts view), the per-provider reserve a fallback chain keeps (`routing.reserve`), and Anthropic's `quota` recording replayed end to end; pi 1.4's ChatGPT sign-in recorded (#238: it sends no quota headers); the legacy Codex backend and Copilot are not recorded, by decision
+- [ ] Quota for a ChatGPT plan signed in through pi 1.4's `openai` login (#332): it sends no quota headers, so it shows `null` quota and `routing.reserve` never skips it
+- [x] Usage and cost by route (#70): the `alias` and `attempt` on the upstream log lines, the running totals per alias × provider × model in memory (`src/server/route-totals.ts`) for the console (#61), per-minute stats kept across restarts in SQLite (`src/stats/`, #216), and served over HTTP at `GET /v1/switchboard/usage` (#224)
 - [x] Stats dashboard (#216): the stats store and recorder, and the console's Stats view rebuilt on its queries (today, week and 30 days; overview, timeline, models, errors)
+- [x] Cache reads and writes apart (#297): `GET /v1/switchboard/usage` reports `cache_read_tokens` and `cache_write_tokens` instead of their sum `cache_tokens`; the console shows the cache hit rate (Stats view `hit`, the in-memory table's `hit`, `cache read` and `cache write`, the sidebar's SESSION panel), from one definition in `src/stats/cache.ts`, and its tokens in are the whole prompt
+- [x] Usage limits told apart (#199): a plan's usage limit (its wording, or a wait of 5 minutes or more) answers `429` with OpenAI's `insufficient_quota` and `x-should-retry: false`; a rate limit whose wait the proxy read carries `retry-after` and `retry-after-ms`; routing still treats both as `rate_limit`
+- [x] `pi-switchboard doctor` (#299): a local subcommand that reads the config, pi's runtime and logins, and the stats file (read-only) and prints general and cache findings with a recommendation each, as text or `--json`; reuses `/healthz/models` and `/healthz/creds`' computations (`--verify` as `?verify=true`); exit 1 only for a general error, 2 for a usage error. The stats count requests that sent a `prompt_cache_key` (schema version 2, the first migration; an older proxy then refuses the file)
+- [x] Doctor findings in the console (#325): view `6` lists `src/doctor/findings.ts`' findings errors first, each with a pointer to the view or key that acts on it and the selected one's recommendation in a detail pane, judged from the console's live state (the running config and auth, the last status read, the Accounts view's last `v`, the Stats view's open file) without calling a provider or writing a file; the tab counts errors and warnings (`Doctor 2`); `t` `w` `a` set one window for Stats and Doctor
+- [x] Host/origin guard and auth-off warnings (#188): opt-in `hostOriginGuard` (`--host-origin-guard`, `PI_SWITCHBOARD_HOST_ORIGIN_GUARD`) refuses a DNS-rebinding `Host` (not an IP, a dotless name or `host.docker.internal`) and a foreign `Origin` with 403, before auth, on every path; with auth off, the startup log (every bind), the console and `/proxy show` say who can use the proxy (`authOffRisk`)
+- [x] `store: false` accepted (#197): chat completions take `store: false` or `null` (never sent upstream) and refuse `true` with a named 422, as the Responses API already did, so pi's own OpenAI adapter pointed at the switchboard works; `test/integration/pi-client.test.ts` runs that adapter against the proxy
+- [x] `n: 1` accepted (#197): `1` or `null` (never sent upstream), any other value a named 422; constitution 3.12.0 names these "honored values" in principle I, so a field accepted at the value the proxy already honors needs no amendment of its own
 - [x] Reasoning effort per alias target (#230): `{ model, reasoningEffort }` targets replace the request's effort (constitution 3.7.0), reported in `x_pi.reasoning_effort` and `x_pi.attempts`; an unsupported effort leaves the target out (`effort-unsupported`, `/healthz/models` 503); `/v1/switchboard/models` lists the fixed effort
 - [x] Console Models view (#230): view `4` lists the exposed models and every alias with its diagnostics; its menus create, rename, edit (targets, efforts from the model's ladder, `fallbackOn`) and delete aliases, saved to `proxy-config.json` and used by the next request
+- [x] Console Settings view (#288): view `5` lists every `proxy-config.json` setting a standalone proxy uses with its saved value, the running value while a restart is due, and the flag or env var that wins; each is edited within its bounds and saved at once; `r` restarts the HTTP server in the console with the reloaded config (a new address bound before the old closes; requests in flight finish; one stats recorder at a time)
 - [x] Family aliases (#231): `{ family, pin?, reasoningEffort? }` targets follow the newest exposed model of `anthropic/claude-{opus,sonnet,haiku,fable}` or `openai-codex/{sol,luna,terra,astra}` by the version in the ID, resolved per request; moves logged at warning; `familyAliases` and the `family-unknown`, `pin-outside-family`, `family-unparsed` diagnostics on `/healthz/models`; the console's Models view shows resolutions and pins (**Pin to…**, **Follow newest**, family as a new alias); release dates (#176) would replace the ID rules
+- [x] Built-in `-latest` aliases (#231 follow-up, constitution 3.11.0): every family the exposed models name has one (`opus-latest`, `sol-latest`, …), computed with the exposure, listed after the configured aliases, replaced by a configured alias of its name; families are read from the IDs (`familiesIn`), so a new tier needs no code change; the console lists them in their own LATEST box, apart from the configured aliases, and **Pin to…** saves an alias of the name
 - [x] Several logins per provider (#227): `{provider}-N` logins (copies of pi's built-ins, own credential in pi's store, requests sent as the base, never configured by the base's environment key), registered at startup for every stored slot credential and by the console's login list, which offers each logged-in provider's next slot; logout drops the slot; a label per login (asked after a login, `Set a label` in the menu, `labels` in the config) shown in the Accounts view and the pickers; a login is not a model (constitution 3.6.0): the model is listed once and routing picks the login (`routing.logins.fallbackOn`, default `rate_limit`), reported as `x_pi.login`, with cooldowns, quota, reserve and totals per login and `/v1/switchboard/models` listing each model's logins; proven offline against the mock provider
-- [ ] Logins, follow-up (#233): a recorded fixture through a copy (from a login made for recording); open: a console action that puts a login first
+- [x] Login order and disabled logins (#233, part 2): `routing.logins.order` (a provider's logins to try first; the others follow in the usual order) and `routing.logins.disabled` (never called, still logged in; a model whose every login is disabled leaves `/v1/models`), read per request and repaired like the other routing fields; names that are no login, and providers with every login disabled, listed in `/healthz/models` `loginDiagnostics` (unknown names also warned in the log); `/v1/switchboard/models` lists the logins in routing order, then the disabled ones with `disabled: true`; the console's Accounts view marks the first login and the disabled ones, and its menu gains **Use first**, **Disable** and **Enable**
+- [x] Logins, follow-up (#233): a real call through `anthropic-2` (a login made for recording), recorded by the proxy's own copy (`anthropic-messages/second-login`) and replayed (`second-login-replay.test.ts`): the slot's own token, the accepted request's headers and system prompt. Legacy Codex logins are left out, by decision
 
 ## Phase 6 — More of OpenAI's API
 
@@ -464,6 +477,17 @@ serving model and login reported under `x_pi` and in the log.
       Bearer scheme (items 1–2); a client's own key refused upstream is
       `401 upstream_api_key_invalid` and a missing login `502 upstream_credentials_missing`
       (items 3–4); an upstream 400/422 is `400 upstream_invalid_request` (item 5, #147)
+
+## Follow-ups from the 0.5.0 audit (#334)
+
+- [ ] Nested chat objects strip unknown keys instead of refusing them (#335, needs a decision on `stream_options.include_obfuscation`)
+- [ ] Responses API fields accepted and never forwarded: name them in principle I or refuse them (#336)
+- [ ] Responses stream: a redacted thinking block's summary differs between the stream and the item (#337)
+- [ ] Doctor: cost advice for a model reachable only through a `{provider}-N` login (#338)
+- [ ] One debug line per upstream error, not one per layer (#339)
+- [ ] `PI_SWITCHBOARD_AGENTIC`: remove or keep as reserved (#340)
+- [ ] Test the pi extension's proxy start path (#341)
+- [ ] Small cleanups: an unused constant, two `param` path formats, test env vars in CONTRIBUTING, two functions at the complexity limit (#342)
 
 ## Later, not planned: experimental agentic mode
 

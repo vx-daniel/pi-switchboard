@@ -50,7 +50,8 @@ export default defineConfig({
       // Names every naming/* rule accepts. `z`: zod's documented `import * as z` convention.
       // `auth`: pi-ai's `Provider.auth`, a required key of every provider a test builds.
       // `ctx`: pi-ai's `ApiKeyAuth.resolve({ ctx, … })`, the input a test calls a resolver with.
-      naming: { allow: ['z', 'auth', 'ctx'] }
+      // `n`: OpenAI's chat-completions field (choices per request), accepted at `1` (#197).
+      naming: { allow: ['z', 'auth', 'ctx', 'n'] }
     },
     rules: {
       // Viaanix base + type-aware
@@ -442,6 +443,22 @@ export default defineConfig({
         files: ['src/openai/text-schemas.ts'],
         rules: {
           'zod/prefer-string-schema-with-trim': 'off'
+        }
+      },
+      {
+        // Scripts run under plain Node (`node scripts/record-fixtures.ts`), which cannot resolve the
+        // `@proxy/*` alias: they import `src/` by relative `.ts` path.
+        files: ['scripts/**/*.ts'],
+        rules: {
+          '@limegrass/import-alias/import-alias': 'off'
+        }
+      },
+      {
+        // The recorder imports this module under plain Node, which cannot resolve `@proxy/*`: it
+        // may import only pi's packages and Node built-ins (#331 review).
+        files: ['src/pi/account-provider.ts'],
+        rules: {
+          'no-restricted-imports': ['error', { patterns: ['@proxy/*', './*', '../*'] }]
         }
       }
     ]

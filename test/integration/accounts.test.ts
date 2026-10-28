@@ -7,18 +7,16 @@
  * logins apart by the key each request carries.
  */
 
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-
 import { activeCooldown, clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { getRuntime } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
 import { loginLabels, loginOptions, runLogin, runLogout, saveLoginLabel } from '@proxy/tui/login'
+import { saveLoginDisabled, saveLoginFirst } from '@proxy/tui/login-routing'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { type FixtureAgentDir, loadFixtureAgentDir, writeProxyConfig } from '../fixtures/agent-dir'
 import { scriptedScreens } from '../fixtures/login-screens'
 import {
   finishChunk,
@@ -81,15 +79,6 @@ const refusingFirstLogin: MockReply = (response, request) =>
 let mock: MockProvider
 let agentDir: FixtureAgentDir
 
-/**
- * Writes the proxy's config file.
- *
- * @param config - the config, as JSON
- */
-function setConfig(config: Record<string, unknown>): void {
-  writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify(config))
-}
-
 beforeAll(async () => {
   mock = await startMockProvider({
     [MODEL]: byLogin,
@@ -115,7 +104,7 @@ beforeAll(async () => {
     },
     authJson: { 'groq-2': { type: 'api_key', key: SECOND_KEY } }
   })
-  setConfig({})
+  writeProxyConfig(agentDir.path, {})
 })
 
 beforeEach(() => {
@@ -250,7 +239,9 @@ describe('a second login', () => {
   // second login would run at the request's effort, and the attempt on the first wouldn't say
   // what it ran at.
   test("an alias target's effort carries over to every login", async () => {
-    setConfig({ aliases: { 'quiet-groq': { model: `groq/${MODEL}`, reasoningEffort: 'none' } } })
+    writeProxyConfig(agentDir.path, {
+      aliases: { 'quiet-groq': { model: `groq/${MODEL}`, reasoningEffort: 'none' } }
+    })
     try {
       const answer = await ask('quiet-groq')
 
@@ -271,7 +262,7 @@ describe('a second login', () => {
         }
       })
     } finally {
-      setConfig({})
+      writeProxyConfig(agentDir.path, {})
     }
   })
 
@@ -307,7 +298,7 @@ describe('a second login', () => {
   // or ending the request although the alias's next model could answer: the model's other logins
   // are skipped, and the next model is tried (#227).
   test("an alias moves past all of a model's logins on a class only the alias names", async () => {
-    setConfig({
+    writeProxyConfig(agentDir.path, {
       aliases: {
         chain: { targets: [`groq/${REFUSING_MODEL}`, `other/${OTHER_MODEL}`], fallbackOn: ['auth'] }
       }
@@ -325,7 +316,7 @@ describe('a second login', () => {
         }
       })
     } finally {
-      setConfig({})
+      writeProxyConfig(agentDir.path, {})
     }
   })
 
@@ -361,14 +352,14 @@ describe('a second login', () => {
   // Catches a login hop the configuration does not name (principle VI): with
   // `routing.logins.fallbackOn` empty, the first login's 429 is the answer.
   test('is not tried when routing.logins.fallbackOn leaves rate limits out', async () => {
-    setConfig({ routing: { logins: { fallbackOn: [] } } })
+    writeProxyConfig(agentDir.path, { routing: { logins: { fallbackOn: [] } } })
     try {
       const answer = await ask(MODEL)
 
       expect(answer.status).toBe(429)
       expect(answer.upstreamKeys).toEqual([FIRST_KEY])
     } finally {
-      setConfig({})
+      writeProxyConfig(agentDir.path, {})
     }
   })
 
@@ -448,5 +439,167 @@ describe('a second login', () => {
     const options = loginOptions(getRuntime()).map((option) => option.id)
     expect(options).toContain('groq-3')
     expect(options).not.toContain('groq-4')
+  })
+})
+
+/**
+ * Reads the model's logins on `/v1/switchboard/models`, with whether each is disabled.
+ *
+ * @returns each login's `id` and `disabled`
+ */
+async function loginStates(): Promise<unknown[]> {
+  const entry = (await listed('/v1/switchboard/models')).find(
+    (model) => isRecord(model) && model['id'] === MODEL
+  )
+  const logins = isRecord(entry) && Array.isArray(entry['logins']) ? entry['logins'] : []
+  return logins.map((login: unknown) =>
+    isRecord(login) ? { id: login['id'], disabled: login['disabled'] } : undefined
+  )
+}
+
+/**
+ * Reads `/healthz/models`.
+ *
+ * @returns the status and the `loginDiagnostics`
+ */
+async function loginHealth(): Promise<{ status: number; diagnostics: unknown }> {
+  const response = await createApp(testConfig(), fileConfigReader).request('/healthz/models')
+  const body = await jsonBody(response)
+  return {
+    status: response.status,
+    diagnostics: isRecord(body) ? body['loginDiagnostics'] : undefined
+  }
+}
+
+describe("a provider's login order and disabled logins (#233)", () => {
+  // Catches `routing.logins.order` ignored (the base still called first, spending the login the
+  // operator meant to keep), the login left out of `x_pi.login`, an alias target or the
+  // switchboard list not following the order, an unlisted login dropped rather than appended, or
+  // a request with its own key handed to another login.
+  test('a login put first is called first, and the others follow', async () => {
+    writeProxyConfig(agentDir.path, {
+      aliases: { 'quiet-groq': { model: `groq/${MODEL}`, reasoningEffort: 'none' } },
+      routing: { logins: { order: { groq: ['groq-2'] } } }
+    })
+    try {
+      const answer = await ask(MODEL)
+
+      expect(answer.status).toBe(200)
+      expect(answer.upstreamKeys).toEqual([SECOND_KEY])
+      expect(answer.body).toMatchObject({ model: `groq/${MODEL}`, x_pi: { login: 'groq-2' } })
+      const xPi = isRecord(answer.body) ? answer.body['x_pi'] : undefined
+      expect(isRecord(xPi) && 'attempts' in xPi).toBe(false)
+      expect((await ask('quiet-groq')).upstreamKeys).toEqual([SECOND_KEY])
+      expect(await loginStates()).toEqual([
+        { id: 'groq-2', disabled: false },
+        { id: 'groq', disabled: false }
+      ])
+      const ownKey = await ask(MODEL, { headers: { 'X-Switchboard-Upstream-Api-Key': FIRST_KEY } })
+      expect(ownKey.upstreamKeys).toEqual([FIRST_KEY])
+    } finally {
+      writeProxyConfig(agentDir.path, {})
+    }
+  })
+
+  // Catches a name that is no login stopping the proxy or reordering the others, or ignored
+  // silently: it is listed on `/healthz/models`, which stays healthy.
+  test('a name that is no login is ignored and listed on /healthz/models', async () => {
+    writeProxyConfig(agentDir.path, {
+      routing: { logins: { order: { groq: ['groq-9', 'groq-2'] }, disabled: ['nobody-2'] } }
+    })
+    try {
+      expect((await ask(MODEL)).upstreamKeys).toEqual([SECOND_KEY])
+      const health = await loginHealth()
+      expect(health.status).toBe(200)
+      expect(health.diagnostics).toEqual([
+        expect.objectContaining({
+          code: 'unknown-login',
+          setting: 'routing.logins.order',
+          provider: 'groq',
+          login: 'groq-9'
+        }),
+        expect.objectContaining({
+          code: 'unknown-login',
+          setting: 'routing.logins.disabled',
+          provider: null,
+          login: 'nobody-2'
+        })
+      ])
+    } finally {
+      writeProxyConfig(agentDir.path, {})
+    }
+  })
+
+  // Catches a disabled login called anyway: as the fallback after the first login's 429, which
+  // `routing.logins.fallbackOn` names by default. It stays listed, marked disabled.
+  test('a disabled login is never called, not even as the fallback', async () => {
+    writeProxyConfig(agentDir.path, { routing: { logins: { disabled: ['groq-2'] } } })
+    try {
+      const answer = await ask(MODEL)
+
+      expect(answer.status).toBe(429)
+      expect(answer.upstreamKeys).toEqual([FIRST_KEY])
+      expect(await loginStates()).toEqual([
+        { id: 'groq', disabled: false },
+        { id: 'groq-2', disabled: true }
+      ])
+      expect((await loginHealth()).diagnostics).toEqual([])
+    } finally {
+      writeProxyConfig(agentDir.path, {})
+    }
+  })
+
+  // Catches a model whose every login is disabled still listed (a client picks it and gets an
+  // upstream error) or still called, or its absence unexplained: `/healthz/models` names the
+  // provider.
+  test('a model whose every login is disabled leaves /v1/models', async () => {
+    writeProxyConfig(agentDir.path, { routing: { logins: { disabled: ['groq', 'groq-2'] } } })
+    try {
+      const ids = (await listed('/v1/models')).map((model: unknown) =>
+        isRecord(model) ? model['id'] : undefined
+      )
+      expect(ids).not.toContain(MODEL)
+      expect(ids).toContain(OTHER_MODEL)
+      const detail = await createApp(testConfig(), fileConfigReader).request(
+        `/v1/models/${encodeURIComponent(MODEL)}`
+      )
+      expect(detail.status).toBe(404)
+      expect(await jsonBody(detail)).toMatchObject({ error: { code: 'model_not_found' } })
+      const answer = await ask(MODEL)
+      expect(answer.status).toBe(404)
+      expect(answer.upstreamKeys).toEqual([])
+      expect((await loginHealth()).diagnostics).toEqual([
+        expect.objectContaining({ code: 'all-logins-disabled', provider: 'groq', login: null })
+      ])
+    } finally {
+      writeProxyConfig(agentDir.path, {})
+    }
+  })
+
+  // Catches the console's **Use first**, **Disable** and **Enable** not reaching the next request
+  // (a restart needed), writing the order without the provider's other logins, or rewriting the
+  // rest of the config file.
+  test("the Accounts view's actions write the config the next request uses", async () => {
+    writeProxyConfig(agentDir.path, { labels: { 'groq-2': 'work' } })
+    try {
+      expect(saveLoginFirst('groq-2', ['groq', 'groq-2', 'other'])).toBe(true)
+      expect(loginLabels()).toEqual({ 'groq-2': 'work' })
+      expect((await fileConfigReader()).loginRouting).toEqual({
+        fallbackOn: ['rate_limit'],
+        order: { groq: ['groq-2', 'groq'] },
+        disabled: []
+      })
+      expect((await ask(MODEL)).upstreamKeys).toEqual([SECOND_KEY])
+
+      expect(saveLoginDisabled('groq-2', true)).toBe(true)
+      expect((await ask(MODEL)).upstreamKeys).toEqual([FIRST_KEY])
+
+      clearAllCooldowns()
+      expect(saveLoginDisabled('groq-2', false)).toBe(true)
+      expect((await fileConfigReader()).loginRouting?.disabled).toEqual([])
+      expect((await ask(MODEL)).upstreamKeys).toEqual([SECOND_KEY])
+    } finally {
+      writeProxyConfig(agentDir.path, {})
+    }
   })
 })

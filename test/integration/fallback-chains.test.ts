@@ -5,9 +5,6 @@
  * completions adapter against the mock provider, which answers by model.
  */
 
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-
 import type { AliasTarget } from '@proxy/config/schema'
 import { clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { createApp } from '@proxy/server/app'
@@ -15,7 +12,7 @@ import { fileConfigReader } from '@proxy/server/routes'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { type FixtureAgentDir, loadFixtureAgentDir, setAliases } from '../fixtures/agent-dir'
 import {
   cutOff,
   finishChunk,
@@ -26,7 +23,7 @@ import {
   startMockProvider,
   textChunks
 } from '../fixtures/mock-provider'
-import { testConfig } from '../helpers'
+import { testConfig, xPi } from '../helpers'
 
 const MOCK_KEY = 'notarealsecret-mock-provider-key'
 /** A 429 as OpenAI sends it. */
@@ -97,10 +94,7 @@ afterAll(async () => {
  * @param target - what `chain` names
  */
 function setChain(target: AliasTarget): void {
-  writeFileSync(
-    join(agentDir.path, 'proxy-config.json'),
-    JSON.stringify({ aliases: { chain: target } })
-  )
+  setAliases(agentDir.path, { chain: target })
 }
 
 /** A small PNG as a data URI, for the image request. */
@@ -149,27 +143,6 @@ async function ask(
     .slice(before)
     .map((request) => (isRecord(request.body) ? request.body['model'] : undefined))
   return { status: response.status, text, upstream }
-}
-
-/**
- * Parses a response's `x_pi`: the body's, or each stream chunk's.
- *
- * @param text - the response body
- * @param stream - whether it is a stream
- * @returns every `x_pi` found, in order
- */
-function xPi(text: string, stream: boolean): unknown[] {
-  if (!stream) {
-    const body: unknown = JSON.parse(text)
-    return [isRecord(body) ? body['x_pi'] : undefined]
-  }
-  return text
-    .split('\n')
-    .filter((line) => line.startsWith('data: {'))
-    .map((line) => {
-      const chunk: unknown = JSON.parse(line.slice('data: '.length))
-      return isRecord(chunk) ? chunk['x_pi'] : undefined
-    })
 }
 
 describe('a fallback chain moves on', () => {

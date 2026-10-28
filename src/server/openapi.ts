@@ -4,13 +4,14 @@
  *
  * @remarks
  * Two hono-openapi pieces feed the document. `describeRoute` takes the descriptions here: summary,
- * tags and each status's response schema. `validator()` takes the request schemas here
- * (`modelPathSchema`, `chatHeadersSchema`, `chatRequestBodySchema`, `credentialsQuerySchema`):
- * it checks the request and documents the parameter or body from the same schema, so neither is
- * written by hand. The chat body's 400/422 split and wording stay the proxy's: the route's
- * validator hook answers a failed body with `chatRequestRejection`. The response schemas are the
- * ones the handlers type their bodies with, so the document cannot describe a field the code does
- * not send.
+ * tags and each status's response schema. `validator()` takes the request schemas (here
+ * `modelPathSchema`, `chatHeadersSchema`, `chatRequestBodySchema`, `credentialsQuerySchema`,
+ * `usageQuerySchema` and `cooldownsQuerySchema`; the Responses body in `responses-route.ts`): it
+ * checks the request and documents the parameter or body from the same schema, so neither is
+ * written by hand. The bodies' 400/422 split and wording stay the proxy's: each body's validator
+ * hook answers a failed body through `rejectionResponse` (`chatRequestRejection` for chat). The
+ * response schemas are the ones the handlers type their bodies with, so the document cannot
+ * describe a field the code does not send.
  *
  * Documented: every route the proxy serves. The OpenAI endpoints it answers with 404 are written
  * in by hand (`unsupportedPaths`), since hono-openapi leaves wildcard and `ALL` routes out.
@@ -36,7 +37,8 @@ import * as z from 'zod'
 // described where it is read and nowhere else. The path, header and query schemas accept any
 // value the request can carry (a path parameter and a header are always one string, a query may
 // repeat), so their validators never fail and need no hook: hono-openapi's own failure answer is
-// not in OpenAI's error shape. Only the chat body can fail, and its hook answers in OpenAI's.
+// not in OpenAI's error shape. Only the chat and Responses bodies can fail, and their hooks answer
+// in OpenAI's.
 
 /**
  * The model detail route's path: the model ID, which may span slashes. Surrounding spaces are
@@ -68,11 +70,14 @@ export const chatHeadersSchema = z.object({
   'x-switchboard-upstream-api-key': z
     .string()
     .trim()
+    .min(1)
     .optional()
     .meta({
       description:
         "An API key for the model's provider, used instead of pi's stored credential for this " +
-        'request. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.'
+        'request. Empty or only spaces is refused with 400; leave the header out to use the ' +
+        'stored credential. ' +
+        'Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.'
     })
 })
 
@@ -256,7 +261,8 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
     400: errorResponse(
       'Invalid JSON, an invalid field value or message, a conversation longer than the model ' +
         'takes (`context_length_exceeded`), a request the provider refused as invalid ' +
-        '(`upstream_invalid_request`), or the old `X-Pi-Upstream-Api-Key` header.'
+        '(`upstream_invalid_request`), the old `X-Pi-Upstream-Api-Key` header, or an empty ' +
+        '`X-Switchboard-Upstream-Api-Key`.'
     ),
     401: errorResponse(
       'Proxy auth failed, or the provider rejected the key sent in ' +
@@ -268,7 +274,11 @@ export const createChatCompletionDescription: DescribeRouteOptions = {
     ),
     413: errorResponse('The body is over the size limit.'),
     422: errorResponse('A field the proxy does not accept (`unsupported_parameter`).'),
-    429: errorResponse('The provider rate-limited the request.'),
+    429: errorResponse(
+      'The provider rate-limited the request (`rate_limit`, with `retry-after` and ' +
+        "`retry-after-ms` when the provider said when), or the login's usage limit is reached " +
+        '(`insufficient_quota`, with `x-should-retry: false`).'
+    ),
     502: errorResponse(
       "The provider refused pi's stored credential (`upstream_auth_error`), pi has no " +
         "credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent " +
@@ -364,7 +374,8 @@ export const docsPageDescription: DescribeRouteOptions = {
 
 /**
  * Documents the unsupported endpoints by hand: hono-openapi leaves wildcard routes out, and an
- * `ALL` route has no method to document. Each gets `GET` and `POST`, marked deprecated.
+ * `ALL` route has no method to document. Each gets `GET` and `POST`, marked deprecated, with the
+ * 401 every `/v1` route answers before the 404 while proxy auth is on.
  *
  * @returns the path items, keyed by OpenAPI path (`/*` as a `{path}` parameter)
  */
@@ -386,9 +397,13 @@ function unsupportedPaths(): Record<string, Record<string, unknown>> {
           tags: [NOT_SUPPORTED_TAG],
           summary: 'Not supported by this proxy',
           description:
-            'Any method answers 404 `invalid_request_error`; nothing reaches a provider.',
+            'Any method answers 404 `invalid_request_error`; nothing reaches a provider. ' +
+            'With proxy auth on, a request without the token gets the 401 first.',
           deprecated: true,
-          responses: { 404: { $ref: `#/components/responses/${NOT_SUPPORTED_RESPONSE}` } }
+          responses: {
+            401: UNAUTHORIZED,
+            404: { $ref: `#/components/responses/${NOT_SUPPORTED_RESPONSE}` }
+          }
         }
       ])
     )

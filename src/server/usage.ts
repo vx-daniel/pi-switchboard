@@ -58,9 +58,15 @@ const usageFields = {
     .meta({ description: "Average time to a stream's first event." }),
   attempts: z.int().meta({ description: 'Upstream calls, fallbacks included.' }),
   fallbacks: z.int(),
-  input_tokens: z.int(),
+  input_tokens: z.int().meta({
+    description:
+      'Uncached input tokens. The prompt is these plus `cache_read_tokens` and `cache_write_tokens`.'
+  }),
   output_tokens: z.int(),
-  cache_tokens: z.int().meta({ description: 'Cache reads and writes.' }),
+  cache_read_tokens: z.int().meta({ description: "Input tokens read from the provider's cache." }),
+  cache_write_tokens: z
+    .int()
+    .meta({ description: "Input tokens written to the provider's cache." }),
   cost_usd: z.number()
 }
 
@@ -127,7 +133,8 @@ function usageBody(usage: UsageStats): Omit<Usage['models'][number], 'model'> {
     fallbacks: usage.fallbacks,
     input_tokens: usage.inputTokens,
     output_tokens: usage.outputTokens,
-    cache_tokens: usage.cacheTokens,
+    cache_read_tokens: usage.cacheReadTokens,
+    cache_write_tokens: usage.cacheWriteTokens,
     cost_usd: usage.costUsd
   }
 }

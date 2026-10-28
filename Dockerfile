@@ -4,7 +4,7 @@
 # every dependency, so the login and the server always run the same pi.
 #
 # Build: docker build -t pi-switchboard .
-# Run:   see compose.yaml and README.md ("Docker").
+# Run:   see compose.yaml and docs/docker.md.
 
 # Digest-pinned: a rebuild must not change the runtime silently. The digest is the multi-platform
 # index (linux/amd64 and linux/arm64, among others). Bump the tag and the digest together.
@@ -34,8 +34,8 @@ RUN corepack enable && pnpm install --prod --frozen-lockfile --ignore-scripts &&
     find node_modules/.pnpm -type f \( -name '*.map' -o -name '*.ts' -o -name '*.mts' -o -name '*.cts' \) -delete
 
 FROM ${NODE_IMAGE}
-# pi keeps its login in PI_CODING_AGENT_DIR, the one writable place (a volume); the proxy reads
-# its own proxy-config.json from there too. `pi` is on PATH for the login command.
+# pi keeps its login in PI_CODING_AGENT_DIR, the one writable place (a volume); the proxy keeps its
+# proxy-config.json and its stats file there too. `pi` is on PATH for the login command.
 ENV HOME=/home/node \
     PI_CODING_AGENT_DIR=/home/node/.pi/agent \
     PI_SWITCHBOARD_HOST=0.0.0.0 \

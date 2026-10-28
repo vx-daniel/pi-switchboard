@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import { piAgentDir } from '@proxy/config/agent-dir'
 import { proxyLogger } from '@proxy/logging'
 import { type FinishedRequest, onActiveRequestsChange } from '@proxy/server/active-requests'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 import { onRouteTotalsChange, type RouteEvent } from '@proxy/server/route-totals'
 import { openStatsStore } from '@proxy/stats/store'
 import type {
@@ -56,11 +57,11 @@ export interface RecorderOptions {
   readonly flushMs?: number
   /** How many days of rows to keep. */
   readonly retentionDays?: number
-  /** The clock, for the minute an event falls in. */
+  /** The clock, for the minute a route event falls in and the prune cutoff. */
   readonly now?: () => number
 }
 
-/** A recorder's mutable counts, keyed by minute and route as JSON. */
+/** A recorder's mutable counts, each keyed by its row's primary key as JSON. */
 interface Pending {
   readonly requests: Map<string, { -readonly [Field in keyof RequestMinute]: RequestMinute[Field] }>
   readonly attempts: Map<string, { -readonly [Field in keyof AttemptMinute]: AttemptMinute[Field] }>
@@ -99,7 +100,8 @@ function addFinished(pending: Pending, request: FinishedRequest, model: string):
     durationMsTotal: 0,
     durationMsMax: 0,
     firstEventMsTotal: 0,
-    firstEventCount: 0
+    firstEventCount: 0,
+    promptCacheKeyRequests: 0
   }
   const duration = Math.max(0, request.endedAt - request.startedAt)
   row.requests += 1
@@ -109,6 +111,7 @@ function addFinished(pending: Pending, request: FinishedRequest, model: string):
     row.firstEventMsTotal += Math.max(0, request.firstEventAt - request.startedAt)
     row.firstEventCount += 1
   }
+  if (request.promptCacheKey) row.promptCacheKeyRequests += 1
   pending.requests.set(id, row)
 }
 
@@ -299,6 +302,7 @@ export function recordStatsToFile(): (() => void) | undefined {
       path,
       reason: errorMessage(error)
     })
+    recordConsoleEvent(`Stats are off: could not open ${path}`, 'warning')
     return undefined
   }
   const stopRecorder = startStatsRecorder(store)
@@ -308,5 +312,6 @@ export function recordStatsToFile(): (() => void) | undefined {
   }
   process.once('exit', stop)
   statsLogger.info('Recording stats to {path}', { path })
+  recordConsoleEvent(`Recording stats to ${path}`)
   return stop
 }

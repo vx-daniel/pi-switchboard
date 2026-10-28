@@ -10,6 +10,7 @@ import { proxyLogger } from '@proxy/logging'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
 import { internalError, invalidRequest } from '@proxy/server/errors'
 import { createHealthRoutes } from '@proxy/server/health'
+import { hostOriginGuardMiddleware } from '@proxy/server/host-origin-guard'
 import { requestLogMiddleware } from '@proxy/server/http-requests'
 import { HTTP_INTERNAL_SERVER_ERROR, HTTP_NOT_FOUND } from '@proxy/server/http-status'
 import {
@@ -17,8 +18,8 @@ import {
   disconnectMiddleware,
   proxyAuthMiddleware,
   rejectedChatMiddleware,
-  renamedHeaderMiddleware,
-  requestIdMiddleware
+  requestIdMiddleware,
+  upstreamKeyHeaderMiddleware
 } from '@proxy/server/middleware'
 import {
   DOCS_PATH,
@@ -42,9 +43,10 @@ const lifecycleLogger = proxyLogger('server')
 const httpLogger = proxyLogger('server', 'http')
 
 /**
- * Builds the proxy's Hono app: request ID, disconnect and body size middleware on every path,
- * the OpenAPI document and the docs page, proxy auth on `/v1/*` and the `/healthz/<check>` detail
- * endpoints, then the health and OpenAI routes, and an OpenAI-style 404 for anything else.
+ * Builds the proxy's Hono app: request ID, request log, disconnect, host/origin guard (when on)
+ * and body size middleware on every path, the OpenAPI document and the docs page, proxy auth on
+ * `/v1/*` and the `/healthz/<check>` detail endpoints, then the health and OpenAI routes, and an
+ * OpenAI-style 404 for anything else.
  *
  * @remarks
  * Three paths skip proxy auth: `GET /healthz`, so liveness probes need no token, and the OpenAPI
@@ -53,8 +55,8 @@ const httpLogger = proxyLogger('server', 'http')
  * that runs; `/docs` is outside `/v1`. The docs route is always registered, so the document is
  * the same whatever the config; with `docsUi` off it answers 404.
  *
- * @param config - the server config: proxy auth mode, body size limit, upstream timeout, remote
- *   images, docs UI
+ * @param config - the server config: proxy auth mode, the host/origin guard, body size limit,
+ *   upstream timeout, remote images, docs UI
  * @param configReader - where the model exposure config comes from; `undefined` reads the config
  *   file and pi's settings on each request ({@link fileConfigReader})
  * @param remoteImageFetch - how remote images are fetched when `remoteImagesEnabled` is on;
@@ -79,6 +81,10 @@ export function createApp(
   // Ahead of the body size limit and proxy auth, so a chat request they turn away is recorded too.
   app.use('/v1/chat/completions', rejectedChatMiddleware())
   app.use('/v1/responses', rejectedChatMiddleware())
+  // The host/origin guard (#188), when on: after the request log and the rejected-chat record, so
+  // a refusal is listed; ahead of the body and proxy auth, so it never depends on a token being
+  // set. Every path, `/healthz` and the docs page included.
+  if (config.hostOriginGuardEnabled) app.use('*', hostOriginGuardMiddleware())
   app.use('*', bodySizeLimitMiddleware(config))
 
   // The OpenAPI document and the docs page, open like `/healthz`: registered before proxy auth.
@@ -106,10 +112,11 @@ export function createApp(
 
   const authMiddleware = proxyAuthMiddleware(proxyAuth)
   app.use('/v1/*', authMiddleware)
-  // The old upstream key header (#65), on the one route that reads the key, after proxy auth: an
-  // unauthenticated caller gets the 401 first, and probes of the open paths are not affected.
-  app.use('/v1/chat/completions', renamedHeaderMiddleware())
-  app.use('/v1/responses', renamedHeaderMiddleware())
+  // The upstream key header (old name #65, empty #207), on the routes that read the key, after
+  // proxy auth: an unauthenticated caller gets the 401 first, and probes of the open paths are
+  // not affected.
+  app.use('/v1/chat/completions', upstreamKeyHeaderMiddleware())
+  app.use('/v1/responses', upstreamKeyHeaderMiddleware())
   // `/healthz` itself stays open for liveness probes; its detail endpoints name providers and
   // models. Not `/healthz/*`: Hono's wildcard also matches the bare `/healthz`.
   app.use('/healthz/:check{.+}', authMiddleware)

@@ -25,6 +25,7 @@ import {
 } from '../fixtures/mock-provider'
 import { jsonBody, testApp, testConfig } from '../helpers'
 
+const HTTP_OK = 200
 const HTTP_BAD_REQUEST = 400
 const HTTP_NOT_FOUND = 404
 const HTTP_UNPROCESSABLE_ENTITY = 422
@@ -193,6 +194,21 @@ describe('the Responses API', () => {
 
     expect([without.status, withToken.status]).toEqual([401, HTTP_NOT_FOUND])
     expect(JSON.stringify(await jsonBody(without))).not.toContain('responses-api')
+  })
+
+  // Catches the empty-key check left off this route: the empty key would reach the provider and
+  // come back as a 502 blaming it (#207).
+  test('refuses an empty X-Switchboard-Upstream-Api-Key with 400, calling nothing', async () => {
+    const before = mock.requests.length
+    const response = await app().request('/v1/responses', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Switchboard-Upstream-Api-Key': '' },
+      body: JSON.stringify({ model: 'mock/text', input: 'Hi' })
+    })
+
+    expect(response.status).toBe(HTTP_BAD_REQUEST)
+    expect(JSON.stringify(await jsonBody(response))).toContain('header is empty')
+    expect(mock.requests.length).toBe(before)
   })
 
   // Catches a response the SDK can't read: `output_text` is the SDK's own join of the message
@@ -534,6 +550,77 @@ describe('the Responses API', () => {
     expect(answer.status).toBe(HTTP_BAD_REQUEST)
     expect(answer.body).toMatchObject({ error: { param: 'input.0.encrypted_content' } })
   })
+
+  // Catches an item of a type the proxy doesn't take reported at the whole item instead of its
+  // `type`: every branch's `type` or `role` differs, so all are set aside, and then compared again
+  // as before #318 rather than giving up at the union.
+  test('refuses an input item of an unknown type at its type', async () => {
+    const answer = await post({
+      model: 'mock/text',
+      input: [{ type: 'web_search_call', id: 'ws_1', status: 'completed' }]
+    })
+
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
+    expect(answer.body).toMatchObject({ error: { param: 'input.0.type' } })
+  })
+
+  // Catches a function tool's or a json_schema format's description trimmed on this route's own
+  // schema (#255): the model reads it, and a list or a trailing example lost its layout.
+  test('keeps the whitespace of tool and json_schema descriptions', async () => {
+    const tool = '  Run it.\n  - once\n'
+    const format = '\n  one field\n'
+    const answer = await post({
+      model: 'mock/text',
+      input: 'Hi',
+      tools: [{ type: 'function', name: 'run', description: tool }],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'answer',
+          description: format,
+          schema: { type: 'object' }
+        }
+      }
+    })
+
+    expect(answer.status).toBe(HTTP_OK)
+    expect(lastUpstream()['tools']).toEqual([
+      expect.objectContaining({ function: expect.objectContaining({ description: tool }) })
+    ])
+    expect(lastUpstream()['response_format']).toMatchObject({
+      json_schema: { description: format }
+    })
+  })
+
+  // Catches a replayed assistant turn refused for the empty `annotations`/`logprobs` the SDK
+  // echoes back, or a non-empty one accepted though the proxy can't send it on, or refused with
+  // another item type's field named (#318: it said `content.0.type`, "expected reasoning_text").
+  test.each(['annotations', 'logprobs'])(
+    'takes an empty %s on a replayed output_text, and refuses a non-empty one',
+    async (field) => {
+      const turn = (value: unknown[]): unknown => ({
+        model: 'mock/text',
+        input: [
+          { role: 'user', content: 'Hi' },
+          {
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'output_text', text: 'Hello', [field]: value }]
+          },
+          { role: 'user', content: 'Again' }
+        ]
+      })
+
+      const empty = await post(turn([]))
+      const filled = await post(turn([{ token: 'Hello', logprob: 0 }]))
+
+      expect(empty.status).toBe(HTTP_OK)
+      expect(filled.status).toBe(HTTP_BAD_REQUEST)
+      expect(filled.body).toMatchObject({
+        error: { param: expect.stringMatching(new RegExp(`^input\\.1\\.content\\.0\\.${field}`)) }
+      })
+    }
+  )
 
   // Catches the stored-response operations answering the generic unknown-route 404, or worse,
   // falling through to another route.

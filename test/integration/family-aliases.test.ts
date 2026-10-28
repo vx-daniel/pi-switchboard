@@ -149,16 +149,21 @@ describe('a family alias', () => {
 
     expect(first.upstream).toEqual(['claude-opus-5'])
     expect(before.body).toMatchObject({
-      familyAliases: [
-        {
+      familyAliases: expect.arrayContaining([
+        expect.objectContaining({
           alias: 'opus-moving',
           resolved: 'anthropic/claude-opus-5',
           newerHidden: 'anthropic/claude-opus-5-5'
-        }
-      ]
+        })
+      ])
     })
     expect(moved.upstream).toEqual(['claude-opus-5-5'])
-    expect(warnings.filter((message) => message.includes('now follows'))).toEqual([
+    // The built-in opus-latest moves with the same family; this test's alias is its own.
+    expect(
+      warnings.filter(
+        (message) => message.includes('now follows') && message.includes('opus-moving')
+      )
+    ).toEqual([
       'Alias "opus-moving" now follows "anthropic/claude-opus" to "anthropic/claude-opus-5-5", not "anthropic/claude-opus-5"'
     ])
   })
@@ -215,13 +220,24 @@ describe('a family alias', () => {
     })
   })
 
-  // Catches the new field or a 503 appearing for a config with no family alias.
-  test('a config without family aliases reports none, and stays healthy', async () => {
+  // Catches the built-in -latest aliases missing without a config entry, configured in a way that
+  // fails the health check, or answered by an older member than a configured family alias would be.
+  test('with no family alias configured, the built-in opus-latest follows the newest', async () => {
     setConfig({ opus: 'anthropic/claude-opus-5' }, OPUS)
 
     const { status, body } = await health()
+    const answer = await ask('opus-latest')
 
     expect(status).toBe(200)
-    expect(body).toMatchObject({ familyAliases: [], aliasDiagnostics: [] })
+    expect(body).toMatchObject({
+      familyAliases: expect.arrayContaining([
+        expect.objectContaining({ alias: 'opus-latest', resolved: 'anthropic/claude-opus-5-5' })
+      ])
+    })
+    expect(answer.upstream).toEqual(['claude-opus-5-5'])
+    expect(answer.body).toMatchObject({
+      model: 'anthropic/claude-opus-5-5',
+      x_pi: { alias: 'opus-latest' }
+    })
   })
 })

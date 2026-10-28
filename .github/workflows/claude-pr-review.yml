@@ -5,7 +5,7 @@ name: Claude PR Review
 # its comment-list job (that repository's `scripts/docs/touched-comments.ts` has no counterpart here).
 #
 # BY HAND: Actions → Claude PR Review → Run workflow, with the pull request's number. It reviews the whole
-# pull request. This is not a required status check (ci.yml and secret-scan.yml are).
+# pull request. This is not a required status check (only ci.yml's `gate` is, #200).
 #
 # ⚠ NO `track_progress`. claude-code-action (v1.0.217, `src/modes/detector.ts`) throws when `track_progress`
 # is set on an event other than pull_request or issues, and a manual run is `workflow_dispatch`.
@@ -44,11 +44,8 @@ concurrency:
   group: claude-pr-review-${{ inputs.pull_request }}
   cancel-in-progress: true
 
-permissions:
-  contents: read
-  pull-requests: write
-  issues: write
-  id-token: write
+# Nothing by default: each job asks for what it uses (#207 spike, zizmor `excessive-permissions`).
+permissions: {}
 
 jobs:
   # A manual run carries no pull request event, so the fields the review needs are read here, once.
@@ -83,6 +80,13 @@ jobs:
       needs.pull-request.outputs.draft == 'false' &&
       needs.pull-request.outputs.author_type != 'Bot'
     timeout-minutes: 10
+    # The review reads the checkout, posts its comment (`pull-requests`, `issues`) and authenticates
+    # the action (`id-token`); only this job holds those.
+    permissions:
+      contents: read
+      pull-requests: write
+      issues: write
+      id-token: write
 
     steps:
       # THE MISSING-TOKEN GUARD, and it must be a step rather than a job-level `if:` — GitHub does not make
@@ -117,10 +121,16 @@ jobs:
       # reviewer would read the default branch's files while judging the pull request's diff.
       - name: Checkout PR head
         if: steps.token.outputs.present == 'true'
-        uses: actions/checkout@v6
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ needs.pull-request.outputs.head_sha }}
           fetch-depth: 1
+
+      # When the review started, so the indicator below can tell this run's comment from an earlier one.
+      - name: Note the start time
+        id: started
+        if: steps.token.outputs.present == 'true'
+        run: echo "at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - name: Run Claude review
         id: claude
@@ -191,7 +201,7 @@ jobs:
             PR body claims: {one-line summary of the PR's verification claims, or "none stated"}.
 
             ### Constitution
-            {each principle (I–V) the diff affects: complies / conflicts, with the line. OR "No principle affected"}
+            {each principle (I–VI) the diff affects: complies / conflicts, with the line. OR "No principle affected"}
 
             ### Risk Assessment
             Correctness: {one line}
@@ -233,6 +243,10 @@ jobs:
         # missing, #1817 above) and still set it. So the step's own outcome is read FIRST and on its own: any
         # non-success is a failure, whether or not a file was written.
         #
+        # Neither is a successful step with a file: a run on #296 went green and posted nothing. So the
+        # review counts only once `claude[bot]` has commented since the start time; without that comment,
+        # or without a run at all, the job fails after posting the indicator, and the run shows ❌.
+        #
         # Upserted by a hidden marker so repeated runs update one comment instead of spamming the PR, and only
         # this workflow's own comment (`github-actions[bot]`). One comment object per line: `--paginate` runs
         # `--jq` on each page, so a filter that builds one array per page is not one JSON document past 30
@@ -245,17 +259,34 @@ jobs:
           SHA: ${{ needs.pull-request.outputs.head_sha }}
           EXECUTION_FILE: ${{ steps.claude.outputs.execution_file }}
           CLAUDE_OUTCOME: ${{ steps.claude.outcome }}
+          STARTED_AT: ${{ steps.started.outputs.at }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           set -euo pipefail
           MARKER='<!-- claude-run-status: pr-review -->'
+          # A review is a `claude[bot]` comment in one of the prompt's two forms (the `## Code Review`
+          # template, or the one-line "Approve" note for a whitespace- or comment-only diff) posted
+          # since the start time; ISO 8601 UTC timestamps compare as strings. With no start time,
+          # every earlier review would match, so none is looked for. A failed lookup counts as no
+          # review rather than ending the script before the indicator is posted.
+          review=''
+          if [ -n "${STARTED_AT}" ]; then
+            review="$(gh api "repos/${REPO}/issues/${NUMBER}/comments" --paginate \
+              --jq ".[] | select(.user.login == \"claude[bot]\" and .created_at >= \"${STARTED_AT}\" and (.body | startswith(\"## Code Review\") or startswith(\"Approve\"))) | .html_url" \
+              | sed -n 1p)" || review=''
+          fi
+          failed=true
           if [ "${CLAUDE_OUTCOME}" != "success" ]; then
             body="${MARKER}"$'\n'"❌ **Claude PR review failed** on \`${SHA:0:7}\` (step outcome: ${CLAUDE_OUTCOME}) — no verdict was posted. See the [run](${RUN_URL})."
-          elif [ -n "${EXECUTION_FILE}" ]; then
-            body="${MARKER}"$'\n'"✅ **Claude PR review** ran on \`${SHA:0:7}\`."
-          else
-            echo "::warning::Claude PR review did not run despite a token being present."
+          elif [ -z "${EXECUTION_FILE}" ]; then
+            echo "::error::Claude PR review did not run despite a token being present."
             body="${MARKER}"$'\n'"⚠️ **Claude PR review did not run**, and the \`CLAUDE_CODE_OAUTH_TOKEN\` secret IS set. Check the workflow logs — the token may be expired or invalid."
+          elif [ -z "${review}" ]; then
+            echo "::error::Claude PR review ran but posted no review comment."
+            body="${MARKER}"$'\n'"❌ **Claude PR review ran but posted no review** on \`${SHA:0:7}\`. Run it again; see the [run](${RUN_URL})."
+          else
+            failed=false
+            body="${MARKER}"$'\n'"✅ **Claude PR review** ran on \`${SHA:0:7}\`: [the review](${review})."
           fi
           # Upsert by hidden marker: PATCH the existing sticky comment, else POST a new one.
           existing="$(gh api "repos/${REPO}/issues/${NUMBER}/comments" --paginate \
@@ -265,3 +296,4 @@ jobs:
           else
             gh api -X POST "repos/${REPO}/issues/${NUMBER}/comments" -f body="${body}" >/dev/null
           fi
+          if [ "${failed}" = true ]; then exit 1; fi

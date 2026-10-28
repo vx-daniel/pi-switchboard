@@ -20,9 +20,11 @@ import {
   UnusableProxyAuthError
 } from '@proxy/config/env'
 import {
+  authOffRisk,
   describeConfigFileProblem,
   getConfigPath,
   intBounds,
+  isLoopbackHost,
   parseIntText,
   ProxyConfigSchema
 } from '@proxy/config/schema'
@@ -36,6 +38,7 @@ import {
 } from '@proxy/logging'
 import { getAvailableModels } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { recordStatsToFile } from '@proxy/stats/recorder'
 import type * as z from 'zod'
@@ -67,6 +70,11 @@ export const SERVER_ARGS = {
   'auth-token': {
     type: 'string',
     description: 'Bearer token for proxy authentication'
+  },
+  'host-origin-guard': {
+    type: 'boolean',
+    description:
+      'Refuse requests a web page could send: a Host a DNS-rebinding page would use, or another Origin (off by default)'
   },
   'remote-images': {
     type: 'boolean',
@@ -107,6 +115,7 @@ export interface CliArgs {
   'host'?: string | undefined
   'port'?: string | undefined
   'auth-token'?: string | undefined
+  'host-origin-guard'?: boolean | undefined
   'remote-images'?: boolean | undefined
   'docs-ui'?: boolean | undefined
   'responses-api'?: boolean | undefined
@@ -115,16 +124,6 @@ export interface CliArgs {
   'upstream-timeout'?: string | undefined
   'log-level'?: string | undefined
   'log-format'?: string | undefined
-}
-
-/**
- * Checks whether a bind address only accepts connections from this machine.
- *
- * @param host - The bind address.
- * @returns Whether `host` is `localhost`, `::1` or in `127.0.0.0/8`.
- */
-export function isLoopbackHost(host: string): boolean {
-  return host === 'localhost' || host === '::1' || host.startsWith('127.')
 }
 
 /** An integer flag: which flag, which override it sets, and the bounds its value must satisfy. */
@@ -187,6 +186,9 @@ function copyPlainFlags(args: CliArgs, cli: CliOverrides): void {
   if (args['auth-token'] !== undefined) {
     cli.authToken = args['auth-token']
   }
+  if (args['host-origin-guard'] !== undefined) {
+    cli.hostOriginGuard = args['host-origin-guard']
+  }
   if (args['remote-images'] !== undefined) {
     cli.remoteImages = args['remote-images']
   }
@@ -202,7 +204,8 @@ function copyPlainFlags(args: CliArgs, cli: CliOverrides): void {
 }
 
 /**
- * Builds CLI overrides from parsed args.
+ * Builds CLI overrides from parsed args: the settings the flags set, which win over the
+ * environment and the config file. The console reads them to say which settings a flag holds.
  *
  * @remarks
  * {@link invalidFlag} has refused any value outside its bounds before this runs, so an integer
@@ -211,7 +214,7 @@ function copyPlainFlags(args: CliArgs, cli: CliOverrides): void {
  * @param args - The parsed CLI flags.
  * @returns The overrides for {@link loadConfig}.
  */
-function buildCliOverrides(args: CliArgs): CliOverrides {
+export function buildCliOverrides(args: CliArgs): CliOverrides {
   const cli: CliOverrides = {}
   copyPlainFlags(args, cli)
   for (const { flag, key, schema } of INT_FLAGS) {
@@ -273,12 +276,30 @@ export interface LogOutput {
 }
 
 /**
+ * Loads the config with the flags given, as logging already stands: the console's restart reads
+ * the saved settings again this way, and applies the log level only once the new server listens.
+ *
+ * @param args - The parsed CLI flags.
+ * @returns The config; `undefined` when proxy auth is set but cannot be applied, which is logged.
+ * @throws whatever loading the config throws, other than {@link UnusableProxyAuthError}
+ */
+export function reloadConfig(args: CliArgs): ServerConfig | undefined {
+  try {
+    return loadConfig(buildCliOverrides(args))
+  } catch (error) {
+    if (!(error instanceof UnusableProxyAuthError)) throw error
+    logUnusableProxyAuth(error.invalid)
+    return undefined
+  }
+}
+
+/**
  * Configures logging, then loads the config.
  *
  * @remarks
  * Config loading logs too, so logging is configured first with the level the CLI or env asks for,
  * then again with the fully resolved level (which may come from the config file). The logging
- * flags have already been checked ({@link invalidLoggingFlag}).
+ * flags have already been checked ({@link invalidFlag}).
  *
  * @param args - The parsed CLI flags.
  * @param output - Where log lines go, and in which format.
@@ -295,14 +316,8 @@ export function loadConfigWithLogging(args: CliArgs, output: LogOutput): ServerC
   )
   configureLogging({ level: earlyLogLevel, format, write })
 
-  let config: ServerConfig
-  try {
-    config = loadConfig(buildCliOverrides(args))
-  } catch (error) {
-    if (!(error instanceof UnusableProxyAuthError)) throw error
-    logUnusableProxyAuth(error.invalid)
-    return undefined
-  }
+  const config = reloadConfig(args)
+  if (config === undefined) return undefined
   configureLogging({ level: config.logLevel, format, write })
   const envFormat = process.env.PI_SWITCHBOARD_LOG_FORMAT
   if (envFormat !== undefined && !isLogFormat(envFormat)) {
@@ -319,8 +334,8 @@ export function loadConfigWithLogging(args: CliArgs, output: LogOutput): ServerC
  * Logs the effective config and how proxy auth is set, never the token itself.
  *
  * @remarks
- * Auth off is a warning when the proxy listens beyond loopback, and debug otherwise; a token needs
- * no line.
+ * Auth off is a warning wherever the proxy listens, saying who can use it ({@link authOffRisk})
+ * and how to stop them; a token needs no line.
  *
  * @param config - the resolved server config
  */
@@ -330,6 +345,7 @@ export function logEffectiveConfig(config: ServerConfig): void {
     host: config.host,
     port: config.port,
     proxyAuthMode: config.proxyAuth.kind,
+    hostOriginGuardEnabled: config.hostOriginGuardEnabled,
     agenticEnabled: config.agenticEnabled,
     remoteImagesEnabled: config.remoteImagesEnabled,
     docsUiEnabled: config.docsUiEnabled,
@@ -344,25 +360,27 @@ export function logEffectiveConfig(config: ServerConfig): void {
     logLevel: config.logLevel
   })
   if (config.proxyAuth.kind === 'token') return
-  if (isLoopbackHost(config.host)) {
-    lifecycleLogger.debug('Proxy auth is disabled: /v1 endpoints accept unauthenticated requests')
-  } else {
-    // Off-loopback without auth is an exposure worth seeing at the default level.
-    lifecycleLogger.warn(
-      'Proxy auth is disabled and the proxy listens on {host}: any client that can reach it can use your provider credentials',
-      { host: config.host }
-    )
-  }
+  // Auth off is a warning wherever the proxy listens (#188): on loopback too, web pages reach it.
+  const advice =
+    isLoopbackHost(config.host) && !config.hostOriginGuardEnabled
+      ? 'Set a token (--auth-token, PI_SWITCHBOARD_AUTH_TOKEN or authToken), or at least turn on the host/origin guard (--host-origin-guard)'
+      : 'Set a token (--auth-token, PI_SWITCHBOARD_AUTH_TOKEN or authToken)'
+  lifecycleLogger.warn('Proxy auth is off on {host}: {risk}. {advice}', {
+    host: config.host,
+    risk: authOffRisk(config.host, config.hostOriginGuardEnabled),
+    advice
+  })
 }
 
 /**
- * Starts the HTTP server and waits until it listens. The model runtime must be initialized
- * (`initRegistry`).
+ * Starts the HTTP server and waits until it listens, without recording stats. The model runtime
+ * must be initialized (`initRegistry`).
  *
  * @remarks
  * A port in use or an address that cannot be bound rejects here, before the caller goes on (the
  * console takes over the terminal only after this), instead of surfacing later as an uncaught
- * `error` event.
+ * `error` event. The console records stats itself, so a restart can hand the recorder from one
+ * server to the next without both counting the same requests (#288).
  *
  * @param config - the resolved server config
  * @param proxyAuth - the proxy auth the server applies; by default one made from
@@ -370,7 +388,7 @@ export function logEffectiveConfig(config: ServerConfig): void {
  * @returns the listening server
  * @throws Error when the server cannot listen, such as `EADDRINUSE`
  */
-export async function listen(
+export async function openServer(
   config: ServerConfig,
   proxyAuth?: ProxyAuthSwitch
 ): Promise<ServerType> {
@@ -388,12 +406,28 @@ export async function listen(
     server.once('error', failed)
     server.once('listening', listening)
   })
+  const modelCount = getAvailableModels().length
   lifecycleLogger.info('Listening on http://{host}:{port} with {modelCount} models', {
     host: config.host,
     port: config.port,
-    modelCount: getAvailableModels().length,
+    modelCount,
     logLevel: config.logLevel
   })
+  recordConsoleEvent(
+    `Listening on http://${config.host}:${String(config.port)} with ${String(modelCount)} models`
+  )
+  return server
+}
+
+/**
+ * Starts the HTTP server ({@link openServer}) and, with stats on, records them until it closes.
+ *
+ * @param config - the resolved server config
+ * @returns the listening server
+ * @throws Error when the server cannot listen, such as `EADDRINUSE`
+ */
+export async function listen(config: ServerConfig): Promise<ServerType> {
+  const server = await openServer(config)
   // Written until the server closes, or the process exits without closing it.
   const stopStats = config.statsEnabled ? recordStatsToFile() : undefined
   if (stopStats !== undefined) server.once('close', stopStats)

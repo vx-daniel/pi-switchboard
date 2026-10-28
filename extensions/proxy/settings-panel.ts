@@ -9,6 +9,8 @@ import { Container, type SettingItem, SettingsList, Text } from '@earendil-works
 import { getLogLevels, isLogLevel } from '@logtape/logtape'
 import {
   configFileAuthTokenInvalid,
+  configFileProblem,
+  describeConfigFileProblem,
   getConfigPath,
   isModelExposureMode,
   isPublicModelIdMode,
@@ -49,8 +51,9 @@ const ID_MODE_DESCRIPTIONS: Record<string, string> = {
 
 /** Description shown for each model exposure mode. */
 const EXPOSURE_MODE_DESCRIPTIONS: Record<string, string> = {
-  scoped: "Expose models from pi's configured auth (default)",
-  all: 'Expose all registered models, including those without auth',
+  scoped:
+    "Expose the models pi's enabledModels setting selects; every model when it has none (default)",
+  all: 'Expose every model with a login or key',
   custom: 'Expose only manually selected models'
 }
 
@@ -159,6 +162,7 @@ const SETTING_DISPLAY_VALUES = {
   'host': (config: ProxyConfig) => config.host,
   'port': (config: ProxyConfig) => String(config.port),
   'authToken': (config: ProxyConfig) => authDisplay(config),
+  'hostOriginGuard': (config: ProxyConfig) => (config.hostOriginGuard ? 'on' : 'off'),
   'remoteImages': (config: ProxyConfig) => (config.remoteImages ? 'on' : 'off'),
   'docsUi': (config: ProxyConfig) => (config.docsUi ? 'on' : 'off'),
   'stats': (config: ProxyConfig) => (config.stats ? 'on' : 'off'),
@@ -197,8 +201,8 @@ function getDisplayValue(config: ProxyConfig, id: string): string {
 }
 
 /**
- * Builds the server rows: lifetime, host, port, auth, remote images, body size, timeout and log
- * level.
+ * Builds the server rows: lifetime, host, port, auth, the host/origin guard, remote images, docs
+ * UI, stats, body size, timeout and log level.
  *
  * @param config - the current proxy config
  * @returns the server setting items
@@ -227,6 +231,14 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
       values: ['4141', '8080', '3000', '9090']
     },
     authSettingItem(config),
+    {
+      id: 'hostOriginGuard',
+      label: 'Host/origin guard',
+      description:
+        'Refuse requests a web page could send (a DNS-rebinding Host, another Origin); for a proxy without a token',
+      currentValue: config.hostOriginGuard ? 'on' : 'off',
+      values: ['off', 'on']
+    },
     {
       id: 'remoteImages',
       label: 'Remote images',
@@ -396,6 +408,7 @@ const CONFIG_UPDATERS: Record<Exclude<SettingId, 'authToken'>, ConfigUpdater> = 
     ...config,
     port: Math.max(1, Math.min(MAX_PORT, Number.parseInt(value, 10) || config.port))
   }),
+  'hostOriginGuard': (config, value) => ({ ...config, hostOriginGuard: value === 'on' }),
   'remoteImages': (config, value) => ({ ...config, remoteImages: value === 'on' }),
   'docsUi': (config, value) => ({ ...config, docsUi: value === 'on' }),
   'stats': (config, value) => ({ ...config, stats: value === 'on' }),
@@ -492,7 +505,8 @@ export function applySetting(state: ProxyState, id: string, value: string): stri
 
 /**
  * Opens the settings panel as an overlay; each change is applied, saved and followed by Zed
- * auto-sync.
+ * auto-sync. A config file that can't be read or parsed is not opened: it would show the defaults
+ * it loads as, and no change could be saved over it (#288).
  *
  * @param state - the extension state; its config is reloaded from the file first
  * @param context - the command context, used for the overlay and notifications
@@ -501,6 +515,14 @@ export async function openSettingsPanel(
   state: ProxyState,
   context: ExtensionCommandContext
 ): Promise<void> {
+  const problem = configFileProblem()
+  if (problem !== undefined) {
+    context.ui.notify(
+      `proxy-config.json ${describeConfigFileProblem(problem)}: fix or remove it, or run /proxy reset. Nothing is saved over it until then.`,
+      'warning'
+    )
+    return
+  }
   state.config = loadConfigFromFile()
 
   await context.ui.custom<undefined>(

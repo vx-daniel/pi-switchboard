@@ -16,7 +16,6 @@
 
 import { chatCompletionRequestSchema, rejectedFields } from '@proxy/openai/schemas'
 import { isRecord } from '@proxy/utils/guards'
-import { Ajv2020 } from 'ajv/dist/2020'
 import { afterAll, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
@@ -40,6 +39,7 @@ import {
   requiredOf,
   subset
 } from '../fixtures/openai-spec/schema'
+import { violations } from '../fixtures/openai-spec/violations'
 import { jsonBody, testApp, testConfig } from '../helpers'
 
 const HTTP_OK = 200
@@ -58,33 +58,9 @@ const SHORT_UPSTREAM_TIMEOUT_MS = 50
 /** Smaller than any chat request body. */
 const TINY_BODY_LIMIT = 10
 const PROXY_TOKEN = 'notarealsecret-openai-spec-token'
-/** A field the proxy rejects by name; a computed key, since its name is one letter (`n`). */
+/** A field the proxy rejects by name, whatever its value. */
 const REJECTED_FIELD = rejectedFields[0]
-/** The `$id` the pinned subset is registered under. */
-const SPEC_ID = 'openai'
 const USAGE = { prompt_tokens: 3, completion_tokens: 2 }
-
-// `strict: false`: the spec carries OpenAPI keywords that are not JSON Schema (`discriminator`).
-// Formats are not checked: no format plugin is installed, and none of the checked shapes depends
-// on one.
-const ajv = new Ajv2020({ strict: false, allErrors: true, validateFormats: false, logger: false })
-ajv.addSchema({ $id: SPEC_ID, components: subset.components })
-
-/**
- * Validates a value against one of OpenAI's schemas.
- *
- * @param schemaName - the schema's name under `components.schemas`
- * @param value - the value to validate
- * @returns one line per violation, `<path> <message>`; empty when the value is valid
- */
-function violations(schemaName: string, value: unknown): string[] {
-  const validate = ajv.getSchema(`${SPEC_ID}#/components/schemas/${schemaName}`)
-  if (validate === undefined) throw new Error(`No schema '${schemaName}' in the pinned subset`)
-  if (validate(value) === true) return []
-  return (validate.errors ?? []).map(
-    (error) => `${error.instancePath || '/'} ${error.message ?? error.keyword}`
-  )
-}
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
@@ -376,7 +352,6 @@ const FIELDS_NOT_ACCEPTED: Readonly<Record<string, string>> = {
   prompt_cache_options: `${UNKNOWN_REJECTION}; pi has no equivalent: its \`ttl\` takes one value and \`mode: explicit\` has no pi counterpart (#39)`,
   safety_identifier: UNKNOWN_REJECTION,
   service_tier: UNKNOWN_REJECTION,
-  store: UNKNOWN_REJECTION,
   modalities: `${UNKNOWN_REJECTION}; the proxy answers in text only`,
   audio: `${UNKNOWN_REJECTION}; the proxy answers in text only`,
   verbosity: UNKNOWN_REJECTION,

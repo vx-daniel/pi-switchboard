@@ -6,6 +6,7 @@
 import { stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui'
 import { FINISHED_KEPT, type FinishedRequest } from '@proxy/server/active-requests'
 import {
+  authOffRow,
   requestsPerMinute,
   SPARKLINE_MINUTES,
   statusStrip,
@@ -27,7 +28,8 @@ function snapshot(fields: Partial<StatusStripInput> = {}): StatusStripInput {
   return {
     version: '0.3.0',
     address: '127.0.0.1:4141',
-    proxyAuth: 'off',
+    proxyAuth: 'token',
+    beyondLoopback: false,
     exposed: 24,
     available: 58,
     uptimeMs: 1_834_000,
@@ -65,6 +67,7 @@ function finishedAt(time: number): FinishedRequest {
     model: 'alpha/model',
     attempt: 1,
     stream: false,
+    promptCacheKey: false,
     firstEventAt: undefined,
     startedAt: time - 1000,
     endedAt: time,
@@ -87,7 +90,7 @@ describe('statusStrip', () => {
     const row = plain(snapshot({ perMinute: [...Array.from({ length: 29 }, () => 0), 3] }), 200)
 
     expect(row.replaceAll(/ {2,}/g, ' ')).toBe(
-      ' ◆ pi-switchboard 0.3.0 ● SERVING 127.0.0.1:4141 · auth off · 24/58 models exposed · up 30m34s · 1 conn · 0 cooldowns last 30 min ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█ · 0.6 req/min '
+      ' ◆ pi-switchboard 0.3.0 ● SERVING 127.0.0.1:4141 · auth token · 24/58 models exposed · up 30m34s · 1 conn · 0 cooldowns last 30 min ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█ · 0.6 req/min '
     )
   })
 
@@ -103,7 +106,7 @@ describe('statusStrip', () => {
       const keptInOrder = (later: string, earlier: string): boolean =>
         !row.includes(later) || row.includes(earlier)
 
-      expect(row).toContain('127.0.0.1:4141 · auth off')
+      expect(row).toContain('127.0.0.1:4141 · auth token')
       expect(keptInOrder('cooldowns', ' conn')).toBe(true)
       expect(keptInOrder(' conn', 'up 30m34s')).toBe(true)
       expect(keptInOrder('up 30m34s', 'models exposed')).toBe(true)
@@ -114,7 +117,7 @@ describe('statusStrip', () => {
   // Catches the traffic shown while a count was dropped for it: the left details go first, down
   // to the address and the auth, then the right group from its start.
   test('drops the counts before the traffic, and the sparkline before the rate', () => {
-    expect(plain(snapshot(), 100)).toMatch(/auth off +0\.0 req\/min $/)
+    expect(plain(snapshot(), 100)).toMatch(/auth token +0\.0 req\/min $/)
     expect(plain(snapshot(), 60)).not.toContain('req/min')
   })
 
@@ -125,20 +128,20 @@ describe('statusStrip', () => {
 
     expect(plain(withCost, 200)).toMatch(/ · 0\.0 req\/min · \$1\.23 today $/)
     expect(plain(snapshot(), 200)).not.toContain('today')
-    expect(plain(withCost, 100)).toMatch(/auth off +0\.0 req\/min · \$1\.23 today $/)
-    expect(plain(withCost, 80)).toMatch(/auth off +\$1\.23 today $/)
+    expect(plain(withCost, 100)).toMatch(/auth token +0\.0 req\/min · \$1\.23 today $/)
+    expect(plain(withCost, 80)).toMatch(/auth token +\$1\.23 today $/)
   })
 
   // Catches an error dropped for a count or for the version on a narrow terminal: it is what the
   // operator must see.
   test('never drops an exposure or models.json error', () => {
     const one = plain(snapshot({ modelsJsonError: true }), 80)
-    expect(one).toContain('auth off · models.json error')
+    expect(one).toContain('auth token · models.json error')
     expect(one).not.toContain('0.3.0')
     expect(one).not.toContain('models exposed')
 
     const both = plain(snapshot({ exposed: 'bad config', modelsJsonError: true }), 110)
-    expect(both).toContain('auth off · exposure config error · models.json error')
+    expect(both).toContain('auth token · exposure config error · models.json error')
   })
 
   // Catches the rate counting the whole half hour instead of the last five minutes, or hiding
@@ -150,6 +153,43 @@ describe('statusStrip', () => {
 
     expect(plain(snapshot({ perMinute }), 160)).toContain(' 2.0 req/min')
     expect(plain(snapshot({ perMinute, saturated: true }), 160)).toContain(' 2.0+ req/min')
+  })
+})
+
+describe('statusStrip with proxy auth off (#287)', () => {
+  // Catches auth off shown as a plain detail anyone could miss, a badge that needs color to read
+  // (the tests render without a theme, as NO_COLOR does), the key that fixes it left out, or the
+  // badge cut on the narrowest terminal.
+  test.each([60, 80, 100, 120, 160])(
+    'at %d columns a whole badge takes SERVING’s place and names the key',
+    (width) => {
+      const row = plain(snapshot({ proxyAuth: 'off' }), width)
+
+      expect(visibleWidth(statusStrip(snapshot({ proxyAuth: 'off' }), width))).toBe(width)
+      expect(row).toContain(' ⚠ AUTH OFF (p)   127.0.0.1:4141')
+      expect(row).not.toContain('SERVING')
+      expect(row).not.toContain('auth ')
+    }
+  )
+
+  // Catches an error dropped once the auth detail no longer counts among the details kept.
+  test('still never drops an error', () => {
+    expect(plain(snapshot({ proxyAuth: 'off', modelsJsonError: true }), 80)).toContain(
+      '127.0.0.1:4141 · models.json error'
+    )
+  })
+})
+
+describe('authOffRow', () => {
+  // Catches the alert row cut before the address or the key on a narrow terminal, or not exactly
+  // as wide as it.
+  test.each([60, 100, 160])('keeps the address and the key at %d columns', (width) => {
+    const row = authOffRow('0.0.0.0:4141', width)
+
+    expect(visibleWidth(row)).toBe(width)
+    expect(stripTerminalSequences(row)).toMatch(
+      /^ ⚠ Proxy auth is off on 0\.0\.0\.0:4141 · p sets a token/
+    )
   })
 })
 

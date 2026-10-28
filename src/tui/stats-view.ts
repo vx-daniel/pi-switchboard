@@ -7,11 +7,11 @@
 
 import { visibleWidth } from '@earendil-works/pi-tui'
 import type { RouteTotals } from '@proxy/server/route-totals'
-import { usd } from '@proxy/tui/panel'
+import { hitRate, usd } from '@proxy/tui/panel'
 import { paint, strong } from '@proxy/tui/theme'
 
 /** Widths of the Stats view's number columns. */
-const WIDTHS = { count: 8, tokens: 11, cost: 10 } as const
+const WIDTHS = { count: 8, share: 5, tokens: 11, cost: 10 } as const
 /** The route column's width: as wide as fits, between these. */
 const ROUTE_WIDTH = { least: 16, most: 44 } as const
 /** Decimal places a cost is shown with: a request can cost a fraction of a cent. */
@@ -37,8 +37,10 @@ type Counts = Pick<
 >
 
 /**
- * The number columns, in order: the most telling first (requests, failures, cost), so a narrow
- * terminal cuts the token counts, not the cost.
+ * The number columns, in order: the most telling first (requests, failures, cost, fallbacks, the
+ * cache hit rate), so a narrow terminal cuts the token counts, not the cost. `uncached` is the
+ * input not read from or written to the cache; the prompt is it plus `cache read` and
+ * `cache write`.
  */
 const COLUMNS: readonly {
   readonly title: string
@@ -53,12 +55,18 @@ const COLUMNS: readonly {
     cell: (counts) => usd(counts.costUsd, COST_DECIMALS)
   },
   { title: 'fellback', width: WIDTHS.count, cell: (counts) => count(counts.fallbacks) },
-  { title: 'input', width: WIDTHS.tokens, cell: (counts) => count(counts.inputTokens) },
+  { title: 'hit', width: WIDTHS.share, cell: (counts) => hitRate(counts) },
+  { title: 'uncached', width: WIDTHS.tokens, cell: (counts) => count(counts.inputTokens) },
   { title: 'output', width: WIDTHS.tokens, cell: (counts) => count(counts.outputTokens) },
   {
-    title: 'cache',
+    title: 'cache read',
     width: WIDTHS.tokens,
-    cell: (counts) => count(counts.cacheReadTokens + counts.cacheWriteTokens)
+    cell: (counts) => count(counts.cacheReadTokens)
+  },
+  {
+    title: 'cache write',
+    width: WIDTHS.tokens,
+    cell: (counts) => count(counts.cacheWriteTokens)
   }
 ]
 

@@ -250,7 +250,11 @@ describe('collectPayloadFields: prediction', () => {
 // --- collectPayloadFields: the whole payload, per API family ---
 
 describe('collectPayloadFields: whole payload per API family', () => {
-  /** Every passthrough field the proxy accepts, set at once. */
+  /**
+   * Every field the proxy accepts and may pass through, set at once. `store` is accepted but
+   * never passed (#197): pi sets it itself where the API takes it, and a server that doesn't know
+   * it may refuse it.
+   */
   const everyField = minimalRequest({
     tool_choice: 'required',
     parallel_tool_calls: false,
@@ -261,7 +265,8 @@ describe('collectPayloadFields: whole payload per API family', () => {
     frequency_penalty: 0.5,
     presence_penalty: 0.2,
     metadata: { team: 'j5' },
-    response_format: { type: 'json_object' }
+    response_format: { type: 'json_object' },
+    store: false
   })
 
   const OPENAI_PAYLOAD = {

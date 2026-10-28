@@ -1,7 +1,7 @@
 /**
  * The console's Accounts view (#61): each login pi has a credential for, as the proxy sees it,
- * with its quota (#69), its reserve and its cooldowns, then the row that opens pi's login
- * selector; under them, the selected row in full.
+ * with its quota (#69), its reserve, its cooldowns and its place in its provider's routing order
+ * (#233), then the row that opens pi's login selector; under them, the selected row in full.
  *
  * @remarks
  * Rendering only: the console gathers an {@link AccountsView} snapshot (the quota store, the
@@ -16,10 +16,12 @@
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import type { LoginLabels } from '@proxy/config/schema'
+import type { LoginRouting } from '@proxy/openai/model-logins'
 import type { Cooldown } from '@proxy/pi/cooldowns'
 import type { ProviderQuota, QuotaWindow } from '@proxy/pi/quota'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import type { ReserveSkip } from '@proxy/server/route-reserve'
+import { type LoginPlace, loginPlaces } from '@proxy/tui/login-routing'
 import { accountActions, clampSelection, LOGIN_ROW } from '@proxy/tui/navigation'
 import {
   compactDuration,
@@ -73,6 +75,8 @@ export interface AccountsView {
   readonly belowReserve: ReadonlyMap<string, ReserveSkip>
   /** The active cooldowns, every login's. */
   readonly cooldowns: readonly Cooldown[]
+  /** `routing.logins.order` and `.disabled`: each login's place, and which are disabled (#233). */
+  readonly routing: LoginRouting
 }
 
 /** How the Accounts view looks up each login's quota and reserve: the stores, or a test's maps. */
@@ -97,7 +101,7 @@ export interface AccountLookups {
  * Builds the Accounts view's snapshot: the logins and the selection as given, with each login's
  * quota report and reserve check looked up once.
  *
- * @param base - the logins, the selected row, the labels, the clock and the cooldowns
+ * @param base - the logins, the selected row, the labels, the clock, the cooldowns and the routing
  * @param lookups - where each login's quota and reserve come from
  * @returns the snapshot
  */
@@ -123,6 +127,7 @@ interface AccountFacts {
   readonly windows: readonly QuotaWindow[]
   readonly reserve: ReserveSkip | undefined
   readonly cooldowns: readonly Cooldown[]
+  readonly place: LoginPlace | undefined
 }
 
 /**
@@ -130,15 +135,21 @@ interface AccountFacts {
  *
  * @param account - the login's credential status; never the credential itself
  * @param view - the snapshot
+ * @param places - every login's place in its provider's routing order
  * @returns the facts
  */
-function factsOf(account: ProviderCredentialStatus, view: AccountsView): AccountFacts {
+function factsOf(
+  account: ProviderCredentialStatus,
+  view: AccountsView,
+  places: ReadonlyMap<string, LoginPlace>
+): AccountFacts {
   return {
     account,
     label: view.labels[account.provider],
     windows: view.quotas.get(account.provider)?.windows ?? [],
     reserve: view.belowReserve.get(account.provider),
-    cooldowns: view.cooldowns.filter((cooldown) => cooldown.provider === account.provider)
+    cooldowns: view.cooldowns.filter((cooldown) => cooldown.provider === account.provider),
+    place: places.get(account.provider)
   }
 }
 
@@ -178,8 +189,8 @@ function verificationNote(account: ProviderCredentialStatus): string | undefined
 }
 
 /**
- * Renders what a row notes after its quota: the reserve, the soonest cooldown's time left, the
- * last verification.
+ * Renders what a row notes after its quota: whether the login is disabled or called first among
+ * several (#233), the reserve, the soonest cooldown's time left, the last verification.
  *
  * @param facts - the login
  * @param now - the current time
@@ -187,6 +198,10 @@ function verificationNote(account: ProviderCredentialStatus): string | undefined
  */
 function rowNotes(facts: AccountFacts, now: number): string {
   const notes: string[] = []
+  if (facts.place?.disabled === true) notes.push(paint('dim', 'disabled'))
+  else if (facts.place?.first === true && facts.place.count > 1) {
+    notes.push(paint('accent', '▲ first'))
+  }
   if (facts.reserve !== undefined) notes.push(paint('error', 'below reserve'))
   const soonest = facts.cooldowns.reduce<Cooldown | undefined>(
     (first, cooldown) => (first === undefined || cooldown.until < first.until ? cooldown : first),
@@ -273,11 +288,12 @@ function accountRow(facts: AccountFacts, cells: number, now: number): string {
   const { account } = facts
   const label = facts.label === undefined ? paint('border', '—') : paint('accent', facts.label)
   const kind = account.type === 'oauth' ? 'account' : 'API key'
+  // A login is cut with `…` when longer than its column (`qwen-token-plan-individual`, a
+  // models.json provider), so the columns after it stay aligned; a disabled one is dimmed (#233).
+  const name = truncateToWidth(account.provider, COLUMNS.login, '…', true)
   const fixed = [
     paint(dotColor(facts), '●'),
-    // A name longer than its column (`qwen-token-plan-individual`, a models.json provider) is cut
-    // with `…`, so the columns after it stay aligned.
-    truncateToWidth(account.provider, COLUMNS.login, '…', true),
+    facts.place?.disabled === true ? paint('dim', name) : name,
     truncateToWidth(label, COLUMNS.label, '…', true),
     paint('muted', kind.padEnd(COLUMNS.kind)),
     String(account.availableModelCount).padStart(COLUMNS.models)
@@ -365,8 +381,24 @@ function detailCooldown(cooldown: Cooldown, now: number): string {
 }
 
 /**
+ * Renders a login's place in its provider's routing order (#233): disabled, or its place among
+ * several logins.
+ *
+ * @param place - the login's place
+ * @returns the line, or `undefined` for a provider's only login that is not disabled
+ */
+function routingLine(place: LoginPlace | undefined): string | undefined {
+  if (place === undefined) return undefined
+  if (place.disabled) return paint('dim', 'disabled: routing never calls it; it stays logged in')
+  if (place.count === 1) return undefined
+  const order = `${paint('dim', 'order ')}${String(place.position)} of ${String(place.count)}`
+  return place.first ? `${order}  ${paint('accent', '▲ called first')}` : order
+}
+
+/**
  * Lists the detail pane's lines for a login: its kind, source and models; each quota window; the
- * reserve, cooldowns and verification when there are any; then the actions Enter opens.
+ * reserve, cooldowns, routing place and verification when there are any; then the actions Enter
+ * opens.
  *
  * @param facts - the login
  * @param width - the pane's content columns
@@ -399,9 +431,11 @@ function detailLines(facts: AccountFacts, width: number, now: number): string[] 
     )
   }
   for (const cooldown of facts.cooldowns) lines.push(detailCooldown(cooldown, now))
+  const routing = routingLine(facts.place)
+  if (routing !== undefined) lines.push(routing)
   const verification = verificationNote(account)
   if (verification !== undefined) lines.push(verification)
-  const actions = accountActions(account).map((choice) => choice.label.toLowerCase())
+  const actions = accountActions(account, facts.place).map((choice) => choice.label.toLowerCase())
   lines.push('', `${tabAccent('↵')} ${paint('dim', `actions: ${actions.join(', ')}`)}`)
   return lines
 }
@@ -437,7 +471,11 @@ export function accountRows(
   view: AccountsView,
   size: { readonly height: number; readonly width: number }
 ): string[] {
-  const facts = view.accounts.map((account) => factsOf(account, view))
+  const places = loginPlaces(
+    view.accounts.map((account) => account.provider),
+    view.routing
+  )
+  const facts = view.accounts.map((account) => factsOf(account, view, places))
   const current = clampSelection(view.selected, facts.length)
   const cells = tableGauge(facts, size.width - MARK_COLUMNS, view.now)
   const table = [

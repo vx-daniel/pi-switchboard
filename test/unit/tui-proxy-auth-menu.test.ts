@@ -1,6 +1,11 @@
 import type { OverrideSource, ProxyAuth } from '@proxy/config/env'
 import { createProxyAuthSwitch } from '@proxy/server/proxy-auth'
-import { type AuthScreens, type AuthTarget, runAuthMenu } from '@proxy/tui/proxy-auth-menu'
+import {
+  type AuthScreens,
+  type AuthTarget,
+  runAuthMenu,
+  runAuthOffPrompt
+} from '@proxy/tui/proxy-auth-menu'
 import { describe, expect, test } from 'vite-plus/test'
 
 /** What scripted dialogs saw and did. */
@@ -32,6 +37,11 @@ function scripted(picks: (string | undefined)[], typed: (string | undefined)[] =
       options.push(labels)
       return Promise.resolve(picks.shift())
     },
+    warn: (title, labels) => {
+      titles.push(`[warn] ${title}`)
+      options.push(labels)
+      return Promise.resolve(picks.shift())
+    },
     input: (title) => {
       titles.push(title)
       return Promise.resolve(typed.shift())
@@ -57,6 +67,7 @@ function proxyWith(initial: ProxyAuth, override?: OverrideSource): AuthTarget {
     override,
     overrideToken: override !== undefined && initial.kind === 'token' ? initial.token : undefined,
     host: '127.0.0.1',
+    hostOriginGuard: false,
     address: '127.0.0.1:4141'
   }
 }
@@ -172,5 +183,76 @@ describe('the proxy auth menu', () => {
 
     expect(proxy.proxyAuth.current()).toEqual({ kind: 'token', token: 'file-token' })
     expect(saved).toEqual([])
+  })
+})
+
+describe('the auth-off popup (#287)', () => {
+  // Catches the popup not saying who can use the proxy, or a token picked from it applied but not
+  // saved, so auth would be off again at the next start.
+  test('says who can use the proxy, and a token generated from it is applied and saved', async () => {
+    const proxy = proxyWith({ kind: 'off' })
+    const script = scripted(['Generate a token', 'Close'])
+    const { save, saved } = recordingSave()
+
+    await runAuthOffPrompt(proxy, script.screens, save)
+
+    // `[warn]`: the console's red alert panel, not the plain selector.
+    expect(script.titles[0]).toMatch(/^\[warn\] ⚠ Proxy auth is off on 127\.0\.0\.1:4141/)
+    expect(script.titles[0]).toContain('any web page open in a browser on it')
+    expect(script.options[0]).toEqual([
+      'Generate a token',
+      'Enter a token',
+      'Keep auth off for now'
+    ])
+    const applied = proxy.proxyAuth.current()
+    expect(applied.kind).toBe('token')
+    expect(saved).toEqual([applied.kind === 'token' ? applied.token : 'none'])
+  })
+
+  // Catches keeping auth off, or dismissing the popup, changing anything.
+  test.each(['Keep auth off for now', undefined])(
+    '%s keeps auth off and saves nothing',
+    async (pick) => {
+      const proxy = proxyWith({ kind: 'off' })
+      const { save, saved } = recordingSave()
+
+      await runAuthOffPrompt(proxy, scripted([pick]).screens, save)
+
+      expect(proxy.proxyAuth.current()).toEqual({ kind: 'off' })
+      expect(saved).toEqual([])
+    }
+  )
+
+  // Catches the popup interrupting a console that started with a token.
+  test('shows nothing with auth on', async () => {
+    const script = scripted([])
+
+    await runAuthOffPrompt(proxyWith({ kind: 'token', token: 'file-token' }), script.screens)
+
+    expect(script.titles).toEqual([])
+  })
+
+  // Catches the popup beyond loopback understating it as a local matter.
+  test('beyond loopback says anyone who can reach it', async () => {
+    const script = scripted([undefined])
+
+    await runAuthOffPrompt(
+      { ...proxyWith({ kind: 'off' }), host: '0.0.0.0', address: '0.0.0.0:4141' },
+      script.screens
+    )
+
+    expect(script.titles[0]).toContain('anyone who can reach it on the network')
+  })
+
+  // Catches the warning ignoring the host/origin guard (#188): with it on, web pages are kept out
+  // on loopback, and the popup must not claim otherwise, nor drop the programs on this machine.
+  test('with the host/origin guard on, says web pages are kept out but programs are not', async () => {
+    const script = scripted([undefined])
+
+    await runAuthOffPrompt({ ...proxyWith({ kind: 'off' }), hostOriginGuard: true }, script.screens)
+
+    expect(script.titles[0]).toContain('any program on this machine can use your provider logins')
+    expect(script.titles[0]).toContain('the host/origin guard keeps web pages out')
+    expect(script.titles[0]).not.toContain('any web page open')
   })
 })

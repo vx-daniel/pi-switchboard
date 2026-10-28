@@ -9,6 +9,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+import type { AliasTarget } from '@proxy/config/schema'
 import { initRegistry } from '@proxy/pi/registry'
 import { vi } from 'vite-plus/test'
 
@@ -20,6 +21,8 @@ export interface FixtureAgentDirFiles {
   readonly modelsJsonText?: string
   /** Written as JSON, owner-only, as pi expects. */
   readonly authJson?: unknown
+  /** Written as is, owner-only, for an auth.json pi cannot read. Wins over `authJson`. */
+  readonly authJsonText?: string
 }
 
 /** A loaded fixture agent directory: where it is, and how to delete it. */
@@ -75,8 +78,11 @@ export async function loadFixtureAgentDir(
     files.modelsJsonText ??
     (files.modelsJson === undefined ? undefined : JSON.stringify(files.modelsJson))
   if (modelsJson !== undefined) writeFileSync(join(path, 'models.json'), modelsJson)
-  if (files.authJson !== undefined) {
-    writeFileSync(join(path, 'auth.json'), JSON.stringify(files.authJson), { mode: OWNER_ONLY })
+  const authJson =
+    files.authJsonText ??
+    (files.authJson === undefined ? undefined : JSON.stringify(files.authJson))
+  if (authJson !== undefined) {
+    writeFileSync(join(path, 'auth.json'), authJson, { mode: OWNER_ONLY })
   }
   vi.stubEnv('PI_CODING_AGENT_DIR', path)
   await initRegistry()
@@ -86,4 +92,24 @@ export async function loadFixtureAgentDir(
       rmSync(path, { recursive: true, force: true })
     }
   }
+}
+
+/**
+ * Writes the proxy's `proxy-config.json` into an agent directory, replacing any file there.
+ *
+ * @param agentDir - the agent directory's path
+ * @param config - the file's contents, written as JSON as given
+ */
+export function writeProxyConfig(agentDir: string, config: Record<string, unknown>): void {
+  writeFileSync(join(agentDir, 'proxy-config.json'), JSON.stringify(config))
+}
+
+/**
+ * Writes a `proxy-config.json` that sets these aliases and nothing else.
+ *
+ * @param agentDir - the agent directory's path
+ * @param aliases - the `aliases` map, as the config holds it
+ */
+export function setAliases(agentDir: string, aliases: Record<string, AliasTarget>): void {
+  writeProxyConfig(agentDir, { aliases })
 }

@@ -1,0 +1,791 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>How pi-switchboard fits together</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #e6e7ed;
+        --color-ink: #343b58;
+        --color-muted: #4c505e;
+        --color-accent: #6f490e;
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', 'Noto Serif', serif;
+        --font-mono: 'Geist Mono', ui-monospace, monospace;
+      }
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 2rem;
+      }
+      .frame {
+        max-width: 1200px;
+        width: 100%;
+      }
+      .diagram-container {
+        width: 100%;
+        overflow-x: auto;
+      }
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 1.5rem;
+      }
+      svg {
+        width: 100%;
+        min-width: 960px;
+        display: block;
+      }
+      @media print {
+        .diagram-container {
+          overflow-x: visible;
+        }
+        svg {
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Architecture · pi-switchboard</p>
+      <h1>How pi-switchboard fits together</h1>
+      <div class="diagram-container">
+        <svg
+          viewBox="0 0 960 600"
+          xmlns="http://www.w3.org/2000/svg"
+          role="img"
+          aria-labelledby="architecture-title architecture-desc"
+        >
+          <title id="architecture-title">How pi-switchboard fits together</title>
+          <desc id="architecture-desc">
+            Clients send OpenAI requests through the HTTP layer to routing, which picks a model and
+            login, and pi's SDK calls the provider; pi's agent directory holds logins, models, the
+            proxy's config and its stats, and the console reads live state and writes config.
+          </desc>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#4c505e" />
+            </marker>
+            <marker
+              id="arrow-accent"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#6f490e" />
+            </marker>
+            <marker
+              id="arrow-link"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#34548a" />
+            </marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#e6e7ed" />
+          <rect
+            x="208"
+            y="152"
+            width="544"
+            height="272"
+            rx="8"
+            fill="rgba(52,59,88,0.02)"
+            stroke="rgba(52,59,88,0.10)"
+            stroke-width="0.8"
+          />
+          <rect x="220" y="156" width="129" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="284.5"
+            y="165"
+            fill="#565a6e"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.14em"
+          >
+            PI-SWITCHBOARD PROCESS
+          </text>
+          <path
+            d="M168,64 H292 Q300,64 300,72 V200"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            stroke-dasharray="4,3"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M168,232 H232"
+            fill="none"
+            stroke="#34548a"
+            stroke-width="1.2"
+            marker-end="url(#arrow-link)"
+          />
+          <path
+            d="M368,232 H408"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M552,232 H592"
+            fill="none"
+            stroke="#6f490e"
+            stroke-width="1.4"
+            marker-end="url(#arrow-accent)"
+          />
+          <path
+            d="M728,232 H792"
+            fill="none"
+            stroke="#34548a"
+            stroke-width="1.2"
+            marker-end="url(#arrow-link)"
+          />
+          <path
+            d="M660,456 V264"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M504,456 V264"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M300,392 V472 Q300,480 308,480 H408"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            stroke-dasharray="4,3"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M456,264 V288 Q456,296 448,296 H344 Q336,296 336,304 V328"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            stroke-dasharray="4,3"
+            marker-end="url(#arrow)"
+          />
+          <rect x="213" y="44" width="42" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="234"
+            y="53"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            STARTS
+          </text>
+          <rect x="174" y="206" width="52" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="200"
+            y="215"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            REQUESTS
+          </text>
+          <rect x="748" y="206" width="24" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="760"
+            y="215"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            API
+          </text>
+          <rect x="671" y="354" width="42" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="692"
+            y="363"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            LOGINS
+          </text>
+          <rect x="515" y="354" width="42" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="536"
+            y="363"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            CONFIG
+          </text>
+          <rect x="311" y="434" width="42" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="332"
+            y="443"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            WRITES
+          </text>
+          <rect x="365" y="276" width="62" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="396"
+            y="285"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            LIVE STATE
+          </text>
+          <rect x="40" y="40" width="128" height="48" rx="6" fill="#e6e7ed" />
+          <rect
+            x="40"
+            y="40"
+            width="128"
+            height="48"
+            rx="6"
+            fill="rgba(52,59,88,0.02)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+            stroke-dasharray="4,3"
+          />
+          <text
+            x="104.0"
+            y="62.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            pi extension
+          </text>
+          <text
+            x="104.0"
+            y="77.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            /proxy in pi
+          </text>
+          <rect x="40" y="200" width="128" height="64" rx="6" fill="#e6e7ed" />
+          <rect
+            x="40"
+            y="200"
+            width="128"
+            height="64"
+            rx="6"
+            fill="rgba(76,80,94,0.10)"
+            stroke="#565a6e"
+            stroke-width="1"
+          />
+          <text
+            x="104.0"
+            y="230.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Clients
+          </text>
+          <text
+            x="104.0"
+            y="245.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            SDKs · agents
+          </text>
+          <rect x="232" y="200" width="136" height="64" rx="6" fill="#e6e7ed" />
+          <rect
+            x="232"
+            y="200"
+            width="136"
+            height="64"
+            rx="6"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <rect
+            x="240"
+            y="206"
+            width="34"
+            height="12"
+            rx="2"
+            fill="none"
+            stroke="#343b58"
+            stroke-opacity="0.5"
+            stroke-width="0.8"
+          />
+          <text
+            x="257.0"
+            y="215"
+            fill="#565a6e"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.08em"
+          >
+            HTTP
+          </text>
+          <text
+            x="300.0"
+            y="234.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            HTTP layer
+          </text>
+          <text
+            x="300.0"
+            y="249.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            auth · validation
+          </text>
+          <rect x="408" y="200" width="144" height="64" rx="6" fill="#e6e7ed" />
+          <rect
+            x="408"
+            y="200"
+            width="144"
+            height="64"
+            rx="6"
+            fill="rgba(111,73,14,0.08)"
+            stroke="#6f490e"
+            stroke-width="1"
+          />
+          <rect
+            x="416"
+            y="206"
+            width="34"
+            height="12"
+            rx="2"
+            fill="none"
+            stroke="#6f490e"
+            stroke-opacity="0.5"
+            stroke-width="0.8"
+          />
+          <text
+            x="433.0"
+            y="215"
+            fill="#565a6e"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.08em"
+          >
+            CORE
+          </text>
+          <text
+            x="480.0"
+            y="234.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Routing
+          </text>
+          <text
+            x="480.0"
+            y="249.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            aliases · logins
+          </text>
+          <rect x="592" y="200" width="136" height="64" rx="6" fill="#e6e7ed" />
+          <rect
+            x="592"
+            y="200"
+            width="136"
+            height="64"
+            rx="6"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <rect
+            x="600"
+            y="206"
+            width="28"
+            height="12"
+            rx="2"
+            fill="none"
+            stroke="#343b58"
+            stroke-opacity="0.5"
+            stroke-width="0.8"
+          />
+          <text
+            x="614.0"
+            y="215"
+            fill="#565a6e"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.08em"
+          >
+            SDK
+          </text>
+          <text
+            x="660.0"
+            y="234.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            pi's SDK
+          </text>
+          <text
+            x="660.0"
+            y="249.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            ModelRuntime
+          </text>
+          <rect x="792" y="200" width="128" height="64" rx="6" fill="#e6e7ed" />
+          <rect
+            x="792"
+            y="200"
+            width="128"
+            height="64"
+            rx="6"
+            fill="rgba(52,59,88,0.03)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+          />
+          <rect
+            x="800"
+            y="206"
+            width="28"
+            height="12"
+            rx="2"
+            fill="none"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-opacity="0.5"
+            stroke-width="0.8"
+          />
+          <text
+            x="814.0"
+            y="215"
+            fill="#565a6e"
+            font-size="7"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.08em"
+          >
+            EXT
+          </text>
+          <text
+            x="856.0"
+            y="234.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Providers
+          </text>
+          <text
+            x="856.0"
+            y="249.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            20+ via pi
+          </text>
+          <rect x="232" y="328" width="136" height="64" rx="6" fill="#e6e7ed" />
+          <rect
+            x="232"
+            y="328"
+            width="136"
+            height="64"
+            rx="6"
+            fill="rgba(52,59,88,0.02)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+            stroke-dasharray="4,3"
+          />
+          <text
+            x="300.0"
+            y="358.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            The console
+          </text>
+          <text
+            x="300.0"
+            y="373.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            tui · same process
+          </text>
+          <rect x="408" y="456" width="320" height="48" rx="6" fill="#e6e7ed" />
+          <rect
+            x="408"
+            y="456"
+            width="320"
+            height="48"
+            rx="6"
+            fill="rgba(52,59,88,0.05)"
+            stroke="#4c505e"
+            stroke-width="1"
+          />
+          <text
+            x="568.0"
+            y="478.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            pi's agent directory
+          </text>
+          <text
+            x="568.0"
+            y="493.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            auth · models · proxy-config · stats
+          </text>
+          <line
+            x1="40"
+            y1="540"
+            x2="920"
+            y2="540"
+            stroke="rgba(52,59,88,0.10)"
+            stroke-width="0.8"
+          />
+          <text
+            x="40"
+            y="556"
+            fill="#4c505e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            letter-spacing="0.18em"
+          >
+            LEGEND
+          </text>
+          <rect
+            x="40"
+            y="572"
+            width="24"
+            height="12"
+            rx="2"
+            fill="rgba(111,73,14,0.08)"
+            stroke="#6f490e"
+            stroke-width="1"
+          />
+          <text
+            x="72"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Routing (focal)
+          </text>
+          <rect
+            x="171"
+            y="572"
+            width="24"
+            height="12"
+            rx="2"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <text
+            x="203"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Process component
+          </text>
+          <rect
+            x="312"
+            y="572"
+            width="24"
+            height="12"
+            rx="2"
+            fill="rgba(52,59,88,0.05)"
+            stroke="#4c505e"
+            stroke-width="1"
+          />
+          <text
+            x="344"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Files
+          </text>
+          <rect
+            x="396"
+            y="572"
+            width="24"
+            height="12"
+            rx="2"
+            fill="rgba(52,59,88,0.03)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+          />
+          <text
+            x="428"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            External
+          </text>
+          <rect
+            x="494"
+            y="572"
+            width="24"
+            height="12"
+            rx="2"
+            fill="rgba(52,59,88,0.02)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+            stroke-dasharray="4,3"
+          />
+          <text
+            x="526"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Optional
+          </text>
+          <line
+            x1="592"
+            y1="578"
+            x2="616"
+            y2="578"
+            stroke="#34548a"
+            stroke-width="1.2"
+            marker-end="url(#arrow-link)"
+          />
+          <text
+            x="624"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            HTTP
+          </text>
+          <line
+            x1="671"
+            y1="578"
+            x2="695"
+            y2="578"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            stroke-dasharray="4,3"
+            marker-end="url(#arrow)"
+          />
+          <text
+            x="703"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Starts · writes · reads state
+          </text>
+        </svg>
+      </div>
+    </div>
+  </body>
+</html>

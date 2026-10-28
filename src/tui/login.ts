@@ -20,13 +20,14 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import { loadConfigFromFile, type LoginLabels, saveConfigToFile } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { parseAccountProviderId } from '@proxy/pi/account-provider'
 import {
   isBuiltinProvider,
   nextAccountSlot,
-  parseAccountProviderId,
   registerAccountProvider,
   unregisterAccountProvider
 } from '@proxy/pi/accounts'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 
 /** One entry of pi's login provider selector. */
 export type LoginOption = ConstructorParameters<typeof OAuthSelectorComponent>[1][number]
@@ -59,7 +60,7 @@ export interface LoginScreens {
 /** Logger for logins in the console. */
 const loginLogger = proxyLogger('tui', 'login')
 
-/** How long the catalog refresh after a login may take. */
+/** How long the catalog refresh after a login, or listing the stored credentials, may take. */
 const CATALOG_REFRESH_MS = 15_000
 
 /**
@@ -316,6 +317,7 @@ export async function runLogin(
     throw error
   }
   loginLogger.info('Logged in to {provider} ({type})', { provider: providerId, type })
+  recordConsoleEvent(`Logged in to ${providerId} (${type})`)
   const refreshed = await runtime.refresh({
     providers: [providerId],
     signal: AbortSignal.timeout(CATALOG_REFRESH_MS)
@@ -347,6 +349,7 @@ export async function runLogout(
 ): Promise<void> {
   await runtime.logout(providerId, { signal })
   loginLogger.info('Logged out of {provider}', { provider: providerId })
+  recordConsoleEvent(`Logged out of ${providerId}`)
   unregisterAccountProvider(runtime, providerId)
   if (loginLabels()[providerId] !== undefined) saveLoginLabel(providerId, '')
 }

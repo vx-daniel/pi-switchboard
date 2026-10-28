@@ -1,0 +1,632 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A chat request, end to end</title>
+    <style>
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+      :root {
+        --color-paper: #e6e7ed;
+        --color-ink: #343b58;
+        --color-muted: #4c505e;
+        --color-accent: #6f490e;
+        --font-sans: 'Geist', system-ui, sans-serif;
+        --font-serif: 'Instrument Serif', 'Noto Serif', serif;
+        --font-mono: 'Geist Mono', ui-monospace, monospace;
+      }
+      body {
+        font-family: var(--font-sans);
+        background: var(--color-paper);
+        color: var(--color-ink);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 3rem 2rem;
+      }
+      .frame {
+        max-width: 1200px;
+        width: 100%;
+      }
+      .diagram-container {
+        width: 100%;
+        overflow-x: auto;
+      }
+      .eyebrow {
+        font-family: var(--font-mono);
+        font-size: 0.66rem;
+        font-weight: 500;
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: var(--color-muted);
+        margin-bottom: 0.5rem;
+      }
+      h1 {
+        font-family: var(--font-serif);
+        font-size: clamp(1.5rem, 2.4vw + 0.75rem, 2rem);
+        font-weight: 400;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        color: var(--color-ink);
+        margin-bottom: 1.5rem;
+      }
+      svg {
+        width: 100%;
+        min-width: 960px;
+        display: block;
+      }
+      @media print {
+        .diagram-container {
+          overflow-x: visible;
+        }
+        svg {
+          min-width: 0;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <p class="eyebrow">Flowchart · pi-switchboard</p>
+      <h1>A chat request, end to end</h1>
+      <div class="diagram-container">
+        <svg
+          viewBox="0 0 960 600"
+          xmlns="http://www.w3.org/2000/svg"
+          role="img"
+          aria-labelledby="chat-request-title chat-request-desc"
+        >
+          <title id="chat-request-title">A chat request, end to end</title>
+          <desc id="chat-request-desc">
+            A chat request is checked and its route planned, or rejected, then each candidate is
+            called through pi until one answers or a failure that moves on to no other candidate is
+            answered.
+          </desc>
+          <defs>
+            <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+              <polygon points="0 0, 8 3, 0 6" fill="#4c505e" />
+            </marker>
+            <marker
+              id="arrow-accent"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#6f490e" />
+            </marker>
+            <marker
+              id="arrow-link"
+              markerWidth="8"
+              markerHeight="6"
+              refX="7"
+              refY="3"
+              orient="auto"
+            >
+              <polygon points="0 0, 8 3, 0 6" fill="#34548a" />
+            </marker>
+          </defs>
+          <rect width="100%" height="100%" fill="#e6e7ed" />
+          <path
+            d="M184,120 H216"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M376,120 H408"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M536,120 H640"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M472,168 V248 Q472,256 464,256 H376"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M760,152 V224"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M692,272 H650"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M580,224 V196 Q580,188 588,188 H692 Q700,188 700,180 V152"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M580,320 V400"
+            fill="none"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <path
+            d="M760,320 V400"
+            fill="none"
+            stroke="#6f490e"
+            stroke-width="1.4"
+            marker-end="url(#arrow-accent)"
+          />
+          <rect x="576" y="94" width="24" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="588"
+            y="103"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            YES
+          </text>
+          <rect x="482" y="204" width="20" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="492"
+            y="213"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            NO
+          </text>
+          <rect x="659" y="246" width="24" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="671"
+            y="255"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            YES
+          </text>
+          <rect x="625" y="162" width="30" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="640"
+            y="171"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            NEXT
+          </text>
+          <rect x="590" y="346" width="20" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="600"
+            y="355"
+            fill="#565a6e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            NO
+          </text>
+          <rect x="770" y="346" width="20" height="12" rx="2" fill="#e6e7ed" />
+          <text
+            x="780"
+            y="355"
+            fill="#6f490e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+            letter-spacing="0.06em"
+          >
+            NO
+          </text>
+          <rect x="40" y="96" width="144" height="48" rx="20" fill="#e6e7ed" />
+          <rect
+            x="40"
+            y="96"
+            width="144"
+            height="48"
+            rx="20"
+            fill="rgba(52,59,88,0.03)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+          />
+          <text
+            x="112.0"
+            y="118.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Chat request
+          </text>
+          <text
+            x="112.0"
+            y="133.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            /v1/chat/completions
+          </text>
+          <rect x="216" y="88" width="160" height="64" rx="6" fill="#e6e7ed" />
+          <rect
+            x="216"
+            y="88"
+            width="160"
+            height="64"
+            rx="6"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <text
+            x="296.0"
+            y="118.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Check and plan
+          </text>
+          <text
+            x="296.0"
+            y="133.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            checks · candidates
+          </text>
+          <polygon points="472,72 536,120 472,168 408,120" fill="#e6e7ed" />
+          <polygon
+            points="472,72 536,120 472,168 408,120"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <text
+            x="472"
+            y="124"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Accepted?
+          </text>
+          <rect x="640" y="88" width="180" height="64" rx="6" fill="#e6e7ed" />
+          <rect
+            x="640"
+            y="88"
+            width="180"
+            height="64"
+            rx="6"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <text
+            x="730.0"
+            y="118.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Call the provider
+          </text>
+          <text
+            x="730.0"
+            y="133.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            through pi
+          </text>
+          <polygon points="760,224 828,272 760,320 692,272" fill="#e6e7ed" />
+          <polygon
+            points="760,224 828,272 760,320 692,272"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <text
+            x="760"
+            y="269"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Failed before
+          </text>
+          <text
+            x="760"
+            y="283"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            answering?
+          </text>
+          <polygon points="580,224 650,272 580,320 510,272" fill="#e6e7ed" />
+          <polygon
+            points="580,224 650,272 580,320 510,272"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <text
+            x="580"
+            y="269"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            A candidate
+          </text>
+          <text
+            x="580"
+            y="283"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            for the class?
+          </text>
+          <rect x="200" y="232" width="176" height="56" rx="20" fill="#e6e7ed" />
+          <rect
+            x="200"
+            y="232"
+            width="176"
+            height="56"
+            rx="20"
+            fill="rgba(52,59,88,0.03)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+          />
+          <text
+            x="288.0"
+            y="258.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Rejected
+          </text>
+          <text
+            x="288.0"
+            y="273.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            400 401 403 404 413 422 502
+          </text>
+          <rect x="500" y="400" width="160" height="56" rx="20" fill="#e6e7ed" />
+          <rect
+            x="500"
+            y="400"
+            width="160"
+            height="56"
+            rx="20"
+            fill="rgba(52,59,88,0.03)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+          />
+          <text
+            x="580.0"
+            y="426.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Error answer
+          </text>
+          <text
+            x="580.0"
+            y="441.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            400 401 404 429 502 503 504
+          </text>
+          <rect x="680" y="400" width="160" height="56" rx="20" fill="#e6e7ed" />
+          <rect
+            x="680"
+            y="400"
+            width="160"
+            height="56"
+            rx="20"
+            fill="rgba(111,73,14,0.08)"
+            stroke="#6f490e"
+            stroke-width="1"
+          />
+          <text
+            x="760.0"
+            y="426.0"
+            fill="#343b58"
+            font-size="12"
+            font-weight="600"
+            font-family="'Geist', system-ui, sans-serif"
+            text-anchor="middle"
+          >
+            Answer
+          </text>
+          <text
+            x="760.0"
+            y="441.0"
+            fill="#4c505e"
+            font-size="9"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            text-anchor="middle"
+          >
+            JSON or SSE · x_pi
+          </text>
+          <line
+            x1="40"
+            y1="540"
+            x2="920"
+            y2="540"
+            stroke="rgba(52,59,88,0.10)"
+            stroke-width="0.8"
+          />
+          <text
+            x="40"
+            y="556"
+            fill="#4c505e"
+            font-size="8"
+            font-family="'Geist Mono', ui-monospace, monospace"
+            letter-spacing="0.18em"
+          >
+            LEGEND
+          </text>
+          <rect
+            x="40"
+            y="572"
+            width="24"
+            height="12"
+            rx="6"
+            fill="rgba(52,59,88,0.03)"
+            stroke="rgba(52,59,88,0.30)"
+            stroke-width="1"
+          />
+          <text
+            x="72"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Start / end
+          </text>
+          <rect
+            x="152"
+            y="572"
+            width="24"
+            height="12"
+            rx="2"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <text
+            x="184"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Step
+          </text>
+          <polygon
+            points="231,578 243,572 255,578 243,584"
+            fill="#ffffff"
+            stroke="#343b58"
+            stroke-width="1"
+          />
+          <text
+            x="263"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Decision
+          </text>
+          <line
+            x1="329"
+            y1="578"
+            x2="353"
+            y2="578"
+            stroke="#6f490e"
+            stroke-width="1.2"
+            marker-end="url(#arrow-accent)"
+          />
+          <text
+            x="361"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Answered
+          </text>
+          <line
+            x1="427"
+            y1="578"
+            x2="451"
+            y2="578"
+            stroke="#4c505e"
+            stroke-width="1.2"
+            marker-end="url(#arrow)"
+          />
+          <text
+            x="459"
+            y="582"
+            fill="#4c505e"
+            font-size="8.5"
+            font-family="'Geist', system-ui, sans-serif"
+          >
+            Branch
+          </text>
+        </svg>
+      </div>
+    </div>
+  </body>
+</html>

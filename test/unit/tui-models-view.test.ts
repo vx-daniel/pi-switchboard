@@ -49,20 +49,41 @@ function exposed(id: string, provider = 'alpha', reasoning = false): ExposedMode
  * @returns the rows, without colour codes or trailing spaces
  */
 function rendered(view: ModelsView, height: number, width = STACKED): string[] {
-  return modelsRows(view, { height, width }, 0).map((row) => stripTerminalSequences(row).trimEnd())
+  return modelsRows(view, { height, width }, 0).rows.map((row) =>
+    stripTerminalSequences(row).trimEnd()
+  )
 }
 
 /**
- * Reads the ALIASES box's content off the plain rows of a stacked view: the rows between its
- * borders, without them.
+ * Reads a box's content off the plain rows of a stacked view: the rows between its borders,
+ * without them.
  *
  * @param rows - the plain rows
+ * @param title - the box's title
  * @returns the box's lines, without trailing spaces
  */
-function boxLines(rows: readonly string[]): string[] {
-  const top = rows.findIndex((row) => row.startsWith('╭─ ALIASES'))
+function boxLines(rows: readonly string[], title = 'ALIASES'): string[] {
+  const top = rows.findIndex((row) => row.startsWith(`╭─ ${title}`))
   const bottom = rows.findIndex((row, rowIndex) => rowIndex > top && row.startsWith('╰'))
   return rows.slice(top + 1, bottom).map((row) => row.slice(2, -1).trimEnd())
+}
+
+/**
+ * Reads a box's content off the plain rows of a side-by-side view: the column it starts at, from
+ * its top border to its bottom one, without its borders.
+ *
+ * @param rows - the plain rows
+ * @param title - the box's title
+ * @returns the box's lines, without trailing spaces; none when no box has the title
+ */
+function sideBoxLines(rows: readonly string[], title: string): string[] {
+  const top = rows.findIndex((row) => row.includes(`╭─ ${title}`))
+  if (top === -1) return []
+  const column = rows[top]?.indexOf(`╭─ ${title}`) ?? 0
+  return boxLines(
+    rows.slice(top).map((row) => row.slice(column)),
+    title
+  )
 }
 
 describe('the console Models view', () => {
@@ -83,6 +104,22 @@ describe('the console Models view', () => {
     expect(boxLines(onAlias)).toContainEqual(expect.stringMatching(/^› reviewer +alpha\/m1$/u))
     expect(onLastModel).toContainEqual(expect.stringMatching(/^› m19 /u))
   })
+
+  // Catches the frame saying how many models there are while the matrix is scrolled past some,
+  // so the operator can't tell the list goes on, or a wrong count of those on screen.
+  test.each([STACKED, SIDE_BY_SIDE])(
+    'says how many models show while the matrix is scrolled, %d columns',
+    (width) => {
+      const models = Array.from({ length: 20 }, (_, position) => exposed(`m${String(position)}`))
+      const data = { models, aliases: {}, diagnostics: [], families: [] }
+
+      const scrolled = modelsRows({ ...data, selected: 0 }, { height: 20, width }, 0)
+      const shown = scrolled.rows.filter((row) => /^[› ] m\d/u.test(stripTerminalSequences(row)))
+      expect(scrolled.note).toBe(`${String(shown.length)} of 20 models shown · ↑↓`)
+      expect(shown.length).toBeLessThan(20)
+      expect(modelsRows({ ...data, selected: 0 }, { height: 40, width }, 0).note).toBe('')
+    }
+  )
 
   // Catches a screen too short for the matrix and the box together showing the part without the
   // selection, or neither: below ten rows the part with the selection takes them all.
@@ -196,10 +233,134 @@ describe('the console Models view', () => {
       families: [],
       selected: 3
     }
-    const rows = modelsRows(view, { height, width }, 0)
+    const { rows } = modelsRows(view, { height, width }, 0)
 
     expect(rows.length).toBeLessThanOrEqual(height)
     for (const row of rows) expect(visibleWidth(row)).toBe(width)
+  })
+
+  // Catches the detail pane missing beside the matrix, or showing a public ID cut as the matrix
+  // cuts it, or a model's skipped levels and cooldown reason left out.
+  test('beside the matrix, a pane under the box shows the selected model in full', () => {
+    const long = exposed(`a-model-with-a-public-id-longer-than-thirty-columns`, 'alpha', true)
+    const skipping = { ...long, model: { ...long.model, thinkingLevelMap: { minimal: null } } }
+    startCooldown({ provider: 'alpha', canonicalId: long.canonicalId }, 'unavailable', 42_000, 0)
+    const view = { models: [skipping], aliases: {}, diagnostics: [], families: [], selected: 0 }
+
+    const pane = sideBoxLines(rendered(view, 24, SIDE_BY_SIDE), 'MODEL').join('\n')
+
+    expect(pane).toContain('a-model-with-a-public-id-longer-than-thirty-columns')
+    expect(pane).toMatch(/provider alpha/u)
+    expect(pane).toMatch(/efforts none → high \(4 levels\)/u)
+    expect(pane).toMatch(/skips minimal/u)
+    expect(pane).toMatch(/cooling 42s unavailable/u)
+    expect(pane).toContain('↵ makes an alias for this model')
+  })
+
+  // Catches the pane describing a model while an alias or the new-alias row is selected, so
+  // Enter does something other than the pane says.
+  test('the pane follows the selection onto an alias and the new-alias row', () => {
+    const data = {
+      models: [exposed('m0')],
+      aliases: { reviewer: { targets: ['alpha/m0'], fallbackOn: [], reasoningEffort: 'high' } },
+      diagnostics: [],
+      families: []
+    }
+
+    const onAlias = sideBoxLines(
+      rendered({ ...data, selected: 1 }, 24, SIDE_BY_SIDE),
+      'ALIAS reviewer'
+    )
+    const onNew = rendered({ ...data, selected: 2 }, 24, SIDE_BY_SIDE)
+
+    expect(onAlias.join('\n')).toMatch(/target alpha\/m0/u)
+    expect(onAlias.join('\n')).toContain('↵ rename')
+    expect(sideBoxLines(onNew, 'NEW ALIAS').join('\n')).toContain('↵ names a new alias')
+    expect(sideBoxLines(onNew, 'MODEL')).toEqual([])
+  })
+
+  // Catches a built-in alias described as one the operator configured (so Enter's pin looks like
+  // an edit), or its family shown without what it resolves to now.
+  test('on a built-in alias, the pane names it built in, its resolution, and that Enter pins it', () => {
+    const family = 'anthropic/claude-sonnet'
+    const view: ModelsView = {
+      models: [exposed('m0')],
+      aliases: {},
+      latest: { 'sonnet-latest': { family } },
+      diagnostics: [],
+      families: [
+        {
+          alias: 'sonnet-latest',
+          position: 0,
+          family,
+          pin: null,
+          resolved: 'anthropic/claude-sonnet-5-5',
+          newest: 'anthropic/claude-sonnet-5-5',
+          newerHidden: null
+        }
+      ],
+      selected: 2
+    }
+
+    const pane = sideBoxLines(rendered(view, 30, SIDE_BY_SIDE), 'BUILT-IN ALIAS sonnet-latest')
+
+    expect(pane.join('\n')).toMatch(
+      /target anthropic\/claude-sonnet → claude-sonnet-5-5 \(newest\)/u
+    )
+    expect(pane.join('\n')).toContain('↵ pins it')
+  })
+
+  // Catches a model served by a second login shown as served by its provider's own, so the
+  // operator looks for a cooldown or a refusal on the wrong login.
+  test('the pane names the login only when it is not the provider', () => {
+    const view = (login: string): ModelsView => ({
+      models: [{ ...exposed('m0'), login }],
+      aliases: {},
+      diagnostics: [],
+      families: [],
+      selected: 0
+    })
+
+    expect(sideBoxLines(rendered(view('alpha-2'), 24, SIDE_BY_SIDE), 'MODEL')).toContainEqual(
+      expect.stringMatching(/^login +alpha-2$/u)
+    )
+    expect(sideBoxLines(rendered(view('alpha'), 24, SIDE_BY_SIDE), 'MODEL').join('\n')).not.toMatch(
+      /login/u
+    )
+  })
+
+  // Catches a pane taller than the rows left pushing past the view's height or losing its
+  // bottom border, so it reads as running on off screen.
+  test('a pane taller than the rows left loses its last lines and keeps its frame', () => {
+    const model = { ...exposed('m0', 'alpha', true), login: 'alpha-2' }
+    const view = { models: [model], aliases: {}, diagnostics: [], families: [], selected: 0 }
+
+    const rows = rendered(view, 10, SIDE_BY_SIDE)
+    const pane = sideBoxLines(rows, 'MODEL')
+
+    expect(rows).toHaveLength(10)
+    expect(rows.at(-1)).toMatch(/╰─+╯$/u)
+    expect(pane.length).toBeGreaterThan(0)
+    expect(pane.join('\n')).not.toContain('↵ makes an alias')
+  })
+
+  // Catches the pane squeezing the boxes or the matrix: it shows only with six rows left under
+  // the boxes, and never under the matrix on a narrow view.
+  test('the pane shows only beside the matrix with six rows left under the boxes', () => {
+    const view = {
+      models: [exposed('m0')],
+      aliases: {},
+      diagnostics: [],
+      families: [],
+      selected: 0
+    }
+    const hasPane = (height: number, width: number): boolean =>
+      rendered(view, height, width).some((row) => row.includes('╭─ MODEL'))
+
+    // The ALIASES box wants four rows here: the new-alias row, its heading and its frame.
+    expect(hasPane(10, SIDE_BY_SIDE)).toBe(true)
+    expect(hasPane(9, SIDE_BY_SIDE)).toBe(false)
+    expect(hasPane(30, STACKED)).toBe(false)
   })
 
   // Catches the box left under the matrix on a wide view, or put beside it on a narrow one.
@@ -295,6 +456,78 @@ describe('the console Models view', () => {
         /^ {2}opus-steady +anthropic\/claude-opus pinned: claude-opus-5 · newest: claude-opus-5-5$/u
       ) as unknown
     ])
+  })
+
+  // Catches the built-in aliases mixed in with the operator's (which are theirs and which the
+  // system's must be plain), the new-alias row pushed under them, or the selection skipping them.
+  test('the built-in -latest aliases have their own LATEST box, after ALIASES', () => {
+    const family = 'anthropic/claude-sonnet'
+    const view: ModelsView = {
+      models: [exposed('m0')],
+      aliases: { reviewer: 'alpha/m0' },
+      latest: { 'sonnet-latest': { family } },
+      diagnostics: [],
+      families: [
+        {
+          alias: 'sonnet-latest',
+          position: 0,
+          family,
+          pin: null,
+          resolved: 'anthropic/claude-sonnet-5-5',
+          newest: 'anthropic/claude-sonnet-5-5',
+          newerHidden: null
+        }
+      ],
+      selected: 3
+    }
+    const rows = rendered(view, 30, 120)
+
+    expect(modelsItems(view).map((listed) => listed.kind)).toEqual([
+      'model',
+      'alias',
+      'new',
+      'latest'
+    ])
+    expect(rows).toContainEqual(expect.stringMatching(/^╭─ ALIASES 1 ─/u))
+    expect(rows).toContainEqual(expect.stringMatching(/^╭─ LATEST 1 ─/u))
+    expect(boxLines(rows)).toEqual([
+      expect.stringMatching(/^ {2}alias +targets$/u),
+      expect.stringMatching(/^ {2}reviewer +alpha\/m0$/u),
+      '  + New alias…'
+    ])
+    expect(boxLines(rows, 'LATEST')).toEqual([
+      expect.stringMatching(/^ {2}alias +family$/u),
+      expect.stringMatching(
+        /^› sonnet-latest +anthropic\/claude-sonnet → claude-sonnet-5-5 \(newest\)$/u
+      )
+    ])
+  })
+
+  // Catches a selected built-in alias squeezed off a short screen by the ALIASES box above it.
+  test('a short view keeps a selected built-in alias on screen', () => {
+    const latest = Object.fromEntries(
+      Array.from({ length: 6 }, (_, position) => [
+        `tier${String(position)}-latest`,
+        { family: `anthropic/claude-tier${String(position)}` }
+      ])
+    )
+    const aliases = Object.fromEntries(
+      Array.from({ length: 6 }, (_, position) => [`mine${String(position)}`, 'alpha/m0'])
+    )
+    const view: ModelsView = {
+      models: [exposed('m0')],
+      aliases,
+      latest,
+      diagnostics: [],
+      families: [],
+      // The last built-in alias: after the model, six aliases and the new-alias row.
+      selected: 13
+    }
+
+    const rows = rendered(view, 14, SIDE_BY_SIDE)
+
+    expect(rows).toHaveLength(14)
+    expect(rows).toContainEqual(expect.stringMatching(/› tier5-latest /u))
   })
 
   // Catches a long chain, its fallback classes or a diagnostic cut with `…` in a narrow box: they

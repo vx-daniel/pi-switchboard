@@ -6,6 +6,10 @@
  */
 
 import type { LookupAddress } from 'node:dns'
+import { once } from 'node:events'
+import { connect, type Socket } from 'node:net'
+import { setTimeout as sleep } from 'node:timers/promises'
+import { Worker } from 'node:worker_threads'
 
 import { resetSync } from '@logtape/logtape'
 import { configureLogging } from '@proxy/logging'
@@ -510,5 +514,91 @@ describe('fetchRemoteImage: the deadline covers resolution', () => {
         new AbortController().signal
       )
     ).toEqual({ ok: false, reason: 'timeout' })
+  })
+})
+
+/**
+ * A worker that listens on a loopback port with a backlog of one, then blocks until released, so
+ * it never accepts a connection. Its parent gets the port.
+ */
+const STALLED_LISTENER_SOURCE = `
+const { parentPort, workerData } = require('node:worker_threads')
+const server = require('node:net').createServer()
+server.listen({ port: 0, host: '127.0.0.1', backlog: 1 }, () => {
+  parentPort.postMessage(server.address().port)
+  Atomics.wait(workerData.release, 0, 0)
+  server.close()
+})
+`
+/** How long a loopback connection may stay unopened before its listener's queue counts as full. */
+const QUEUE_FULL_MS = 300
+/** The most connections tried to fill the queue. */
+const MAX_FILLERS = 8
+
+/** A loopback port whose listener never accepts and whose accept queue is full. */
+interface StalledPort {
+  readonly port: number
+  /** Releases the listener and closes every connection made to it. */
+  close(): Promise<void>
+}
+
+/**
+ * Starts a listener that never accepts, and fills its accept queue, so the kernel drops any further
+ * connection attempt: a connection to the port never opens, and nothing leaves the machine.
+ *
+ * @returns the port, and how to release it
+ * @throws Error when the worker reports no port, or the queue never fills
+ */
+async function startStalledPort(): Promise<StalledPort> {
+  const release = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT))
+  const worker = new Worker(STALLED_LISTENER_SOURCE, { eval: true, workerData: { release } })
+  const [port]: unknown[] = await once(worker, 'message')
+  if (typeof port !== 'number') throw new Error('the stalled listener reported no port')
+  const fillers: Socket[] = []
+  const close = async (): Promise<void> => {
+    Atomics.store(release, 0, 1)
+    Atomics.notify(release, 0)
+    for (const filler of fillers) filler.destroy()
+    await worker.terminate()
+  }
+  for (let tried = 0; tried < MAX_FILLERS; tried += 1) {
+    const filler = connect(port, '127.0.0.1')
+    // A filler the queue dropped is destroyed by `close`; its error is of no interest.
+    filler.on('error', () => undefined)
+    fillers.push(filler)
+    const opened = await Promise.race([
+      once(filler, 'connect').then(() => true),
+      sleep(QUEUE_FULL_MS).then(() => false)
+    ])
+    if (!opened) return { port, close }
+  }
+  await close()
+  throw new Error('the stalled listener accept queue never filled')
+}
+
+describe('fetchRemoteImage: the connect timeout', () => {
+  // Catches a host that never completes the TCP handshake holding the fetch until the total
+  // deadline: the connect timeout must end it first, as a timeout. Ending early with `timeout` and
+  // no deadline reached leaves only the connect timeout to explain it.
+  test('refuses a host whose connection never opens, at the connect timeout', async () => {
+    const stalled = await startStalledPort()
+    try {
+      const options: RemoteImageFetchOptions = {
+        ...LOOPBACK_IMAGE_FETCH,
+        limits: { ...LOOPBACK_IMAGE_FETCH.limits, connectTimeoutMs: 100, totalTimeoutMs: 3000 }
+      }
+      const start = performance.now()
+
+      const result = await fetchRemoteImage(
+        `http://127.0.0.1:${String(stalled.port)}/image.png`,
+        options,
+        new AbortController().signal
+      )
+
+      expect(result).toEqual({ ok: false, reason: 'timeout' })
+      expect(performance.now() - start).toBeLessThan(1000)
+    } finally {
+      await stalled.close()
+    }
   })
 })

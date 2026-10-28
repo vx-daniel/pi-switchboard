@@ -22,10 +22,12 @@ import {
   type RequestOutcome
 } from '@proxy/server/active-requests'
 import type { RouteTotals } from '@proxy/server/route-totals'
+import { promptTokens } from '@proxy/stats/cache'
 import {
   compactCount,
   compactDuration,
   FRAME_COLUMNS,
+  hitRate,
   latency,
   panel,
   quotaColor,
@@ -112,7 +114,7 @@ export function sidebarWidth(terminalWidth: number): number | undefined {
  * Renders one quota window: its name, a bar, the share used and the time to its reset.
  *
  * @param window - the window
- * @param account - the provider, for its reserve
+ * @param account - the login, for whether it is below its reserve
  * @param input - the snapshot, for the clock
  * @param width - the content's columns
  * @returns the line
@@ -368,8 +370,9 @@ function recentLines(
 }
 
 /**
- * Renders the SESSION panel's lines: requests, failures and fallbacks, tokens, cache and cost
- * since the proxy started.
+ * Renders the SESSION panel's lines: requests, failures and fallbacks, tokens, the cache and cost
+ * since the proxy started. Tokens in are the whole prompt, cached parts included; the cache line
+ * is the share of it read from the cache, then the tokens written to it.
  *
  * @param input - the snapshot
  * @param width - the content's columns
@@ -388,10 +391,14 @@ function sessionLines(input: SidebarInput, width: number): string[] {
     ),
     spread(
       'tokens in / out',
-      `${compactCount(counts.inputTokens)}${paint('border', ' / ')}${compactCount(counts.outputTokens)}`,
+      `${compactCount(promptTokens(counts))}${paint('border', ' / ')}${compactCount(counts.outputTokens)}`,
       width
     ),
-    spread('cache', compactCount(counts.cacheReadTokens + counts.cacheWriteTokens), width),
+    spread(
+      'cache hit · written',
+      `${hitRate(counts)}${separator}${compactCount(counts.cacheWriteTokens)}`,
+      width
+    ),
     spread('cost', tabAccent(usd(counts.costUsd, COST_DECIMALS)), width)
   ]
 }
@@ -473,7 +480,7 @@ function stack(specs: readonly PanelSpec[], width: number, gaps: boolean): strin
 
 /**
  * Fits the panels to the height: with blank rows between them if they fit so, else without; then
- * without SESSION; then with RECENT's list cut down to its summary; then cut at the bottom.
+ * without SESSION; then with RECENT's list cut, as far as its summary; then cut at the bottom.
  *
  * @param specs - the panels, in order
  * @param size - the space available
@@ -502,7 +509,7 @@ function fitPanels(
 /**
  * Renders the sidebar: QUOTA, IN FLIGHT, RECENT and SESSION panels. Under stress
  * ({@link underStress}) IN FLIGHT and RECENT come before QUOTA, whose quiet logins collapse to one
- * row, and RECENT's title carries the last minute's failures.
+ * row. RECENT's title always carries the last minute's failures, or with none its rejections.
  *
  * @param input - the snapshot
  * @param size - the space available

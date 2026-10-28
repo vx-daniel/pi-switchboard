@@ -10,10 +10,11 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { setTimeout as sleep } from 'node:timers/promises'
 
 import { SettingsManager } from '@earendil-works/pi-coding-agent'
 import { DEFAULT_CONFIG } from '@proxy/config/schema'
@@ -29,6 +30,7 @@ import {
 } from 'vite-plus/test'
 
 import {
+  getPidPath,
   killStalePid,
   refreshStatus,
   showStatus,
@@ -37,7 +39,7 @@ import {
 } from '../../extensions/proxy/process'
 import type { ProxyState } from '../../extensions/proxy/state'
 import { fakeCommandContext } from '../fixtures/extension-context'
-import { listenOnLoopback } from '../fixtures/local-server'
+import { freePort, listenOnLoopback } from '../fixtures/local-server'
 
 vi.mock('@vx-daniel/pi-switchboard/config', () => import('@proxy/config/schema'))
 vi.mock('@vx-daniel/pi-switchboard/logging', () => import('@proxy/logging'))
@@ -79,16 +81,59 @@ function pidOf(child: ChildProcess): number {
 }
 
 /**
- * Finds a loopback port with nothing listening on it.
- *
- * @returns a port number that was free when its probe server closed
+ * A stand-in for the package's built entry (`dist/index.mjs`): answers every request with a list
+ * of one model, on the host and port the extension passes in the environment.
  */
-async function closedPort(): Promise<number> {
-  const server = createServer()
-  const origin = await listenOnLoopback(server)
-  server.close()
-  await once(server, 'close')
-  return Number(new URL(origin).port)
+const STAND_IN_PROXY = `
+import { createServer } from 'node:http'
+createServer((_request, response) => {
+  response.writeHead(200, { 'content-type': 'application/json' })
+  response.end(JSON.stringify({ object: 'list', data: [{ id: 'stand-in' }] }))
+}).listen(Number(process.env.PI_SWITCHBOARD_PORT), process.env.PI_SWITCHBOARD_HOST)
+`
+
+/** How often {@link stopStandIn} checks that a stand-in has exited. */
+const STAND_IN_EXIT_POLL_MS = 10
+
+/**
+ * Says whether a process is still running.
+ *
+ * @param pid - the process; `undefined` for none
+ * @returns whether signal 0 reaches it; `false` for none
+ */
+function isAlive(pid: number | undefined): boolean {
+  if (pid === undefined) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Finds the proxy process the extension keeps track of: its session child, or the process its PID
+ * file names.
+ *
+ * @param state - the state `startProxy` ran with
+ * @returns the PID, or `undefined` when it tracks none
+ */
+function trackedPid(state: ProxyState): number | undefined {
+  if (state.sessionProcess !== undefined) return state.sessionProcess.pid
+  return existsSync(getPidPath()) ? Number(readFileSync(getPidPath(), 'utf-8')) : undefined
+}
+
+/**
+ * Stops the stand-in proxy `startProxy` spawned, and waits until it has exited.
+ *
+ * @param state - the state `startProxy` ran with
+ */
+async function stopStandIn(state: ProxyState): Promise<void> {
+  const pid = trackedPid(state)
+  if (pid === undefined) return
+  process.kill(pid, 'SIGKILL')
+  // A detached child is not this process's to wait for: poll until the PID is gone.
+  while (isAlive(pid)) await sleep(STAND_IN_EXIT_POLL_MS)
 }
 
 let agentDir: string
@@ -96,15 +141,6 @@ let server: Server
 let port: number
 let responder: Responder
 let children: ChildProcess[]
-
-/**
- * Returns the PID file path `process.ts` reads, inside the temp agent dir.
- *
- * @returns `<agentDir>/proxy.pid`
- */
-function pidPath(): string {
-  return join(agentDir, 'proxy.pid')
-}
 
 /**
  * Builds an extension state whose config points the probe at a loopback port.
@@ -186,7 +222,7 @@ describe('showStatus', () => {
   // file exists.
   test('no server and no PID file: tells the user to start it', async () => {
     const { context, notifications, statuses } = fakeCommandContext({})
-    await showStatus(stateOn(await closedPort()), context)
+    await showStatus(stateOn(await freePort()), context)
     expect(notifications).toEqual([
       { message: 'Proxy not running. Use /proxy start', level: 'info' }
     ])
@@ -196,7 +232,7 @@ describe('showStatus', () => {
   // Catches the model count or the PID of a live proxy going missing from `/proxy status`.
   test('healthy proxy with a live PID: shows models and pid', async () => {
     const child = await ownChild()
-    writeFileSync(pidPath(), `${String(pidOf(child))}\n`)
+    writeFileSync(getPidPath(), `${String(pidOf(child))}\n`)
     const { context, notifications, statuses } = fakeCommandContext({})
     await showStatus(stateOn(port), context)
     expect(notifications).toEqual([
@@ -208,36 +244,36 @@ describe('showStatus', () => {
     expect(statuses).toEqual([
       { key: STATUS_KEY, text: `proxy: http://127.0.0.1:${String(port)} (2 models)` }
     ])
-    expect(existsSync(pidPath())).toBe(true)
+    expect(existsSync(getPidPath())).toBe(true)
   })
 
   // Catches a garbage PID file being shown as a pid, or being deleted as if it were stale.
   test('garbage PID file: no pid shown, file left alone', async () => {
-    writeFileSync(pidPath(), 'not-a-pid')
+    writeFileSync(getPidPath(), 'not-a-pid')
     const { context, notifications } = fakeCommandContext({})
     await showStatus(stateOn(port), context)
     expect(notifications).toEqual([
       { message: `http://127.0.0.1:${String(port)} -- 2 models available`, level: 'info' }
     ])
-    expect(existsSync(pidPath())).toBe(true)
+    expect(existsSync(getPidPath())).toBe(true)
   })
 
   // Catches a PID file naming a dead process being shown, or left behind for the next start to
   // kill.
   test('stale PID file: no pid shown, file removed', async () => {
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     const { context, notifications } = fakeCommandContext({})
     await showStatus(stateOn(port), context)
     expect(notifications).toEqual([
       { message: `http://127.0.0.1:${String(port)} -- 2 models available`, level: 'info' }
     ])
-    expect(existsSync(pidPath())).toBe(false)
+    expect(existsSync(getPidPath())).toBe(false)
   })
 
   // Catches another user's live proxy (kill(pid, 0) answers EPERM) being read as stale, which
   // deleted its PID file so `/proxy stop` and `status` lost track of it (#93).
   test("another user's process (EPERM): pid shown, file kept", async () => {
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     answerEpermForImpossiblePid()
     const { context, notifications } = fakeCommandContext({})
     await showStatus(stateOn(port), context)
@@ -247,12 +283,12 @@ describe('showStatus', () => {
         level: 'info'
       }
     ])
-    expect(existsSync(pidPath())).toBe(true)
+    expect(existsSync(getPidPath())).toBe(true)
   })
 
   // Catches an unreadable PID file (a directory there) crashing `/proxy status`.
   test('unreadable PID file: treated as no pid', async () => {
-    mkdirSync(pidPath())
+    mkdirSync(getPidPath())
     const { context, notifications } = fakeCommandContext({})
     await showStatus(stateOn(port), context)
     expect(notifications).toEqual([
@@ -324,7 +360,7 @@ describe('stopProxy', () => {
   // Catches `/proxy stop` not signalling the session-tied proxy it spawned.
   test('session proxy: SIGTERMs it and clears the status', async () => {
     const child = await ownChild()
-    const state = stateOn(await closedPort())
+    const state = stateOn(await freePort())
     state.sessionProcess = child
     const exited = once(child, 'exit')
     const { context, notifications, statuses } = fakeCommandContext({})
@@ -341,7 +377,7 @@ describe('stopProxy', () => {
     const child = await ownChild()
     child.kill('SIGKILL')
     await once(child, 'exit')
-    const state = stateOn(await closedPort())
+    const state = stateOn(await freePort())
     state.sessionProcess = child
     const { context, notifications, statuses } = fakeCommandContext({})
 
@@ -357,12 +393,12 @@ describe('stopProxy', () => {
   // Catches `/proxy stop` leaving a detached proxy running or its PID file behind.
   test('detached proxy from the PID file: SIGTERMs it and removes the file', async () => {
     const child = await ownChild()
-    writeFileSync(pidPath(), String(pidOf(child)))
+    writeFileSync(getPidPath(), String(pidOf(child)))
     const exited = once(child, 'exit')
     const { context, notifications, statuses } = fakeCommandContext({})
     await stopProxy(stateOn(port), context)
     expect(await exited).toEqual([null, 'SIGTERM'])
-    expect(existsSync(pidPath())).toBe(false)
+    expect(existsSync(getPidPath())).toBe(false)
     expect(notifications).toEqual([
       { message: `Proxy stopped (pid ${String(pidOf(child))})`, level: 'info' }
     ])
@@ -371,10 +407,10 @@ describe('stopProxy', () => {
 
   // Catches `/proxy stop` claiming success on a proxy it did not start and cannot stop.
   test('stale PID file and a foreign proxy answering: says to stop it manually', async () => {
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     const { context, notifications, statuses } = fakeCommandContext({})
     await stopProxy(stateOn(port), context)
-    expect(existsSync(pidPath())).toBe(false)
+    expect(existsSync(getPidPath())).toBe(false)
     expect(notifications).toEqual([
       {
         message: `Proxy at http://127.0.0.1:${String(port)} was not started by /proxy -- stop it manually`,
@@ -387,7 +423,7 @@ describe('stopProxy', () => {
   // Catches `/proxy stop` with nothing running erroring or leaving a stale status in the bar.
   test('nothing running: says so and clears the status', async () => {
     const { context, notifications, statuses } = fakeCommandContext({})
-    await stopProxy(stateOn(await closedPort()), context)
+    await stopProxy(stateOn(await freePort()), context)
     expect(notifications).toEqual([{ message: 'Proxy is not running', level: 'info' }])
     expect(statuses).toEqual([{ key: STATUS_KEY, text: undefined }])
   })
@@ -395,11 +431,11 @@ describe('stopProxy', () => {
   // Catches `/proxy stop` deleting the PID file of another user's live proxy (SIGTERM answers
   // EPERM) and then saying it was not started by /proxy, so status and stop lose it (#93).
   test("another user's proxy (EPERM) answering: says so, keeps the PID file", async () => {
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     answerEpermForImpossiblePid()
     const { context, notifications, statuses } = fakeCommandContext({})
     await stopProxy(stateOn(port), context)
-    expect(existsSync(pidPath())).toBe(true)
+    expect(existsSync(getPidPath())).toBe(true)
     expect(notifications).toEqual([
       {
         message: `Proxy at http://127.0.0.1:${String(port)} runs as another user (pid ${String(IMPOSSIBLE_PID)}) -- stop it as that user`,
@@ -412,11 +448,11 @@ describe('stopProxy', () => {
   // Catches an EPERM pid with no proxy answering (a PID recycled by another user's process) being
   // kept forever: it is stale, like a missing process.
   test('EPERM pid and nothing answering: treated as stale', async () => {
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     answerEpermForImpossiblePid()
     const { context, notifications } = fakeCommandContext({})
-    await stopProxy(stateOn(await closedPort()), context)
-    expect(existsSync(pidPath())).toBe(false)
+    await stopProxy(stateOn(await freePort()), context)
+    expect(existsSync(getPidPath())).toBe(false)
     expect(notifications).toEqual([{ message: 'Proxy is not running', level: 'info' }])
   })
 })
@@ -425,10 +461,10 @@ describe('killStalePid', () => {
   // Catches a PID file naming a dead process surviving into the next start. `readPid` finds it
   // gone and removes the file, so there is nothing to signal and nothing to warn about.
   test('PID file of a dead process: removed, nothing signalled', async () => {
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     const { context, notifications } = fakeCommandContext({})
     await killStalePid(context)
-    expect(existsSync(pidPath())).toBe(false)
+    expect(existsSync(getPidPath())).toBe(false)
     expect(notifications).toEqual([])
   })
 
@@ -436,12 +472,12 @@ describe('killStalePid', () => {
   // the port): it is signalled, and the file goes.
   test("this user's leftover process: SIGTERMed, file removed", async () => {
     const child = await ownChild()
-    writeFileSync(pidPath(), String(pidOf(child)))
+    writeFileSync(getPidPath(), String(pidOf(child)))
     const exited = once(child, 'exit')
     const { context, notifications } = fakeCommandContext({})
     await killStalePid(context)
     expect(await exited).toEqual([null, 'SIGTERM'])
-    expect(existsSync(pidPath())).toBe(false)
+    expect(existsSync(getPidPath())).toBe(false)
     expect(notifications).toEqual([
       { message: `Stale proxy process ${String(pidOf(child))} -- killing`, level: 'warning' }
     ])
@@ -450,11 +486,11 @@ describe('killStalePid', () => {
   // Catches a start blocked forever by another user's process (EPERM), or the user told it was
   // killed when it could not be: the file is replaced and the message says why (#93).
   test("another user's process (EPERM): file replaced, not claimed killed", async () => {
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     answerEpermForImpossiblePid()
     const { context, notifications } = fakeCommandContext({})
     await killStalePid(context)
-    expect(existsSync(pidPath())).toBe(false)
+    expect(existsSync(getPidPath())).toBe(false)
     expect(notifications).toEqual([
       {
         message: `PID file named process ${String(IMPOSSIBLE_PID)}, which belongs to another user and is not answering -- starting a new proxy`,
@@ -466,7 +502,7 @@ describe('killStalePid', () => {
   // Catches the user told a stale process is being killed when it exited between reading the PID
   // file and the signal (#111): there was nothing to kill, so nothing to say; the file still goes.
   test('process gone by the time it is signalled: file removed, nothing claimed', async () => {
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     // Alive when readPid checks (signal 0), gone when SIGTERM is sent.
     vi.spyOn(process, 'kill').mockImplementation((_pid, signal) => {
       if (signal === 0) return true
@@ -476,7 +512,7 @@ describe('killStalePid', () => {
 
     await killStalePid(context)
 
-    expect({ fileKept: existsSync(pidPath()), notifications }).toEqual({
+    expect({ fileKept: existsSync(getPidPath()), notifications }).toEqual({
       fileKept: false,
       notifications: []
     })
@@ -515,19 +551,19 @@ describe('startProxy', () => {
   ])(
     '$label: refused with the reason, nothing spawned',
     async ({ authToken, inherited, old, message }) => {
-      const freePort = await closedPort()
+      const unusedPort = await freePort()
       writeFileSync(
         join(agentDir, 'proxy-config.json'),
-        JSON.stringify({ host: '127.0.0.1', port: freePort, authToken })
+        JSON.stringify({ host: '127.0.0.1', port: unusedPort, authToken })
       )
       vi.stubEnv('PI_SWITCHBOARD_AUTH_TOKEN', inherited)
       vi.stubEnv('PI_PROXY_AUTH_TOKEN', old)
-      writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+      writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
       const { context, notifications, statuses } = fakeCommandContext({})
 
-      await startProxy(stateOn(freePort), context)
+      await startProxy(stateOn(unusedPort), context)
 
-      expect({ notifications, statuses, pidFileKept: existsSync(pidPath()) }).toEqual({
+      expect({ notifications, statuses, pidFileKept: existsSync(getPidPath()) }).toEqual({
         notifications: [{ message, level: 'error' }],
         statuses: [],
         pidFileKept: true
@@ -538,19 +574,14 @@ describe('startProxy', () => {
   // Catches the extension spawning a proxy over a config file it could not parse: the extension
   // holds the defaults (auth off), while the child refuses over the file, which may hold a token.
   test('a config file that is not valid JSON: refused with the reason, nothing spawned', async () => {
-    const freePort = await closedPort()
+    const unusedPort = await freePort()
     writeFileSync(join(agentDir, 'proxy-config.json'), '{"authToken": "notarealsecret-fi')
-    // The file cannot name a port, so the probe would go to the default 4141, where the developer's
-    // own proxy may be listening: answer it with a refused connection instead.
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
-      Object.assign(new Error('fetch failed'), { code: 'ECONNREFUSED' })
-    )
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     const { context, notifications, statuses } = fakeCommandContext({})
 
-    await startProxy(stateOn(freePort), context)
+    await startProxy(stateOn(unusedPort), context)
 
-    expect({ notifications, statuses, pidFileKept: existsSync(pidPath()) }).toEqual({
+    expect({ notifications, statuses, pidFileKept: existsSync(getPidPath()) }).toEqual({
       notifications: [
         {
           message:
@@ -566,18 +597,15 @@ describe('startProxy', () => {
   // Catches the unreadable variant (a directory in the file's place fails like a permission error,
   // without needing one) being treated as "no file" and spawned over.
   test('a config file that cannot be read: refused with the error code, nothing spawned', async () => {
-    const freePort = await closedPort()
+    const unusedPort = await freePort()
     rmSync(join(agentDir, 'proxy-config.json'), { force: true })
     mkdirSync(join(agentDir, 'proxy-config.json'))
-    vi.spyOn(globalThis, 'fetch').mockRejectedValue(
-      Object.assign(new Error('fetch failed'), { code: 'ECONNREFUSED' })
-    )
-    writeFileSync(pidPath(), String(IMPOSSIBLE_PID))
+    writeFileSync(getPidPath(), String(IMPOSSIBLE_PID))
     const { context, notifications, statuses } = fakeCommandContext({})
 
-    await startProxy(stateOn(freePort), context)
+    await startProxy(stateOn(unusedPort), context)
 
-    expect({ notifications, statuses, pidFileKept: existsSync(pidPath()) }).toEqual({
+    expect({ notifications, statuses, pidFileKept: existsSync(getPidPath()) }).toEqual({
       notifications: [
         {
           message:
@@ -589,4 +617,43 @@ describe('startProxy', () => {
       pidFileKept: true
     })
   })
+
+  // Catches `/proxy start` never actually starting a proxy, or reporting it before it answers:
+  // with nothing answering, the extension must spawn the package's built entry with the config as
+  // environment, wait until it answers, then report its URL, model count and lifetime. The built
+  // entry here is a stand-in that serves one model on the port and host it is given.
+  test.each([
+    { lifetime: 'session', mode: 'session', kept: { sessionChild: true, pidFile: false } },
+    { lifetime: 'detached', mode: 'background', kept: { sessionChild: false, pidFile: true } }
+  ] as const)(
+    '$lifetime: spawns the built entry, waits until it answers, and reports it',
+    async ({ lifetime, mode, kept }) => {
+      const proxyPort = await freePort()
+      writeFileSync(
+        join(agentDir, 'proxy-config.json'),
+        JSON.stringify({ host: '127.0.0.1', port: proxyPort, lifetime })
+      )
+      mkdirSync(join(agentDir, 'dist'))
+      writeFileSync(join(agentDir, 'dist', 'index.mjs'), STAND_IN_PROXY)
+      const state = stateOn(proxyPort)
+      const { context, notifications, statuses } = fakeCommandContext({})
+
+      try {
+        await startProxy(state, context)
+
+        const url = `http://127.0.0.1:${String(proxyPort)}`
+        expect(notifications).toEqual([
+          { message: `Proxy started at ${url} (1 models) [${mode}]`, level: 'info' }
+        ])
+        expect(statuses.at(-1)).toEqual({ key: STATUS_KEY, text: `proxy: ${url} (1 models)` })
+        expect({
+          sessionChild: state.sessionProcess !== undefined,
+          pidFile: existsSync(getPidPath())
+        }).toEqual(kept)
+        expect(isAlive(trackedPid(state))).toBe(true)
+      } finally {
+        await stopStandIn(state)
+      }
+    }
+  )
 })

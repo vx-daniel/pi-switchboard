@@ -7,8 +7,8 @@
  * {@link dashboardRows} renders a {@link DashboardData} snapshot and reads nothing else;
  * {@link createDashboardSource} reads that snapshot from the stats store, at most every few seconds
  * for one window and chart width, so redraws on every request don't query the file each time.
- * {@link createTodayCostSource} reads today's cost for the status strip the same way, apart from
- * the dashboard's snapshot so the two don't push each other out.
+ * Today's cost for the status strip and the Doctor view's numbers (#325) are read the same way,
+ * each with its own snapshot (`stats-snapshots.ts`), over the same connection.
  * {@link openStatsView} is what the console holds: the dashboard while the stats file is open, the
  * totals since the proxy started otherwise.
  *
@@ -16,8 +16,11 @@
  */
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
+import type { DoctorStats } from '@proxy/doctor/collect'
+import type { StatsState } from '@proxy/doctor/findings'
 import { proxyLogger } from '@proxy/logging'
 import { routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
+import { promptTokens } from '@proxy/stats/cache'
 import { statsFilePath } from '@proxy/stats/recorder'
 import {
   type AliasStats,
@@ -40,11 +43,17 @@ import {
   compactCount,
   compactDuration,
   FRAME_COLUMNS,
+  hitRate,
   latency,
   panel,
   spread,
   usd
 } from '@proxy/tui/panel'
+import {
+  createDoctorStatsSource,
+  createTodayCostSource,
+  SNAPSHOT_MS
+} from '@proxy/tui/stats-snapshots'
 import { fitLabel, statsRows } from '@proxy/tui/stats-view'
 import { activeTab, type ConsoleColor, keycap, paint, strong, tabAccent } from '@proxy/tui/theme'
 import { errorMessage } from '@proxy/utils/guards'
@@ -55,8 +64,6 @@ const consoleLogger = proxyLogger('tui')
 
 /** Minutes in an hour. */
 const MINUTES_PER_HOUR = 60
-/** How long a snapshot is reused for one window and width, in milliseconds. */
-const SNAPSHOT_MS = 5000
 /** Rows the timeline's bars take at most and at least. */
 const CHART_ROWS = { most: 16, least: 3 } as const
 /** Model rows the layout makes room for before the timeline takes the rest. */
@@ -98,8 +105,19 @@ const FAILED_COLUMN = 1
 const KEPT_NOTE = `stats kept ${String(STATS_KEPT_DAYS)} days`
 /** What the ALIASES panel calls requests that named a model directly. */
 const DIRECT_LABEL = 'direct'
+/** What the Stats and Doctor views say to do once a read of the stats file has failed. */
+const RETRY_HINT = 'see the log; restart the console to retry'
+/** What the Doctor view says of the stats once a read of the file has failed (#325). */
+const UNREADABLE_FOR_DOCTOR: StatsState = {
+  kind: 'unreadable',
+  reason: `a read failed (${RETRY_HINT})`
+}
 
-/** The usage table's number columns, for models and aliases alike. */
+/**
+ * The usage table's number columns, for models and aliases alike. `in` is the whole prompt, cached
+ * parts included, as a chat completion's `prompt_tokens` is; `hit` is the share of it read from
+ * the cache.
+ */
 const USAGE_COLUMNS: readonly {
   readonly title: string
   readonly width: number
@@ -111,10 +129,11 @@ const USAGE_COLUMNS: readonly {
   { title: 'avg', width: 7, cell: (usage) => optionalLatency(usage.averageMs) },
   { title: 'slow', width: 7, cell: (usage) => latency(usage.slowestMs) },
   { title: '1st', width: 7, cell: (usage) => optionalLatency(usage.averageFirstEventMs) },
+  { title: 'hit', width: 4, cell: (usage) => hitRate(usage) },
   {
     title: 'tok in/out',
     width: 13,
-    cell: (usage) => `${compactCount(usage.inputTokens)}/${compactCount(usage.outputTokens)}`
+    cell: (usage) => `${compactCount(promptTokens(usage))}/${compactCount(usage.outputTokens)}`
   },
   { title: 'cost', width: 8, cell: (usage) => usd(usage.costUsd) }
 ]
@@ -194,30 +213,6 @@ export function createDashboardSource(
 }
 
 /**
- * Creates the status strip's reader of today's cost: the cost of the requests since local
- * midnight, read again only after a few seconds. It keeps its own snapshot, so the strip reading
- * it on every redraw doesn't push out the dashboard's.
- *
- * @param store - the stats store
- * @param now - the clock
- * @returns a function to today's cost, in US dollars
- */
-export function createTodayCostSource(
-  store: Pick<StatsStore, 'models'>,
-  now: () => number = Date.now
-): () => number {
-  let cached: { at: number; costUsd: number } | undefined
-  return () => {
-    const at = now()
-    if (cached !== undefined && at - cached.at < SNAPSHOT_MS) return cached.costUsd
-    const models = store.models(windowMinutes('today', at))
-    const costUsd = models.reduce((total, model) => total + model.costUsd, 0)
-    cached = { at, costUsd }
-    return costUsd
-  }
-}
-
-/**
  * Formats a time that may be missing.
  *
  * @param ms - the time, or `undefined`
@@ -285,7 +280,8 @@ interface WindowTotals {
   readonly failed: number
   /** Requests rejected before reaching a model, of any status. */
   readonly rejected: number
-  readonly inputTokens: number
+  /** The whole prompt, cached parts included. */
+  readonly promptTokens: number
   readonly outputTokens: number
   readonly costUsd: number
   /** The slowest request of any model. */
@@ -305,7 +301,7 @@ function windowTotals(data: DashboardData): WindowTotals {
     served: totalOf((model) => model.requests),
     failed: totalOf((model) => model.failed),
     rejected: data.errors.rejected.reduce((total, row) => total + row.count, 0),
-    inputTokens: totalOf((model) => model.inputTokens),
+    promptTokens: totalOf((model) => promptTokens(model)),
     outputTokens: totalOf((model) => model.outputTokens),
     costUsd: totalOf((model) => model.costUsd),
     slowestMs: Math.max(0, ...data.models.map((model) => model.slowestMs))
@@ -367,7 +363,7 @@ function overviewTiles(data: DashboardData, totals: WindowTotals, width: number)
     tokens: {
       label: 'TOKENS OUT',
       value: strong(compactCount(totals.outputTokens)),
-      caption: `${compactCount(totals.inputTokens)} in`
+      caption: `${compactCount(totals.promptTokens)} in`
     },
     cost: {
       label: 'COST',
@@ -690,6 +686,22 @@ export interface StatsView {
    *   the view shows the totals instead
    */
   frameNote(): string
+  /**
+   * Says how long each of the timeline's bars is, for the tab's context beside the window.
+   *
+   * @param window - the dashboard's window
+   * @param width - the view's columns, as {@link StatsView.rows} takes them
+   * @returns `22 min per bar` while the dashboard is shown; `''` when the view shows the totals
+   */
+  perBar(window: StatsWindow, width: number): string
+  /**
+   * Reads what the Doctor view judges the cache by (#325), from the same open file.
+   *
+   * @param window - the window, shared with the dashboard
+   * @returns the models' numbers and the aliases' fallbacks; why not, with stats off or a file
+   *   that can't be opened or read
+   */
+  doctorStats(window: StatsWindow): DoctorStats
   /** Closes the stats file, if it is open. */
   close(): void
 }
@@ -722,13 +734,16 @@ function totalsRows(
  * status strip.
  *
  * @param note - why the dashboard isn't shown
+ * @param doctor - what the Doctor view reads instead of the file: why it can't
  * @returns the view
  */
-function totalsView(note: string): StatsView {
+function totalsView(note: string, doctor: StatsState): StatsView {
   return {
     rows: (_window, size) => totalsRows(note, size),
     todayCostUsd: () => undefined,
     frameNote: () => '',
+    perBar: () => '',
+    doctorStats: () => ({ state: doctor, fallbacksByAlias: undefined }),
     close: () => undefined
   }
 }
@@ -782,7 +797,7 @@ export function openStatsView(
 ): StatsView {
   if (!statsEnabled) {
     const off = 'Stats are off (--no-stats): totals since the proxy started.'
-    return totalsView(off)
+    return totalsView(off, { kind: 'off' })
   }
   const path = statsFilePath()
   let store: DashboardStore
@@ -795,12 +810,12 @@ export function openStatsView(
     })
     const unopened =
       'The stats file could not be opened (see the log): totals since the proxy started.'
-    return totalsView(unopened)
+    return totalsView(unopened, { kind: 'unreadable', reason: errorMessage(error) })
   }
   const read = createDashboardSource(store)
   const readTodayCost = createTodayCostSource(store)
-  const unreadable =
-    'The stats file could not be read (see the log; restart the console to retry): totals since the proxy started.'
+  const readDoctor = createDoctorStatsSource(store)
+  const unreadable = `The stats file could not be read (${RETRY_HINT}): totals since the proxy started.`
   const guarded = createReadGuard(path)
   return {
     rows: (window, size) =>
@@ -814,6 +829,16 @@ export function openStatsView(
       guarded(
         () => KEPT_NOTE,
         () => ''
+      ),
+    perBar: (window, width) =>
+      guarded(
+        () => perBarLabel(read(window, chartColumns(width)).bucketMinutes),
+        () => ''
+      ),
+    doctorStats: (window) =>
+      guarded(
+        () => readDoctor(window),
+        () => ({ state: UNREADABLE_FOR_DOCTOR, fallbacksByAlias: undefined })
       ),
     close: () => store.close()
   }

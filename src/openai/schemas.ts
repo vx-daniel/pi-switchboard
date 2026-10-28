@@ -7,11 +7,13 @@
  *   stream_options
  * - Tools: tools, tool_choice, parallel_tool_calls
  * - Model control: reasoning_effort, top_p, frequency_penalty, presence_penalty, seed,
- *   response_format
+ *   response_format, prompt_cache_key
+ * - Honored values only: store (`false` or `null`), n (`1` or `null`) (#197)
  * - Client interop (accepted, not interpreted): metadata, prediction
  *
  * Unknown top-level fields fail the strict schema (422 in `validate.ts`). Explicitly rejected
- * with a named error: n, logprobs, top_logprobs, logit_bias, functions, function_call.
+ * with a named error: logprobs, top_logprobs, logit_bias, functions, function_call, and any
+ * `store` or `n` value other than the honored one.
  *
  * @packageDocumentation
  */
@@ -108,6 +110,13 @@ const userMessageSchema = z
   .strict()
 
 /**
+ * An array that must be empty: what an SDK echoes back for a response field the proxy never sets
+ * (`annotations`, `logprobs`). Not `z.tuple([])`, whose JSON Schema (`prefixItems: []`) is invalid
+ * under 2020-12 and stops schema-driven tools from testing the routes that use it (#207).
+ */
+export const emptyArraySchema = z.array(z.never()).max(0)
+
+/**
  * An `assistant` message: optional (nullable) text content and optional function tool calls.
  *
  * @remarks
@@ -126,7 +135,7 @@ const assistantMessageSchema = z
     refusal: z.null().optional(),
     audio: z.null().optional(),
     function_call: z.null().optional(),
-    annotations: z.tuple([]).nullable().optional(),
+    annotations: emptyArraySchema.nullable().optional(),
     tool_calls: z
       .array(
         z
@@ -186,7 +195,7 @@ const functionToolSchema = z.object({
   type: z.literal('function'),
   function: z.object({
     name: z.string().trim(),
-    description: z.string().trim().optional(),
+    description: textSchema.optional(),
     parameters: z.record(z.string().trim(), z.unknown()).optional(),
     strict: z.boolean().nullable().optional()
   })
@@ -215,7 +224,7 @@ const jsonSchemaResponseFormatSchema = z.object({
   type: z.literal('json_schema'),
   json_schema: z.object({
     name: z.string().trim(),
-    description: z.string().trim().optional(),
+    description: textSchema.optional(),
     schema: z.record(z.string().trim(), z.unknown()).optional(),
     strict: z.boolean().nullable().optional()
   })
@@ -238,10 +247,39 @@ const MIN_PENALTY = -2
 const MAX_PENALTY = 2
 
 /**
- * Longest `prompt_cache_key` accepted: pi-ai's `OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH` (1.3.0), which
+ * Longest `prompt_cache_key` accepted: pi-ai's `OPENAI_PROMPT_CACHE_KEY_MAX_LENGTH` (1.4.0), which
  * its root entry point does not export.
  */
-export const PROMPT_CACHE_KEY_MAX_LENGTH = 64
+const PROMPT_CACHE_KEY_MAX_LENGTH = 64
+
+/**
+ * `prompt_cache_key`, on chat completions and the Responses API: becomes pi's `sessionId`
+ * (`buildStreamOptions`), which pi sends as the provider's cache or session key where it has one
+ * (#39). At most {@link PROMPT_CACHE_KEY_MAX_LENGTH} characters, because pi cuts a longer key
+ * itself, silently merging keys that share their first 64.
+ */
+export const promptCacheKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(PROMPT_CACHE_KEY_MAX_LENGTH)
+  .nullable()
+  .optional()
+
+/**
+ * `store`, on chat completions and the Responses API (#197): the proxy stores nothing, so "don't
+ * store" is what it already does. `false` and `null` are accepted and never sent upstream (pi sets
+ * `store` itself where the API takes it); `true` is a named 422 ({@link STORE_TRUE_REFUSAL}).
+ * pi's own OpenAI adapter sends `false` to any host it doesn't know, this one included.
+ */
+export const storeSchema = z.literal(false).nullable().optional()
+
+/**
+ * `n` (#197): the proxy answers with one choice, so `1` (OpenAI's default) is what it already
+ * does. `1` and `null` are accepted and never sent upstream; any other value is a named 422
+ * ({@link N_OTHER_THAN_ONE_REFUSAL}).
+ */
+const nSchema = z.literal(1).nullable().optional()
 
 /** OpenAI's `reasoning_effort` values, lowest first (OpenAI's `ReasoningEffort` schema, #132). */
 export const REASONING_EFFORTS = [
@@ -280,16 +318,9 @@ export const chatCompletionRequestSchema = z
     presence_penalty: z.number().min(MIN_PENALTY).max(MAX_PENALTY).optional(),
     seed: z.int().optional(),
     response_format: responseFormatSchema.optional(),
-    // Prompt caching: becomes pi's `sessionId` (`buildStreamOptions`), which pi sends as the
-    // provider's cache or session key where it has one (#39). At most 64 characters because pi
-    // cuts a longer key to 64 itself, silently merging keys that share their first 64.
-    prompt_cache_key: z
-      .string()
-      .trim()
-      .min(1)
-      .max(PROMPT_CACHE_KEY_MAX_LENGTH)
-      .nullable()
-      .optional(),
+    prompt_cache_key: promptCacheKeySchema,
+    store: storeSchema,
+    n: nSchema,
     // Passthrough fields sent by real clients; accepted but not interpreted
     metadata: z.record(z.string().trim(), z.unknown()).optional(),
     prediction: z
@@ -307,20 +338,27 @@ export const chatCompletionRequestSchema = z
 /** A parsed chat-completions request body. */
 export type ChatCompletionRequest = z.infer<typeof chatCompletionRequestSchema>
 
+/** The 422 message for `store: true`, on chat completions and the Responses API alike (#197). */
+export const STORE_TRUE_REFUSAL =
+  "'store: true' is not supported: the proxy stores nothing; send false"
+
+/** The 422 message for an `n` other than `1` (#197). */
+export const N_OTHER_THAN_ONE_REFUSAL =
+  "'n' other than 1 is not supported: the proxy returns one choice; send 1 or leave it out"
+
 // --- Rejected fields ---
 
 /**
  * Fields rejected with a named 422 error instead of the generic unknown-parameter error.
  *
  * @remarks
- * `n`, `logprobs`, `top_logprobs`, `logit_bias`: the proxy returns a single choice with no
- * token probability data, so accepting these would need response-side changes.
+ * `logprobs`, `top_logprobs`, `logit_bias`: the proxy returns no token probability data, so
+ * accepting these would need response-side changes.
  *
  * `functions`, `function_call`: deprecated OpenAI fields, superseded by `tools` and
  * `tool_choice`.
  */
 export const rejectedFields = [
-  'n',
   'logprobs',
   'top_logprobs',
   'logit_bias',

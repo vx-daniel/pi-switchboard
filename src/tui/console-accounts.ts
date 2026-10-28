@@ -13,6 +13,7 @@ import {
 } from '@earendil-works/pi-coding-agent'
 import type { TuiAltScreen } from '@earendil-works/pi-tui'
 import { proxyLogger } from '@proxy/logging'
+import { DEFAULT_LOGIN_ROUTING } from '@proxy/openai/model-logins'
 import {
   getLoginDeviceId,
   getRuntime,
@@ -29,6 +30,12 @@ import {
   runLogout,
   saveLoginLabel
 } from '@proxy/tui/login'
+import {
+  type LoginPlace,
+  loginPlaces,
+  saveLoginDisabled,
+  saveLoginFirst
+} from '@proxy/tui/login-routing'
 import { type AccountAction, accountActions, clampSelection } from '@proxy/tui/navigation'
 import { credentialChanged } from '@proxy/tui/status-refresh'
 import { errorMessage } from '@proxy/utils/guards'
@@ -202,14 +209,17 @@ export function openSelected(context: ConsoleContext): void {
     openLogin(context)
     return
   }
-  const choices = accountActions(account)
+  const logins = state.accounts.map((each) => each.provider)
+  const routing = state.status?.file.routing.logins ?? DEFAULT_LOGIN_ROUTING
+  const place = loginPlaces(logins, routing).get(account.provider)
+  const choices = accountActions(account, place)
   const selector = new ExtensionSelectorComponent(
     account.provider,
     choices.map((choice) => choice.label),
     (label) => {
       handle.hide()
       const chosen = choices.find((choice) => choice.label === label)
-      if (chosen !== undefined) runAccountAction(context, account, chosen.action)
+      if (chosen !== undefined) runAccountAction(context, { account, place }, chosen.action)
     },
     () => handle.hide()
   )
@@ -217,20 +227,97 @@ export function openSelected(context: ConsoleContext): void {
 }
 
 /**
+ * Writes a login's routing change (#233) and redraws: the next request uses it.
+ *
+ * @param context - the console
+ * @param write - the config write; returns whether the file was written
+ */
+async function changeRouting(context: ConsoleContext, write: () => boolean): Promise<void> {
+  if (!write()) consoleLogger.warn('The login routing change was not saved')
+  await context.refresh()
+}
+
+/**
+ * Disables a login. When it is its provider's only enabled login, asks first: the provider's
+ * models leave `/v1/models` (#233).
+ *
+ * @param context - the console
+ * @param login - the login
+ * @param lastEnabled - whether it is its provider's only enabled login
+ */
+async function disableLogin(
+  context: ConsoleContext,
+  login: string,
+  lastEnabled: boolean
+): Promise<void> {
+  if (lastEnabled) {
+    const sure = await pickLabel(
+      context.tui,
+      `Disable ${login}? It is the provider's only enabled login: its models leave /v1/models.`,
+      ['Disable it', 'Keep it']
+    )
+    if (sure !== 'Disable it') return
+  }
+  await changeRouting(context, () => saveLoginDisabled(login, true))
+}
+
+/** The account an action acts on, and its place in its provider's routing order. */
+interface SelectedAccount {
+  readonly account: ProviderCredentialStatus
+  readonly place: LoginPlace | undefined
+}
+
+/** Each account action: what it runs, and what a failure of it is called in the log. */
+const ACCOUNT_ACTIONS: Readonly<
+  Record<
+    AccountAction,
+    {
+      readonly what: string
+      readonly run: (context: ConsoleContext, selected: SelectedAccount) => Promise<void>
+    }
+  >
+> = {
+  verify: { what: 'Verifying the logins', run: (context) => context.refresh(true) },
+  login: {
+    what: 'Login',
+    run: (context, { account }) => loginTo(context, account.provider, account.type)
+  },
+  label: { what: 'Label', run: (context, { account }) => askForLabel(context, account.provider) },
+  first: {
+    what: 'Use first',
+    run: (context, { account }) =>
+      changeRouting(context, () =>
+        saveLoginFirst(
+          account.provider,
+          context.state.accounts.map((each) => each.provider)
+        )
+      )
+  },
+  disable: {
+    what: 'Disable',
+    run: (context, { account, place }) =>
+      disableLogin(context, account.provider, place?.lastEnabled !== false)
+  },
+  enable: {
+    what: 'Enable',
+    run: (context, { account }) =>
+      changeRouting(context, () => saveLoginDisabled(account.provider, false))
+  },
+  logout: { what: 'Logout', run: (context, { account }) => logoutOf(context, account.provider) }
+}
+
+/**
  * Runs an action chosen from an account's menu.
  *
  * @param context - the console
- * @param account - the account it acts on
+ * @param selected - the account it acts on, and its place in its provider's routing order
  * @param action - what to do
  */
 function runAccountAction(
   context: ConsoleContext,
-  account: ProviderCredentialStatus,
+  selected: SelectedAccount,
   action: AccountAction
 ): void {
-  if (action === 'verify') inBackground(context.refresh(true), 'Verifying the logins')
-  else if (action === 'login') {
-    inBackground(loginTo(context, account.provider, account.type), 'Login')
-  } else if (action === 'label') inBackground(askForLabel(context, account.provider), 'Label')
-  else inBackground(logoutOf(context, account.provider), 'Logout')
+  const { what, run } = ACCOUNT_ACTIONS[action]
+  inBackground(run(context, selected), what)
 }

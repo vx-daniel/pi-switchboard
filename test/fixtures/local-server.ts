@@ -6,7 +6,7 @@
  */
 
 import { once } from 'node:events'
-import type { IncomingMessage, Server } from 'node:http'
+import { createServer, type IncomingMessage, type Server } from 'node:http'
 import { zstdDecompressSync } from 'node:zlib'
 
 /**
@@ -59,4 +59,17 @@ export async function listenOnLoopback(server: Server): Promise<string> {
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('test server not on TCP')
   return `http://127.0.0.1:${String(address.port)}`
+}
+
+/**
+ * Finds a loopback port nothing listens on right now.
+ *
+ * @returns a port number that was free when its probe server closed
+ */
+export async function freePort(): Promise<number> {
+  const probe = createServer()
+  const origin = await listenOnLoopback(probe)
+  probe.close()
+  await once(probe, 'close')
+  return Number(new URL(origin).port)
 }

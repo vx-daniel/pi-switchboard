@@ -1,4 +1,4 @@
-# pi-switchboard in a container (#60). README.md, "Docker", has the steps: build or pull, log in
+# pi-switchboard in a container (#60). docs/docker.md has the steps: build or pull, log in
 # through pi, start.
 #
 #   export PI_SWITCHBOARD_AUTH_TOKEN="$(openssl rand -hex 32)"
@@ -38,8 +38,9 @@ services:
     # it to this machine alone.
     ports:
       - '127.0.0.1:${PI_SWITCHBOARD_PUBLISH_PORT:-4141}:4141'
-    # pi's login, its token refreshes and the proxy's proxy-config.json. Never seed it by copying a
-    # host auth.json: a refresh rotates the refresh token under the other copy, which then fails.
+    # pi's login, its token refreshes, and the proxy's proxy-config.json and stats file. Never seed
+    # it by copying a host auth.json: a refresh rotates the refresh token under the other copy,
+    # which then fails.
     volumes:
       - pi-agent:/home/node/.pi/agent
     read_only: true

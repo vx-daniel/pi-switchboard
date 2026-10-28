@@ -4,8 +4,11 @@ import {
   accountActions,
   clampSelection,
   footerLine,
+  logsKeys,
   moveSelection,
+  pickedWindow,
   stepView,
+  VIEW_DIGIT,
   VIEWS
 } from '@proxy/tui/navigation'
 import { describe, expect, test } from 'vite-plus/test'
@@ -13,8 +16,22 @@ import { describe, expect, test } from 'vite-plus/test'
 describe('console navigation', () => {
   // Catches the view keys getting stuck at either end instead of wrapping around the tabs.
   test('moving between views wraps around', () => {
-    expect(VIEWS.map((view) => stepView(view, 1))).toEqual(['accounts', 'stats', 'models', 'logs'])
-    expect(VIEWS.map((view) => stepView(view, -1))).toEqual(['models', 'logs', 'accounts', 'stats'])
+    expect(VIEWS.map((view) => stepView(view, 1))).toEqual([
+      'accounts',
+      'stats',
+      'models',
+      'settings',
+      'doctor',
+      'logs'
+    ])
+    expect(VIEWS.map((view) => stepView(view, -1))).toEqual([
+      'doctor',
+      'logs',
+      'accounts',
+      'stats',
+      'models',
+      'settings'
+    ])
   })
 
   // Catches the selection leaving the list: past the login row after the last account, above the
@@ -38,17 +55,44 @@ describe('console navigation', () => {
       type,
       availableModelCount: 1
     })
+    const only = { position: 1, count: 1, first: true, disabled: false, lastEnabled: true }
 
-    expect(accountActions(account('oauth')).map((choice) => choice.label)).toEqual([
+    expect(accountActions(account('oauth'), only).map((choice) => choice.label)).toEqual([
       'Verify all logins',
       'Log in again',
       'Set a label',
+      'Disable',
       'Log out of anthropic'
     ])
-    expect(accountActions(account('api_key'))[1]).toEqual({
+    expect(accountActions(account('api_key'), only)[1]).toEqual({
       action: 'login',
       label: 'Enter a new API key'
     })
+  })
+
+  // Catches the routing actions (#233) offered where they do nothing or hidden where they work:
+  // **Use first** only for an enabled login another login comes before, **Enable** for a disabled
+  // one, and a plain **Disable** while another login of the provider stays enabled.
+  test('an account menu offers to call a login first, and to disable or enable it', () => {
+    const second: ProviderCredentialStatus = {
+      provider: 'anthropic-2',
+      type: 'oauth',
+      availableModelCount: 1
+    }
+    const routingActions = (place: Parameters<typeof accountActions>[1]): string[] =>
+      accountActions(second, place)
+        .filter((choice) => ['first', 'disable', 'enable'].includes(choice.action))
+        .map((choice) => choice.label)
+
+    expect(
+      routingActions({ position: 2, count: 2, first: false, disabled: false, lastEnabled: false })
+    ).toEqual(['Use first', 'Disable'])
+    expect(
+      routingActions({ position: 1, count: 2, first: true, disabled: false, lastEnabled: false })
+    ).toEqual(['Disable'])
+    expect(
+      routingActions({ position: 2, count: 2, first: false, disabled: true, lastEnabled: false })
+    ).toEqual(['Enable'])
   })
 
   // Catches the footer offering the sidebar key on a terminal too narrow for the sidebar, where it
@@ -79,5 +123,36 @@ describe('console navigation', () => {
     const at48 = stripTerminalSequences(footerLine('accounts', { width: 48, sidebarFits: false }))
     expect(at48).toMatch(/^ {2}↑↓ {2}select +q {2}quit \(stops the proxy\) $/)
     expect(visibleWidth(at48)).toBe(48)
+  })
+
+  // Catches `r` named for both views at once, or for the view already shown, instead of the one
+  // it switches to.
+  test('the first view’s r names the other view: the raw log from the table, and back', () => {
+    const size = { width: 160, sidebarFits: true }
+    const onTable = stripTerminalSequences(footerLine('logs', size, logsKeys(false)))
+    const onRaw = stripTerminalSequences(footerLine('logs', size, logsKeys(true)))
+
+    expect(onTable).toMatch(/ r {2}raw log /u)
+    expect(onRaw).toMatch(/ r {2}requests /u)
+    expect(onRaw).not.toContain('raw log')
+  })
+
+  // Catches the Doctor tab (#325) out of reach by its digit, a digit that jumps to another tab
+  // than the one its tab shows, or the footer still saying `1-5`.
+  test('6 jumps to the Doctor tab, and the footer names every digit', () => {
+    const footer = stripTerminalSequences(footerLine('doctor', { width: 160, sidebarFits: true }))
+
+    expect(VIEW_DIGIT.doctor).toBe('6')
+    for (const view of VIEWS) expect(VIEW_DIGIT[view]).toBe(String(VIEWS.indexOf(view) + 1))
+    expect(footer).toContain('1-6 ←→')
+    expect(footer).toMatch(/^ {2}↑↓ {2}select {3}t {2}today {3}w {2}week {3}a {2}all 30 days/u)
+  })
+
+  // Catches the window keys acting on one of the two views that share the window (#325), so `w`
+  // in Stats and in Doctor disagree, or acting on a view whose footer does not list them.
+  test('the window keys set the one window from Stats and from Doctor, and nowhere else', () => {
+    expect(pickedWindow('stats', 'today', 'week')).toBe('week')
+    expect(pickedWindow('doctor', 'week', 'all')).toBe('all')
+    expect(pickedWindow('models', 'today', 'week')).toBe('today')
   })
 })

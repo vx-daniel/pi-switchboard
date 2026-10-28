@@ -13,7 +13,6 @@ import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
-import { createServer as createNetServer } from 'node:net'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -21,6 +20,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { freePort } from '../fixtures/local-server'
 import {
   finishChunk,
   type MockProvider,
@@ -79,21 +79,6 @@ function portOf(server: { address(): ReturnType<Server['address']> }): number {
   const address = server.address()
   if (address === null || typeof address === 'string') throw new Error('server is not on TCP')
   return address.port
-}
-
-/**
- * A free local port, for the binary to listen on.
- *
- * @returns a port nothing listened on a moment ago
- */
-async function freePort(): Promise<number> {
-  const server = createNetServer()
-  server.listen(0, '127.0.0.1')
-  await once(server, 'listening')
-  const port = portOf(server)
-  server.close()
-  await once(server, 'close')
-  return port
 }
 
 /**

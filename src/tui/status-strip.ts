@@ -7,8 +7,10 @@
  * @remarks
  * Rendering only: the console gathers a {@link StatusStripInput} snapshot and redraws. When the
  * row is too narrow, the left details drop from the end down to the address and the auth, then the
- * right group drops from its start, then the rest is cut. An error (the exposure config, pi's
- * `models.json`) is never dropped: it comes right after the auth.
+ * right group drops from its start, then the version, then the rest is cut. An error (the
+ * exposure config, pi's `models.json`) is never dropped: it comes right after the auth. Proxy auth
+ * off is a badge that says so in its text, in the warning color on loopback and the error color
+ * beyond it (#287); beyond loopback the screen also gives it a row of its own ({@link authOffRow}).
  *
  * @packageDocumentation
  */
@@ -16,7 +18,7 @@
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
 import { FINISHED_KEPT, type FinishedRequest } from '@proxy/server/active-requests'
 import { compactDuration, usd } from '@proxy/tui/panel'
-import { badge, paint, strong, tabAccent } from '@proxy/tui/theme'
+import { alertBadge, badge, paint, strong, tabAccent } from '@proxy/tui/theme'
 import { MS_PER_MINUTE } from '@proxy/utils/time'
 
 /** Minutes the sparkline covers, one cell each. */
@@ -35,7 +37,7 @@ const MARK = '◆'
 const SEPARATOR = paint('border', ' · ')
 /** Decimal places of the rate. */
 const RATE_DECIMALS = 1
-/** The left details kept whatever the width: the address and the auth. */
+/** The left details kept whatever the width with a token: the address and the auth. */
 const LEFT_DETAILS_KEPT = 2
 
 /** Everything one render of the strip shows. */
@@ -44,7 +46,9 @@ export interface StatusStripInput {
   /** `host:port`, without the scheme. */
   readonly address: string
   /** Proxy auth: `token` or `off`. */
-  readonly proxyAuth: string
+  readonly proxyAuth: 'token' | 'off'
+  /** Whether the proxy listens beyond this machine: auth off is an error there, not a warning. */
+  readonly beyondLoopback: boolean
   /** Exposed model count or the exposure config's error, or `undefined` before the first read. */
   readonly exposed: number | string | undefined
   /** Available model count, or `undefined` before the first read. */
@@ -141,14 +145,15 @@ function rightParts(input: StatusStripInput): string[] {
 }
 
 /**
- * Lists the left details: the address and the auth first (never dropped), then the errors (never
- * dropped either), then what the row's width allows.
+ * Lists the left details: the address and, with a token, the auth first (never dropped), then the
+ * errors (never dropped either), then what the row's width allows. Auth off is the badge instead.
  *
  * @param input - the snapshot
  * @returns the details, in order
  */
 function leftDetails(input: StatusStripInput): string[] {
-  const details = [input.address, `${paint('dim', 'auth ')}${input.proxyAuth}`]
+  const details = [input.address]
+  if (input.proxyAuth === 'token') details.push(`${paint('dim', 'auth ')}token`)
   if (typeof input.exposed === 'string') details.push(paint('error', 'exposure config error'))
   if (input.modelsJsonError) details.push(paint('error', 'models.json error'))
   if (typeof input.exposed === 'number' && input.available !== undefined) {
@@ -164,16 +169,44 @@ function leftDetails(input: StatusStripInput): string[] {
 }
 
 /**
- * Counts the left details that are never dropped: the address, the auth, and any error.
+ * Counts the left details that are never dropped: the address, the auth with a token, and any
+ * error.
  *
  * @param input - the snapshot
  * @returns how many
  */
 function leftDetailsKept(input: StatusStripInput): number {
-  let kept = LEFT_DETAILS_KEPT
+  let kept = input.proxyAuth === 'token' ? LEFT_DETAILS_KEPT : LEFT_DETAILS_KEPT - 1
   if (typeof input.exposed === 'string') kept += 1
   if (input.modelsJsonError) kept += 1
   return kept
+}
+
+/**
+ * Draws the badge after the name: `● SERVING` with a token; with auth off, a badge that says so
+ * and names the key that sets a token, in the warning color on loopback and the error color beyond
+ * it (#287). It takes `SERVING`'s place, so it is never dropped, even on the narrowest terminal.
+ *
+ * @param input - the snapshot
+ * @returns the badge
+ */
+function statusBadge(input: StatusStripInput): string {
+  if (input.proxyAuth === 'token') return badge(' ● SERVING ')
+  return alertBadge(input.beyondLoopback ? 'error' : 'warning', ' ⚠ AUTH OFF (p) ')
+}
+
+/**
+ * Renders the row the screen shows under the strip while proxy auth is off and the proxy listens
+ * beyond this machine (#287): a solid error-colored bar across the screen, the address and the key
+ * first, so a narrow terminal cuts the explanation rather than them.
+ *
+ * @param address - `host:port`, without the scheme
+ * @param width - the terminal's columns
+ * @returns the row, `width` columns
+ */
+export function authOffRow(address: string, width: number): string {
+  const text = ` ⚠ Proxy auth is off on ${address} · p sets a token · anyone who can reach it can use your logins`
+  return alertBadge('error', truncateToWidth(text, width, '…', true))
 }
 
 /**
@@ -185,7 +218,7 @@ function leftDetailsKept(input: StatusStripInput): number {
  */
 export function statusStrip(input: StatusStripInput, width: number): string {
   const name = `${tabAccent(` ${MARK} `)}${strong('pi-switchboard')}`
-  const serving = `  ${badge(' ● SERVING ')}  `
+  const serving = `  ${statusBadge(input)}  `
   let fixed = `${name} ${paint('dim', input.version)}${serving}`
   const left = leftDetails(input)
   const right = rightParts(input)

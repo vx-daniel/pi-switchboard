@@ -15,6 +15,7 @@ import {
   DEFAULT_CONFIG,
   getConfigPath,
   intBounds,
+  isLoopbackHost,
   normalizeConfig,
   parseIntText,
   ProxyConfigSchema
@@ -262,7 +263,7 @@ describe('normalizeConfig', () => {
     expect(result.routing.reserve).toEqual({ 'anthropic': 0.2, 'openai-codex': 0 })
     expect(normalizeConfig({}).routing).toEqual({
       reserve: {},
-      logins: { fallbackOn: ['rate_limit'] }
+      logins: { fallbackOn: ['rate_limit'], order: {}, disabled: [] }
     })
   })
 
@@ -271,14 +272,35 @@ describe('normalizeConfig', () => {
   test('repairs routing.logins.fallbackOn to its default and keeps a valid list', () => {
     expect(
       normalizeConfig({ routing: { logins: { fallbackOn: ['rate-limit'] } } }).routing.logins
-    ).toEqual({ fallbackOn: ['rate_limit'] })
-    expect(normalizeConfig({ routing: { logins: { fallbackOn: [] } } }).routing.logins).toEqual({
-      fallbackOn: []
-    })
+        .fallbackOn
+    ).toEqual(['rate_limit'])
+    expect(
+      normalizeConfig({ routing: { logins: { fallbackOn: [] } } }).routing.logins.fallbackOn
+    ).toEqual([])
     expect(
       normalizeConfig({ routing: { logins: { fallbackOn: ['auth', 'unavailable'] } } }).routing
+        .logins.fallbackOn
+    ).toEqual(['auth', 'unavailable'])
+  })
+
+  // Catches an invalid login order or disabled list stopping the proxy, kept as written (a
+  // non-string compared with every login), or costing the valid entries beside it (#233).
+  test('repairs routing.logins.order and .disabled, keeping their valid entries', () => {
+    const logins = normalizeConfig({
+      routing: {
+        logins: {
+          order: { anthropic: [' anthropic-2 ', 7, ''], openai: 'openai-2' },
+          disabled: ['anthropic-3', null, '  ']
+        }
+      }
+    }).routing.logins
+
+    expect(logins.order).toEqual({ anthropic: ['anthropic-2'] })
+    expect(logins.disabled).toEqual(['anthropic-3'])
+    expect(
+      normalizeConfig({ routing: { logins: { order: [], disabled: 'anthropic-2' } } }).routing
         .logins
-    ).toEqual({ fallbackOn: ['auth', 'unavailable'] })
+    ).toEqual({ fallbackOn: ['rate_limit'], order: {}, disabled: [] })
   })
 
   // Catches one bad label costing the others, an empty or padded label kept (the console shows it
@@ -307,6 +329,7 @@ describe('normalizeConfig', () => {
       port: 9090,
       lifetime: 'session',
       authToken: 'tok',
+      hostOriginGuard: true,
       remoteImages: true,
       docsUi: true,
       responsesApi: true,
@@ -320,7 +343,14 @@ describe('normalizeConfig', () => {
       aliases: { coding: 'openai/gpt-4o' },
       labels: { 'anthropic-2': 'work' },
       logLevel: 'debug',
-      routing: { reserve: { anthropic: 0.2 }, logins: { fallbackOn: ['rate_limit', 'auth'] } },
+      routing: {
+        reserve: { anthropic: 0.2 },
+        logins: {
+          fallbackOn: ['rate_limit', 'auth'],
+          order: { anthropic: ['anthropic-2', 'anthropic'] },
+          disabled: ['anthropic-3']
+        }
+      },
       zed: { providerName: 'My Proxy', autoSync: true }
     }
     expect(normalizeConfig(full)).toEqual(full)
@@ -447,7 +477,17 @@ describe('normalizeConfig: repairs', () => {
   test.each([
     ['a config that is not an object', null, 'config'],
     ['a zed block that is not an object', { zed: null }, 'zed'],
-    ['a fractional number', { port: 4141.5 }, 'port']
+    ['a fractional number', { port: 4141.5 }, 'port'],
+    [
+      'a login order that is not a map of lists',
+      { routing: { logins: { order: { anthropic: 'anthropic-2' } } } },
+      'routing.logins.order'
+    ],
+    [
+      'a disabled login that is not a name',
+      { routing: { logins: { disabled: [7] } } },
+      'routing.logins.disabled'
+    ]
   ])('%s is reported by its path', (_case, raw, path) => {
     captureWarnings()
     normalizeConfig(raw)
@@ -487,6 +527,23 @@ describe('normalizeConfig: repairs', () => {
   test('host is trimmed, and a blank host takes the default', () => {
     expect(normalizeConfig({ host: ' 0.0.0.0 ' }).host).toBe('0.0.0.0')
     expect(normalizeConfig({ host: '   ' }).host).toBe(DEFAULT_CONFIG.host)
+  })
+})
+
+describe('isLoopbackHost', () => {
+  // Catches a bind address that only looks like loopback counted as one, which would word the
+  // auth-off warning as a local matter for a name that can resolve to any interface (#309 review).
+  test.each([
+    ['127.0.0.1', true],
+    ['127.10.20.30', true],
+    ['localhost', true],
+    ['::1', true],
+    ['127.evil.example', false],
+    ['127.0.0.1.nip.io', false],
+    ['0.0.0.0', false],
+    ['192.168.1.20', false]
+  ])('%s is loopback: %s', (host, loopback) => {
+    expect(isLoopbackHost(host)).toBe(loopback)
   })
 })
 

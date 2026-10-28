@@ -12,6 +12,7 @@
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
+import { modelAvailability } from '@proxy/pi/availability'
 import { activeCooldown, type Cooldown, loginSubject } from '@proxy/pi/cooldowns'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
 import { MS_PER_SECOND, unixSecondsNow } from '@proxy/utils/time'
@@ -179,6 +180,13 @@ const piModelCapabilitiesSchema = z
       }),
     cooldown: cooldownSchema,
     quota: quotaSchema,
+    availability: z.enum(['verified', 'refused', 'unknown']).meta({
+      description:
+        'Whether the provider login serves the model, from calls this process made (#174): ' +
+        '`refused` after the login refused it (answered as 404 `model_not_found`), `verified` ' +
+        'after a whole answer, `unknown` before either. The latest result wins. An alias ' +
+        "reports its target's."
+    }),
     logins: z
       .array(
         z.object({
@@ -186,14 +194,20 @@ const piModelCapabilitiesSchema = z
             description:
               'The login: the provider, or one of its extra logins (`anthropic-2`, #227).'
           }),
+          disabled: z.boolean().meta({
+            description:
+              'Whether `routing.logins.disabled` names the login (#233): it keeps its ' +
+              'credential, but routing never calls it.'
+          }),
           cooldown: cooldownSchema,
           quota: quotaSchema
         })
       )
       .meta({
         description:
-          'The logins that may serve the model, in the order routing tries them (#227). The ' +
-          "model's own `cooldown` and `quota` are the first login's."
+          'The logins that may serve the model, in the order routing tries them (#227), as ' +
+          '`routing.logins.order` sets it (#233); then the disabled ones, which it never tries. ' +
+          "The model's own `cooldown` and `quota` are the first login's."
       })
   })
   .meta({ id: 'ModelCapabilities', description: 'What pi knows about an exposed model.' })
@@ -247,14 +261,20 @@ function quotaField(quota: ProviderQuota | undefined): PiModelList['data'][numbe
 }
 
 /**
- * Reports one login of a model: its cooldown (#68) and its quota (#69).
+ * Reports one login of a model: whether it is disabled (#233), its cooldown (#68) and its quota
+ * (#69).
  *
  * @param login - the login's entry: its provider is the login
- * @returns the login's ID, cooldown and quota
+ * @param disabled - whether `routing.logins.disabled` names it
+ * @returns the login's ID, whether it is disabled, its cooldown and its quota
  */
-function loginField(login: ExposedModel): PiModelList['data'][number]['logins'][number] {
+function loginField(
+  login: ExposedModel,
+  disabled: boolean
+): PiModelList['data'][number]['logins'][number] {
   return {
     id: login.login,
+    disabled,
     cooldown: cooldownField(activeCooldown(loginSubject(login))),
     quota: quotaField(providerQuota(login.login))
   }
@@ -273,8 +293,9 @@ export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
     object: 'list',
     data: models.map((exposed) => {
       const { publicId, model } = exposed
-      const logins = (exposed.logins ?? [exposed]).map(loginField)
-      const [first] = logins
+      const enabled = (exposed.logins ?? [exposed]).map((login) => loginField(login, false))
+      const disabled = (exposed.disabledLogins ?? []).map((login) => loginField(login, true))
+      const [first] = enabled
       return {
         id: publicId,
         provider: exposed.provider,
@@ -296,7 +317,8 @@ export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
         },
         cooldown: first?.cooldown ?? null,
         quota: first?.quota ?? null,
-        logins
+        availability: modelAvailability(exposed.canonicalId),
+        logins: [...enabled, ...disabled]
       }
     })
   }

@@ -4,7 +4,7 @@
  * @remarks
  * Initializes pi's model runtime (file-based auth and models.json storage), reads the global
  * `enabledModels` setting from pi's SettingsManager, and exposes lookup functions used by the
- * proxy routes. pi 1.x's async `ModelRuntime` owns credentials, catalogs and request
+ * proxy routes. pi's async `ModelRuntime` (pi 1.x) owns credentials, catalogs and request
  * authentication in one place.
  *
  * @packageDocumentation
@@ -24,6 +24,11 @@ const registryLogger = proxyLogger('pi', 'registry')
 let runtime: ModelRuntime | undefined
 /** pi's settings manager for the process's working directory; set by {@link initRegistry}. */
 let settingsManager: SettingsManager | undefined
+/**
+ * Why `{provider}-N` logins were not registered at startup, or `undefined` when they were (or
+ * there were none); set by {@link initRegistry}.
+ */
+let loginListingFailure: string | undefined
 
 /**
  * Outcome of resolving request auth for a model: usable, or why not. `error` is already
@@ -39,6 +44,17 @@ const MODELS_JSON_PARSE_PREFIX = 'Failed to parse models.json:'
 const JSON_ERROR_LINE_COLUMN = /\(line (\d+) column (\d+)\)/
 /** Where other JSON.parse messages put the fault: `position N`. */
 const JSON_ERROR_OFFSET = /position (\d+)/
+/**
+ * JavaScriptCore's JSON.parse messages (the Bun binary) that quote nothing from the file, captured
+ * from Bun 1.4.4. JavaScriptCore gives no location, so this phrase is all there is to keep.
+ *
+ * @remarks
+ * An allowlist, not a denylist: other JavaScriptCore messages quote the file (`Unexpected
+ * identifier "notarealsec"`, `Invalid escape character q`, `"\uZZZZ" is not a valid unicode
+ * escape`, `Unrecognized token '#'`). `Unexpected token` is kept only for JSON's own punctuation.
+ */
+const JSON_ERROR_JSC_REASON =
+  /^JSON Parse error: (Unexpected EOF|Expected '[}\]]'|Expected ':' before value in object property definition|Unterminated string|Unexpected comma at the end of array expression|Property name must be a string literal|Unable to parse JSON string|Single quotes \('\) are not allowed in JSON|Invalid number|Invalid digits after decimal point|\\u must be followed by 4 hex digits|Unexpected token '[{}[\]:,]')$/
 
 /**
  * Splits pi's models.json error into its message and the file's path.
@@ -66,9 +82,11 @@ function splitModelsJsonError(error: string): { detail: string; path: string | u
  * @remarks
  * JSON.parse messages can include a slice of the text around the fault (`Unexpected token 'o',
  * ..."apiKey": notarealsec"... is not valid JSON`), which is often a key, so a parse error keeps
- * only where it is. Load errors (the fs message) and schema errors (property paths, which name the
- * user's providers and models, and TypeBox's fixed messages) quote no values and pass through. The
- * file's path is dropped; callers that log it take it separately.
+ * only where it is (V8) or, when the engine gives no location (JavaScriptCore, the Bun binary),
+ * its reason if that is one known to quote nothing ({@link JSON_ERROR_JSC_REASON}). Load errors
+ * (the fs message) and schema errors (property paths, which name the user's providers and models,
+ * and TypeBox's fixed messages) quote no values and pass through. The file's path is dropped;
+ * callers that log it take it separately.
  *
  * @param error - pi's models.json error, as `ModelRuntime.getError()` returns it
  * @returns the reduced message
@@ -81,9 +99,11 @@ export function describeModelsJsonError(error: string): string {
     return `models.json is not valid JSON at line ${String(lineColumn[1])} column ${String(lineColumn[2])}`
   }
   const offset = JSON_ERROR_OFFSET.exec(detail)
-  return offset === null
+  if (offset !== null) return `models.json is not valid JSON at position ${String(offset[1])}`
+  const reason = JSON_ERROR_JSC_REASON.exec(detail.slice(MODELS_JSON_PARSE_PREFIX.length).trim())
+  return reason === null
     ? 'models.json is not valid JSON'
-    : `models.json is not valid JSON at position ${String(offset[1])}`
+    : `models.json is not valid JSON: ${String(reason[1])}`
 }
 
 /** How long listing pi's stored credentials at startup may take. */
@@ -94,7 +114,8 @@ const CREDENTIAL_LIST_TIMEOUT_MS = 15_000
  *
  * @remarks
  * Every `{provider}-N` credential in pi's store gets its provider registered (#227) before
- * the availability snapshot is taken.
+ * the availability snapshot is taken. A store that cannot be listed is not retried; see
+ * {@link getLoginRegistration}.
  *
  * @returns the models.json error ({@link describeModelsJsonError}), or `undefined` on success
  */
@@ -110,11 +131,14 @@ export async function initRegistry(): Promise<string | undefined> {
       path: splitModelsJsonError(rawError).path
     })
   }
-  const accounts = await registerStoredAccounts(
+  const stored = await registerStoredAccounts(
     runtime,
     AbortSignal.timeout(CREDENTIAL_LIST_TIMEOUT_MS)
   )
-  if (accounts.length > 0) {
+  // Nothing re-runs the listing after startup, so a failed one stands until restart;
+  // `/healthz/creds` says so rather than reading as "no logins".
+  loginListingFailure = stored.listed ? undefined : stored.reason
+  if (stored.listed && stored.accounts.length > 0) {
     // A registered provider is only provisionally available until the next availability pass;
     // this one settles it, from the stored credentials alone, before the snapshot is read. Should
     // it fail, the proxy starts anyway: the provisional entries stand until the next pass.
@@ -132,6 +156,28 @@ export async function initRegistry(): Promise<string | undefined> {
     modelsJsonLoaded: loadError === undefined
   })
   return loadError
+}
+
+/**
+ * Whether the startup registration of `{provider}-N` logins ran: `registered: false` with the
+ * failure's code or name (never its message, which can quote a path).
+ */
+export type LoginRegistration = { registered: true } | { registered: false; reason: string }
+
+/**
+ * Says whether the startup registration of `{provider}-N` logins was skipped because pi's
+ * credential store could not be listed.
+ *
+ * @remarks
+ * Not the same as having no such login. The listing is not retried, so a failure stands until the
+ * proxy restarts.
+ *
+ * @returns `registered: true`, or `registered: false` with the failure's code or name
+ */
+export function getLoginRegistration(): LoginRegistration {
+  return loginListingFailure === undefined
+    ? { registered: true }
+    : { registered: false, reason: loginListingFailure }
 }
 
 /**
@@ -175,9 +221,10 @@ export function getLoginDeviceId(): string {
  * Returns every model available (with auth configured).
  *
  * @remarks
- * Reads the runtime's availability snapshot, taken when `initRegistry()` ran: a model whose
- * credentials were added afterwards appears after a restart. Listing stays synchronous and cheap,
- * as pi 0.x's synchronous `getAvailable()` was.
+ * Reads the runtime's availability snapshot. pi updates it when this process logs in or out
+ * (`ModelRuntime.login`, `logout`) or refreshes availability; a credential another process adds,
+ * such as pi's own `/login`, appears after a restart. Listing stays synchronous and cheap, as pi
+ * 0.x's synchronous `getAvailable()` was.
  *
  * @returns a copy of the available models
  * @throws Error when {@link initRegistry} has not run

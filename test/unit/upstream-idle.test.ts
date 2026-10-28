@@ -154,6 +154,42 @@ describe('upstream idle timeout', () => {
     expect(await downstream.result()).toBe(final)
   })
 
+  // Catches the relay calling a result a failure because `result()` took more promise hops to
+  // settle than the stand-in it races (#248 review): a pi that wraps the promise must not turn a
+  // legitimate result into "Upstream stream failed".
+  test('passes on a result that settles a few promise hops late', async () => {
+    const { upstream, downstream } = relayed()
+    const final = message('stop')
+    vi.spyOn(upstream, 'result').mockImplementation(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+      return final
+    })
+
+    upstream.push(textDelta)
+    upstream.end(final)
+
+    expect(await collect(downstream)).toEqual(['text_delta'])
+    expect(await downstream.result()).toBe(final)
+  })
+
+  // Catches a provider that ends its stream with neither a final event nor a result (#248): pi
+  // never settles its result then, so waiting on it left the response hanging, past the idle
+  // timeout, which nothing reads once the upstream iteration is over.
+  test('ends with an error event when the provider ends with no final event or result', async () => {
+    const { idle, upstream, downstream } = relayed()
+
+    upstream.push(textDelta)
+    upstream.end()
+
+    expect(await collect(downstream)).toEqual(['text_delta', 'error'])
+    const final = await downstream.result()
+    expect(final.stopReason).toBe('error')
+    expect(final.errorMessage).toBe('Upstream stream failed')
+    await vi.advanceTimersByTimeAsync(IDLE_MS * 2)
+    expect(idle.signal.aborted).toBe(false)
+  })
+
   // Catches a timed-out call being reported as the SDK's generic abort, which maps to 502.
   test('names the timeout in the error event it caused', async () => {
     const { upstream, downstream } = relayed()

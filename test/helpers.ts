@@ -1,13 +1,18 @@
 /**
- * Shared test helpers: type guards for the proxy's OpenAI-shaped response bodies, and a proxy app
- * built from a fixed config instead of the user's config file.
+ * Shared test helpers: type guards for the proxy's OpenAI-shaped response bodies, a proxy app
+ * built from a fixed config instead of the user's config file, the chat route's body validation,
+ * and model fixtures.
  *
  * @packageDocumentation
  */
 
+import type { Api, Model } from '@earendil-works/pi-ai'
 import type { ServerConfig } from '@proxy/config/env'
+import type { ExposedModel } from '@proxy/openai/model-exposure'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
+import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { createApp } from '@proxy/server/app'
+import { chatRequestBodySchema } from '@proxy/server/openapi'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import type { ExposureConfigReader } from '@proxy/server/routes'
 import { isRecord } from '@proxy/utils/guards'
@@ -136,6 +141,7 @@ export function testConfig(): ServerConfig {
     host: '127.0.0.1',
     port: 4141,
     proxyAuth: { kind: 'off' },
+    hostOriginGuardEnabled: false,
     agenticEnabled: false,
     remoteImagesEnabled: false,
     docsUiEnabled: false,
@@ -193,4 +199,121 @@ export function testApp(
 export function present<T>(value: T | undefined, what: string): T {
   if (value === undefined) throw new Error(`expected ${what}, got nothing`)
   return value
+}
+
+// ---------------------------------------------------------------------------
+// The chat route's body validation
+// ---------------------------------------------------------------------------
+
+/** How the chat route answered a request body: the status, and its error's `param` and `message`. */
+export interface ChatRouteAnswer {
+  readonly status: number
+  /** The error's `param`; `undefined` when the answer is not an error. */
+  readonly param: unknown
+  /** The error's `message`; `undefined` when the answer is not an error. */
+  readonly message: unknown
+}
+
+/**
+ * Posts a body to `POST /v1/chat/completions` on a {@link testApp}, which serves no model.
+ *
+ * @remarks
+ * A body the route's validator refuses gets its 400 or 422; one it accepts reaches model
+ * resolution and gets a 404 at `model`, as no model is exposed.
+ *
+ * @param body - the request body, sent as JSON
+ * @returns the status, and the error's `param` and `message`
+ */
+export async function postChatBody(body: unknown): Promise<ChatRouteAnswer> {
+  const response = await testApp().request('/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  })
+  const answer = await jsonBody(response)
+  const error = isRecord(answer) && isRecord(answer['error']) ? answer['error'] : {}
+  return { status: response.status, param: error['param'], message: error['message'] }
+}
+
+/**
+ * Parses a chat body with the schema the chat route's validator runs (`chatRequestBodySchema`),
+ * giving the request the route's handler gets.
+ *
+ * @param body - the request body
+ * @returns the parsed request
+ * @throws Error when the schema refuses the body
+ */
+export function parseChatBody(body: unknown): ChatCompletionRequest {
+  const result = chatRequestBodySchema.safeParse(body)
+  if (!result.success) throw new Error(`request did not validate: ${result.error.message}`)
+  return result.data
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+/**
+ * Builds a text-only, zero-cost model on the `openai-completions` API.
+ *
+ * @param provider - the provider name; also forms the base URL host
+ * @param id - the model ID, used as its name too
+ * @returns the model
+ */
+export function makeModel(provider: string, id: string): Model<Api> {
+  return {
+    id,
+    name: id,
+    api: 'openai-completions',
+    provider,
+    baseUrl: `https://${provider}.example.com`,
+    reasoning: false,
+    input: ['text'],
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+    contextWindow: 128000,
+    maxTokens: 4096
+  }
+}
+
+/**
+ * Builds an exposed {@link makeModel} model, listed by its bare ID and served by its provider's
+ * base login.
+ *
+ * @param provider - the provider
+ * @param id - the model ID
+ * @returns the exposed model
+ */
+export function exposed(provider: string, id: string): ExposedModel {
+  return {
+    publicId: id,
+    canonicalId: `${provider}/${id}`,
+    model: makeModel(provider, id),
+    provider,
+    login: provider
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Chat answers
+// ---------------------------------------------------------------------------
+
+/**
+ * Parses a chat answer's `x_pi`: the body's, or each stream chunk's.
+ *
+ * @param text - the response body
+ * @param stream - whether it is a stream
+ * @returns every `x_pi` found, in order; `undefined` entries where a chunk or body had none
+ */
+export function xPi(text: string, stream: boolean): unknown[] {
+  if (!stream) {
+    const body: unknown = JSON.parse(text)
+    return [isRecord(body) ? body['x_pi'] : undefined]
+  }
+  return text
+    .split('\n')
+    .filter((line) => line.startsWith('data: {'))
+    .map((line) => {
+      const chunk: unknown = JSON.parse(line.slice('data: '.length))
+      return isRecord(chunk) ? chunk['x_pi'] : undefined
+    })
 }

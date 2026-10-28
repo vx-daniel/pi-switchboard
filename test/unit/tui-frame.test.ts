@@ -69,17 +69,43 @@ describe('framedView', () => {
   test('folder tabs: the current one opens into the frame, the others stand closed on it', () => {
     const rows = plain(frame({ columns: 100, rows: 40 }, { view: 'accounts' }))
 
-    expect(rows[0]).toMatch(/^ {2}╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ *$/)
-    expect(rows[1]).toMatch(/^ {2}│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 4 Models │ +idle *$/)
-    expect(rows[2]).toMatch(/^╭─┴─+┴─┘ {12}└─┴─+┴─┴─+┴─+╮$/)
+    expect(rows[0]).toMatch(/^ {2}╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ ╭─+╮ *$/)
+    expect(rows[1]).toMatch(
+      /^ {2}│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 4 Models │ │ 5 Settings │ │ 6 Doctor │ +idle *$/
+    )
+    expect(rows[2]).toMatch(/^╭─┴─+┴─┘ {12}└─┴─+┴─┴─+┴─┴─+┴─┴─+┴─+╮$/)
   })
 
   // Catches the tabs in the border on a short terminal losing a digit, the current one unmarked,
   // or the context pushed off the border.
   test('compact tabs sit in the top border with the context at its right end', () => {
-    const rows = plain(frame({ columns: 80, rows: 24 }, { view: 'stats', context: 'today' }))
+    const rows = plain(frame({ columns: 90, rows: 24 }, { view: 'stats', context: 'today' }))
 
-    expect(rows[0]).toMatch(/^╭─ 1 Requests ─ 2 Accounts ─ 3 Stats ─ 4 Models ─+ today ─╮$/)
+    expect(rows[0]).toMatch(
+      /^╭─ 1 Requests ─ 2 Accounts ─ 3 Stats ─ 4 Models ─ 5 Settings ─ 6 Doctor ─+ today ─╮$/
+    )
+  })
+
+  // Catches the current view's tab left out when the row has no room for every tab (the sidebar
+  // narrows the frame), so nothing shows which view is open.
+  test("keeps the current view's tab when the row has no room for every tab", () => {
+    const rows = plain(frame({ columns: 66, rows: 40 }, { view: 'settings' }))
+
+    expect(rows[1]).toMatch(/│ 1 Requests │ │ 2 Accounts │ │ 3 Stats │ │ 5 Settings │/)
+    expect(rows[1]).not.toContain('Models')
+  })
+
+  // Catches the Doctor tab's count (#325) missing from either kind of tab, or its tab left out
+  // on a narrow row before tabs that count nothing, where its errors would go unseen.
+  test('a tab carries its count, and is kept before the tabs without one', () => {
+    const badges = { doctor: { count: 2, level: 'error' } } as const
+    const folder = plain(frame({ columns: 100, rows: 40 }, { badges }))
+    const compact = plain(frame({ columns: 90, rows: 24 }, { badges, context: '' }))
+    const narrow = plain(frame({ columns: 66, rows: 40 }, { view: 'settings', badges }))
+
+    expect(folder[1]).toContain('│ 6 Doctor 2 │')
+    expect(compact[0]).toContain('─ 6 Doctor 2 ─')
+    expect(narrow[1]).toMatch(/│ 1 Requests │ │ 2 Accounts │ │ 5 Settings │ │ 6 Doctor 2 │/)
   })
 
   // Catches the view's rows unpadded or uncut inside the borders, or a short body leaving the
@@ -121,15 +147,47 @@ describe('framedView', () => {
   })
 })
 
+describe('the bottom border’s status', () => {
+  // Catches the view's state (Requests live or paused) missing from the bottom border, drawn at
+  // the wrong end, or a status that pushes the row past the frame's width.
+  test('sits at the left of the bottom border, the note at the right, every row fitting', () => {
+    for (const columns of [60, 100, 160]) {
+      const input = frame({ columns, rows: 24 }, { status: '‖ paused · 3 newer below' })
+      const rendered = framedView(input, ['a row'])
+      for (const row of rendered) expect(visibleWidth(row)).toBe(input.layout.mainWidth)
+      const bottom = stripTerminalSequences(rendered.at(-1) ?? '')
+      expect(bottom).toMatch(/^╰─ ‖ paused · 3 newer below ─/u)
+      expect(bottom).toMatch(/─ 12 lines ─╯$/u)
+    }
+  })
+
+  // Catches the note crowding out the status on a narrow frame: the status says whether rows are
+  // arriving unseen, the note only counts them.
+  test('the note gives way to the status when both do not fit', () => {
+    const input = frame({ columns: 40, rows: 24 }, { status: '‖ paused · 3 newer below' })
+    const bottom = stripTerminalSequences(plain(input).at(-1) ?? '')
+
+    expect(bottom).toContain('‖ paused')
+    expect(bottom).not.toContain('12 lines')
+  })
+})
+
 describe('exposedModelsLabel', () => {
   // Catches the Models tab saying `0 models` while the status strip shows an exposure-config
-  // error (two sources for one count), or a count before the first status read.
+  // error (two sources for one count), a count before the first status read, or the built-in
+  // aliases counted as the operator's (#231).
   test.each([
-    ['a count with aliases', 24, 1, '24 models · 1 alias'],
-    ['a count with several aliases', 24, 3, '24 models · 3 aliases'],
+    ['a count with aliases', 24, { configured: 1, latest: 0 }, '24 models · 1 alias'],
+    ['a count with several aliases', 24, { configured: 3, latest: 0 }, '24 models · 3 aliases'],
+    ['built-in aliases apart', 24, { configured: 1, latest: 8 }, '24 models · 1 alias · 8 latest'],
     ['a count alone, for the note', 24, undefined, '24 models'],
-    ['the exposure config’s error', 'bad config', 2, 'exposure config error'],
-    ['nothing before the first read', undefined, 0, '']
+    [
+      'the exposure config’s error',
+      'bad config',
+      { configured: 2, latest: 0 },
+      'exposure config error'
+    ],
+    ['nothing before the first read', undefined, { configured: 0, latest: 0 }, '']
   ])('%s', (_label, exposed, aliases, expected) => {
     expect(exposedModelsLabel(exposed, aliases)).toBe(expected)
   })

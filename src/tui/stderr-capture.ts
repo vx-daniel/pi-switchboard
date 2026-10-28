@@ -1,5 +1,5 @@
 /**
- * Sends stray stderr writes to the console's log view (#61), so a write that bypasses LogTape
+ * Sends stray stderr writes to the console's raw log (#61), so a write that bypasses LogTape
  * does not corrupt the screen.
  *
  * @packageDocumentation
@@ -10,11 +10,11 @@ import { StringDecoder } from 'node:string_decoder'
 
 import type { LogBuffer } from '@proxy/tui/log-buffer'
 
-/** What marks a line as a stray stderr write in the log view. */
+/** What marks a line as a stray stderr write in the raw log. */
 const MARK = '[stderr] '
 
 /**
- * Replaces a stream's `write` so that what is written goes to the log view instead, a line at a
+ * Replaces a stream's `write` so that what is written goes to the raw log instead, a line at a
  * time, each marked `[stderr]`.
  *
  * @remarks

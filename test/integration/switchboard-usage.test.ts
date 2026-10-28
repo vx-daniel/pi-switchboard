@@ -36,7 +36,8 @@ function recordTraffic(): void {
     durationMsTotal: 0,
     durationMsMax: 0,
     firstEventMsTotal: 0,
-    firstEventCount: 0
+    firstEventCount: 0,
+    promptCacheKeyRequests: 0
   }
   const store = openStatsStore(statsFilePath())
   store.add({
@@ -51,7 +52,8 @@ function recordTraffic(): void {
         durationMsTotal: 3000,
         durationMsMax: 2000,
         firstEventMsTotal: 800,
-        firstEventCount: 2
+        firstEventCount: 2,
+        promptCacheKeyRequests: 1
       },
       { minute, alias: '', model: 'p/a', outcome: 'failed', status: 0, requests: 1, ...zeroTimes },
       {
@@ -72,6 +74,7 @@ function recordTraffic(): void {
         inputTokens: 100,
         outputTokens: 40,
         cacheReadTokens: 10,
+        cacheWriteTokens: 4,
         costUsd: 0.5
       },
       { ...attempt(minute, '', 'p/a'), attempts: 1, failures: 1 }
@@ -130,7 +133,8 @@ describe('GET /v1/switchboard/usage', () => {
           fallbacks: 1,
           input_tokens: 100,
           output_tokens: 40,
-          cache_tokens: 10,
+          cache_read_tokens: 10,
+          cache_write_tokens: 4,
           cost_usd: 0.5,
           average_ms: 1500,
           slowest_ms: 2000,

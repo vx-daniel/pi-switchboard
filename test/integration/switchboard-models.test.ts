@@ -74,7 +74,8 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       cost: { input: 2.5, output: 15, cache_read: 0.25, cache_write: 3.125 },
       cooldown: null,
       quota: null,
-      logins: [{ id: 'acme', cooldown: null, quota: null }]
+      availability: 'unknown',
+      logins: [{ id: 'acme', disabled: false, cooldown: null, quota: null }]
     })
   })
 
@@ -102,7 +103,8 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
       cooldown: null,
       quota: null,
-      logins: [{ id: 'acme', cooldown: null, quota: null }]
+      availability: 'unknown',
+      logins: [{ id: 'acme', disabled: false, cooldown: null, quota: null }]
     })
   })
 })

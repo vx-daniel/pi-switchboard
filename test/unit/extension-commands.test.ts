@@ -31,7 +31,12 @@ import {
 } from 'vite-plus/test'
 
 import proxyExtension from '../../extensions/proxy/index'
-import { type FixtureAgentDir, loadFixtureAgentDir, offlineProvider } from '../fixtures/agent-dir'
+import {
+  type FixtureAgentDir,
+  loadFixtureAgentDir,
+  offlineProvider,
+  writeProxyConfig
+} from '../fixtures/agent-dir'
 import { fakeCommandContext, type Notification } from '../fixtures/extension-context'
 
 vi.mock('@vx-daniel/pi-switchboard/config', () => import('@proxy/config/schema'))
@@ -86,15 +91,6 @@ describe('/proxy with models on two providers', () => {
   let zedRoot: string
   let zedSettingsPath: string
 
-  /**
-   * Writes `proxy-config.json` into the fixture agent dir.
-   *
-   * @param config - the config object, written as JSON
-   */
-  function writeProxyConfig(config: Record<string, unknown>): void {
-    writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify(config))
-  }
-
   beforeAll(async () => {
     agentDir = await loadFixtureAgentDir({
       modelsJson: {
@@ -115,7 +111,7 @@ describe('/proxy with models on two providers', () => {
     vi.stubEnv('HOME', zedRoot)
     vi.stubEnv('XDG_CONFIG_HOME', zedRoot)
     vi.stubEnv('PI_SWITCHBOARD_EXTENSION_LOG_FILE', '')
-    writeProxyConfig({ modelExposureMode: 'all' })
+    writeProxyConfig(agentDir.path, { modelExposureMode: 'all' })
   })
 
   afterEach(() => {
@@ -176,18 +172,44 @@ describe('/proxy with models on two providers', () => {
       }
     }
   ])('token with authToken $file.authToken', async ({ file, shown }) => {
-    writeProxyConfig(file)
+    writeProxyConfig(agentDir.path, file)
     expect(await runProxy('token')).toEqual([shown])
   })
 
   // Catches `/proxy reset` keeping an invalid authToken (#82): the reset is an explicit choice, so
   // it must write the defaults, auth off included, rather than leave every request refused.
   test('reset replaces an invalid authToken with the defaults', async () => {
-    writeProxyConfig({ authToken: 12345, port: 5151 })
+    writeProxyConfig(agentDir.path, { authToken: 12345, port: 5151 })
 
     expect(await runProxy('reset')).toEqual([
       { message: 'Proxy settings reset to defaults', level: 'info' }
     ])
+    expect(JSON.parse(readFileSync(join(agentDir.path, 'proxy-config.json'), 'utf-8'))).toEqual(
+      DEFAULT_CONFIG
+    )
+  })
+
+  // Catches the settings panel opening over a config file that is not valid JSON: it would show
+  // the defaults the file loads as, and every change would silently fail to save (#288).
+  test('config refuses to open over a file that is not valid JSON, and says how out', async () => {
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{"port": 51')
+
+    expect(await runProxy('config', true)).toEqual([
+      {
+        message:
+          'proxy-config.json is not valid JSON: fix or remove it, or run /proxy reset. Nothing is saved over it until then.',
+        level: 'warning'
+      }
+    ])
+  })
+
+  // Catches `/proxy reset`, the one way out the panel names, unable to replace such a file now
+  // that every other save refuses to (#288).
+  test('reset replaces a file that is not valid JSON with the defaults', async () => {
+    writeFileSync(join(agentDir.path, 'proxy-config.json'), '{"port": 51')
+
+    await runProxy('reset')
+
     expect(JSON.parse(readFileSync(join(agentDir.path, 'proxy-config.json'), 'utf-8'))).toEqual(
       DEFAULT_CONFIG
     )
@@ -234,7 +256,7 @@ describe('/proxy with models on two providers', () => {
     // Catches an exposure error being synced as a partial model list instead of shown.
     test('an exposure error is shown and nothing is written', async () => {
       writeFileSync(zedSettingsPath, ZED_SETTINGS)
-      writeProxyConfig({ modelExposureMode: 'all', publicModelIdMode: 'universal' })
+      writeProxyConfig(agentDir.path, { modelExposureMode: 'all', publicModelIdMode: 'universal' })
       expect(await runProxy('zed-sync')).toEqual([
         { message: `Zed sync: Model exposure error: ${UNIVERSAL_CONFLICT}`, level: 'error' }
       ])

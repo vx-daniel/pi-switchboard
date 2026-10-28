@@ -1,6 +1,6 @@
 /**
- * Hono middleware: request IDs and request logging, client disconnect detection, proxy auth, body
- * size limits.
+ * Hono middleware: request IDs and request logging, the upstream key header, client disconnect
+ * detection, proxy auth, rejected chat requests, JSON bodies and body size limits.
  *
  * @packageDocumentation
  */
@@ -114,26 +114,42 @@ export function requestIdMiddleware(): MiddlewareHandler<ProxyEnv> {
 }
 
 /**
- * Creates the middleware that rejects the upstream key header by its old name (#65).
+ * Creates the middleware that checks the upstream key header: refuses it by its old name (#65),
+ * and refuses it empty (#207).
  *
  * @remarks
- * Ignoring it would send the request with pi's stored credential instead of the key the client
- * meant (principle I: rejected, not ignored). The header's value is never logged or echoed.
+ * Ignoring the old name would send the request with pi's stored credential instead of the key the
+ * client meant (principle I: rejected, not ignored). An empty value would become the provider key
+ * and fail upstream with a 502 that blames the provider; it is a client mistake, refused with
+ * 400 as an empty `--auth-token` is refused. The header's value is never logged or echoed.
  *
- * @returns the middleware: a 400 naming the new header, or the next handler
+ * @returns the middleware: a 400 naming the header, or the next handler
  */
-export function renamedHeaderMiddleware(): MiddlewareHandler<ProxyEnv> {
+export function upstreamKeyHeaderMiddleware(): MiddlewareHandler<ProxyEnv> {
   return async (context, next) => {
-    if (context.req.header(OLD_UPSTREAM_API_KEY_HEADER) === undefined) return next()
-    httpLogger.warn('Rejected a request with the old {header} header', {
-      header: OLD_UPSTREAM_API_KEY_HEADER
-    })
-    return context.json(
-      invalidRequest(
-        `The ${OLD_UPSTREAM_API_KEY_HEADER} header is not read any more: send the key as ${UPSTREAM_API_KEY_HEADER}`
-      ),
-      HTTP_BAD_REQUEST
-    )
+    if (context.req.header(OLD_UPSTREAM_API_KEY_HEADER) !== undefined) {
+      httpLogger.warn('Rejected a request with the old {header} header', {
+        header: OLD_UPSTREAM_API_KEY_HEADER
+      })
+      return context.json(
+        invalidRequest(
+          `The ${OLD_UPSTREAM_API_KEY_HEADER} header is not read any more: send the key as ${UPSTREAM_API_KEY_HEADER}`
+        ),
+        HTTP_BAD_REQUEST
+      )
+    }
+    if (context.req.header(UPSTREAM_API_KEY_HEADER)?.trim() === '') {
+      httpLogger.warn('Rejected a request with an empty {header} header', {
+        header: UPSTREAM_API_KEY_HEADER
+      })
+      return context.json(
+        invalidRequest(
+          `The ${UPSTREAM_API_KEY_HEADER} header is empty: send a key, or leave the header out to use the proxy's login`
+        ),
+        HTTP_BAD_REQUEST
+      )
+    }
+    return next()
   }
 }
 
@@ -266,11 +282,11 @@ export function disconnectMiddleware(): MiddlewareHandler<ProxyEnv> {
  * as rejected, for the console (#214).
  *
  * @remarks
- * Mounted on `POST /v1/chat/completions` ahead of the body size limit and proxy auth, so it sees
- * their answers too. The chat route marks a request that reaches the dispatch (`chatDispatched`),
- * which `active-requests.ts` follows from there; any other answer is recorded with its status and
- * the model the request named, if the route read that far (`chatModel`). Nothing else from the
- * request is kept.
+ * Mounted on `POST /v1/chat/completions` and `POST /v1/responses` ahead of the body size limit and
+ * proxy auth, so it sees their answers too. The chat route marks a request that reaches the
+ * dispatch (`chatDispatched`), which `active-requests.ts` follows from there; any other answer is
+ * recorded with its status and the model the request named, if the route read that far
+ * (`chatModel`). Nothing else from the request is kept.
  *
  * @returns the middleware
  */
@@ -302,9 +318,10 @@ const JSON_MEDIA_TYPE = /^application\/([a-z-.]+\+)?json/i
  * request's `Content-Type` to `application/json` when it is anything else. A body that is not
  * JSON still fails, as invalid JSON.
  *
- * The rewrite is deliberate and local: only the chat route mounts this, after the request line is
- * logged and auth has run, and nothing after it reads the declared type. Both `app.request` (the
- * tests) and `@hono/node-server` (production) give a Request whose headers can be set.
+ * The rewrite is deliberate and local: only the chat and Responses routes mount this, after the
+ * request line is logged and auth has run, and nothing after it reads the declared type. Both
+ * `app.request` (the tests) and `@hono/node-server` (production) give a Request whose headers can
+ * be set.
  *
  * @returns the middleware
  */

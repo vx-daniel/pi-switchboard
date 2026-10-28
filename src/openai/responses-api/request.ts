@@ -32,7 +32,11 @@ import {
   type ResponsesInputItem,
   createResponseRequestSchema
 } from '@proxy/openai/responses-api/request-schema'
-import type { ChatCompletionRequest, OpenAIMessage } from '@proxy/openai/schemas'
+import {
+  type ChatCompletionRequest,
+  type OpenAIMessage,
+  STORE_TRUE_REFUSAL
+} from '@proxy/openai/schemas'
 import { schemaRejection, type ValidationError } from '@proxy/openai/validate'
 import { isRecord } from '@proxy/utils/guards'
 
@@ -46,7 +50,7 @@ export interface TranslatedRequest {
   readonly reasoning: readonly (readonly ReasoningToken[])[]
 }
 
-/** How a translation ended: the chat request, or the 400 for a token the proxy did not write. */
+/** How a translation ended: the chat request, or the 400 for a reasoning item it can't replay. */
 export type Translation =
   | { readonly ok: true; readonly value: TranslatedRequest }
   | { readonly ok: false; readonly message: string; readonly param: string }
@@ -79,8 +83,9 @@ function namedRejection(body: unknown): ValidationError | undefined {
   if (field !== undefined) {
     return named(field, `'${field}' is not supported: ${RESPONSES_REJECTED_FIELDS[field] ?? ''}`)
   }
+  // Chat completions refuse it the same way (`chatRequestRejection`); both use one message.
   if (body['store'] === true) {
-    return named('store', "'store: true' is not supported: the proxy stores nothing; send false")
+    return named('store', STORE_TRUE_REFUSAL)
   }
   const { tools, include } = body
   const tool = Array.isArray(tools)
@@ -287,7 +292,8 @@ function addItem(
  * Builds the chat messages: `instructions` as the system message, then `input`.
  *
  * @param request - the Responses request
- * @returns the messages and each assistant message's reasoning, or the 400 for a bad token
+ * @returns the messages and each assistant message's reasoning, or the 400 for a reasoning item
+ *   without a token, with one the proxy did not write, or with nothing after it
  */
 function messagesOf(
   request: CreateResponseRequest
@@ -395,8 +401,8 @@ function labelsOf(request: CreateResponseRequest): Partial<ChatCompletionRequest
  * replay.
  *
  * @param request - the validated Responses request
- * @returns the chat request and reasoning, or the 400 for a reasoning token the proxy did not
- *   write
+ * @returns the chat request and reasoning, or the 400 for a reasoning item without a token, with
+ *   one the proxy did not write, or with nothing after it
  */
 export function toChatRequest(request: CreateResponseRequest): Translation {
   const messages = messagesOf(request)

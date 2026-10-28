@@ -8,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { getRuntime } from '@proxy/pi/registry'
+import { consoleEvents } from '@proxy/server/console-events'
 import {
   loginLabels,
   loginOptions,
@@ -130,6 +131,7 @@ describe('a login in the console', () => {
     )
 
     expect(await servedModels()).toContain(MODEL)
+    expect(consoleEvents().at(-1)?.text).toBe(`Logged in to ${PROVIDER} (oauth)`)
     expect(storedCredentials()[PROVIDER]).toMatchObject({
       type: 'oauth',
       access: 'browser:the-code'
@@ -279,5 +281,6 @@ describe('a logout in the console', () => {
 
     expect(await servedModels()).not.toContain(MODEL)
     expect(storedCredentials()).not.toHaveProperty(PROVIDER)
+    expect(consoleEvents().at(-1)?.text).toBe(`Logged out of ${PROVIDER}`)
   })
 })

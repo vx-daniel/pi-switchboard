@@ -318,12 +318,25 @@ export function aliasFallbackOn(target: AliasTarget): readonly FailureClass[] {
  */
 const ReserveShareSchema = z.number().min(0).max(1)
 
+/** A login's provider ID (`anthropic`, `anthropic-2`), as `routing.logins` names it. */
+const LoginNameSchema = z.string().trim().min(1)
+/** Logins in the order routing tries them, first first (`routing.logins.order`'s values). */
+const LoginListSchema = z.array(LoginNameSchema).readonly()
+
 /**
  * How a request moves between a provider's logins (#227): the failure classes that move it from
- * one login of the same model to the next. A rate limit by default: the reason to log in twice.
+ * one login of the same model to the next (a rate limit by default: the reason to log in twice),
+ * the logins a provider tries first (#233), and the logins routing never calls (#233).
  */
 const LoginsConfigSchema = z.object({
-  fallbackOn: z.array(FailureClassSchema).readonly()
+  fallbackOn: z.array(FailureClassSchema).readonly(),
+  /**
+   * Base provider -> its logins to try first, in order (`{ "anthropic": ["anthropic-2"] }`).
+   * Logins left out follow in the usual order: the base, then `-2`, `-3` by number.
+   */
+  order: z.record(z.string().trim().min(1), LoginListSchema).readonly(),
+  /** Logins routing never calls; each keeps its credential in pi's store. */
+  disabled: LoginListSchema
 })
 /** The `routing.logins` section: see {@link LoginsConfigSchema}. */
 export type LoginsConfig = z.infer<typeof LoginsConfigSchema>
@@ -359,6 +372,11 @@ export const ProxyConfigSchema = z.object({
   port: boundedInt(1, MAX_PORT),
   /** Bearer token for proxy auth. Empty string = disabled. */
   authToken: VerbatimStringSchema,
+  /**
+   * Refuse requests a web page could send (#188): a `Host` a DNS-rebinding page would use, or an
+   * `Origin` other than the proxy's own. Off by default.
+   */
+  hostOriginGuard: z.boolean(),
   /** Allow remote image URL fetching. */
   remoteImages: z.boolean(),
   /** Serve the Swagger UI docs page at `/docs` (#129). */
@@ -426,6 +444,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   host: '127.0.0.1',
   port: 4141,
   authToken: '',
+  hostOriginGuard: false,
   remoteImages: false,
   docsUi: false,
   responsesApi: false,
@@ -440,7 +459,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   aliases: {},
   labels: {},
   logLevel: 'info',
-  routing: { reserve: {}, logins: { fallbackOn: ['rate_limit'] } },
+  routing: { reserve: {}, logins: { fallbackOn: ['rate_limit'], order: {}, disabled: [] } },
   zed: {
     providerName: 'Pi Proxy',
     autoSync: false
@@ -499,20 +518,28 @@ export const UpstreamTimeoutMsSchema = scaledInt(
 )
 
 /**
- * Keeps the list entries {@link VerbatimNameSchema} accepts.
+ * Returns a repairer that keeps the list entries `schema` accepts.
  *
- * @param value - The field's raw value.
- * @returns The valid entries; empty when `value` is not an array.
+ * @typeParam T - The entry type.
+ * @param schema - The schema each entry must pass.
+ * @returns The repairer: the valid entries, empty when the value is not an array.
  */
-function validNames(value: unknown): string[] {
-  if (!Array.isArray(value)) return []
-  const result: string[] = []
-  for (const candidate of value) {
-    const parsed = VerbatimNameSchema.safeParse(candidate)
-    if (parsed.success) result.push(parsed.data)
+function validList<T>(schema: z.ZodType<T>): (value: unknown) => T[] {
+  return (value) => {
+    if (!Array.isArray(value)) return []
+    const result: T[] = []
+    for (const candidate of value) {
+      const parsed = schema.safeParse(candidate)
+      if (parsed.success) result.push(parsed.data)
+    }
+    return result
   }
-  return result
 }
+
+/** Keeps the list entries {@link VerbatimNameSchema} accepts. */
+const validNames = validList(VerbatimNameSchema)
+/** Keeps the login names `routing.logins` accepts: non-empty, trimmed. */
+const validLogins = validList(LoginNameSchema)
 
 /**
  * Keeps the map entries whose value {@link VerbatimNameSchema} accepts.
@@ -555,6 +582,8 @@ const validAliases = validEntries(AliasTargetSchema)
 const validReserves = validEntries(ReserveShareSchema)
 /** Keeps the `labels` entries the schema accepts: a provider and a short, non-empty label. */
 const validLabels = validEntries(LabelSchema)
+/** Keeps the `routing.logins.order` entries with a provider and a list: each list's valid logins. */
+const validLoginOrder = validEntries(z.array(z.unknown()).transform(validLogins))
 
 /** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
 type FieldReader<Key extends string> = <T>(
@@ -639,12 +668,15 @@ function normalizeZedSyncConfig(raw: unknown, corrected: string[]): ZedSyncConfi
  */
 function normalizeLoginsConfig(raw: unknown, corrected: string[]): LoginsConfig {
   const field = fieldReader<keyof LoginsConfig>(raw, corrected, 'routing.logins')
+  const fields = LoginsConfigSchema.shape
   return {
     fallbackOn: field(
       'fallbackOn',
-      LoginsConfigSchema.shape.fallbackOn,
+      fields.fallbackOn,
       () => DEFAULT_CONFIG.routing.logins.fallbackOn
-    )
+    ),
+    order: field('order', fields.order, validLoginOrder),
+    disabled: field('disabled', fields.disabled, validLogins)
   }
 }
 
@@ -680,6 +712,11 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     host: field('host', fields.host, () => DEFAULT_CONFIG.host),
     port: field('port', fields.port, clampInt(fields.port, DEFAULT_CONFIG.port)),
     authToken: field('authToken', fields.authToken, () => DEFAULT_CONFIG.authToken),
+    hostOriginGuard: field(
+      'hostOriginGuard',
+      fields.hostOriginGuard,
+      () => DEFAULT_CONFIG.hostOriginGuard
+    ),
     remoteImages: field('remoteImages', fields.remoteImages, () => DEFAULT_CONFIG.remoteImages),
     docsUi: field('docsUi', fields.docsUi, () => DEFAULT_CONFIG.docsUi),
     responsesApi: field('responsesApi', fields.responsesApi, () => DEFAULT_CONFIG.responsesApi),
@@ -859,16 +896,16 @@ export function describeConfigFileProblem(file: ConfigFileProblem): string {
 }
 
 /**
- * Picks out an `authToken` that is set but is not a string (`null` included).
+ * Picks out an `authToken` that is set but is not a string (`null` included), by the schema's
+ * own field, so the two never disagree (#254).
  *
  * @param raw - The parsed config file.
  * @returns The invalid value, boxed, or `undefined` when it is absent or a string.
  */
 function invalidAuthToken(raw: unknown): { readonly value: unknown } | undefined {
-  if (!isRecord(raw) || raw['authToken'] === undefined || typeof raw['authToken'] === 'string') {
-    return undefined
-  }
-  return { value: raw['authToken'] }
+  const value = isRecord(raw) ? raw['authToken'] : undefined
+  const parsed = ProxyConfigSchema.shape.authToken.optional().safeParse(value)
+  return parsed.success ? undefined : { value }
 }
 
 /**
@@ -885,13 +922,20 @@ export function configFileAuthTokenInvalid(): boolean {
   return invalidAuthToken(rawConfigFile()) !== undefined
 }
 
-/** How `saveConfigToFile` treats an `authToken` the file has but that is not a string (#82). */
+/** How `saveConfigToFile` treats a file it would write over. */
 export interface SaveConfigOptions {
   /**
-   * Replace it with the config's value. Only for an explicit choice (disabling auth, a reset):
-   * otherwise the repaired '' would be written, and '' means auth off.
+   * Replace an `authToken` the file has that is not a string (#82) with the config's value. Only
+   * for an explicit choice (disabling auth, a reset): otherwise the repaired '' would be written,
+   * and '' means auth off.
    */
   readonly replaceInvalidAuthToken?: boolean
+  /**
+   * Write over a file that exists but can't be read or isn't valid JSON (#288). Only for a reset:
+   * such a file loads as the defaults, so any other save would replace what it holds, a token
+   * included, with them.
+   */
+  readonly replaceUnusableFile?: boolean
 }
 
 /**
@@ -899,14 +943,24 @@ export interface SaveConfigOptions {
  *
  * @remarks
  * A failure is logged as a warning, not thrown. An `authToken` in the file that is not a string is
- * kept when the config's token is '' unless `options.replaceInvalidAuthToken` is set (#82).
+ * kept when the config's token is '' unless `options.replaceInvalidAuthToken` is set (#82). A file
+ * that exists but can't be read or parsed is not written over unless `options.replaceUnusableFile`
+ * is set: the config came from the defaults it loads as, not from the file (#288).
  *
  * @param config - The config to write.
- * @param options - How to treat an invalid `authToken` already in the file.
+ * @param options - How to treat an invalid `authToken` or an unusable file already there.
  * @returns whether the file was written
  */
 export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions = {}): boolean {
   const configPath = getConfigPath()
+  const problem = configFileProblem()
+  if (problem !== undefined && options.replaceUnusableFile !== true) {
+    configLogger.warn('Not saving to {path}: it {problem}; fix or remove it first', {
+      path: configPath,
+      problem: describeConfigFileProblem(problem)
+    })
+    return false
+  }
   const normalized = normalizeConfig(config)
   // A config loaded from a file with an invalid authToken carries the repaired ''. Writing it would
   // turn auth off for good, so the file's value stays until the user chooses (#82).
@@ -941,11 +995,10 @@ export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions
  * Builds the env vars the pi extension passes to the proxy it spawns.
  *
  * @remarks
- * Covers host, port, auth token (only when non-empty), remote images, the docs UI, body size,
- * upstream timeout and log level. Not `lifetime` or `zed` (extension-only). Not
- * `PI_SWITCHBOARD_AGENTIC` either, on
- * purpose: agentic mode is not built, the variable only reaches the startup log, and the
- * extension has no setting for it.
+ * Covers host, port, auth token (only when non-empty), the host/origin guard, remote images, the
+ * docs UI, the Responses API, stats, body size, upstream timeout and log level. Not `lifetime` or
+ * `zed` (extension-only). Not `PI_SWITCHBOARD_AGENTIC` either, on purpose: agentic mode is not
+ * built, the variable only reaches the startup log, and the extension has no setting for it.
  *
  * @param config - The config to translate.
  * @returns Env var names and values.
@@ -957,6 +1010,7 @@ export function configToEnv(config: ProxyConfig): Record<string, string> {
   if (config.authToken.length > 0) {
     env['PI_SWITCHBOARD_AUTH_TOKEN'] = config.authToken
   }
+  env['PI_SWITCHBOARD_HOST_ORIGIN_GUARD'] = String(config.hostOriginGuard)
   env['PI_SWITCHBOARD_REMOTE_IMAGES'] = String(config.remoteImages)
   env['PI_SWITCHBOARD_DOCS_UI'] = String(config.docsUi)
   env['PI_SWITCHBOARD_RESPONSES_API'] = String(config.responsesApi)
@@ -967,4 +1021,39 @@ export function configToEnv(config: ProxyConfig): Record<string, string> {
   // Model exposure settings are not passed: the proxy reads them from the shared JSON config file,
   // at startup and again on every request (`fileConfigReader` in src/server/routes.ts).
   return env
+}
+
+/** An IPv4 address in `127.0.0.0/8`, written out in full. */
+const LOOPBACK_IPV4 = /^127(?:\.\d{1,3}){3}$/
+
+/**
+ * Checks whether a bind address only accepts connections from this machine.
+ *
+ * @param host - The bind address.
+ * @returns Whether `host` is `localhost`, `::1` or an address in `127.0.0.0/8`; a name that only
+ *   starts with `127.` (`127.evil.example`) is not, since it can resolve anywhere.
+ */
+export function isLoopbackHost(host: string): boolean {
+  return host === 'localhost' || host === '::1' || LOOPBACK_IPV4.test(host)
+}
+
+/**
+ * Says who can use the proxy while proxy auth is off (#188): every warning about auth off words it
+ * the same way. On loopback, other programs on this machine, and web pages open in a browser
+ * (DNS rebinding, cross-origin posts) unless the host/origin guard is on; beyond loopback, anyone
+ * on the network, whom the guard does not stop.
+ *
+ * @param host - The bind address.
+ * @param hostOriginGuard - Whether the host/origin guard is on.
+ * @returns The risk, as a clause with no capital or final stop.
+ */
+export function authOffRisk(host: string, hostOriginGuard: boolean): string {
+  if (isLoopbackHost(host)) {
+    return hostOriginGuard
+      ? 'any program on this machine can use your provider logins through it (the host/origin guard keeps web pages out)'
+      : 'any program on this machine, and any web page open in a browser on it, can use your provider logins through it'
+  }
+  return hostOriginGuard
+    ? 'anyone who can reach it on the network can use your provider logins (the host/origin guard keeps web pages out, not them)'
+    : 'anyone who can reach it on the network, and any web page open in a browser on this machine, can use your provider logins'
 }

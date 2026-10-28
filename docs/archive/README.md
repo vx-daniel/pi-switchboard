@@ -11,4 +11,5 @@ reasoning, not as plans. The current plan is `ROADMAP.md`, and the architecture 
 | `zed-pi-ide-integration.md` | Research into IDE context integration between Zed and pi | Not built |
 
 Still current, in `docs/`: `engineering/phase-3d-analysis.md` (the analysis behind Phase 3D's
-decisions) and `discovery/openai-compatible-clients.md` (client research).
+decisions) and `discovery/openai-compatible-clients.md` (client research). The user documentation
+starts at `docs/README.md`.

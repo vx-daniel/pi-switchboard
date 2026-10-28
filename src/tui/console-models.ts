@@ -14,7 +14,6 @@
 import {
   type AliasModel,
   type AliasTarget,
-  type FailureClass,
   FailureClassSchema,
   type FamilyTarget,
   isFamilyTarget,
@@ -22,7 +21,7 @@ import {
   targetSummary
 } from '@proxy/config/schema'
 import type { ModelExposureResult } from '@proxy/openai/model-exposure'
-import { KNOWN_FAMILIES, scanFamily } from '@proxy/openai/model-families'
+import { familiesIn, scanFamily } from '@proxy/openai/model-families'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import type { ReasoningEffort } from '@proxy/openai/schemas'
 import {
@@ -35,8 +34,9 @@ import {
 } from '@proxy/tui/aliases'
 import type { ConsoleContext } from '@proxy/tui/console'
 import { inBackground } from '@proxy/tui/console-accounts'
-import { askLine, pickLabel } from '@proxy/tui/dialogs'
-import { modelsItemAt, type ModelsItem, modelsViewData } from '@proxy/tui/models-view'
+import { askLine, pickLabel, tickList } from '@proxy/tui/dialogs'
+import type { ModelsItem } from '@proxy/tui/models-detail'
+import { modelsItemAt, modelsViewData } from '@proxy/tui/models-view'
 
 /** The effort option that keeps the request's own `reasoning_effort`. */
 const REQUEST_EFFORT = "The request's effort (not fixed)"
@@ -222,7 +222,7 @@ function familyModel(editor: AliasEditor, target: FamilyTarget): string | undefi
  * @returns the family target, or `undefined` when cancelled or none has an exposed member
  */
 async function pickFamilyTarget(editor: AliasEditor): Promise<FamilyTarget | undefined> {
-  const families = KNOWN_FAMILIES.filter((family) => familyMembers(editor, family).length > 0)
+  const families = familiesIn(editor.exposure.byCanonicalId.keys())
   if (families.length === 0) {
     await notify(editor, 'No model family has an exposed model.')
     return undefined
@@ -387,7 +387,7 @@ function targetActions(target: AliasModel | undefined): string[] {
 }
 
 /**
- * Shows an alias's targets, each with its effort, and the menu's other rows.
+ * Labels an alias's targets for the targets menu, each numbered with its effort.
  *
  * @param models - the targets
  * @returns one label per target, in order
@@ -454,19 +454,15 @@ async function editTargets(editor: AliasEditor, name: string, start: AliasDraft)
  * @param start - the alias as it was when the menu opened
  */
 async function editFallbackOn(editor: AliasEditor, name: string, start: AliasDraft): Promise<void> {
-  const classes = FailureClassSchema.options
-  const chosen = new Set<FailureClass>(start.fallbackOn)
-  for (;;) {
-    const rows = classes.map((failure) => `[${chosen.has(failure) ? 'x' : ' '}] ${failure}`)
-    const choice = await editor.screens.select(`Fall back from ${name} on`, [...rows, DONE])
-    if (choice === undefined) return
-    if (choice === DONE) break
-    const failure = classes[rows.indexOf(choice)]
-    if (failure !== undefined && !chosen.delete(failure)) chosen.add(failure)
+  const fallbackOn = await tickList(
+    editor.screens,
+    `Fall back from ${name} on`,
+    FailureClassSchema.options,
+    start.fallbackOn
+  )
+  if (fallbackOn !== undefined) {
+    await save(editor, name, { ...start, fallbackOn }, { previousName: name })
   }
-  // In the schema's order, whatever order they were ticked in.
-  const fallbackOn = classes.filter((failure) => chosen.has(failure))
-  await save(editor, name, { ...start, fallbackOn }, { previousName: name })
 }
 
 /**
@@ -507,13 +503,35 @@ const ALIAS_ACTIONS: Readonly<
 }
 
 /**
- * Runs what Enter does on a Models view row: an alias's menu, or a new alias (for the row's
- * model, on a model's row).
+ * Runs what Enter does on a built-in `-latest` alias (#231): it has no config entry to rename or
+ * delete, so its one action pins it, saving an alias of its name that replaces it.
+ *
+ * @param editor - the editor
+ * @param name - the alias
+ * @param target - the family it follows
+ */
+async function pinBuiltIn(editor: AliasEditor, name: string, target: AliasTarget): Promise<void> {
+  const draft = draftOf(target)
+  const choice = await editor.screens.select(`Alias ${name} (built in: follows the newest)`, [
+    PIN_TO
+  ])
+  if (choice !== PIN_TO) return
+  const next = await TARGET_ACTIONS[PIN_TO]?.(editor, draft.models, 0)
+  if (next !== undefined) await save(editor, name, { ...draft, models: next }, { creating: true })
+}
+
+/**
+ * Runs what Enter does on a Models view row: an alias's menu, a built-in alias's pin, or a new
+ * alias (for the row's model, on a model's row).
  *
  * @param editor - the editor
  * @param item - the selected row
  */
 export async function runModelsItem(editor: AliasEditor, item: ModelsItem): Promise<void> {
+  if (item.kind === 'latest') {
+    await pinBuiltIn(editor, item.name, item.target)
+    return
+  }
   if (item.kind !== 'alias') {
     await newAlias(editor, item.kind === 'model' ? item.model.canonicalId : undefined)
     return

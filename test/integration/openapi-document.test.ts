@@ -9,6 +9,8 @@
 
 import { OPENAPI_OPTIONS, SWAGGER_UI_VERSION, UNSUPPORTED_ENDPOINTS } from '@proxy/server/openapi'
 import type { ProxyEnv } from '@proxy/server/types'
+import { isRecord } from '@proxy/utils/guards'
+import { Ajv2020 } from 'ajv/dist/2020'
 import type { Hono } from 'hono'
 import { generateSpecs } from 'hono-openapi'
 import { describe, expect, test } from 'vite-plus/test'
@@ -65,6 +67,48 @@ function documentedRoutes(document: {
     .toSorted()
 }
 
+/**
+ * Collects every JSON Schema in a document: the components' schemas, and each `schema` under a
+ * path (parameters, request and response bodies).
+ *
+ * @param node - the document, or a part of it
+ * @param found - where the schemas go; written to
+ * @returns `found`
+ */
+function schemasIn(node: unknown, found: unknown[] = []): unknown[] {
+  if (Array.isArray(node)) {
+    for (const element of node) schemasIn(element, found)
+    return found
+  }
+  if (!isRecord(node)) return found
+  for (const [field, child] of Object.entries(node)) {
+    if (field === 'schema') found.push(child)
+    else schemasIn(child, found)
+  }
+  return found
+}
+
+/**
+ * Lists the operations that sit behind proxy auth (no `security: []`) but don't document a 401.
+ *
+ * @param document - the OpenAPI document
+ * @returns `<METHOD> <path>` for each
+ */
+function authedWithout401(document: unknown): string[] {
+  const paths = isRecord(document) && isRecord(document['paths']) ? document['paths'] : {}
+  return Object.entries(paths).flatMap(([path, item]) =>
+    Object.entries(isRecord(item) ? item : {})
+      .filter(([method]) => method !== 'parameters')
+      .filter(([, operation]) => {
+        if (!isRecord(operation)) return false
+        const open = Array.isArray(operation['security']) && operation['security'].length === 0
+        const responses = isRecord(operation['responses']) ? operation['responses'] : {}
+        return !open && !('401' in responses)
+      })
+      .map(([method]) => `${method.toUpperCase()} ${path}`)
+  )
+}
+
 describe('the OpenAPI document', () => {
   // Catches a route, field, status or description changed without the committed document: the
   // contract would move with nothing in the diff to review.
@@ -72,6 +116,27 @@ describe('the OpenAPI document', () => {
     const document = await generateSpecs(testApp(), OPENAPI_OPTIONS)
 
     await expect(`${JSON.stringify(document, null, 2)}\n`).toMatchFileSnapshot('../../openapi.json')
+  })
+
+  // Catches a schema that is not valid JSON Schema 2020-12, such as `prefixItems: []` from
+  // `z.tuple([])`: schema-driven tools (Schemathesis, client generators) refuse the routes that
+  // use it, as they refused chat completions and the Responses API (#207).
+  test('holds only valid JSON Schema', async () => {
+    const document = await generateSpecs(testApp(), OPENAPI_OPTIONS)
+    const ajv = new Ajv2020({ strict: false, validateFormats: false, logger: false })
+    const invalid = schemasIn(JSON.parse(JSON.stringify(document))).filter(
+      (schema) => isRecord(schema) && ajv.validateSchema(schema) !== true
+    )
+
+    expect(invalid).toEqual([])
+  })
+
+  // Catches a route behind proxy auth whose 401 is not documented, so a client generated from
+  // the document doesn't expect it (the unsupported endpoints, #207).
+  test('documents the 401 of every route behind proxy auth', async () => {
+    const document = await generateSpecs(testApp(), OPENAPI_OPTIONS)
+
+    expect(authedWithout401(JSON.parse(JSON.stringify(document)))).toEqual([])
   })
 
   // Catches a route added without a description (hono-openapi leaves it out silently), or one

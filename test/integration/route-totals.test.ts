@@ -6,11 +6,8 @@
  * model's usage; the models' prices make the cost.
  */
 
-import { writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-
 import { resetSync } from '@logtape/logtape'
-import type { AliasTarget, FailureClass } from '@proxy/config/schema'
+import type { FailureClass } from '@proxy/config/schema'
 import { configureLogging } from '@proxy/logging'
 import { clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { createApp } from '@proxy/server/app'
@@ -25,7 +22,7 @@ import { fileConfigReader } from '@proxy/server/routes'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
+import { type FixtureAgentDir, loadFixtureAgentDir, setAliases } from '../fixtures/agent-dir'
 import {
   chunk,
   cutOff,
@@ -197,7 +194,7 @@ beforeAll(async () => {
       init
     )
   })
-  setAliases({
+  setAliases(agentDir.path, {
     'coding': { targets: ['alpha/limited-mock', 'beta/answer-mock'], fallbackOn: ['rate_limit'] },
     'fast': 'alpha/priced-mock',
     'broken': 'alpha/cut-mock',
@@ -236,15 +233,6 @@ afterAll(async () => {
   await mock.close()
   agentDir.remove()
 })
-
-/**
- * Writes the proxy's config file with these aliases.
- *
- * @param aliases - alias -> target
- */
-function setAliases(aliases: Record<string, AliasTarget>): void {
-  writeFileSync(join(agentDir.path, 'proxy-config.json'), JSON.stringify({ aliases }))
-}
 
 /**
  * Sends one chat request and reads the whole answer.

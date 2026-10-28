@@ -4,16 +4,16 @@
  *
  * @remarks
  * - **Skipped only where the route names the class.** A candidate cooling down after a 429 is
- *   skipped only when the hop past it is named for `rate_limit`, and after a 503 only when it is
- *   named for `unavailable` (principle VI): the alias's `fallbackOn` between models, and
+ *   skipped only when the hop past it is named for `rate_limit`, and after a 503 or 529 only when
+ *   it is named for `unavailable` (principle VI): the alias's `fallbackOn` between models, and
  *   `routing.logins.fallbackOn` between a model's logins (#227). A chain that names neither calls
  *   it as before #68.
  * - **Never skip them all.** When every remaining candidate is cooling down, the one whose cooldown
  *   ends first is tried, so the request still makes one real call.
- * - **Every failure is recorded.** A 429 or 503 from any request starts a cooldown, so the operator
- *   and clients see it even before a chain uses it.
+ * - **Every failure is recorded.** A `rate_limit` or `unavailable` failure from any request starts
+ *   a cooldown, so the operator and clients see it even before a chain uses it.
  * - **Keyed by login.** A 429 cools the login that met it (`candidate.login`), not the provider's
- *   other logins; a 503 cools the model, under every login (#227).
+ *   other logins; a 503 or 529 cools the model, under every login (#227).
  *
  * @packageDocumentation
  */
@@ -23,7 +23,6 @@ import { proxyLogger } from '@proxy/logging'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import type { Attempt } from '@proxy/openai/responses'
 import { activeCooldown, type Cooldown, loginSubject, startCooldown } from '@proxy/pi/cooldowns'
-import { type FailedResponse, resetAfterMs } from '@proxy/pi/reset-time'
 import { movesOn, type RouteHops } from '@proxy/server/route-hops'
 
 /** Logger for routing decisions, as for the chat route's other skips. */
@@ -164,17 +163,13 @@ export function attemptOf(
  *
  * @param candidate - the model that failed
  * @param failure - the failure's class
- * @param captured - the failed response, when the capturing `fetch` kept it
+ * @param waitMs - the wait the failed response gave, or `undefined` for the default
  */
 export function recordCooldown(
   candidate: ExposedModel,
   failure: FailureClass | undefined,
-  captured: FailedResponse | undefined
+  waitMs: number | undefined
 ): void {
   if (failure !== 'rate_limit' && failure !== 'unavailable') return
-  startCooldown(
-    loginSubject(candidate),
-    failure,
-    captured === undefined ? undefined : resetAfterMs(captured)
-  )
+  startCooldown(loginSubject(candidate), failure, waitMs)
 }

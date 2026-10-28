@@ -24,7 +24,8 @@
  * and resolved after the public and canonical IDs.
  *
  * A provider's extra logins (`@proxy/openai/model-logins`, #227) are not models of their own: the
- * base provider's model is the exposed one, and each entry lists the logins that may serve it.
+ * base provider's model is the exposed one, and each entry lists the logins that may serve it, in
+ * the configured order, without the disabled ones (#233).
  *
  * @packageDocumentation
  */
@@ -33,6 +34,7 @@ import type { Api, Model } from '@earendil-works/pi-ai'
 import type {
   AliasTarget,
   FailureClass,
+  FamilyTarget,
   ModelExposureMode,
   PublicModelIdMode
 } from '@proxy/config/schema'
@@ -41,9 +43,16 @@ import type { ThinkingLevelsOf } from '@proxy/openai/effort-levels'
 import {
   type AliasDiagnostic,
   exposeAliases,
-  type FamilyResolution
+  type FamilyResolution,
+  latestAliases
 } from '@proxy/openai/model-aliases'
-import { groupLogins } from '@proxy/openai/model-logins'
+import {
+  DEFAULT_LOGIN_ROUTING,
+  groupLogins,
+  type LoginDiagnostic,
+  loginDiagnostics,
+  type LoginRouting
+} from '@proxy/openai/model-logins'
 import type { ReasoningEffort } from '@proxy/openai/schemas'
 import { canonicalModelId } from '@proxy/pi/model-id'
 import { resolveModelScope, type ScopeDiagnostic } from '@proxy/pi/model-scope'
@@ -88,6 +97,11 @@ export interface ExposedModel {
    * (#227): the same model, each under its login. Routing tries them in this order.
    */
   readonly logins?: readonly ExposedModel[]
+  /**
+   * The same model under each login `routing.logins.disabled` names (#233), which routing never
+   * calls; only when there is one.
+   */
+  readonly disabledLogins?: readonly ExposedModel[]
 }
 
 /** An alias's exposed targets, in order, and the failures that move to the next (#67). */
@@ -110,8 +124,13 @@ export interface ModelExposureConfig {
   /** The proxy's own canonical IDs, used when modelExposureMode is "custom"; empty exposes none. */
   readonly customModels: readonly string[]
   readonly providerPrefixes: Readonly<Record<string, string>>
-  /** Alias -> one canonical ID, or targets with the failures that move between them (#66, #67). */
+  /**
+   * Alias -> one target (a model or a family), or targets with the failures that move between
+   * them (#66, #67, #231).
+   */
   readonly aliases: Readonly<Record<string, AliasTarget>>
+  /** `routing.logins.order` and `.disabled` (#233); the usual order, none disabled, when left out. */
+  readonly loginRouting?: LoginRouting | undefined
 }
 
 /** A successful exposure computation: the exposed models and lookup maps. */
@@ -129,10 +148,17 @@ export interface ModelExposureResult {
   readonly aliases: readonly ExposedModel[]
   /** Alias -> its entry in {@link aliases}. */
   readonly byAlias: ReadonlyMap<string, ExposedModel>
-  /** Configured aliases left out: named like an exposed model, or naming no exposed model. */
+  /**
+   * Aliases and targets left out, and family members whose version can't be read (#66, #230,
+   * #231).
+   */
   readonly aliasDiagnostics: readonly AliasDiagnostic[]
+  /** Login settings that name no login, and providers whose every login is disabled (#233). */
+  readonly loginDiagnostics: readonly LoginDiagnostic[]
   /** What each family alias target resolves to now (#231). */
   readonly familyResolutions: readonly FamilyResolution[]
+  /** The built-in `-latest` aliases computed with this exposure, by name (#231). */
+  readonly latestAliases: Readonly<Record<string, FamilyTarget>>
 }
 
 /** A failed exposure computation: a config conflict that makes public IDs ambiguous. */
@@ -478,31 +504,37 @@ function validatePrefixUniqueness(
 // ---------------------------------------------------------------------------
 
 /**
- * Builds an exposed model's entry: the primary login's, carrying every login when there is more
- * than one (#227).
+ * Builds an exposed model's entry: the first login's, carrying every login when there is more
+ * than one (#227), and the disabled ones when there are any (#233).
  *
  * @param publicId - the model's public ID
  * @param model - the model exposure selected: the base provider's
- * @param logins - the models that may serve it, one per login, the primary first
+ * @param group - the models that may serve it, one per login, in routing order, and the same
+ *   model under each disabled login
+ * @param group.logins - the enabled logins' models, in routing order
+ * @param group.disabled - the disabled logins' models
  * @returns the entry
  */
 function exposedEntry(
   publicId: string,
   model: Model<Api>,
-  logins: readonly Model<Api>[]
+  group: { readonly logins: readonly Model<Api>[]; readonly disabled: readonly Model<Api>[] }
 ): ExposedModel {
   const canonicalId = canonicalModelId(model)
-  const entries = logins.map((login): ExposedModel => ({
+  const entryOf = (login: Model<Api>): ExposedModel => ({
     publicId,
     canonicalId,
     model: login,
     provider: model.provider,
     login: login.provider
-  }))
-  const [
-    first = { publicId, canonicalId, model, provider: model.provider, login: model.provider }
-  ] = entries
-  return entries.length > 1 ? { ...first, logins: entries } : first
+  })
+  const entries = group.logins.map(entryOf)
+  const [first = entryOf(model)] = entries
+  return {
+    ...first,
+    ...(entries.length > 1 ? { logins: entries } : {}),
+    ...(group.disabled.length > 0 ? { disabledLogins: group.disabled.map(entryOf) } : {})
+  }
 }
 
 /**
@@ -523,9 +555,11 @@ export function computeModelExposure(
   config: ModelExposureConfig,
   thinkingLevels: ThinkingLevelsOf
 ): ModelExposureOutcome {
-  // 0. One model per provider, whatever its logins (#227): a login slot's models are the base's.
-  const groups = groupLogins(available)
-  const loginsOf = new Map(groups.map((group) => [group.primary, group.logins]))
+  // 0. One entry per base provider's model, whatever its logins (#227): a login slot's models are
+  // the base's. A disabled login is left out, and so is a model whose every login is (#233).
+  const loginRouting = config.loginRouting ?? DEFAULT_LOGIN_ROUTING
+  const groups = groupLogins(available, loginRouting)
+  const groupOf = new Map(groups.map((group) => [group.primary, group]))
 
   // 1. Filter to exposed set
   const { models: exposed, scopeDiagnostics } = filterExposedModels(
@@ -581,7 +615,7 @@ export function computeModelExposure(
   for (const model of exposed) {
     const publicId = idMap.get(model)
     if (publicId === undefined) continue
-    const entry = exposedEntry(publicId, model, loginsOf.get(model) ?? [model])
+    const entry = exposedEntry(publicId, model, groupOf.get(model) ?? { logins: [], disabled: [] })
     models.push(entry)
     byPublicId.set(publicId, entry)
     byCanonicalId.set(entry.canonicalId, entry)
@@ -598,12 +632,17 @@ export function computeModelExposure(
     }
   )
 
-  const aliased = exposeAliases(config.aliases, {
-    byPublicId,
-    byCanonicalId,
-    availableIds: groups.map(({ primary }) => canonicalModelId(primary)),
-    thinkingLevels
-  })
+  // The built-in `-latest` aliases come after the configured ones, which replace one of their name.
+  const latest = latestAliases(config.aliases, { byPublicId, byCanonicalId })
+  const aliased = exposeAliases(
+    { ...config.aliases, ...latest },
+    {
+      byPublicId,
+      byCanonicalId,
+      availableIds: groups.map(({ primary }) => canonicalModelId(primary)),
+      thinkingLevels
+    }
+  )
   return {
     ok: true,
     models,
@@ -613,7 +652,9 @@ export function computeModelExposure(
     aliases: aliased.aliases,
     byAlias: aliased.byAlias,
     aliasDiagnostics: aliased.diagnostics,
-    familyResolutions: aliased.families
+    loginDiagnostics: loginDiagnostics(available, loginRouting),
+    familyResolutions: aliased.families,
+    latestAliases: latest
   }
 }
 

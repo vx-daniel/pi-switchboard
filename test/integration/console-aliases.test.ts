@@ -15,7 +15,8 @@ import { getAvailableModels } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
 import { type AliasEditor, runModelsItem } from '@proxy/tui/console-models'
-import { type ModelsItem, modelsItems, modelsViewData } from '@proxy/tui/models-view'
+import type { ModelsItem } from '@proxy/tui/models-detail'
+import { modelsItems, modelsViewData } from '@proxy/tui/models-view'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -178,7 +179,7 @@ function aliasRow(name: string): (items: readonly ModelsItem[]) => ModelsItem | 
  * @returns the row
  */
 function newRow(items: readonly ModelsItem[]): ModelsItem | undefined {
-  return items.at(-1)
+  return items.find((row) => row.kind === 'new')
 }
 
 /**
@@ -506,6 +507,27 @@ describe('the console alias editor', () => {
     expect(loadConfigFromFile().aliases).toEqual({
       'opus-latest': { family: 'anthropic/claude-opus' }
     })
+  })
+
+  // Catches a built-in alias offering Rename or Delete (it has no config entry to change), or a pin
+  // that doesn't save an alias of its name replacing it.
+  test('a built-in -latest alias is listed without config, and Pin to… saves one replacing it', async () => {
+    const latestRow = (items: readonly ModelsItem[]): ModelsItem | undefined =>
+      items.find((row) => row.kind === 'latest' && row.name === 'opus-latest')
+    const listed = latestRow(
+      modelsItems(modelsViewData({ exposure: await exposure(), aliases: {}, exposed: 0 }))
+    )
+
+    const seen = await enterOn(latestRow, ['Pin to…', 'anthropic/claude-opus-5'])
+    const answer = await ask('opus-latest')
+
+    expect(listed).toMatchObject({ kind: 'latest', target: { family: 'anthropic/claude-opus' } })
+    expect(seen.options[0]).toEqual(['Pin to…'])
+    expect(loadConfigFromFile().aliases).toEqual({
+      'opus-latest': { family: 'anthropic/claude-opus', pin: 'anthropic/claude-opus-5' }
+    })
+    expect((await exposure()).latestAliases).not.toHaveProperty('opus-latest')
+    expect(answer.upstream).toEqual([['claude-opus-5', undefined]])
   })
 
   // Catches the effort menu doing nothing without a word on a family with no exposed model: the

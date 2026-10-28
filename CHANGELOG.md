@@ -1,3 +1,5 @@
+Releases after 0.4.0 are recorded on [GitHub Releases](https://github.com/vx-daniel/pi-switchboard/releases), with notes generated from the merged pull requests. This file covers 0.4.0 and earlier, as semantic-release wrote it.
+
 # [0.4.0](https://github.com/vx-daniel/pi-switchboard/compare/pi-switchboard-v0.3.0...pi-switchboard-v0.4.0) (2026-10-24)
 
 

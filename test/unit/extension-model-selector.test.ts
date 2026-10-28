@@ -7,7 +7,7 @@
  * sources, as `extension-reports.test.ts` does.
  */
 
-import { readFileSync } from 'node:fs'
+import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { stripVTControlCharacters } from 'node:util'
 
@@ -180,5 +180,20 @@ describe('selecting', () => {
 
     press(selector, ESCAPE)
     expect(selector.closedWith()).toEqual('2 selected')
+  })
+
+  // Catches a tick shown and counted as saved when the file broke while the selector was open:
+  // the save is refused (#288), so the row must go back to what the file holds.
+  test('Space on a file that is no longer valid JSON undoes the tick and saves nothing', () => {
+    const selector = openSelector(['alpha/a1'])
+    const path = join(agentDir.path, 'proxy-config.json')
+    writeFileSync(path, '{"port": 51')
+
+    press(selector, RIGHT, SPACE)
+
+    expect(selectedRow(selector)).toEqual('beta/b1 false')
+    expect(readFileSync(path, 'utf-8')).toBe('{"port": 51')
+    press(selector, ESCAPE)
+    expect(selector.closedWith()).toEqual('1 selected')
   })
 })

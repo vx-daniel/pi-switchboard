@@ -22,7 +22,8 @@ const zedSyncLogger = proxyLogger('extension', 'zed-sync')
  * @param state - the extension state; its config supplies the proxy URL and Zed provider name
  * @param dryRun - whether to report the changes without writing Zed's settings.json
  * @returns `ok` and a user-facing message: the sync summary and settings path, or the error
- * @throws Error when the session's model registry is not available yet
+ * @throws Error when the session's model registry is not available yet, or the file system error
+ *   when Zed's settings.json cannot be read or written
  */
 async function runZedSync(
   state: ProxyState,
@@ -70,6 +71,8 @@ async function runZedSync(
  * @param state - the extension state
  * @param context - the extension context, used for the notification
  * @param args - the /proxy argument string; `--dry-run` anywhere in it makes a dry run
+ * @throws Error when the session's model registry is not available yet, or the file system error
+ *   when Zed's settings.json cannot be read or written
  */
 export async function handleZedSync(
   state: ProxyState,

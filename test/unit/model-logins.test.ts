@@ -3,31 +3,10 @@
  * group under the base provider's, and the base stands for them in exposure.
  */
 
-import type { Api, Model } from '@earendil-works/pi-ai'
 import { groupLogins } from '@proxy/openai/model-logins'
 import { describe, expect, test } from 'vite-plus/test'
 
-/**
- * Builds a chat model of a provider.
- *
- * @param provider - the provider
- * @param id - the model ID
- * @returns the model
- */
-function makeModel(provider: string, id: string): Model<Api> {
-  return {
-    id,
-    name: id,
-    api: 'openai-completions',
-    provider,
-    baseUrl: `https://${provider}.example.com`,
-    reasoning: false,
-    input: ['text'],
-    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
-    contextWindow: 128000,
-    maxTokens: 4096
-  }
-}
+import { makeModel } from '../helpers'
 
 describe('groupLogins', () => {
   // Catches a slot's models grouped with the wrong model, listed as models of their own, or the
@@ -89,5 +68,25 @@ describe('groupLogins', () => {
 
     expect(group?.primary).toBe(acme)
     expect(group?.logins).toEqual([acme])
+  })
+
+  // Catches the configured order (#233) ignored or applied across providers, an unlisted login
+  // dropped instead of following in the usual order, a disabled login kept among those routing
+  // calls, or a model whose every login is disabled still exposed.
+  test('follows routing.logins.order, and leaves the disabled logins out of routing', () => {
+    const base = makeModel('anthropic', 'opus')
+    const second = makeModel('anthropic-2', 'opus')
+    const third = makeModel('anthropic-3', 'opus')
+    const codex = makeModel('openai-codex', 'gpt')
+
+    const groups = groupLogins([base, second, third, codex], {
+      order: { anthropic: ['anthropic-3', 'anthropic-9'], openai: ['openai-codex-2'] },
+      disabled: ['anthropic-2', 'openai-codex']
+    })
+
+    expect(groups).toHaveLength(1)
+    expect(groups[0]?.primary).toBe(base)
+    expect(groups[0]?.logins).toEqual([third, base])
+    expect(groups[0]?.disabled).toEqual([second])
   })
 })

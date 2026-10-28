@@ -1,5 +1,6 @@
 /**
- * Aliases: names a user defines for exposed models, in `proxy-config.json`'s `aliases` (#66).
+ * Aliases: names a user defines for exposed models, in `proxy-config.json`'s `aliases` (#66), and
+ * the built-in `-latest` aliases that follow each family's newest model (#231).
  *
  * @remarks
  * Most clients only let you choose a model name, so a name is the one routing control every
@@ -21,6 +22,10 @@
  *   at warning, once, with the old and the new model. A family no rule knows (`family-unknown`)
  *   and a pin outside its family (`pin-outside-family`) are configuration errors; a hidden or
  *   logged-out pin is `target-not-exposed`, never the newest instead.
+ * - **Built in for every family** ({@link latestAliases}): `opus-latest`, `sol-latest` and so on,
+ *   computed with the exposure from the families the exposed models name, one for each family
+ *   with a member it can pick. A configured alias of the same name replaces it, and none is named
+ *   like an exposed model. Otherwise it is a family alias like a configured one.
  * - **Resolved last:** public ID, then canonical ID, then alias (`resolveExposedModel`).
  *
  * @packageDocumentation
@@ -40,7 +45,13 @@ import {
 import { proxyLogger } from '@proxy/logging'
 import { effortsOfLevels, type ThinkingLevelsOf } from '@proxy/openai/effort-levels'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
-import { compareVersions, type FamilyScan, scanFamily } from '@proxy/openai/model-families'
+import {
+  compareVersions,
+  familiesIn,
+  type FamilyScan,
+  latestAliasName,
+  scanFamily
+} from '@proxy/openai/model-families'
 import * as z from 'zod'
 
 /** Logger for model exposure, which aliases are part of. */
@@ -190,7 +201,8 @@ function warnOnce(
 /**
  * Exposes the configured aliases with an exposed target.
  *
- * @param aliases - alias -> one canonical ID, or `{ targets, fallbackOn }`, from the config
+ * @param aliases - alias -> one target (a model or a family), or `{ targets, fallbackOn }`, from
+ *   the config
  * @param lookup - the exposed models, every available model's ID, and pi's thinking levels
  * @returns the exposed aliases, a diagnostic for each alias or target left out, and what each
  *   family target resolves to
@@ -259,6 +271,35 @@ export function exposeAliases(
   return { aliases: exposed, byAlias, diagnostics, families }
 }
 
+/**
+ * Builds the built-in `-latest` aliases (#231): one per family the exposed models name, for a
+ * family with a member it can pick, each following that family's newest model.
+ *
+ * @param configured - the configured aliases: a built-in alias gives way to one of its name
+ * @param lookup - the exposed models: a built-in alias gives way to a model of its name
+ * @returns the built-in aliases by name, in family order
+ */
+export function latestAliases(
+  configured: Readonly<Record<string, AliasTarget>>,
+  lookup: Pick<AliasLookup, 'byPublicId' | 'byCanonicalId'>
+): Readonly<Record<string, FamilyTarget>> {
+  const exposedIds = [...lookup.byCanonicalId.keys()]
+  const latest: Record<string, FamilyTarget> = {}
+  for (const family of familiesIn(exposedIds)) {
+    const name = latestAliasName(family)
+    // Two families named alike (no two rules do today) keep the first in family order: the name
+    // stays one alias, never a choice made per request.
+    if (name === undefined || Object.hasOwn(configured, name) || Object.hasOwn(latest, name)) {
+      continue
+    }
+    if (lookup.byPublicId.has(name) || lookup.byCanonicalId.has(name)) continue
+    // Only dated snapshots exposed: nothing it could pick, so no alias rather than a diagnostic.
+    if ((scanFamily(family, exposedIds)?.members.length ?? 0) === 0) continue
+    latest[name] = { family }
+  }
+  return latest
+}
+
 /** Where exposing an alias's targets reports: its diagnostics and its family resolutions. */
 interface TargetReports {
   readonly diagnostics: AliasDiagnostic[]
@@ -272,8 +313,35 @@ interface TargetPlace {
 }
 
 /**
- * Scans a family among the exposed and the available models, reporting a family no rule knows
- * and each member whose version can't be read.
+ * Says why a family names nothing the proxy can follow, if it doesn't.
+ *
+ * @param family - the family, `provider/tier`
+ * @param available - its members among the available models, or `undefined` for a family no rule
+ *   knows
+ * @param availableIds - every available model's canonical ID
+ * @returns the reason, or `undefined` for a family the proxy can follow
+ */
+function unknownFamilyReason(
+  family: string,
+  available: FamilyScan | undefined,
+  availableIds: readonly string[]
+): string | undefined {
+  if (available === undefined) {
+    return 'which is not a family the proxy knows (provider/tier, such as anthropic/claude-opus)'
+  }
+  const provider = family.slice(0, family.indexOf('/'))
+  // A tier none of a logged-in provider's models names is a typo or a family pi dropped. With no
+  // login to the provider, the tier can't be checked: it is only not exposed.
+  const listed = availableIds.some((canonicalId) => canonicalId.startsWith(`${provider}/`))
+  if (available.all.length > 0 || !listed) {
+    return undefined
+  }
+  return `which none of ${provider}'s models names (a typo, or a family pi no longer lists)`
+}
+
+/**
+ * Scans a family among the exposed and the available models, reporting a family no rule knows or
+ * none of its provider's models names, and each member whose version can't be read.
  *
  * @param alias - the alias
  * @param family - the family it follows
@@ -289,12 +357,13 @@ function scanBoth(
 ): { readonly exposed: FamilyScan; readonly available: FamilyScan } | undefined {
   const exposed = scanFamily(family, lookup.byCanonicalId.keys())
   const available = scanFamily(family, lookup.availableIds)
-  if (exposed === undefined || available === undefined) {
+  const unknown = unknownFamilyReason(family, available, lookup.availableIds)
+  if (exposed === undefined || available === undefined || unknown !== undefined) {
     diagnostics.push({
       code: 'family-unknown',
       alias,
       target: family,
-      message: `Alias "${alias}" follows "${family}", which is not a family the proxy knows (provider/tier, such as anthropic/claude-opus).`
+      message: `Alias "${alias}" follows "${family}", ${unknown ?? 'which is not a family the proxy knows'}.`
     })
     return undefined
   }
