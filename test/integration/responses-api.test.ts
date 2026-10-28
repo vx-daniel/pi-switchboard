@@ -552,7 +552,8 @@ describe('the Responses API', () => {
   })
 
   // Catches a replayed assistant turn refused for the empty `annotations`/`logprobs` the SDK
-  // echoes back, or a non-empty one accepted though the proxy can't send it on.
+  // echoes back, or a non-empty one accepted though the proxy can't send it on, or refused with
+  // another item type's field named (#318: it said `content.0.type`, "expected reasoning_text").
   test.each(['annotations', 'logprobs'])(
     'takes an empty %s on a replayed output_text, and refuses a non-empty one',
     async (field) => {
@@ -573,8 +574,10 @@ describe('the Responses API', () => {
       const filled = await post(turn([{ token: 'Hello', logprob: 0 }]))
 
       expect(empty.status).toBe(HTTP_OK)
-      // Only the status: the item union reports the wrong `param` for now (#318).
       expect(filled.status).toBe(HTTP_BAD_REQUEST)
+      expect(filled.body).toMatchObject({
+        error: { param: expect.stringMatching(new RegExp(`^input\\.1\\.content\\.0\\.${field}`)) }
+      })
     }
   )
 
