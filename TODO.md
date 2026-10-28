@@ -85,6 +85,7 @@ Read `PLAN.md` first. This file should track concrete work items and decisions n
 - [x] Decide and document what `created` means for pi-backed models
 - [x] Implement `GET /v1/models/{model}` with encoded ID support
 - [x] Return OpenAI-style `404` when a model is not found
+- [x] Report on `/v1/switchboard/models` whether the login refused or answered each model (#174)
 
 ### Request parsing and validation
 

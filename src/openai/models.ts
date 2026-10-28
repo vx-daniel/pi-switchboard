@@ -12,6 +12,7 @@
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
+import { modelAvailability } from '@proxy/pi/availability'
 import { activeCooldown, type Cooldown, loginSubject } from '@proxy/pi/cooldowns'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
 import { MS_PER_SECOND, unixSecondsNow } from '@proxy/utils/time'
@@ -179,6 +180,13 @@ const piModelCapabilitiesSchema = z
       }),
     cooldown: cooldownSchema,
     quota: quotaSchema,
+    availability: z.enum(['verified', 'refused', 'unknown']).meta({
+      description:
+        'Whether the provider login serves the model, from calls this process made (#174): ' +
+        '`refused` after the login refused it (answered as 404 `model_not_found`), `verified` ' +
+        'after a whole answer, `unknown` before either. The latest result wins. An alias ' +
+        "reports its target's."
+    }),
     logins: z
       .array(
         z.object({
@@ -296,6 +304,7 @@ export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
         },
         cooldown: first?.cooldown ?? null,
         quota: first?.quota ?? null,
+        availability: modelAvailability(exposed.canonicalId),
         logins
       }
     })

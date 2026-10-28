@@ -30,6 +30,7 @@ import type { ConversionSuccess } from '@proxy/openai/messages'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import type { Attempt, ResponseRoute } from '@proxy/openai/responses'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
+import { noteAvailability } from '@proxy/pi/availability'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
 import { clearCooldowns, loginSubject } from '@proxy/pi/cooldowns'
 import { canonicalModelId } from '@proxy/pi/model-id'
@@ -453,6 +454,7 @@ async function attemptStream(
       const formatted = job.format.stream(
         countingFailures(startingWith(first, events), (failure) => {
           failed = true
+          noteAvailability(candidate.canonicalId, job.options, failure)
           countFailure(failure)
         }),
         route
@@ -470,13 +472,21 @@ async function attemptStream(
       } catch (err: unknown) {
         const mapped = reportThrownFailure(err)
         failed = true
-        countFailure(failureClass(mapped))
+        const thrown = failureClass(mapped)
+        // The callback above records a failure pi reports as an error event; this one, a throw.
+        // Should both see one failure, the second records the same state and logs nothing more.
+        noteAvailability(candidate.canonicalId, job.options, thrown)
+        countFailure(thrown)
         chatLogger.debug('Ending stream with an error event after {frameCount} frames', {
           frameCount,
           durationMs: Math.round(performance.now() - start)
         })
         for (const frame of formatted.fail(mapped.body)) await stream.write(frame)
       } finally {
+        // A started stream is not yet an answer: a refusal can still come as an error event.
+        if (!failed && options.signal?.aborted !== true) {
+          noteAvailability(candidate.canonicalId, job.options, 'answered')
+        }
         active.end(requestOutcome(failed, options.signal))
       }
     })
@@ -519,6 +529,7 @@ async function attemptComplete(
     if (message.stopReason === 'error' || message.stopReason === 'aborted') {
       return final(upstreamFailure(mapFailedCall(message), message.errorMessage, options))
     }
+    noteAvailability(candidate.canonicalId, job.options, 'answered')
     return {
       kind: 'answered',
       respond: (route) => honoContext.json(job.format.complete(message, route))
@@ -723,6 +734,8 @@ async function tryCandidate(
     return { response: answerWith(outcome.respond, candidate, job, attempts) }
   }
   const failed = failureClass(outcome.answer)
+  // Only a call that ran says anything; a credential refused before it is the `auth` class.
+  noteAvailability(candidate.canonicalId, job.options, failed)
   recordRouteFailure(key, failed)
   if (sharedLogin) recordCooldown(candidate, failed, captured)
   const next = moveOn(job, position, { failed, detail: outcome.detail }, attempts)

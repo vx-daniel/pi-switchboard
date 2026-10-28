@@ -838,6 +838,15 @@
             ],
             "description": "The login's latest subscription quota, from its response headers (#69), or null when it reports none (Google, API keys, or no call since the proxy started). A window that has reset since is left out."
           },
+          "availability": {
+            "type": "string",
+            "enum": [
+              "verified",
+              "refused",
+              "unknown"
+            ],
+            "description": "Whether the provider login serves the model, from calls this process made (#174): `refused` after the login refused it (answered as 404 `model_not_found`), `verified` after a whole answer, `unknown` before either. The latest result wins. An alias reports its target's."
+          },
           "logins": {
             "type": "array",
             "items": {
@@ -1007,6 +1016,7 @@
           "cost",
           "cooldown",
           "quota",
+          "availability",
           "logins"
         ],
         "additionalProperties": false,

@@ -238,13 +238,14 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
 | `cost` | USD per million tokens: `input` (uncached), `output`, `cache_read`, `cache_write`; `0` where pi has no price |
 | `cooldown` | `null`, or the cooldown the model is under after a 429 or 503: `reason`, `scope` (`provider` or `model`), `until` (Unix seconds) ([Cooldowns](routing.md#cooldowns)) |
 | `quota` | `null`, or its provider's latest usage windows ([Quota](routing.md#quota)) |
+| `availability` | `refused` after the proxy's login refused the model (answered as `404 model_not_found`), `verified` after a whole answer, `unknown` before either. Kept in memory since the proxy started; the latest result wins, and a request with its own upstream key does not count. The first refusal of a model is logged at `info` |
 
 ```json
 { "object": "list", "data": [{ "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
   "reasoning_efforts": ["none", "minimal", "low", "medium", "high"], "input": ["text", "image"],
   "context_window": 200000, "max_output_tokens": 64000,
   "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null,
-  "quota": null }] }
+  "quota": null, "availability": "unknown" }] }
 ```
 
 docker-agent prices a model reached through a custom `base_url` only from a `cost` table in `team.yaml`, so a team can take these prices; without one it records usage but no cost. The path was `GET /v1/pi/models` before 0.1.0; the old path is gone.
