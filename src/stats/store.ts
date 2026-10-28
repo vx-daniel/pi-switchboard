@@ -580,17 +580,35 @@ function readOnlyLocation(path: string): string | URL {
 }
 
 /**
+ * Reads a file's schema version.
+ *
+ * @param db - the database
+ * @returns its `user_version`; 0 for a new file
+ */
+function userVersion(db: DatabaseSync): number {
+  return numberOf(db.prepare('PRAGMA user_version').get() ?? {}, 'user_version')
+}
+
+/**
  * Brings a file opened for writing to the current schema, in one transaction: the tables for a new
  * file, or the {@link MIGRATIONS} an older one has not had yet.
  *
+ * @remarks
+ * The version is read again inside the transaction, which holds the write lock: two proxies that
+ * start on the same older file both saw that version before either locked it, and the second
+ * would otherwise run a migration the first has already committed (`duplicate column`, #328
+ * review) and lose its stats.
+ *
  * @param db - the database
- * @param version - the file's `user_version`; 0 for a new file
+ * @param version - the file's `user_version` when it was opened; 0 for a new file
  */
 function migrate(db: DatabaseSync, version: number): void {
   if (version === SCHEMA_VERSION) return
   inTransaction(db, () => {
-    if (version === 0) db.exec(SCHEMA)
-    else for (const step of MIGRATIONS.slice(version - 1)) db.exec(step)
+    const current = userVersion(db)
+    if (current >= SCHEMA_VERSION) return
+    if (current === 0) db.exec(SCHEMA)
+    else for (const step of MIGRATIONS.slice(current - 1)) db.exec(step)
     db.exec(`PRAGMA user_version = ${String(SCHEMA_VERSION)}`)
   })
 }
@@ -604,7 +622,7 @@ function migrate(db: DatabaseSync, version: number): void {
  */
 function prepareSchema(db: DatabaseSync, readOnly: boolean): void {
   db.exec(`PRAGMA busy_timeout = ${String(BUSY_TIMEOUT_MS)}`)
-  const version = numberOf(db.prepare('PRAGMA user_version').get() ?? {}, 'user_version')
+  const version = userVersion(db)
   if (version > SCHEMA_VERSION) {
     throw new Error(
       `The stats file is schema version ${String(version)}, newer than this pi-switchboard's ` +

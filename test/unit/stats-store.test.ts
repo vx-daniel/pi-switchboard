@@ -1,3 +1,5 @@
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
 import { mkdtempSync, readdirSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -337,6 +339,43 @@ describe('the stats store', () => {
     const check = new DatabaseSync(path, { readOnly: true })
     expect(check.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 })
     check.close()
+  })
+
+  // Catches two proxies starting on one older file: both read version 1 before either locks it,
+  // and the second ran the migration the first had just committed (`duplicate column`), so that
+  // proxy lost its stats (#328 review). The other proxy is a child process holding the write lock
+  // while it migrates; this one reads the version, waits for the lock, and must not migrate again.
+  test('opens a file another process migrated while it waited', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
+    directories.push(directory)
+    const path = join(directory, 'stats.sqlite')
+    const v1 = new DatabaseSync(path)
+    v1.exec(V1_SCHEMA)
+    v1.exec('PRAGMA user_version = 1')
+    // A proxy's file is in WAL mode, so a reader isn't blocked by the other proxy's lock.
+    v1.exec('PRAGMA journal_mode = WAL')
+    v1.close()
+    const otherProxy = [
+      "const { DatabaseSync } = require('node:sqlite')",
+      `const db = new DatabaseSync(${JSON.stringify(path)})`,
+      "db.exec('BEGIN IMMEDIATE')",
+      "process.stdout.write('locked\\n')",
+      'Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100)',
+      "db.exec('ALTER TABLE request_minutes ADD COLUMN prompt_cache_key_requests INTEGER NOT NULL DEFAULT 0')",
+      "db.exec('PRAGMA user_version = 2')",
+      "db.exec('COMMIT')"
+    ].join(';')
+    const child = spawn(process.execPath, ['-e', otherProxy], {
+      stdio: ['ignore', 'pipe', 'inherit']
+    })
+    await once(child.stdout, 'data')
+
+    const store = openStatsStore(path)
+    opened.push(store)
+    const [exitCode] = await once(child, 'exit')
+
+    expect(exitCode).toBe(0)
+    expect(store.models({ fromMinute: 0, toMinute: 10 })).toEqual([])
   })
 
   // Catches the doctor's read-only store writing to the file, leaving files beside it (a reader
