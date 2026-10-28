@@ -551,6 +551,19 @@ describe('the Responses API', () => {
     expect(answer.body).toMatchObject({ error: { param: 'input.0.encrypted_content' } })
   })
 
+  // Catches an item of a type the proxy doesn't take reported at the whole item instead of its
+  // `type`: every branch's `type` or `role` differs, so all are set aside, and then compared again
+  // as before #318 rather than giving up at the union.
+  test('refuses an input item of an unknown type at its type', async () => {
+    const answer = await post({
+      model: 'mock/text',
+      input: [{ type: 'web_search_call', id: 'ws_1', status: 'completed' }]
+    })
+
+    expect(answer.status).toBe(HTTP_BAD_REQUEST)
+    expect(answer.body).toMatchObject({ error: { param: 'input.0.type' } })
+  })
+
   // Catches a function tool's or a json_schema format's description trimmed on this route's own
   // schema (#255): the model reads it, and a list or a trailing example lost its layout.
   test('keeps the whitespace of tool and json_schema descriptions', async () => {
