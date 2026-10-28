@@ -1950,11 +1950,15 @@ Module layout:
 ```text
 src/
 ├── index.ts            -- entry point: loads the CLI, names a missing pi package
-├── cli.ts              -- citty CLI: the headless proxy, or `tui` for the console
+├── cli.ts              -- citty CLI: the headless proxy, `tui` for the console, or `doctor`
 ├── env.d.ts            -- typed process.env
 ├── config/
 │   ├── schema.ts         -- ProxyConfig Zod schema and types, defaults, repair, JSON I/O (exported via ./config)
 │   └── env.ts            -- ServerConfig from file + env + CLI overrides
+├── doctor/
+│   ├── command.ts        -- `pi-switchboard doctor` (citty): flags, text and JSON output, exit status
+│   ├── collect.ts        -- reads the config, pi's runtime, the health reports and the stats file
+│   └── findings.ts       -- pure findings and thresholds, for the CLI and later the console (#325)
 ├── logging/
 │   └── index.ts          -- LogTape setup, categories, level guide, redaction (exported via ./logging)
 ├── server/
@@ -2247,17 +2251,29 @@ default (`stats`, `--no-stats`, `PI_SWITCHBOARD_STATS=false`).
   in WAL mode, so a console can read while proxies in other processes write. The busy timeout is
   250 ms: `node:sqlite` waits synchronously, on the thread that serves requests, so a write that
   can't get the lock in time is dropped rather than stalling every request in flight. `PRAGMA
-  user_version` holds the schema version; a file from a newer proxy is refused.
+  user_version` holds the schema version, now 2; a file from a newer proxy is refused with a
+  message saying to upgrade, and an older one is migrated in place, keeping its rows
+  (`MIGRATIONS` in `store.ts`, each step an `ALTER TABLE … ADD COLUMN … DEFAULT 0`, all in one
+  transaction with the new `user_version`). Version 2 (#299) added
+  `request_minutes.prompt_cache_key_requests`.
+- **Mixed versions.** An older proxy refuses a newer file, and then runs without stats (a
+  warning, never a failed start). A pi package and a standalone binary (or an image) sharing one
+  agent dir must therefore both be upgraded: once the newer one has migrated the file to
+  version 2, the older one records nothing.
 - **Tables** (`store.ts`), each keyed by the minute: `request_minutes` (finished requests by
-  alias, model, outcome and, for a rejected one, status, with total and longest duration and the
-  total time to a stream's first event), `attempt_minutes` (#70's attempts, failures, fallbacks,
-  tokens and cost by alias and served model) and `failure_minutes` (failed attempts by model and
-  class). Routes, counts and timings only: never message content, the request's `user`, or a
-  credential. A rejected request's model is the name the client sent, so it is cut to 128
-  characters, and past 20 distinct names in a minute the rest are filed as `(other)`. Queries: a
-  timeline in buckets with empty ones filled in, per-model and per-alias numbers (one query
-  grouped by either column, `usageBy`), and failures by class with rejected requests by status.
-  Readers: the console's Stats view and `GET /v1/switchboard/usage`.
+  alias, model, outcome and, for a rejected one, status, with total and longest duration, the
+  total time to a stream's first event, and how many sent a `prompt_cache_key`: a count, never
+  the key, which can be a conversation ID the client chose), `attempt_minutes` (#70's attempts,
+  failures, fallbacks, tokens and cost by alias and served model) and `failure_minutes` (failed
+  attempts by model and class). Routes, counts and timings only: never message content, the
+  request's `user`, or a credential. A rejected request's model is the name the client sent, so
+  it is cut to 128 characters, and past 20 distinct names in a minute the rest are filed as
+  `(other)`. Queries: a timeline in buckets with empty ones filled in, per-model and per-alias
+  numbers (one query grouped by either column, `usageBy`), and failures by class with rejected
+  requests by status.
+  Readers: the console's Stats view, `GET /v1/switchboard/usage` and `pi-switchboard doctor`,
+  which opens the file read-only (`immutable` when no proxy has it open, so not even `-wal` and
+  `-shm` files are left behind) and refuses an older version rather than migrating it.
 - **Recording** (`recorder.ts`). Route totals emit typed events (`RouteEvent`) and the requests
   tracker passes each finished request to its listeners; the recorder adds them up per minute and
   route in memory and writes them every 5 s in one transaction, and when the server closes or the
@@ -2268,6 +2284,36 @@ default (`stats`, `--no-stats`, `PI_SWITCHBOARD_STATS=false`).
   the console's history covers every proxy that writes to the same agent dir. `createApp` alone
   (the tests) records nothing. A file that can't be opened is a warning and no stats, never a
   failed start.
+
+### Doctor (`pi-switchboard doctor`, #299)
+
+A local subcommand that checks the configuration and the prompt cache and prints findings, each
+with a recommendation. No HTTP route serves it (principle I's surface is unchanged); a console
+view is #325.
+
+- **Entry.** `src/cli.ts` finds `doctor` as it finds `tui` and loads `src/doctor/command.ts`
+  dynamically. It takes the server flags, so it judges the config `pi-switchboard` with the same
+  flags and variables would run with, plus `--json`, `--window today|week|all` (the usage route's
+  windows, default `week`) and `--verify`.
+- **What it reads, never writes** (`collect.ts`). The config through `loadConfig`, pi's runtime
+  through `initRegistry` (offline), the request config through `fileConfigReader`, and the
+  stats file read-only. It reuses the health routes' computations (`modelsHealthReport`,
+  `credentialsHealthReport` in `server/health.ts`), so its verdict is theirs. It calls a provider
+  only with `--verify`, as `/healthz/creds?verify=true` does. It names no credential and no
+  message content (principle III). In a new agent dir, `initRegistry` creates pi's empty
+  `auth.json` and `models-store.json`, as any pi start does.
+- **Findings** (`findings.ts`). Pure functions from those inputs to `{ check, severity, subject?,
+  message, recommendation }`, so the console can reuse them. General: the health reports, the
+  config file, auth off or the docs page on off loopback, stats off, a broad `fallbackOn`.
+  Cache, per model with at least 20 calls: hit rate under 50%, cache writes over 40% of the cost
+  at catalog prices, `cold_pct` against `0.75 ÷ (2 − cache-read ÷ input price)` on Anthropic and
+  Bedrock, fallbacks over 5% of calls, and over 10% of requests without a `prompt_cache_key` on
+  the APIs that cache by key (`KEYED_CACHE_APIS`). Stats off, absent or unreadable is one
+  finding. The report's limits (no prompt, so no *why*; expiry and a changed prefix look alike;
+  catalog prices) are printed with it.
+- **Exit status.** 1 only for a general-section error (what makes `/healthz/models` or
+  `/healthz/creds` answer 503, or the proxy refuse to start), 2 for a usage error (an unknown
+  flag, an argument, an unknown window: citty would ignore an unknown flag), else 0.
 
 ### Dead code
 

@@ -7,22 +7,40 @@
  * store needs no dependency. Three tables, each keyed by the minute (`floor(ms / 60 000)`):
  *
  * - `request_minutes`: finished chat requests by alias, model, outcome and (for a rejected one)
- *   status, with their total and longest duration and their total time to a stream's first event.
+ *   status, with their total and longest duration, their total time to a stream's first event,
+ *   and how many sent a `prompt_cache_key` (a count only, never the key: #299).
  * - `attempt_minutes`: upstream attempts by alias and served model, with failures, fallbacks,
  *   tokens and cost, as #70's route totals count them.
  * - `failure_minutes`: failed attempts by served model and failure class.
  *
- * Only routes, counts and timings are stored: never message content, the request's `user`, or a
- * credential. Writes come in batches ({@link StatsBatch}) from the recorder, one transaction each;
- * WAL mode lets the console read while a proxy writes, from the same process or another.
+ * Only routes, counts and timings are stored: never message content, the request's `user`, a
+ * `prompt_cache_key`, or a credential. Writes come in batches ({@link StatsBatch}) from the
+ * recorder, one transaction each; WAL mode lets the console read while a proxy writes, from the
+ * same process or another.
+ *
+ * The schema version is SQLite's `user_version`. A new file gets the current schema; an older one
+ * is migrated in place, keeping its rows ({@link MIGRATIONS}); a newer one is refused, since this
+ * code cannot know what its columns mean. A read-only store (the doctor's, #299) migrates nothing,
+ * so it refuses an older file too.
  *
  * @packageDocumentation
  */
 
+import { existsSync } from 'node:fs'
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite'
+import { pathToFileURL } from 'node:url'
 
-/** The schema version, in SQLite's `user_version`. */
-const SCHEMA_VERSION = 1
+/**
+ * The steps that bring an older stats file up to date, in order: the step at index `n` takes a
+ * file from version `n + 1` to `n + 2`. A step only adds; existing rows keep their counts, and a
+ * column it adds reads 0 on them.
+ */
+const MIGRATIONS: readonly string[] = [
+  // 1 → 2 (#299): how many finished requests sent a `prompt_cache_key`.
+  'ALTER TABLE request_minutes ADD COLUMN prompt_cache_key_requests INTEGER NOT NULL DEFAULT 0'
+]
+/** The schema version, in SQLite's `user_version`: 1, plus one per migration. */
+const SCHEMA_VERSION = 1 + MIGRATIONS.length
 /**
  * How long a statement waits for another connection's lock, in milliseconds. `node:sqlite` waits
  * synchronously, on the thread that serves requests, so the wait is short: a write that can't get
@@ -52,6 +70,7 @@ CREATE TABLE IF NOT EXISTS request_minutes (
   duration_ms_max INTEGER NOT NULL,
   first_event_ms_total INTEGER NOT NULL,
   first_event_count INTEGER NOT NULL,
+  prompt_cache_key_requests INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (minute, alias, model, outcome, status)
 ) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS attempt_minutes (
@@ -81,14 +100,15 @@ CREATE TABLE IF NOT EXISTS failure_minutes (
 /** Adds a batch row to `request_minutes`, or to the row already there. */
 const UPSERT_REQUEST = `
 INSERT INTO request_minutes (minute, alias, model, outcome, status, requests, duration_ms_total,
-  duration_ms_max, first_event_ms_total, first_event_count)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  duration_ms_max, first_event_ms_total, first_event_count, prompt_cache_key_requests)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT (minute, alias, model, outcome, status) DO UPDATE SET
   requests = requests + excluded.requests,
   duration_ms_total = duration_ms_total + excluded.duration_ms_total,
   duration_ms_max = max(duration_ms_max, excluded.duration_ms_max),
   first_event_ms_total = first_event_ms_total + excluded.first_event_ms_total,
-  first_event_count = first_event_count + excluded.first_event_count`
+  first_event_count = first_event_count + excluded.first_event_count,
+  prompt_cache_key_requests = prompt_cache_key_requests + excluded.prompt_cache_key_requests`
 
 /** Adds a batch row to `attempt_minutes`, or to the row already there. */
 const UPSERT_ATTEMPT = `
@@ -126,6 +146,8 @@ export interface RequestMinute {
   readonly firstEventMsTotal: number
   /** How many of the requests streamed and timed a first event. */
   readonly firstEventCount: number
+  /** How many of the requests sent a `prompt_cache_key`; never the key itself. */
+  readonly promptCacheKeyRequests: number
 }
 
 /** One minute's upstream attempts on one route. */
@@ -180,6 +202,8 @@ export interface TimelineBucket {
 export interface UsageStats {
   /** Finished requests, not counting rejected ones. */
   readonly requests: number
+  /** How many of {@link UsageStats.requests} sent a `prompt_cache_key`. */
+  readonly promptCacheKeyRequests: number
   readonly failed: number
   readonly left: number
   /** Average time per request, in milliseconds; `undefined` with none. */
@@ -196,6 +220,12 @@ export interface UsageStats {
   readonly cacheReadTokens: number
   /** Input tokens written to the provider's prompt cache. */
   readonly cacheWriteTokens: number
+  /**
+   * The cache writes made in minutes where a route (alias and model) wrote more than it read:
+   * `docs/caching.md`'s `cold_pct` is these over {@link UsageStats.cacheWriteTokens}, a rough
+   * share of writes that re-wrote an expired cache or a changed prefix.
+   */
+  readonly coldCacheWriteTokens: number
   readonly costUsd: number
 }
 
@@ -340,7 +370,8 @@ function writeBatch(statements: Statements, batch: StatsBatch): void {
       row.durationMsTotal,
       row.durationMsMax,
       row.firstEventMsTotal,
-      row.firstEventCount
+      row.firstEventCount,
+      row.promptCacheKeyRequests
     )
   }
   for (const row of batch.attempts) {
@@ -420,6 +451,7 @@ function usageBy(
   const requests = db
     .prepare(
       `SELECT ${column} AS name, sum(requests) AS requests,
+        sum(prompt_cache_key_requests) AS keyed,
         sum(CASE outcome WHEN 'failed' THEN requests ELSE 0 END) AS failed,
         sum(CASE outcome WHEN 'left' THEN requests ELSE 0 END) AS left_count,
         sum(duration_ms_total) AS duration_total, max(duration_ms_max) AS duration_max,
@@ -433,6 +465,8 @@ function usageBy(
       `SELECT ${column} AS name, sum(attempts) AS attempts, sum(fallbacks) AS fallbacks,
         sum(input_tokens) AS input, sum(output_tokens) AS output,
         sum(cache_read_tokens) AS cache_read, sum(cache_write_tokens) AS cache_write,
+        sum(CASE WHEN cache_write_tokens > cache_read_tokens THEN cache_write_tokens ELSE 0 END)
+          AS cold_write,
         sum(cost_usd) AS cost
       FROM attempt_minutes WHERE minute >= ? AND minute < ? GROUP BY ${column}`
     )
@@ -465,6 +499,7 @@ function usageStats(
   const served = numberOf(requests, 'requests')
   return {
     requests: served,
+    promptCacheKeyRequests: numberOf(requests, 'keyed'),
     failed: numberOf(requests, 'failed'),
     left: numberOf(requests, 'left_count'),
     averageMs: averageOf(numberOf(requests, 'duration_total'), served),
@@ -479,6 +514,7 @@ function usageStats(
     outputTokens: numberOf(attempts, 'output'),
     cacheReadTokens: numberOf(attempts, 'cache_read'),
     cacheWriteTokens: numberOf(attempts, 'cache_write'),
+    coldCacheWriteTokens: numberOf(attempts, 'cold_write'),
     costUsd: numberOf(attempts, 'cost')
   }
 }
@@ -516,27 +552,93 @@ function errorsOf(db: DatabaseSync, range: MinuteRange): ErrorStats {
   }
 }
 
+/** How a store opens its file. */
+export interface OpenStatsOptions {
+  /**
+   * Open the file read-only: no table is created, nothing migrated, nothing written, and a file
+   * that is not at the current schema version is refused. `add` and `prune` then throw.
+   */
+  readonly readOnly?: boolean
+}
+
 /**
- * Opens the stats file, creating it and its tables the first time.
+ * Names the file for a read-only connection.
  *
- * @param path - the file, or `:memory:` for a store that lives as long as the process
- * @returns the store
- * @throws Error when the file can't be opened or created (a read-only directory, say), or it was
- *   written by a newer version of the proxy
+ * @remarks
+ * A file a proxy has open has its `-wal` and `-shm` files beside it, which a reader shares. With
+ * no `-wal` file (no proxy has it open, and the last one checkpointed it), a read-only connection
+ * would still create both and leave them behind; opened `immutable`, it creates nothing.
+ *
+ * @param path - the file
+ * @returns the path, or an `immutable` file URL
  */
-export function openStatsStore(path: string): StatsStore {
-  const db = new DatabaseSync(path)
-  try {
-    db.exec(`PRAGMA busy_timeout = ${String(BUSY_TIMEOUT_MS)}`)
-    db.exec('PRAGMA journal_mode = WAL')
-    const version = numberOf(db.prepare('PRAGMA user_version').get() ?? {}, 'user_version')
-    if (version > SCHEMA_VERSION) {
+function readOnlyLocation(path: string): string | URL {
+  if (existsSync(`${path}-wal`)) return path
+  const url = pathToFileURL(path)
+  url.searchParams.set('immutable', '1')
+  return url
+}
+
+/**
+ * Brings a file opened for writing to the current schema, in one transaction: the tables for a new
+ * file, or the {@link MIGRATIONS} an older one has not had yet.
+ *
+ * @param db - the database
+ * @param version - the file's `user_version`; 0 for a new file
+ */
+function migrate(db: DatabaseSync, version: number): void {
+  if (version === SCHEMA_VERSION) return
+  inTransaction(db, () => {
+    if (version === 0) db.exec(SCHEMA)
+    else for (const step of MIGRATIONS.slice(version - 1)) db.exec(step)
+    db.exec(`PRAGMA user_version = ${String(SCHEMA_VERSION)}`)
+  })
+}
+
+/**
+ * Checks a file's schema version, and brings a writable one up to date.
+ *
+ * @param db - the database, just opened
+ * @param readOnly - whether it was opened read-only
+ * @throws Error when the file is newer than this code's schema, or older and read-only
+ */
+function prepareSchema(db: DatabaseSync, readOnly: boolean): void {
+  db.exec(`PRAGMA busy_timeout = ${String(BUSY_TIMEOUT_MS)}`)
+  const version = numberOf(db.prepare('PRAGMA user_version').get() ?? {}, 'user_version')
+  if (version > SCHEMA_VERSION) {
+    throw new Error(
+      `The stats file is schema version ${String(version)}, newer than this pi-switchboard's ` +
+        `(${String(SCHEMA_VERSION)}): upgrade pi-switchboard to use it`
+    )
+  }
+  if (readOnly) {
+    if (version < SCHEMA_VERSION) {
       throw new Error(
-        `The stats file is schema version ${String(version)}, newer than this proxy's`
+        `The stats file is schema version ${String(version)}, older than this pi-switchboard's ` +
+          `(${String(SCHEMA_VERSION)}): start the proxy once to migrate it`
       )
     }
-    db.exec(SCHEMA)
-    db.exec(`PRAGMA user_version = ${String(SCHEMA_VERSION)}`)
+    return
+  }
+  db.exec('PRAGMA journal_mode = WAL')
+  migrate(db, version)
+}
+
+/**
+ * Opens the stats file, creating it and its tables the first time, and migrating an older one in
+ * place.
+ *
+ * @param path - the file, or `:memory:` for a store that lives as long as the process
+ * @param options - whether to open it read-only
+ * @returns the store
+ * @throws Error when the file can't be opened or created (a read-only directory, say), was
+ *   written by a newer version of the proxy, or (read-only) by an older one
+ */
+export function openStatsStore(path: string, options: OpenStatsOptions = {}): StatsStore {
+  const readOnly = options.readOnly === true
+  const db = new DatabaseSync(readOnly ? readOnlyLocation(path) : path, { readOnly })
+  try {
+    prepareSchema(db, readOnly)
   } catch (error) {
     db.close()
     throw error

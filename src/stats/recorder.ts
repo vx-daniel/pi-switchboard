@@ -100,7 +100,8 @@ function addFinished(pending: Pending, request: FinishedRequest, model: string):
     durationMsTotal: 0,
     durationMsMax: 0,
     firstEventMsTotal: 0,
-    firstEventCount: 0
+    firstEventCount: 0,
+    promptCacheKeyRequests: 0
   }
   const duration = Math.max(0, request.endedAt - request.startedAt)
   row.requests += 1
@@ -110,6 +111,7 @@ function addFinished(pending: Pending, request: FinishedRequest, model: string):
     row.firstEventMsTotal += Math.max(0, request.firstEventAt - request.startedAt)
     row.firstEventCount += 1
   }
+  if (request.promptCacheKey) row.promptCacheKeyRequests += 1
   pending.requests.set(id, row)
 }
 

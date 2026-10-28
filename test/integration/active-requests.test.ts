@@ -101,14 +101,15 @@ afterAll(async () => {
  * Sends one chat request, without reading its answer.
  *
  * @param model - the request's `model`
- * @param options - stream or not, and a signal to leave early
+ * @param options - stream or not, a signal to leave early, and a `prompt_cache_key`
  * @param options.stream - whether to ask for a stream
  * @param options.signal - aborts the request: the client leaves
+ * @param options.promptCacheKey - the request's `prompt_cache_key`; `null` sends it as null
  * @returns the response, once its headers are in
  */
 function send(
   model: string,
-  options: { stream?: boolean; signal?: AbortSignal } = {}
+  options: { stream?: boolean; signal?: AbortSignal; promptCacheKey?: string | null } = {}
 ): Promise<Response> {
   return Promise.resolve(
     createApp(testConfig(), fileConfigReader).request('/v1/chat/completions', {
@@ -117,7 +118,10 @@ function send(
       body: JSON.stringify({
         model,
         stream: options.stream === true,
-        messages: [{ role: 'user', content: 'Say ok' }]
+        messages: [{ role: 'user', content: 'Say ok' }],
+        ...(options.promptCacheKey === undefined
+          ? {}
+          : { prompt_cache_key: options.promptCacheKey })
       }),
       ...(options.signal === undefined ? {} : { signal: options.signal })
     })
@@ -221,6 +225,27 @@ describe('requests in flight', () => {
     const served = model === 'coding' ? 'alpha/answer-mock' : model
     expect(finishedRequests()[0]).toEqual(
       expect.objectContaining({ model: served, attempt, stream, outcome })
+    )
+  })
+
+  // Catches the stats' count of requests with a `prompt_cache_key` (#299) never set by the chat
+  // route, or a `null` key (which pi treats as none) counted as one.
+  test.each([
+    { sent: 'a key', promptCacheKey: 'conversation-1', counted: true },
+    { sent: 'a null key', promptCacheKey: null, counted: false },
+    { sent: 'no key', promptCacheKey: undefined, counted: false }
+  ])('records whether a request sent $sent', async ({ promptCacheKey, counted }) => {
+    const response = await send(
+      'alpha/answer-mock',
+      promptCacheKey === undefined ? {} : { promptCacheKey }
+    )
+    await response.text()
+
+    await vi.waitFor(() => {
+      expect(activeRequests()).toEqual([])
+    })
+    expect(finishedRequests()[0]).toEqual(
+      expect.objectContaining({ model: 'alpha/answer-mock', promptCacheKey: counted })
     )
   })
 })

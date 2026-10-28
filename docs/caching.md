@@ -14,6 +14,8 @@ A provider's prompt cache keeps the start of a prompt it has seen recently, so t
 
 A provider caches a prompt only above a minimum length it sets, so a short request (a title, a one-line classification) reads nothing from the cache whatever you do.
 
+**`pi-switchboard doctor` runs the checks on this page for you** ([Checking the setup](configuration.md#checking-the-setup-pi-switchboard-doctor)): per model with at least 20 calls in a window, a hit rate under 50%, cache writes over 40% of the cost, `cold_pct` against the retention break-even (Anthropic and Bedrock), fallbacks, and, on the APIs above that cache by key, the share of requests sent without a `prompt_cache_key`, which the stats count (a count, never the key; requests recorded before that count existed show as keyless). It recommends; it changes nothing. What it can't do is say *why* a client's prefix changes: that needs the prompt, which the proxy never keeps.
+
 ## Seeing what the cache did
 
 - **Each response.** `usage.prompt_tokens` is the whole prompt; `usage.prompt_tokens_details.cached_tokens` is the part read from the cache and `cache_write_tokens` the part written to it (on the Responses API, `usage.input_tokens_details`). `x_pi` repeats them as `cache_read_tokens` and `cache_write_tokens`, with the call's `cost` in US dollars.
@@ -82,4 +84,4 @@ sqlite3 -readonly -header -column ~/.pi/agent/pi-switchboard-stats.sqlite "
   FROM attempt_minutes WHERE attempts > 0 GROUP BY model"
 ```
 
-`cold_pct` is the share of writes made in minutes where a model wrote more than it read. It counts each conversation's first request as cold, and can miss a rewrite in a minute busy with other turns; if it is well under 40%, `long` most likely costs more than it saves. Treat it as a hint, then compare `cost_usd` over a day with and without `long` to be sure.
+`cold_pct` is the share of writes made in minutes where a model wrote more than it read. It counts each conversation's first request as cold, and can miss a rewrite in a minute busy with other turns; if it is well under 40%, `long` most likely costs more than it saves. Treat it as a hint, then compare `cost_usd` over a day with and without `long` to be sure. `pi-switchboard doctor` computes it per model with the break-even from the model's prices, and recommends `long` above it, or removing `long` below it.

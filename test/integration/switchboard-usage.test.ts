@@ -36,7 +36,8 @@ function recordTraffic(): void {
     durationMsTotal: 0,
     durationMsMax: 0,
     firstEventMsTotal: 0,
-    firstEventCount: 0
+    firstEventCount: 0,
+    promptCacheKeyRequests: 0
   }
   const store = openStatsStore(statsFilePath())
   store.add({
@@ -51,7 +52,8 @@ function recordTraffic(): void {
         durationMsTotal: 3000,
         durationMsMax: 2000,
         firstEventMsTotal: 800,
-        firstEventCount: 2
+        firstEventCount: 2,
+        promptCacheKeyRequests: 1
       },
       { minute, alias: '', model: 'p/a', outcome: 'failed', status: 0, requests: 1, ...zeroTimes },
       {

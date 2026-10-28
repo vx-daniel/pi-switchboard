@@ -14,7 +14,7 @@ Point any OpenAI client at `http://localhost:4141/v1` (Aider, Continue, Open Web
 - **Several logins per provider.** A second subscription to the same service is a second login; the proxy moves to it when the first hits its limit ([Logins](docs/logins.md)).
 - **Quota and cooldowns.** It reads each subscription's usage windows, keeps a reserve you set, and cools a provider that answered 429 for as long as it said.
 - **Honest about what it does.** Responses are checked against OpenAI's published spec, a field it doesn't support is refused with a clear error rather than dropped, and every response says which model and login answered (`x_pi`).
-- **See what's happening.** `pi-switchboard tui` shows every request, your logins and their quota, usage and cost over 30 days, and your aliases, and edits them ([The console](docs/console.md)).
+- **See what's happening.** `pi-switchboard tui` shows every request, your logins and their quota, usage and cost over 30 days, and your aliases, and edits them ([The console](docs/console.md)). `pi-switchboard doctor` checks the config and the prompt cache and says what to change ([Checking the setup](docs/configuration.md#checking-the-setup-pi-switchboard-doctor)).
 - **Local and safe by default.** It listens on `127.0.0.1`. Listening wider without a token logs a warning, and the Docker image won't start without one ([Security](docs/security.md)).
 
 ## How it works

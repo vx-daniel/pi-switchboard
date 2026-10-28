@@ -15,6 +15,8 @@ declare namespace NodeJS {
     /** https://no-color.org: any non-empty value turns the console's colors off. */
     NO_COLOR?: string | undefined
     PI_CODING_AGENT_DIR?: string | undefined
+    /** pi's prompt cache retention: `long` asks for the provider's long cache; read by the doctor. */
+    PI_CACHE_RETENTION?: string | undefined
     PI_SWITCHBOARD_HOST?: string | undefined
     PI_SWITCHBOARD_PORT?: string | undefined
     PI_SWITCHBOARD_AUTH_TOKEN?: string | undefined

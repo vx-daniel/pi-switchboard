@@ -51,6 +51,11 @@ export interface ActiveRequest {
   readonly attempt: number
   /** Whether the client asked for a stream. */
   readonly stream: boolean
+  /**
+   * Whether the request sent a `prompt_cache_key` (#299): the stats count these, never the key,
+   * which can be a conversation ID the client chose.
+   */
+  readonly promptCacheKey: boolean
   /** When the dispatch started, in milliseconds since the epoch. */
   readonly startedAt: number
   /** When a stream's first event arrived; `undefined` until then, and for a plain request. */
@@ -59,8 +64,8 @@ export interface ActiveRequest {
 
 /**
  * One request that finished. A rejected one never reached a model: its `model` is the one the
- * request named (`''` when the proxy did not read that far), its `attempt` is 0, and it never
- * streamed.
+ * request named (`''` when the proxy did not read that far), its `attempt` is 0, it never
+ * streamed, and it counts as sending no `prompt_cache_key`.
  */
 export interface FinishedRequest extends ActiveRequest {
   readonly outcome: RequestOutcome
@@ -82,7 +87,10 @@ export interface RejectedRequest {
 }
 
 /** What a request starts with. */
-export type ActiveRequestStart = Pick<ActiveRequest, 'requestId' | 'alias' | 'model' | 'stream'>
+export type ActiveRequestStart = Pick<
+  ActiveRequest,
+  'requestId' | 'alias' | 'model' | 'stream' | 'promptCacheKey'
+>
 
 /** The dispatcher's handle on one request in flight. */
 export interface ActiveRequestHandle {
@@ -212,6 +220,7 @@ export function recordRejectedRequest(rejected: RejectedRequest, now: number = D
     model: rejected.model ?? '',
     attempt: 0,
     stream: false,
+    promptCacheKey: false,
     startedAt: rejected.startedAt,
     firstEventAt: undefined,
     outcome: 'rejected',

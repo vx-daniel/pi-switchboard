@@ -18,7 +18,8 @@ describe('the finished requests kept for the console', () => {
         requestId: `req-${String(requestIndex)}`,
         alias: null,
         model: 'alpha/model',
-        stream: false
+        stream: false,
+        promptCacheKey: false
       }).end('ok')
     }
 
@@ -35,7 +36,8 @@ describe('the finished requests kept for the console', () => {
       requestId: 'once',
       alias: null,
       model: 'alpha/model',
-      stream: true
+      stream: true,
+      promptCacheKey: false
     })
     handle.streaming()
     handle.settled('ok')
@@ -55,7 +57,8 @@ describe('the finished requests kept for the console', () => {
       requestId: 'never-relayed',
       alias: null,
       model: 'alpha/model',
-      stream: true
+      stream: true,
+      promptCacheKey: false
     })
     handle.settled('failed')
 
@@ -72,7 +75,8 @@ describe('the finished requests kept for the console', () => {
       requestId: 'served',
       alias: null,
       model: 'alpha/model',
-      stream: false
+      stream: false,
+      promptCacheKey: false
     })
     served.end('ok')
     for (let requestIndex = 0; requestIndex <= REJECTED_KEPT * 2; requestIndex += 1) {

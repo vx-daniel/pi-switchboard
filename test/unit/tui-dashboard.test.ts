@@ -25,6 +25,7 @@ const NO_ERRORS: ErrorStats = { failures: [], rejected: [] }
 function modelStats(fields: Partial<ModelStats> & Pick<ModelStats, 'model'>): ModelStats {
   return {
     requests: 0,
+    promptCacheKeyRequests: 0,
     failed: 0,
     left: 0,
     averageMs: undefined,
@@ -36,6 +37,7 @@ function modelStats(fields: Partial<ModelStats> & Pick<ModelStats, 'model'>): Mo
     outputTokens: 0,
     cacheReadTokens: 0,
     cacheWriteTokens: 0,
+    coldCacheWriteTokens: 0,
     costUsd: 0,
     ...fields
   }
