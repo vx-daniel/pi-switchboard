@@ -1,6 +1,7 @@
 /**
- * `/proxy status` and `/proxy stop` (`extensions/proxy/process.ts`) over a temp PID file and a
- * loopback stand-in for the proxy: what each reports, and which process each signals.
+ * `/proxy status`, `/proxy stop`, and `/proxy start`'s checks before it spawns
+ * (`extensions/proxy/process.ts`) over a temp PID file and a loopback stand-in for the proxy: what
+ * each reports, and which process each signals. Spawning a proxy is in `extension-start.test.ts`.
  *
  * Every process signalled here is a child this file spawns; the PID file lives in a temp agent
  * dir (`PI_CODING_AGENT_DIR`), so a real proxy or the developer's `~/.pi` are never touched.
@@ -10,11 +11,10 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setTimeout as sleep } from 'node:timers/promises'
 
 import { SettingsManager } from '@earendil-works/pi-coding-agent'
 import { DEFAULT_CONFIG } from '@proxy/config/schema'
@@ -78,62 +78,6 @@ function healthy(count: number): Responder {
 function pidOf(child: ChildProcess): number {
   if (child.pid === undefined) throw new Error('child has no pid')
   return child.pid
-}
-
-/**
- * A stand-in for the package's built entry (`dist/index.mjs`): answers every request with a list
- * of one model, on the host and port the extension passes in the environment.
- */
-const STAND_IN_PROXY = `
-import { createServer } from 'node:http'
-createServer((_request, response) => {
-  response.writeHead(200, { 'content-type': 'application/json' })
-  response.end(JSON.stringify({ object: 'list', data: [{ id: 'stand-in' }] }))
-}).listen(Number(process.env.PI_SWITCHBOARD_PORT), process.env.PI_SWITCHBOARD_HOST)
-`
-
-/** How often {@link stopStandIn} checks that a stand-in has exited. */
-const STAND_IN_EXIT_POLL_MS = 10
-
-/**
- * Says whether a process is still running.
- *
- * @param pid - the process; `undefined` for none
- * @returns whether signal 0 reaches it; `false` for none
- */
-function isAlive(pid: number | undefined): boolean {
-  if (pid === undefined) return false
-  try {
-    process.kill(pid, 0)
-    return true
-  } catch {
-    return false
-  }
-}
-
-/**
- * Finds the proxy process the extension keeps track of: its session child, or the process its PID
- * file names.
- *
- * @param state - the state `startProxy` ran with
- * @returns the PID, or `undefined` when it tracks none
- */
-function trackedPid(state: ProxyState): number | undefined {
-  if (state.sessionProcess !== undefined) return state.sessionProcess.pid
-  return existsSync(getPidPath()) ? Number(readFileSync(getPidPath(), 'utf-8')) : undefined
-}
-
-/**
- * Stops the stand-in proxy `startProxy` spawned, and waits until it has exited.
- *
- * @param state - the state `startProxy` ran with
- */
-async function stopStandIn(state: ProxyState): Promise<void> {
-  const pid = trackedPid(state)
-  if (pid === undefined) return
-  process.kill(pid, 'SIGKILL')
-  // A detached child is not this process's to wait for: poll until the PID is gone.
-  while (isAlive(pid)) await sleep(STAND_IN_EXIT_POLL_MS)
 }
 
 let agentDir: string
@@ -617,43 +561,4 @@ describe('startProxy', () => {
       pidFileKept: true
     })
   })
-
-  // Catches `/proxy start` never actually starting a proxy, or reporting it before it answers:
-  // with nothing answering, the extension must spawn the package's built entry with the config as
-  // environment, wait until it answers, then report its URL, model count and lifetime. The built
-  // entry here is a stand-in that serves one model on the port and host it is given.
-  test.each([
-    { lifetime: 'session', mode: 'session', kept: { sessionChild: true, pidFile: false } },
-    { lifetime: 'detached', mode: 'background', kept: { sessionChild: false, pidFile: true } }
-  ] as const)(
-    '$lifetime: spawns the built entry, waits until it answers, and reports it',
-    async ({ lifetime, mode, kept }) => {
-      const proxyPort = await freePort()
-      writeFileSync(
-        join(agentDir, 'proxy-config.json'),
-        JSON.stringify({ host: '127.0.0.1', port: proxyPort, lifetime })
-      )
-      mkdirSync(join(agentDir, 'dist'))
-      writeFileSync(join(agentDir, 'dist', 'index.mjs'), STAND_IN_PROXY)
-      const state = stateOn(proxyPort)
-      const { context, notifications, statuses } = fakeCommandContext({})
-
-      try {
-        await startProxy(state, context)
-
-        const url = `http://127.0.0.1:${String(proxyPort)}`
-        expect(notifications).toEqual([
-          { message: `Proxy started at ${url} (1 models) [${mode}]`, level: 'info' }
-        ])
-        expect(statuses.at(-1)).toEqual({ key: STATUS_KEY, text: `proxy: ${url} (1 models)` })
-        expect({
-          sessionChild: state.sessionProcess !== undefined,
-          pidFile: existsSync(getPidPath())
-        }).toEqual(kept)
-        expect(isAlive(trackedPid(state))).toBe(true)
-      } finally {
-        await stopStandIn(state)
-      }
-    }
-  )
 })

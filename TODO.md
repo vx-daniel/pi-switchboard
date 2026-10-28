@@ -486,7 +486,7 @@ serving model and login reported under `x_pi` and in the log.
 - [ ] Doctor: cost advice for a model reachable only through a `{provider}-N` login (#338)
 - [ ] One debug line per upstream error, not one per layer (#339)
 - [ ] `PI_SWITCHBOARD_AGENTIC`: remove or keep as reserved (#340)
-- [ ] Test the pi extension's proxy start path (#341)
+- [x] Test the pi extension's proxy start path (#341)
 - [ ] Small cleanups: an unused constant, two `param` path formats, test env vars in CONTRIBUTING, two functions at the complexity limit (#342)
 
 ## Later, not planned: experimental agentic mode
