@@ -452,6 +452,14 @@ export default defineConfig({
         rules: {
           '@limegrass/import-alias/import-alias': 'off'
         }
+      },
+      {
+        // The recorder imports this module under plain Node, which cannot resolve `@proxy/*`: it
+        // may import only pi's packages and Node built-ins (#331 review).
+        files: ['src/pi/account-provider.ts'],
+        rules: {
+          'no-restricted-imports': ['error', { patterns: ['@proxy/*', './*', '../*'] }]
+        }
       }
     ]
   },
