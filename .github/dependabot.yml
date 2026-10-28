@@ -1,0 +1,33 @@
+# Dependabot (#308). Every pull request targets `dev`, like any other change, and needs `gate`.
+version: 2
+updates:
+  # The SHA-pinned `uses:` lines (#302): one grouped pull request a week, SHA and `# vX.Y.Z`
+  # comment updated together.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: dev
+    commit-message:
+      prefix: ci
+    groups:
+      actions:
+        patterns: ['*']
+    ignore:
+      # Pinned to v1.0.217 on purpose: later releases fail before reading the diff on
+      # ubuntu-latest (anthropics/claude-code-action#1817; see claude-pr-review.yml). Remove this
+      # entry once that issue is fixed.
+      - dependency-name: anthropics/claude-code-action
+
+  # npm: security updates only (the repository's "Dependabot security updates" setting). A limit
+  # of 0 turns routine version updates off; security updates still use this entry's branch and
+  # commit message. Routine bumps, pi's included, stay manual: they usually need code changes.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    target-branch: dev
+    open-pull-requests-limit: 0
+    commit-message:
+      prefix: build
+      include: scope
