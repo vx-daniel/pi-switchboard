@@ -108,9 +108,7 @@ describe('the console’s Doctor view', () => {
         })
       ])
     )
-    expect(shown[0]).toMatch(
-      /^› ADVICE {2}credentials {6}1 providers have .* → 2 Accounts, v {2}╭/u
-    )
+    expect(shown[0]).toMatch(/^› ADVICE {2}credentials {6}1 provider has .* → 2 Accounts, v {2}╭/u)
     expect(report?.statsAvailable).toBe(true)
     expect(fetched).not.toHaveBeenCalled()
     expect(mock.requests).toHaveLength(0)

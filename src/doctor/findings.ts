@@ -374,7 +374,7 @@ function unverifiedFinding(credentials: CredentialsInput): Finding | undefined {
     : credentials.providers.filter((provider) => provider.verified === undefined)
   if (unverified.length === 0) return undefined
   return finding('credentials', 'advice', undefined, {
-    message: `${String(unverified.length)} providers have a login or key: ${unverified.map((provider) => provider.provider).join(', ')}. Not verified.`,
+    message: `${unverified.length === 1 ? '1 provider has' : `${String(unverified.length)} providers have`} a login or key: ${unverified.map((provider) => provider.provider).join(', ')}. Not verified.`,
     recommendation: credentials.howToVerify ?? VERIFY_FLAG_ADVICE
   })
 }

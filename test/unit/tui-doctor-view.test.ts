@@ -250,7 +250,7 @@ describe('the Doctor view’s credentials', () => {
     expect(findings).toEqual([
       expect.objectContaining({
         severity: 'advice',
-        message: expect.stringMatching(/^1 providers have a login or key: beta\. Not verified\.$/u),
+        message: expect.stringMatching(/^1 provider has a login or key: beta\. Not verified\.$/u),
         recommendation: expect.stringMatching(/^Verify the logins in the Accounts view \(v;/u)
       })
     ])
