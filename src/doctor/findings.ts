@@ -451,13 +451,11 @@ function fallbackFindings(
   }
   const loginBroad = broad(fallback.logins)
   if (loginBroad.length > 0) {
-    const total = [...(fallbacksByAlias?.values() ?? [])].reduce(
-      (sum, aliasFallbacks) => sum + aliasFallbacks,
-      0
-    )
+    // No count: the stats record fallbacks by alias and model, and can't tell a move between a
+    // provider's logins from a move to another model.
     findings.push(
       finding('fallback-on', 'advice', 'routing.logins', {
-        message: `Requests move between a provider's logins on ${loginBroad.join(', ')}. ${counted(total)}`,
+        message: `Requests move between a provider's logins on ${loginBroad.join(', ')}.`,
         recommendation:
           'Keep routing.logins.fallbackOn to ["rate_limit"] (the default) unless moving is worth a cold cache.'
       })
@@ -640,7 +638,7 @@ function cacheKeyFinding(stats: ModelStats, model: CatalogModel): Finding | unde
   const keyless = 1 - stats.promptCacheKeyRequests / stats.requests
   if (keyless <= KEYLESS_SHARE) return undefined
   return finding('prompt-cache-key', 'advice', stats.model, {
-    message: `${percent(keyless)} of ${String(stats.requests)} requests sent no prompt_cache_key, on an API that caches by key.`,
+    message: `${percent(keyless)} of ${String(stats.requests)} requests sent no prompt_cache_key, on an API that caches by key. Requests recorded before the stats counted keys (schema version 2) count as keyless.`,
     recommendation: 'Have the client send one prompt_cache_key per conversation.'
   })
 }

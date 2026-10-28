@@ -237,9 +237,10 @@ describe('the doctor general section', () => {
     ).toEqual([expect.objectContaining({ check: 'stats', severity: 'advice' })])
   })
 
-  // Catches a broad fallbackOn going unreported, the default rate_limit flagged, or the window's
-  // fallback count missing from the finding.
-  test('advises on a fallbackOn with broad classes, with its fallbacks', () => {
+  // Catches a broad fallbackOn going unreported, the default rate_limit flagged, an alias's
+  // fallback count missing, or every alias's fallbacks passed off as login moves, which the stats
+  // can't tell apart.
+  test('advises on a fallbackOn with broad classes, with an alias its fallbacks', () => {
     const findings = general({
       fallback: {
         aliases: [
@@ -263,7 +264,7 @@ describe('the doctor general section', () => {
       expect.objectContaining({
         check: 'fallback-on',
         subject: 'routing.logins',
-        message: expect.stringContaining('9 fallbacks')
+        message: expect.not.stringMatching(/\d+ fallbacks/)
       })
     ])
   })

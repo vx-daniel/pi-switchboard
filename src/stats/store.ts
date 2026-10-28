@@ -567,7 +567,9 @@ export interface OpenStatsOptions {
  * @remarks
  * A file a proxy has open has its `-wal` and `-shm` files beside it, which a reader shares. With
  * no `-wal` file (no proxy has it open, and the last one checkpointed it), a read-only connection
- * would still create both and leave them behind; opened `immutable`, it creates nothing.
+ * would still create both and leave them behind; opened `immutable`, it creates nothing. A proxy
+ * that starts between the check and the open can write pages the `immutable` reader doesn't see:
+ * the doctor's read is then a moment stale, which is fine for advice.
  *
  * @param path - the file
  * @returns the path, or an `immutable` file URL
@@ -596,8 +598,8 @@ function userVersion(db: DatabaseSync): number {
  * @remarks
  * The version is read again inside the transaction, which holds the write lock: two proxies that
  * start on the same older file both saw that version before either locked it, and the second
- * would otherwise run a migration the first has already committed (`duplicate column`, #328
- * review) and lose its stats.
+ * would otherwise run a migration the first has already committed (`duplicate column`) and lose
+ * its stats.
  *
  * @param db - the database
  * @param version - the file's `user_version` when it was opened; 0 for a new file
