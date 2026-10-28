@@ -268,6 +268,7 @@ function statsView(name: string, events: string[]): StatsView {
     todayCostUsd: () => undefined,
     frameNote: () => '',
     perBar: () => '',
+    doctorStats: () => ({ state: { kind: 'off' }, fallbacksByAlias: undefined }),
     close: () => events.push(`close ${name}`)
   }
 }

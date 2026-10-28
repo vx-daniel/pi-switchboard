@@ -3,8 +3,8 @@
  * reports, the config, the stats and pi's catalog) to findings, each with a recommendation.
  *
  * @remarks
- * Nothing here reads a file, the environment or the clock, so the console can show the same
- * findings later (#325) from inputs it gathers itself. Findings name providers, models, aliases
+ * Nothing here reads a file, the environment or the clock, so the console's Doctor tab shows the
+ * same findings (#325) from inputs it gathers itself. Findings name providers, models, aliases
  * and config fields, never a credential or message content (constitution principle III).
  *
  * The general section repeats what `/healthz/models` and `/healthz/creds` judge, plus config
@@ -24,10 +24,38 @@ import type { StatsWindow } from '@proxy/stats/windows'
 /** How much a finding matters: only a general `error` fails the doctor (exit status 1). */
 export type Severity = 'error' | 'warning' | 'advice'
 
+/**
+ * Every check's name, the general section's then the cache section's: the names a finding can
+ * carry, so the console can point each at the view or key that acts on it (#325).
+ */
+export const DOCTOR_CHECKS = [
+  'config-file',
+  'proxy-auth',
+  'docs-ui',
+  'stats',
+  'exposure',
+  'models-json',
+  'enabled-models',
+  'alias',
+  'login-routing',
+  'credentials',
+  'logins',
+  'fallback-on',
+  'window',
+  'hit-rate',
+  'cache-write-cost',
+  'retention',
+  'fallbacks',
+  'prompt-cache-key'
+] as const
+
+/** A check's name. */
+export type DoctorCheck = (typeof DOCTOR_CHECKS)[number]
+
 /** One finding: what was checked, how much it matters, what was found and what to do. */
 export interface Finding {
   /** The check's name, stable for scripts: `exposure`, `hit-rate`, … */
-  readonly check: string
+  readonly check: DoctorCheck
   readonly severity: Severity
   /** What it is about: a model, an alias, a provider or a pattern; absent for the whole proxy. */
   readonly subject?: string
@@ -121,7 +149,16 @@ export interface CredentialsInput extends Pick<
     CredentialsHealth['providers'][number],
     'provider' | 'verified' | 'error'
   >[]
+  /**
+   * How to verify the logins, the not-verified advice's recommendation: the console points at its
+   * Accounts view (#325); the CLI's `--verify` when absent.
+   */
+  readonly howToVerify?: string
 }
+
+/** The not-verified advice's recommendation in the CLI. */
+const VERIFY_FLAG_ADVICE =
+  'Run with --verify to resolve each now (as /healthz/creds?verify=true; may refresh an OAuth token).'
 
 /** The server settings the config checks read, as the proxy would start with them. */
 export interface ServerSettings {
@@ -186,6 +223,8 @@ export interface CacheInputs {
   readonly catalog: ReadonlyMap<string, CatalogModel>
   /** Whether `PI_CACHE_RETENTION=long` is set in the doctor's environment. */
   readonly retentionLong: boolean
+  /** The too-few-calls advice's recommendation: the CLI's `--window`, the console's key (#325). */
+  readonly howToWiden: string
 }
 
 /**
@@ -221,7 +260,7 @@ function dollars(tokenDollars: number): string {
  * @returns the finding
  */
 function finding(
-  check: string,
+  check: DoctorCheck,
   severity: Severity,
   subject: string | undefined,
   text: { readonly message: string; readonly recommendation: string }
@@ -325,6 +364,25 @@ function loginFindings(models: ModelsInput): Finding[] {
 }
 
 /**
+ * Reports the logins without a verification result: none once `verified` is set (`--verify`);
+ * otherwise every login in the CLI, and in the console each one its Accounts view has not
+ * verified yet (#325).
+ *
+ * @param credentials - the credentials report
+ * @returns the advice, or `undefined` when every login was verified
+ */
+function unverifiedFinding(credentials: CredentialsInput): Finding | undefined {
+  const unverified = credentials.verified
+    ? []
+    : credentials.providers.filter((provider) => provider.verified === undefined)
+  if (unverified.length === 0) return undefined
+  return finding('credentials', 'advice', undefined, {
+    message: `${unverified.length === 1 ? '1 provider has' : `${String(unverified.length)} providers have`} a login or key: ${unverified.map((provider) => provider.provider).join(', ')}. Not verified.`,
+    recommendation: credentials.howToVerify ?? VERIFY_FLAG_ADVICE
+  })
+}
+
+/**
  * Judges the logins as `/healthz/creds` does: none, or one that fails to verify, fails. Without
  * `--verify` nothing is resolved, so a present login is only reported.
  *
@@ -340,14 +398,9 @@ function credentialFindings(credentials: CredentialsInput): Finding[] {
         recommendation: 'Log in through pi (`/login`, or `pi-switchboard tui`), or set an API key.'
       })
     )
-  } else if (!credentials.verified) {
-    findings.push(
-      finding('credentials', 'advice', undefined, {
-        message: `${String(credentials.providers.length)} providers have a login or key: ${credentials.providers.map((provider) => provider.provider).join(', ')}. Not verified.`,
-        recommendation:
-          'Run with --verify to resolve each now (as /healthz/creds?verify=true; may refresh an OAuth token).'
-      })
-    )
+  } else {
+    const unverified = unverifiedFinding(credentials)
+    if (unverified !== undefined) findings.push(unverified)
   }
   for (const provider of credentials.providers) {
     if (provider.verified !== false) continue
@@ -504,7 +557,7 @@ const SEVERITY_RANK: Readonly<Record<Severity, number>> = { error: 0, warning: 1
  * @param findings - the findings
  * @returns them, errors first
  */
-function bySeverity(findings: readonly Finding[]): Finding[] {
+export function bySeverity(findings: readonly Finding[]): Finding[] {
   return findings.toSorted(
     (left, right) => SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity]
   )
@@ -700,9 +753,9 @@ export function cacheFindings(inputs: CacheInputs): Finding[] {
   const judged = inputs.stats.models.filter((stats) => stats.attempts >= MIN_CALLS)
   if (judged.length === 0) {
     return [
-      finding('stats', 'advice', undefined, {
+      finding('window', 'advice', undefined, {
         message: `No model had ${String(MIN_CALLS)} calls in the window, so none was judged.`,
-        recommendation: 'Try a longer window (--window all), or come back after more traffic.'
+        recommendation: inputs.howToWiden
       })
     ]
   }

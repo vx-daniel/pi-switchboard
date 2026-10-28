@@ -16,13 +16,8 @@
 
 import { getLogLevels, isLogLevel } from '@logtape/logtape'
 import { collectReport, type DoctorOptions } from '@proxy/doctor/collect'
-import {
-  type DoctorReport,
-  doctorExitCode,
-  type Finding,
-  MIN_CALLS,
-  type Severity
-} from '@proxy/doctor/findings'
+import { type DoctorReport, doctorExitCode, type Finding, MIN_CALLS } from '@proxy/doctor/findings'
+import { findingCounts, SEVERITY_LABEL } from '@proxy/doctor/summary'
 import { configureLogging } from '@proxy/logging'
 import { buildCliOverrides, invalidFlag, SERVER_ARGS } from '@proxy/server/startup'
 import { isStatsWindow, STATS_WINDOWS } from '@proxy/stats/windows'
@@ -112,13 +107,6 @@ function usageError(rawArgs: readonly string[], args: DoctorArgs): string | unde
   return unknownArgument(rawArgs) ?? invalidFlag(args)
 }
 
-/** A severity's label in the text output. */
-const SEVERITY_LABEL: Readonly<Record<Severity, string>> = {
-  error: 'ERROR',
-  warning: 'WARNING',
-  advice: 'ADVICE'
-}
-
 /**
  * Formats one finding: its severity, check and subject, the message, and the recommendation.
  *
@@ -147,19 +135,6 @@ function sectionLines(title: string, findings: readonly Finding[]): string[] {
 }
 
 /**
- * Counts findings of one severity, as `1 error` or `2 warnings`.
- *
- * @param findings - every finding
- * @param severity - the severity
- * @param plural - the plural word
- * @returns the count with its word
- */
-function counted(findings: readonly Finding[], severity: Severity, plural: string): string {
-  const count = findings.filter((found) => found.severity === severity).length
-  return `${String(count)} ${count === 1 ? severity : plural}`
-}
-
-/**
  * Formats the report for a terminal: the general section, the cache section with the limits at
  * its end, and a count of the findings with the exit status.
  *
@@ -178,7 +153,7 @@ function formatReport(report: DoctorReport): string {
     `${INDENT}Limits:`,
     ...report.limits.map((limit) => `${INDENT}- ${limit}`),
     '',
-    `${counted(all, 'error', 'errors')}, ${counted(all, 'warning', 'warnings')}, ${counted(all, 'advice', 'advice')}. Exit status ${String(doctorExitCode(report))}.`
+    `${findingCounts(all)}. Exit status ${String(doctorExitCode(report))}.`
   ]
   return `${lines.join('\n')}\n`
 }
