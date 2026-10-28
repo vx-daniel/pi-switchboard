@@ -575,8 +575,8 @@ proxy keeps the latest report per provider, in memory (`src/pi/quota.ts`). It sh
 for clients that pick models themselves, #69's P6 comment). A fallback chain can keep a share of
 it in reserve, skipping a provider that is close to its limit (below).
 
-**What each subscription sends.** Read from a live probe of each login on 2026-10-21, one call each.
-Copilot wasn't logged in, so it is unknown.
+**What each subscription sends.** Read from a live probe of each login on 2026-10-21, one call each,
+and on 2026-10-28 for pi 1.4's ChatGPT sign-in (#238). GitHub Copilot is out of scope: not used.
 
 | Provider | Header | Meaning |
 |---|---|---|
@@ -590,6 +590,7 @@ Copilot wasn't logged in, so it is unknown.
 | | `x-codex-<primary\|secondary>-window-minutes` | `300` (5 hours), `10080` (7 days) |
 | | `x-codex-plan-type`, `x-codex-active-limit` | `plus`, `premium` |
 | | `x-codex-credits-*`, `-primary-over-secondary-limit-percent` | Not kept |
+| OpenAI, "Sign in with ChatGPT" (pi 1.4's `openai` provider, `api.openai.com/v1/responses`) | none | A 200 carries no quota header (recorded: `openai-responses/quota`); the response names Codex (`x-codex-turn-state`) and refuses models a ChatGPT plan lacks as "not supported when using Codex with a ChatGPT account". So a ChatGPT plan signed in this way shows `null` quota, and `routing.reserve` never skips it; the legacy `openai-codex` login (ChatGPT's Codex backend) is the one that reports `x-codex-*` |
 
 - **Exact fields only.** The same responses carry `anthropic-organization-id`,
   `anthropic-workspace-id`, `set-cookie`, request IDs and `x-codex-turn-state`, an opaque token.
@@ -607,13 +608,17 @@ Copilot wasn't logged in, so it is unknown.
 - **Keyed by provider.** pi has one login per provider, so a provider's report is its login's.
   A second login to the same service is a second provider (`anthropic-2`, Accounts
   below), with a report and a reserve of its own.
-- **Recorded for Anthropic only.** `test/fixtures/recordings/anthropic-messages/quota.json` is a
-  live call from a login made for recording, and `test/integration/quota-replay.test.ts` replays
-  it through pi's client to `/healthz/creds`. Codex is tested with the probe's header names and
-  fake identifying values (`test/fixtures/quota-headers.ts`); its recording and a Copilot probe
-  are #238. The recorder keeps a response's quota headers by exact name and nothing else
-  (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), and records a `quota` call for
-  Anthropic and for Codex (over SSE, as the proxy calls it); it needs a login made for recording
+- **Recorded for Anthropic, and for the ChatGPT sign-in.**
+  `test/fixtures/recordings/anthropic-messages/quota.json` is a live call from a login made for
+  recording, and `test/integration/quota-replay.test.ts` replays it through pi's client to
+  `/healthz/creds`. `openai-responses/quota` (2026-10-28) is pi 1.4's ChatGPT sign-in, kept as the
+  evidence that it sends no quota header. The legacy Codex backend (`openai-codex`, "OpenAI Codex
+  (legacy)" in pi 1.4) is not recorded, by decision (#238): the proxy still reads its `x-codex-*`
+  headers, tested with the 2026-10-21 probe's header names and fake identifying values
+  (`test/fixtures/quota-headers.ts`). The recorder keeps a response's quota headers by exact name
+  and nothing else (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), prints every
+  response header's name (never a value) for each recording, and records a `quota` call for
+  Anthropic and for the ChatGPT sign-in; it needs a login made for recording
   (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
 
 **The reserve** (`src/server/route-reserve.ts`, principle VI: configured, and reported). A
@@ -746,16 +751,22 @@ Accounts view, as it leaves aliases to the Models view.
 - **Available before the first request.** A registered provider is only provisionally available
   until the next availability pass; `initRegistry` runs `refresh({ allowNetwork: false })` once
   after registering, so the snapshot the routes read includes a login with a stored credential.
-- **Proven offline, not live.** `test/integration/accounts.test.ts` runs `groq` and a stored
-  `groq-2` against the mock provider, which tells the logins apart by the key each
+- **Proven offline, and live for Anthropic.** `test/integration/accounts.test.ts` runs `groq` and
+  a stored `groq-2` against the mock provider, which tells the logins apart by the key each
   request carries: the model listed once, owned by `groq`, with both logins on
   `/v1/switchboard/models` and `/healthz/creds`; a plain-named request moving to the second login
   on the first's 429 with `x_pi.login` and the attempt's `login`; the cooling first login skipped
   by the next request; no hop with `routing.logins.fallbackOn: []`; the slot's ID answering 404;
   then the login list offering `groq-3`, a scripted API-key login to it joining the
   model's logins at once, a cancelled login leaving no provider, and a logout dropping the slot
-  and its label. A real OAuth refresh and response through a copy need a login made for
-  recording (as #69's recordings do), never a copy of a live login.
+  and its label. Live, through a login made for recording (never a copy of a live login): the
+  recorder's `anthropic-messages/second-login` (2026-10-28) went through a real `anthropic-2`
+  OAuth login, registered by the proxy's own copy (`accountProvider`, in
+  `src/pi/account-provider.ts` so the recorder can import it under plain Node), and Anthropic
+  answered 200. `test/integration/second-login-replay.test.ts` replays it: a request put on
+  `anthropic-2` carries that login's token, with the recording's headers (the Claude Code ones an
+  OAuth token needs) and system prompt. Codex logins (`openai-codex-2`) are not recorded: the
+  legacy Codex route is left out by decision (#238).
 
 ### Usage by route (#70)
 

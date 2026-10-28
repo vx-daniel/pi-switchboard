@@ -129,28 +129,52 @@ export function loadRecording(
 const CREDENTIAL_PATTERN = /sk-ant-[a-z]{3}\d{2}-|Bearer\s+\S{20,}/
 
 /**
- * Saves a recording, unless it contains a credential: any of `secrets` (the values the request's
- * auth headers carried) or anything shaped like one.
+ * An account identifier a provider echoes in every response body, in its serialized form: OpenAI's
+ * Responses API names the ChatGPT user as `safety_identifier: "user-…"` (#238). Not a credential,
+ * and on every response of that route, so it is replaced, not refused.
+ */
+const ACCOUNT_ID_PATTERN = /(safety_identifier\\*":\s*\\*")user-[A-Za-z0-9]+/g
+
+/**
+ * An OpenAI user or organization ID anywhere else in a recording (`user-…`, `org-…`), which
+ * {@link ACCOUNT_ID_PATTERN} did not replace: a field this recorder has not met yet. Refused, as a
+ * credential is, so a new echoed identifier is noticed rather than committed.
+ */
+const OTHER_ACCOUNT_ID_PATTERN = /\b(?:user|org)-(?!redacted\b)[A-Za-z0-9]{16,}/
+
+/**
+ * Saves a recording, unless it contains a credential (any of `secrets`, the values the request's
+ * auth headers carried, or anything shaped like one) or an account ID. An account identifier the
+ * response echoes in a known field ({@link ACCOUNT_ID_PATTERN}) is replaced by `user-redacted`
+ * first; any other ({@link OTHER_ACCOUNT_ID_PATTERN}) is refused.
  *
  * @remarks
- * Refuses rather than redacts, so a leak is noticed instead of silently patched.
+ * Refuses a credential rather than redacting it, so a leak is noticed instead of silently patched.
  *
  * @param recording - the recording to save
  * @param secrets - credential values that must not appear in it; empty strings are ignored
  * @param directory - the recordings root; {@link RECORDINGS_DIR} by default
  * @returns the path the recording was written to
- * @throws Error when the recording contains a credential
+ * @throws Error when the recording contains a credential or an account ID
  */
 export function saveRecording(
   recording: Recording,
   secrets: readonly string[],
   directory = RECORDINGS_DIR
 ): string {
-  const text = `${JSON.stringify(recording, null, JSON_INDENT)}\n`
+  const text = `${JSON.stringify(recording, null, JSON_INDENT)}\n`.replace(
+    ACCOUNT_ID_PATTERN,
+    '$1user-redacted'
+  )
   const leaked = secrets.filter((secret) => secret !== '' && text.includes(secret))
   if (leaked.length > 0 || CREDENTIAL_PATTERN.test(text)) {
     throw new Error(
       `Refusing to save ${recording.api}/${recording.scenario}: it contains a credential`
+    )
+  }
+  if (OTHER_ACCOUNT_ID_PATTERN.test(text)) {
+    throw new Error(
+      `Refusing to save ${recording.api}/${recording.scenario}: it contains an account ID`
     )
   }
   const path = recordingPath(recording.api, recording.scenario, directory)
@@ -222,12 +246,22 @@ function parseJson(text: string): unknown {
   }
 }
 
+/** One exchange a recorder saw. */
+interface RecordedExchange {
+  /** What is saved: the kept headers only. */
+  readonly exchange: CapturedExchange
+  /** The credentials the request carried, which the saved recording must not contain. */
+  readonly secrets: string[]
+  /** Every response header's name, lower-case and sorted; never a value (#238's header probe). */
+  readonly responseHeaderNames: string[]
+}
+
 /** A running recorder, from {@link startRecorder}. */
 export interface Recorder {
   /** The recorder's origin, `http://127.0.0.1:<port>`. */
   readonly baseUrl: string
-  /** Every exchange so far, in order, with the credentials each request carried. */
-  readonly exchanges: readonly { readonly exchange: CapturedExchange; readonly secrets: string[] }[]
+  /** Every exchange so far, in order. */
+  readonly exchanges: readonly RecordedExchange[]
   /** Drops open connections and stops the server. */
   close(): Promise<void>
 }
@@ -244,7 +278,7 @@ export interface Recorder {
  * @returns the running recorder: its base URL, the exchanges so far, and `close()`
  */
 export async function startRecorder(upstreamOrigin: string): Promise<Recorder> {
-  const exchanges: { exchange: CapturedExchange; secrets: string[] }[] = []
+  const exchanges: RecordedExchange[] = []
   const server: Server = createServer((incoming, response) => {
     onRequestBody(incoming, (body) => {
       const request = { path: incoming.url ?? '/', headers: incoming.headers, body }
@@ -282,7 +316,8 @@ interface IncomingRequest {
  * @param upstreamOrigin - the real provider's origin
  * @param request - the request pi sent to the recorder
  * @param response - the response to pi
- * @returns the captured exchange (kept headers only) and the credentials the request carried
+ * @returns the captured exchange (kept headers only), the credentials the request carried, and
+ *   every response header's name
  * @throws TypeError when the upstream body yields something other than bytes; `fetch` errors
  *   when the upstream cannot be reached
  */
@@ -290,7 +325,7 @@ async function forward(
   upstreamOrigin: string,
   { path, headers, body }: IncomingRequest,
   response: ServerResponse
-): Promise<{ exchange: CapturedExchange; secrets: string[] }> {
+): Promise<RecordedExchange> {
   const forwarded = new Headers()
   for (const [headerName, headerValue] of Object.entries(headers)) {
     if (!HOP_HEADERS.has(headerName) && typeof headerValue === 'string') {
@@ -333,7 +368,8 @@ async function forward(
         chunks
       }
     },
-    secrets: credentialsIn(headers)
+    secrets: credentialsIn(headers),
+    responseHeaderNames: [...upstream.headers.keys()].toSorted()
   }
 }
 
@@ -355,7 +391,7 @@ async function record(
   upstreamOrigin: string,
   request: IncomingRequest,
   response: ServerResponse,
-  exchanges: { exchange: CapturedExchange; secrets: string[] }[]
+  exchanges: RecordedExchange[]
 ): Promise<void> {
   try {
     exchanges.push(await forward(upstreamOrigin, request, response))

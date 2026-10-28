@@ -20,10 +20,10 @@ import type {
 } from '@earendil-works/pi-coding-agent'
 import { loadConfigFromFile, type LoginLabels, saveConfigToFile } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
+import { parseAccountProviderId } from '@proxy/pi/account-provider'
 import {
   isBuiltinProvider,
   nextAccountSlot,
-  parseAccountProviderId,
   registerAccountProvider,
   unregisterAccountProvider
 } from '@proxy/pi/accounts'

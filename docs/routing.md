@@ -128,7 +128,7 @@ Subscriptions report on every response how much of each usage window the account
   { "name": "7d", "used": 0.47, "resets_at": 1792893600, "window_minutes": 10080, "status": "allowed" }] }
 ```
 
-- **Who reports.** Anthropic subscriptions (`5h` and `7d` windows) and Codex's ChatGPT plans (`primary`, 5 hours, and `secondary`, 7 days). Google and API-key logins report nothing, and show `null`.
+- **Who reports.** Anthropic subscriptions (`5h` and `7d` windows) and ChatGPT plans signed in as **OpenAI Codex (legacy)** (`openai-codex`: `primary`, 5 hours, and `secondary`, 7 days). A ChatGPT plan signed in through pi 1.4's **OpenAI** login ("Sign in with ChatGPT") reports nothing: OpenAI sends no quota headers on that route (recorded 2026-10-28), so it shows `null` and a reserve never skips it. Google and API-key logins report nothing either, and show `null`.
 - **`used`** is the share of the window used, from 0 to 1. A window that has reset since is left out, and a provider with nothing left to show is `null` until its next response.
 - **Only the shared login.** A request that sends its own key records nothing. Only the window fields, status and plan are kept, never an account or organization ID.
 - **Keep some in reserve.** A fallback chain can skip a provider before it runs out. Set the share of each window to keep free, per provider, in `proxy-config.json`:

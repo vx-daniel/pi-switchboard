@@ -1,9 +1,10 @@
 /**
  * `scripts/record-fixtures.ts`, run offline: its recorders forward to the mock provider (standing
- * in for Anthropic and Codex, `PI_SWITCHBOARD_RECORD_UPSTREAM`), its logins are a fixture agent
- * dir with a fake API key and a fake Codex token (`PI_SWITCHBOARD_RECORD_AGENT_DIR`), and its
- * recordings go to a temp dir (`PI_SWITCHBOARD_RECORD_OUT_DIR`) instead of the committed
- * `test/fixtures/recordings`. The script runs `main()` on import, so each test imports it afresh.
+ * in for Anthropic and OpenAI, `PI_SWITCHBOARD_RECORD_UPSTREAM`), its logins are a fixture agent
+ * dir with fake API keys and a fake ChatGPT sign-in, for each base and Anthropic's second login
+ * (`PI_SWITCHBOARD_RECORD_AGENT_DIR`), and its recordings go to a temp dir
+ * (`PI_SWITCHBOARD_RECORD_OUT_DIR`) instead of the committed `test/fixtures/recordings`. The
+ * script runs `main()` on import, so each test imports it afresh.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -16,16 +17,16 @@ import { VERSION } from '@earendil-works/pi-coding-agent'
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir } from '../fixtures/agent-dir'
-import { FAKE_CODEX_TOKEN } from '../fixtures/codex-token'
-import { type MockProvider, type MockReply, startMockProvider } from '../fixtures/mock-provider'
-import { ANTHROPIC_QUOTA_HEADERS, CODEX_QUOTA_HEADERS } from '../fixtures/quota-headers'
+import { type MockProvider, startMockProvider } from '../fixtures/mock-provider'
+import { ANTHROPIC_QUOTA_HEADERS } from '../fixtures/quota-headers'
 import { loadRecording, type Recording, replay } from '../fixtures/recording'
 
 const ANTHROPIC = 'anthropic-messages'
-const CODEX = 'openai-codex-responses'
+/** pi's `openai` provider signed in with ChatGPT, over the Responses API. */
+const OPENAI = 'openai-responses'
 const MODEL_ID = 'claude-haiku-5-5'
 const MISSING_MODEL_ID = 'claude-recorder-no-such-model'
-const CODEX_MODEL_ID = 'gpt-5.6-luna'
+const OPENAI_MODEL_ID = 'gpt-5.6-luna'
 const ANTHROPIC_SCENARIOS = [
   'text',
   'two-tool-calls',
@@ -34,23 +35,31 @@ const ANTHROPIC_SCENARIOS = [
   'model-not-found',
   'quota'
 ] as const
+/** A second login's scenario, saved next to the base's recordings. */
+const SECOND_LOGIN = 'second-login'
 /** Every recording a run with no names makes, in order: `<api>/<scenario>`. */
 const ALL_RECORDINGS = [
   ...ANTHROPIC_SCENARIOS.map((scenario) => `${ANTHROPIC}/${scenario}`),
-  `${CODEX}/quota`
+  `${ANTHROPIC}/${SECOND_LOGIN}`,
+  `${OPENAI}/quota`
 ]
-/** One request per recording, plus the cache-read repeat. */
-const REQUESTS_SENT = ALL_RECORDINGS.length + 1
+/** The Anthropic requests: one per recording, plus the cache-read repeat. */
+const ANTHROPIC_REQUESTS = ANTHROPIC_SCENARIOS.length + 2
 const API_KEY = 'notarealsecret-record-fixtures-key'
+/** `anthropic-2`'s own key, which its second-login request must carry instead of the base's. */
+const SECOND_API_KEY = 'notarealsecret-record-fixtures-key-2'
+/** The fake ChatGPT sign-in token of the `openai` login: no `sk-` key, as pi tells them apart. */
+const OPENAI_TOKEN = 'notarealsecret-openai-chatgpt-access'
 const EXIT_FAILURE = 1
-/** How long the fixture's Codex login stays valid: an hour, longer than any test run. */
-const CODEX_LOGIN_LIFETIME_MS = 3_600_000
+/** How long the fixture's ChatGPT sign-in stays valid: an hour, longer than any test run. */
+const OPENAI_LOGIN_LIFETIME_MS = 3_600_000
 /** The script, as `pnpm run test:live:record` names it to `node`. */
 const RECORD_SCRIPT = fileURLToPath(new URL('../../scripts/record-fixtures.ts', import.meta.url))
 
-/** The committed recordings the mock answers with, as Anthropic once did. */
+/** The committed recordings the mock answers with, as Anthropic and OpenAI once did. */
 const textAnswer = loadRecording(ANTHROPIC, 'text')
 const missingModelAnswer = loadRecording(ANTHROPIC, 'model-not-found')
+const openaiAnswer = loadRecording(OPENAI, 'quota')
 
 /**
  * Keeps a header set's quota headers: what a recording of a response that sent `headers` holds.
@@ -61,23 +70,6 @@ const missingModelAnswer = loadRecording(ANTHROPIC, 'model-not-found')
 function quotaOnly(headers: Readonly<Record<string, string>>): Record<string, string> {
   const identifying = /organization|workspace|request-id|cookie|turn-state|credits|fallback|overage/
   return Object.fromEntries(Object.entries(headers).filter(([name]) => !identifying.test(name)))
-}
-
-/** Codex's usage-limit body, as its 429 carries it. */
-const CODEX_LIMIT_BODY = JSON.stringify({
-  error: { type: 'usage_limit_reached', message: 'The usage limit has been reached' }
-})
-
-/**
- * Answers as Codex does at a usage limit: 429, the body, and the quota headers a live probe got,
- * identifying ones included, so the recording can be shown to drop them.
- *
- * @param response - the mock's response
- */
-const codexAtLimit: MockReply = (response) => {
-  response.writeHead(429, { ...CODEX_QUOTA_HEADERS, 'content-type': 'application/json' })
-  response.end(CODEX_LIMIT_BODY)
-  return undefined
 }
 
 /** Thrown by the stubbed `process.exit`, so a refusal ends the import instead of the test run. */
@@ -111,7 +103,7 @@ beforeAll(async () => {
   upstream = await startMockProvider({
     [MODEL_ID]: replay({ ...textAnswer, response: withQuota }),
     [MISSING_MODEL_ID]: replay(missingModelAnswer),
-    [CODEX_MODEL_ID]: codexAtLimit
+    [OPENAI_MODEL_ID]: replay(openaiAnswer)
   })
   saveDir = tempDir('pi-proxy-record-fixtures-')
 })
@@ -127,24 +119,31 @@ afterAll(async () => {
   for (const path of tempDirs) rmSync(path, { recursive: true, force: true })
 })
 
+/** The logins a fixture agent dir holds: all of them, the bases only, or none. */
+type Logins = 'all' | 'bases' | 'none'
+
 /**
  * Creates a fixture agent dir for the script to record with, removed in `afterAll`.
  *
- * @param loggedIn - whether auth.json holds a fake Anthropic key and a fake Codex token
+ * @param logins - which logins auth.json holds: a fake Anthropic key and a fake ChatGPT sign-in
+ *   for `openai` for the bases, and for `all` Anthropic's second login too (`anthropic-2`, with
+ *   its own key)
  * @returns the agent dir's path
  */
-async function recordingAgentDir(loggedIn: boolean): Promise<string> {
-  const logins = {
-    'anthropic': { type: 'api_key', key: API_KEY },
-    // pi takes Codex as a ChatGPT login only (OAuth); this one never expires during a test.
-    'openai-codex': {
+async function recordingAgentDir(logins: Logins): Promise<string> {
+  const bases = {
+    anthropic: { type: 'api_key', key: API_KEY },
+    // pi 1.4's "Sign in with ChatGPT" on the `openai` provider: OAuth, sent as a bearer token.
+    openai: {
       type: 'oauth',
-      access: FAKE_CODEX_TOKEN,
-      refresh: 'notarealsecret-codex-refresh',
-      expires: Date.now() + CODEX_LOGIN_LIFETIME_MS
+      access: OPENAI_TOKEN,
+      refresh: 'notarealsecret-openai-refresh',
+      expires: Date.now() + OPENAI_LOGIN_LIFETIME_MS
     }
   }
-  const agentDir = await loadFixtureAgentDir(loggedIn ? { authJson: logins } : {})
+  const all = { ...bases, 'anthropic-2': { type: 'api_key', key: SECOND_API_KEY } }
+  const authJson = { all, bases, none: undefined }[logins]
+  const agentDir = await loadFixtureAgentDir(authJson === undefined ? {} : { authJson })
   agentDirs.push(agentDir)
   return agentDir.path
 }
@@ -207,7 +206,7 @@ function withJoinedBody(recording: Recording): unknown {
  * @param scenario - the scenario name
  * @returns an expected value with asymmetric matchers for the timestamp, path, headers and body
  */
-function expectedAnthropic(scenario: (typeof ANTHROPIC_SCENARIOS)[number]): unknown {
+function expectedAnthropic(scenario: string): unknown {
   const missing = scenario === 'model-not-found'
   const answer = missing ? missingModelAnswer : textAnswer
   const model = missing ? MISSING_MODEL_ID : MODEL_ID
@@ -235,39 +234,85 @@ function expectedAnthropic(scenario: (typeof ANTHROPIC_SCENARIOS)[number]): unkn
 
 describe('recording every scenario', () => {
   let run: ScriptRun
+  let requestsBefore = 0
 
   beforeAll(async () => {
-    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir(true))
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir('all'))
     vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     vi.stubEnv('PI_SWITCHBOARD_RECORD_OUT_DIR', saveDir)
+    requestsBefore = upstream.requests.length
     run = await runScript()
   })
 
   // Catches a scenario or a provider dropped from the run, or a run that ends early or reports
   // nothing.
-  test('records each scenario of both providers and says where it saved it', () => {
-    expect({ exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr }).toEqual({
+  test('records each scenario of every login and says where it saved it', () => {
+    expect({
+      exitCode: run.exitCode,
+      recorded: run.stdout.match(/^recorded .*\n/gm),
+      stderr: run.stderr
+    }).toEqual({
       exitCode: undefined,
-      stdout: ALL_RECORDINGS.map(
+      recorded: ALL_RECORDINGS.map(
         (recording) => `recorded ${recording} -> ${join(saveDir, `${recording}.json`)}\n`
-      ).join(''),
+      ),
       stderr: ''
     })
   })
 
+  // Catches the header probe (#238) dropped, or printing a value: each recording is followed by
+  // the response's header names, the quota ones included even where the recording drops some.
+  test('prints each response header name, never a value, after each recording', () => {
+    const headerLines = run.stdout.match(/^response headers: .*$/gm) ?? []
+    expect({
+      lines: headerLines.length,
+      first: headerLines[0]?.split(': ')[1]?.split(', '),
+      values: Object.values(ANTHROPIC_QUOTA_HEADERS).filter((headerValue) =>
+        run.stdout.includes(headerValue)
+      )
+    }).toEqual({
+      lines: ALL_RECORDINGS.length,
+      first: expect.arrayContaining(['content-type', ...Object.keys(ANTHROPIC_QUOTA_HEADERS)]),
+      values: []
+    })
+  })
+
   // Catches the cache-read repeat dropped, which records a cache write instead of a cache read,
-  // or Codex sent over WebSocket (which bypasses the recorder and carries no quota headers) or to
-  // the wrong path.
-  test('sends each scenario once, cache-read twice, and Codex over SSE to its path', () => {
-    expect(upstream.requests.map((request) => request.path.split('?')[0])).toEqual([
-      ...Array.from({ length: REQUESTS_SENT - 1 }, () => '/v1/messages'),
-      '/backend-api/codex/responses'
+  // or the ChatGPT sign-in sent to the wrong path.
+  test('sends each scenario once, cache-read twice, each to its path', () => {
+    expect(
+      upstream.requests.slice(requestsBefore).map((request) => request.path.split('?')[0])
+    ).toEqual([
+      ...Array.from({ length: ANTHROPIC_REQUESTS }, () => '/v1/messages'),
+      '/v1/responses'
     ])
+  })
+
+  // Catches the second login not registered through the proxy's copy (the run would refuse it or
+  // send nothing), sent with the base's key instead of its own, or sent differently from the base.
+  test("sends the second login's call as the base's text call, with its own key", () => {
+    const sent = upstream.requests.slice(requestsBefore)
+    // The base's `text` call is the run's first request; the same call through the second login
+    // is the one carrying its key.
+    const [baseText] = sent
+    const second = sent.filter((request) => request.headers['x-api-key'] === SECOND_API_KEY)
+    const shape = (request: (typeof sent)[number] | undefined): unknown =>
+      request === undefined
+        ? undefined
+        : {
+            path: request.path,
+            headers: Object.keys(request.headers).toSorted(),
+            body: request.body
+          }
+    expect({ count: second.length, shape: shape(second[0]) }).toEqual({
+      count: 1,
+      shape: shape(baseText)
+    })
   })
 
   // Catches a recording that replay cannot load, or that holds another scenario's exchange, the
   // wrong model, a body other than what the provider sent, or quota headers lost.
-  test.each(ANTHROPIC_SCENARIOS)(
+  test.each([...ANTHROPIC_SCENARIOS, SECOND_LOGIN])(
     'saves %s as a loadable recording of its own exchange',
     (scenario) => {
       expect(withJoinedBody(loadRecording(ANTHROPIC, scenario, saveDir))).toEqual(
@@ -276,33 +321,39 @@ describe('recording every scenario', () => {
     }
   )
 
-  // Catches Codex's quota headers lost, or its identifying ones (the turn token, a cookie, a
-  // request ID) kept: only the window fields and the plan are recorded.
-  test('saves the Codex quota call with its quota headers only', () => {
-    expect(withJoinedBody(loadRecording(CODEX, 'quota', saveDir))).toMatchObject({
-      api: CODEX,
-      model: CODEX_MODEL_ID,
-      request: { path: '/backend-api/codex/responses', body: { model: CODEX_MODEL_ID } },
-      response: {
-        status: 429,
-        headers: quotaOnly(CODEX_QUOTA_HEADERS),
-        body: CODEX_LIMIT_BODY
-      }
-    })
+  // Catches the ChatGPT sign-in's call not recorded, recorded under another API, path or model,
+  // or with a body other than what the provider sent.
+  test('saves the ChatGPT sign-in quota call as a loadable recording of its own exchange', () => {
+    expect(withJoinedBody(loadRecording(OPENAI, 'quota', saveDir))).toEqual(
+      withJoinedBody({
+        ...openaiAnswer,
+        recordedAt: expect.stringMatching(
+          /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/
+        ) as string,
+        piVersion: VERSION,
+        request: {
+          path: '/v1/responses',
+          headers: expect.objectContaining({ 'content-type': 'application/json' }) as Record<
+            string,
+            string
+          >,
+          body: expect.objectContaining({ model: OPENAI_MODEL_ID }) as unknown
+        }
+      })
+    )
   })
 
-  // Catches a login's key, Codex token or ChatGPT account ID, or an identifying response header,
-  // reaching a committed fixture.
+  // Catches a login's key or ChatGPT token, or an identifying response header, reaching a
+  // committed fixture.
   test.each(ALL_RECORDINGS)('keeps credentials and identifying headers out of %s', (recording) => {
     const saved = readFileSync(join(saveDir, `${recording}.json`), 'utf8')
     const leaks = [
       API_KEY,
-      FAKE_CODEX_TOKEN,
-      'notarealsecret-account',
+      SECOND_API_KEY,
+      OPENAI_TOKEN,
       'x-api-key',
       'anthropic-organization-id',
-      'set-cookie',
-      'x-codex-turn-state'
+      'set-cookie'
     ].filter((leak) => saved.includes(leak))
     expect(leaks).toEqual([])
   })
@@ -312,12 +363,12 @@ describe('choosing what to record', () => {
   // Catches the names on the command line ignored, which would re-record every fixture (and spend
   // every login's quota) to refresh one.
   test('records only the named scenarios', async () => {
-    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir(true))
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir('all'))
     vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     vi.stubEnv('PI_SWITCHBOARD_RECORD_OUT_DIR', tempDir('pi-proxy-record-chosen-'))
     const requestsBefore = upstream.requests.length
 
-    const run = await runScript([`${ANTHROPIC}/quota`, CODEX])
+    const run = await runScript([`${ANTHROPIC}/quota`, OPENAI])
 
     expect({
       exitCode: run.exitCode,
@@ -325,7 +376,7 @@ describe('choosing what to record', () => {
       requests: upstream.requests.length - requestsBefore
     }).toEqual({
       exitCode: undefined,
-      recorded: [`recorded ${ANTHROPIC}/quota`, `recorded ${CODEX}/quota`],
+      recorded: [`recorded ${ANTHROPIC}/quota`, `recorded ${OPENAI}/quota`],
       requests: 2
     })
   })
@@ -336,11 +387,11 @@ describe('choosing what to record', () => {
     vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     const requestsBefore = upstream.requests.length
 
-    const run = await runScript([`${CODEX}/no-such-scenario`])
+    const run = await runScript([`${OPENAI}/no-such-scenario`])
 
     expect({
       exitCode: run.exitCode,
-      refusal: run.stderr.startsWith(`No scenario ${CODEX}/no-such-scenario; one of: `),
+      refusal: run.stderr.startsWith(`No scenario ${OPENAI}/no-such-scenario; one of: `),
       requests: upstream.requests.length - requestsBefore
     }).toEqual({ exitCode: EXIT_FAILURE, refusal: true, requests: 0 })
   })
@@ -387,7 +438,7 @@ describe('refusing to record', () => {
 
   // Catches a run with no login sending unauthenticated requests and recording the 401s.
   test('with no Anthropic login in the agent dir', async () => {
-    const agentDir = await recordingAgentDir(false)
+    const agentDir = await recordingAgentDir('none')
     vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', agentDir)
     vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     const requestsBefore = upstream.requests.length
@@ -398,6 +449,23 @@ describe('refusing to record', () => {
       exitCode: EXIT_FAILURE,
       stdout: '',
       stderr: `No Anthropic login in ${agentDir}\n`,
+      requests: 0
+    })
+  })
+
+  // Catches a second login missing from the agent dir recorded through the base's credential.
+  test('with no login for a second-login scenario', async () => {
+    const agentDir = await recordingAgentDir('bases')
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', agentDir)
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
+    const requestsBefore = upstream.requests.length
+
+    const run = await runScript([`${ANTHROPIC}/${SECOND_LOGIN}`])
+
+    expect({ ...run, requests: upstream.requests.length - requestsBefore }).toEqual({
+      exitCode: EXIT_FAILURE,
+      stdout: '',
+      stderr: `No Anthropic 2 login in ${agentDir}\n`,
       requests: 0
     })
   })
