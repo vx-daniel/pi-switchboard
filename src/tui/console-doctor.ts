@@ -22,12 +22,16 @@ import {
 } from '@proxy/pi/registry'
 import type { ConsoleContext } from '@proxy/tui/console'
 import type { Status } from '@proxy/tui/console-state'
+import { SNAPSHOT_MS } from '@proxy/tui/stats-snapshots'
 
 /** What the doctor reads of the console. */
 export type DoctorConsole = Pick<ConsoleContext, 'config' | 'state' | 'proxyAuth' | 'statsView'>
 
-/** How long a report is reused while nothing it reads has changed, in milliseconds. */
-const REPORT_MS = 5000
+/**
+ * How long a report is reused while nothing it reads has changed, in milliseconds: the stats
+ * snapshot's lifetime, so a report never outlives the stats it judged.
+ */
+const REPORT_MS = SNAPSHOT_MS
 
 /** The not-verified advice's recommendation in the console: the Accounts view's `v`. */
 const HOW_TO_VERIFY =
