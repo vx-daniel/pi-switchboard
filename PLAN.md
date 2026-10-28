@@ -612,14 +612,14 @@ and on 2026-10-28 for pi 1.4's ChatGPT sign-in (#238). GitHub Copilot is out of 
   `test/fixtures/recordings/anthropic-messages/quota.json` is a live call from a login made for
   recording, and `test/integration/quota-replay.test.ts` replays it through pi's client to
   `/healthz/creds`. `openai-responses/quota` (2026-10-28) is pi 1.4's ChatGPT sign-in, kept as the
-  evidence that it sends no quota header. The legacy Codex backend (`openai-codex`) is still
-  tested with the probe's header names and fake identifying values
-  (`test/fixtures/quota-headers.ts`): recording it needs an `openai-codex` login ("OpenAI Codex
-  (legacy)" in pi's list) made for recording (#238). The recorder keeps a response's quota headers
-  by exact name and nothing else (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), prints
-  every response header's name (never a value) for each recording, and records a `quota` call for
-  Anthropic, for Codex (over SSE, as the proxy calls it) and for the ChatGPT sign-in; it needs a
-  login made for recording (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
+  evidence that it sends no quota header. The legacy Codex backend (`openai-codex`, "OpenAI Codex
+  (legacy)" in pi 1.4) is not recorded, by decision (#238): the proxy still reads its `x-codex-*`
+  headers, tested with the 2026-10-21 probe's header names and fake identifying values
+  (`test/fixtures/quota-headers.ts`). The recorder keeps a response's quota headers by exact name
+  and nothing else (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), prints every
+  response header's name (never a value) for each recording, and records a `quota` call for
+  Anthropic and for the ChatGPT sign-in; it needs a login made for recording
+  (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
 
 **The reserve** (`src/server/route-reserve.ts`, principle VI: configured, and reported). A
 fallback chain skips a provider that is close to its limit, before it refuses:
@@ -765,8 +765,8 @@ Accounts view, as it leaves aliases to the Models view.
   `src/pi/account-provider.ts` so the recorder can import it under plain Node), and Anthropic
   answered 200. `test/integration/second-login-replay.test.ts` replays it: a request put on
   `anthropic-2` carries that login's token, with the recording's headers (the Claude Code ones an
-  OAuth token needs) and system prompt. `openai-codex-responses/second-login` (through
-  `openai-codex-2`) is in the recorder but not recorded: it needs legacy Codex logins (#238).
+  OAuth token needs) and system prompt. Codex logins (`openai-codex-2`) are not recorded: the
+  legacy Codex route is left out by decision (#238).
 
 ### Usage by route (#70)
 

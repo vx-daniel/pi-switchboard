@@ -1,7 +1,7 @@
 /**
  * Records real provider traffic as replay fixtures (`test/fixtures/recordings/<api>`): Anthropic
- * (`anthropic-messages`), ChatGPT's Codex (`openai-codex-responses`), a second login of each
- * (`<api>/second-login`, #233), and pi 1.4's ChatGPT sign-in on OpenAI (`openai-responses`, #238).
+ * (`anthropic-messages`), a second Anthropic login (`anthropic-messages/second-login`, #233), and
+ * pi 1.4's ChatGPT sign-in on OpenAI (`openai-responses`, #238).
  * On demand only: `pnpm run test:live:record [<api>/<scenario> | <api> ...]` records the named
  * scenarios, or all of them. It spends a few cents of quota on the logins used.
  *
@@ -13,16 +13,16 @@
  * recording, the response's header names (never their values) are printed, to show what a
  * provider sends whatever the recording keeps (#238).
  *
- * SECOND LOGINS: `anthropic-2` and `openai-codex-2` are registered as the proxy registers them, a
- * copy of a fresh built-in provider made by the proxy's own `accountProvider`
- * (`src/pi/account-provider.ts`), with the recorder's `models.json` entry under the slot's ID
- * composed above it. A recording through one therefore proves that copy against the real service:
- * same request as the base, sent with the slot's own credential. They are saved next to the base's
- * recordings, as the `second-login` scenario.
+ * SECOND LOGIN: `anthropic-2` is registered as the proxy registers it, a copy of a fresh built-in
+ * provider made by the proxy's own `accountProvider` (`src/pi/account-provider.ts`), with the
+ * recorder's `models.json` entry under the slot's ID composed above it. A recording through it
+ * therefore proves that copy against the real service: same request as the base, sent with the
+ * slot's own credential. It is saved next to the base's recordings, as the `second-login`
+ * scenario.
  *
  * LOGIN: set PI_SWITCHBOARD_RECORD_AGENT_DIR to a pi agent dir holding the logins made for
  * recording (`PI_CODING_AGENT_DIR=<dir> pi`, then `/login` for each provider; log in a second
- * time, in a private browser window, for `anthropic-2` and `openai-codex-2`). pi reads and
+ * time, in a private browser window, for `anthropic-2`). pi reads and
  * refreshes its `auth.json` in place. Never point it at a copy of a login another pi or proxy
  * uses: refreshing an expired OAuth token rotates the refresh token, and every other copy stops
  * working.
@@ -187,19 +187,6 @@ const ANTHROPIC_TARGET = {
   options: {}
 } as const
 
-/**
- * Codex, as the base and its second login record it: over SSE, as the proxy calls Codex (#185).
- * pi's default WebSocket would bypass the recorder, and only SSE responses carry the quota headers.
- */
-const CODEX_TARGET = {
-  label: 'ChatGPT (Codex)',
-  api: 'openai-codex-responses',
-  modelId: 'gpt-5.6-luna',
-  upstream: 'https://chatgpt.com',
-  basePath: '/backend-api',
-  options: { transport: 'sse' }
-} as const
-
 /** The providers recorded, in order. */
 const TARGETS: readonly Target[] = [
   { ...ANTHROPIC_TARGET, provider: 'anthropic', scenarios: ANTHROPIC_SCENARIOS },
@@ -208,13 +195,6 @@ const TARGETS: readonly Target[] = [
     provider: 'anthropic-2',
     label: 'Anthropic 2',
     scenarios: [{ ...TEXT_SCENARIO, name: SECOND_LOGIN }]
-  },
-  { ...CODEX_TARGET, provider: 'openai-codex', scenarios: [QUOTA_SCENARIO] },
-  {
-    ...CODEX_TARGET,
-    provider: 'openai-codex-2',
-    label: 'ChatGPT (Codex) 2',
-    scenarios: [{ ...QUOTA_SCENARIO, name: SECOND_LOGIN }]
   },
   {
     // pi 1.4's own route to a ChatGPT subscription ("Sign in with ChatGPT" on the `openai`
@@ -324,7 +304,7 @@ async function recordScenario(
 
 /**
  * Picks the scenarios to record from the command line: `<api>/<scenario>` or a whole `<api>`
- * (`pnpm run test:live:record anthropic-messages/quota openai-codex-responses`); all of them when
+ * (`pnpm run test:live:record anthropic-messages/quota openai-responses`); all of them when
  * none is named.
  *
  * @remarks
