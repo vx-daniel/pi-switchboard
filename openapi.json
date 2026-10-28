@@ -3623,6 +3623,17 @@
                       }
                     ]
                   },
+                  "n": {
+                    "anyOf": [
+                      {
+                        "type": "number",
+                        "const": 1
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  },
                   "metadata": {
                     "type": "object",
                     "propertyNames": {

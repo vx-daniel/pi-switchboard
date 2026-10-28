@@ -229,24 +229,59 @@ describe('POST /v1/chat/completions - validation', () => {
     expect(body.error.code).toBe('unsupported_parameter')
   })
 
-  test('rejects permanently rejected fields with 422', async () => {
-    // OpenAI's `n` (choices per request), which the proxy rejects
-    const choicesParameter = 'n'
+  // Catches `n: 1` refused again: OpenAI's default, which clients such as Elixir's LangChain send
+  // on every request (#197). The proxy returns one choice, so it is answered as asked.
+  test.each([1, null])('n: %s is answered', async (choices) => {
     const response = await app.request('/v1/chat/completions', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'openai/gpt-4o',
-        messages: [{ role: 'user', content: 'Hello' }],
-        [choicesParameter]: 2
+        model: MOCK_MODEL,
+        messages: [{ role: 'user', content: 'Hi' }],
+        n: choices
+      })
+    })
+    expect(response.status).toBe(HTTP_OK)
+    expect(await jsonBody(response)).toEqual(okCompletion(response))
+  })
+
+  // Catches several choices asked for and one returned as if that were the answer, or the refusal
+  // not naming `n`.
+  test.each([2, 0, '1'])('n: %j is a named 422', async (choices) => {
+    const response = await app.request('/v1/chat/completions', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: MOCK_MODEL,
+        messages: [{ role: 'user', content: 'Hi' }],
+        n: choices
       })
     })
     expect(response.status).toBe(422)
     const body = await jsonBody(response)
-    expect(isErrorLike(body)).toBe(true)
-    if (!isErrorLike(body)) return
-    expect(body.error['param']).toBe(choicesParameter)
+    expect(isErrorLike(body) ? body.error['param'] : undefined).toBe('n')
   })
+
+  // Catches an accepted value blamed for another field's error: the client would be told to drop
+  // `n: 1`, which is not what is wrong.
+  test.each([{ n: 1 }, { store: false }])(
+    '%j beside an invalid field reports that field',
+    async (honored) => {
+      const response = await app.request('/v1/chat/completions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: MOCK_MODEL,
+          messages: [{ role: 'user', content: 'Hi' }],
+          temperature: 'hot',
+          ...honored
+        })
+      })
+      expect(response.status).toBe(400)
+      const body = await jsonBody(response)
+      expect(isErrorLike(body) ? body.error['param'] : undefined).toBe('temperature')
+    }
+  )
 
   // Catches `store: false` refused again: pi's OpenAI adapter sends it to this host on every
   // request (#197). The proxy stores nothing, so "don't store" is answered as asked.
