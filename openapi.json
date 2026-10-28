@@ -3272,10 +3272,11 @@
                             "annotations": {
                               "anyOf": [
                                 {
+                                  "maxItems": 0,
                                   "type": "array",
-                                  "prefixItems": [],
-                                  "items": false,
-                                  "maxItems": 0
+                                  "items": {
+                                    "not": {}
+                                  }
                                 },
                                 {
                                   "type": "null"
@@ -3714,6 +3715,16 @@
               }
             }
           },
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
           "404": {
             "description": "The Responses API is off, or no exposed model has this ID.",
             "content": {
@@ -3989,16 +4000,18 @@
                                             "type": "string"
                                           },
                                           "annotations": {
+                                            "maxItems": 0,
                                             "type": "array",
-                                            "prefixItems": [],
-                                            "items": false,
-                                            "maxItems": 0
+                                            "items": {
+                                              "not": {}
+                                            }
                                           },
                                           "logprobs": {
+                                            "maxItems": 0,
                                             "type": "array",
-                                            "prefixItems": [],
-                                            "items": false,
-                                            "maxItems": 0
+                                            "items": {
+                                              "not": {}
+                                            }
                                           }
                                         },
                                         "required": [
@@ -4581,9 +4594,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4595,9 +4618,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4611,9 +4644,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4625,9 +4668,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4651,9 +4704,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4665,9 +4728,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4691,9 +4764,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4705,9 +4788,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4721,9 +4814,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4735,9 +4838,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4761,9 +4874,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4775,9 +4898,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4791,9 +4924,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4805,9 +4948,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4831,9 +4984,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4845,9 +5008,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4861,9 +5034,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4875,9 +5058,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4901,9 +5094,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4915,9 +5118,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4931,9 +5144,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4945,9 +5168,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4971,9 +5204,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -4985,9 +5228,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -5011,9 +5264,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -5025,9 +5288,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -5051,9 +5324,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }
@@ -5065,9 +5348,19 @@
           "Not supported"
         ],
         "summary": "Not supported by this proxy",
-        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider.",
+        "description": "Any method answers 404 `invalid_request_error`; nothing reaches a provider. With proxy auth on, a request without the token gets the 401 first.",
         "deprecated": true,
         "responses": {
+          "401": {
+            "description": "Proxy auth is on and the `Authorization: Bearer <token>` header is missing or wrong.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "vendor": "zod"
+                }
+              }
+            }
+          },
           "404": {
             "$ref": "#/components/responses/NotSupported"
           }

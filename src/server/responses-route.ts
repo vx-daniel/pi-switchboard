@@ -28,7 +28,7 @@ import { responsesFormat } from '@proxy/server/answer-formats'
 import { invalidRequest } from '@proxy/server/errors'
 import { HTTP_BAD_REQUEST, HTTP_NOT_FOUND } from '@proxy/server/http-status'
 import { jsonBodyMiddleware } from '@proxy/server/middleware'
-import { chatHeadersSchema, errorResponse, OPENAI_TAG } from '@proxy/server/openapi'
+import { chatHeadersSchema, errorResponse, OPENAI_TAG, UNAUTHORIZED } from '@proxy/server/openapi'
 import { rejectionResponse } from '@proxy/server/request-rejection'
 import type { ChatRouteSettings, ChatRunner } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
@@ -70,6 +70,7 @@ const createResponseDescription: DescribeRouteOptions = {
       'Invalid JSON, an invalid field value, a reasoning `encrypted_content` this proxy did not ' +
         'write, or the errors chat completions give.'
     ),
+    401: UNAUTHORIZED,
     404: errorResponse('The Responses API is off, or no exposed model has this ID.'),
     422: errorResponse(
       'A field the proxy does not accept (`unsupported_parameter`): stored state ' +
