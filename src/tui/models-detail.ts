@@ -188,7 +188,7 @@ function aliasDetailLines(
       families.find((family) => family.alias === item.name && family.position === position)
     )
   )
-  const efforts = [...new Set(targets.map((target) => target.reasoningEffort ?? 'the request’s'))]
+  const efforts = [...new Set(targets.map((target) => target.reasoningEffort ?? "the request's"))]
   const hint =
     item.kind === 'latest'
       ? 'pins it: an alias of its name replaces the built-in one'
