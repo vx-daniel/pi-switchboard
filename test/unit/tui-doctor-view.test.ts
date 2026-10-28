@@ -149,6 +149,16 @@ describe('the Doctor view', () => {
     expect(shown[2]).toMatch(/^Limits: /u)
   })
 
+  // Catches a selection left past the end when a refresh or a window change shrinks the report:
+  // no finding would show as selected and the pane would be empty until the next key press.
+  test('shows the last finding selected when the selection is past the end', () => {
+    const shown = rows(MIXED, { height: 20, width: 120 }, 99)
+    const last = shown.findIndex((row) => row.startsWith('› '))
+
+    expect(last).toBe(MIXED.general.length + MIXED.cache.length - 1)
+    expect(shown.join('\n')).toMatch(/╭─ \w+ \S+ ─+╮/u)
+  })
+
   // Catches the view rendering nothing before the console's first status read.
   test('says it is reading before the first report', () => {
     expect(rows(undefined, { height: 5, width: 80 })).toEqual(['Reading the status…'])

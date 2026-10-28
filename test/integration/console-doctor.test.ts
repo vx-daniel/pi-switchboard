@@ -52,7 +52,7 @@ function snapshot(path: string): Record<string, string> {
 /** The console as the doctor reads it, with how to read the status and logins again. */
 interface Console {
   readonly context: DoctorConsole
-  readonly refresh: () => Promise<void>
+  readonly refresh: (verify?: boolean) => Promise<void>
   readonly agentDir: FixtureAgentDir
   readonly mock: MockProvider
 }
@@ -161,5 +161,26 @@ describe('the console’s Doctor view', () => {
     await refresh()
 
     expect(fallbackOn()).toEqual([expect.objectContaining({ subject: 'fast' })])
+  })
+
+  // Catches a verification reaching the Doctor view only once the report's cache expires. A
+  // verification that finishes after a newer read replaces only the accounts, not the status
+  // (`createRefresh`), so the report must be keyed on the accounts too.
+  test('shows a verification at once, even with the status unchanged', async () => {
+    const { context } = await openConsole()
+    const doctor = createDoctorSource()
+    const notVerified = (): unknown[] =>
+      (doctor(context)?.general ?? []).filter(
+        (finding) => finding.check === 'credentials' && finding.severity === 'advice'
+      )
+
+    expect(notVerified()).toHaveLength(1)
+    // As createRefresh merges a verification into the accounts it already holds.
+    context.state.accounts = context.state.accounts.map((account) => ({
+      ...account,
+      verified: true
+    }))
+
+    expect(notVerified()).toEqual([])
   })
 })

@@ -105,10 +105,12 @@ const FAILED_COLUMN = 1
 const KEPT_NOTE = `stats kept ${String(STATS_KEPT_DAYS)} days`
 /** What the ALIASES panel calls requests that named a model directly. */
 const DIRECT_LABEL = 'direct'
+/** What the Stats and Doctor views say to do once a read of the stats file has failed. */
+const RETRY_HINT = 'see the log; restart the console to retry'
 /** What the Doctor view says of the stats once a read of the file has failed (#325). */
 const UNREADABLE_FOR_DOCTOR: StatsState = {
   kind: 'unreadable',
-  reason: 'a read failed (see the log); restart the console to retry'
+  reason: `a read failed (${RETRY_HINT})`
 }
 
 /**
@@ -813,8 +815,7 @@ export function openStatsView(
   const read = createDashboardSource(store)
   const readTodayCost = createTodayCostSource(store)
   const readDoctor = createDoctorStatsSource(store)
-  const unreadable =
-    'The stats file could not be read (see the log; restart the console to retry): totals since the proxy started.'
+  const unreadable = `The stats file could not be read (${RETRY_HINT}): totals since the proxy started.`
   const guarded = createReadGuard(path)
   return {
     rows: (window, size) =>
