@@ -29,7 +29,6 @@ const HTTP_OK = 200
 const HTTP_BAD_REQUEST = 400
 const HTTP_NOT_FOUND = 404
 const HTTP_UNPROCESSABLE_ENTITY = 422
-const HTTP_INTERNAL_SERVER_ERROR = 500
 const USAGE = { prompt_tokens: 3, completion_tokens: 2 }
 /** A one-pixel PNG, for the image request. */
 const PNG_DATA_URI =
@@ -559,8 +558,8 @@ describe('the Responses API', () => {
       const filled = await post(turn([{ token: 'Hello', logprob: 0 }]))
 
       expect(empty.status).toBe(HTTP_OK)
-      expect(filled.status).toBeGreaterThanOrEqual(HTTP_BAD_REQUEST)
-      expect(filled.status).toBeLessThan(HTTP_INTERNAL_SERVER_ERROR)
+      // Only the status: the item union reports the wrong `param` for now (#318).
+      expect(filled.status).toBe(HTTP_BAD_REQUEST)
     }
   )
 
