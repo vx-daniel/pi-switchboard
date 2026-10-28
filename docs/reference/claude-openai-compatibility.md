@@ -39,7 +39,7 @@ How each proxy-side claim is backed:
 | `temperature` | 0–1, above 1 capped at 1; below 1 is a 400 on Claude 4.7+ and Mythos Preview | 0–2 accepted. **pi leaves it out** for models whose pi catalog entry says `compat.supportsTemperature: false` (Opus 4.7, Opus 5.5, Sonnet 5.5, Haiku 5.5 in `models-store.json`), and whenever thinking is on (pi-ai's `buildParams` in `api/anthropic-messages.js`). So `temperature: 0.5` on Haiku 5.5 and Opus 4.7 answered 200 (live). Older models get it as sent: Opus 4.6 answered 200 with 0.5 (live). The proxy logs pi's drop, the first per model at `info` (constitution 3.2.0, #147, test) |
 | `top_p` | passed through; anything but `0.99` is a 400 on Claude 4.7+, as is sending it with `temperature` | sent as `top_p` (test: `payload-passthrough-providers.test.ts`). Claude's 400 answers **400** `upstream_invalid_request`: `top_p: 0.5` on Haiku 5.5, and `temperature` 0.5 with `top_p` 0.9 on Haiku 4.5 (live). `top_p: 0.99` on Haiku 5.5 answered 200 (live) (#147) |
 | `stop` | non-whitespace sequences work | sent as `stop_sequences`, exactly as sent: `"\n\nHuman:"` stays `"\n\nHuman:"` (#145, test), and `"\n2"` stopped Haiku 4.5 after `1` (live). A sequence that is only whitespace, such as `"\n"`, is Claude's 400 `each stop sequence must contain non-whitespace`, answered **400** `upstream_invalid_request` (live; #147). Before #145 it was trimmed to `""`, which Claude refuses as well |
-| `n` | must be 1 | any `n` is rejected with 422 (test) |
+| `n` | must be 1 | `1` or `null` accepted (one choice is returned); any other value is a named 422 (#197, test) |
 | `parallel_tool_calls` | supported | `false` becomes `disable_parallel_tool_use: true` on `tool_choice` (PLAN, Anthropic table) |
 | `tool_choice` | supported; forced (`required` or named) is an error on Opus 5.5, Sonnet 5.5, Fable 5.1 and Mythos 5.1 | translated: `auto`/`none` → `{type}`, `required` → `{type: "any"}`, named → `{type: "tool", name}` (PLAN). On Opus 5.5 `required` and a named function answer **400** `upstream_invalid_request`, and `auto` answers 200; on Haiku 4.5 `required` answers 200 (live) (#147) |
 | `reasoning_effort` | ignored | pi's thinking level, clamped (#43, test) |
@@ -48,7 +48,8 @@ How each proxy-side claim is backed:
 | `user` | ignored | sent as `metadata.user_id` (#48, test) |
 | `seed`, `presence_penalty`, `frequency_penalty`, `prediction` | ignored | accepted; skipped for Anthropic (PLAN, listed drops) |
 | `logprobs`, `top_logprobs`, `logit_bias` | ignored | rejected with 422 (test) |
-| `store`, `service_tier`, `audio`, `modalities` | ignored | unknown parameters, 422 (spec check) |
+| `store` | ignored | `false` or `null` accepted, never sent upstream; `true` is a named 422 (#197, test) |
+| `service_tier`, `audio`, `modalities` | ignored | unknown parameters, 422 (spec check) |
 | `prompt_cache_key` | not listed | accepted; pi's session ID, which a direct Anthropic OAuth login does not use (#39, test) |
 
 ### Tools
