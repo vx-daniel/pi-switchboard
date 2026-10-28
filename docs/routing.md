@@ -35,7 +35,7 @@ An alias can name several models, tried in order, and the failures that move to 
 
 | Class | Failure before the response starts |
 |---|---|
-| `rate_limit` | 429, or a usage limit (a ChatGPT login's Codex limit) |
+| `rate_limit` | 429, or a usage limit (a ChatGPT login's Codex limit); the client sees `rate_limit` or `insufficient_quota` ([API](api.md)), routing treats both the same |
 | `unavailable` | 503, 529 overloaded, or a provider saying it is out of capacity |
 | `timeout` | 504, or the upstream idle timeout |
 | `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve: `502` `upstream_credentials_missing`) |

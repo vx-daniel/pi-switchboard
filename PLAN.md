@@ -380,7 +380,7 @@ A string alias, and a request that names a model, never fall back.
 
 | Answer | Class |
 |---|---|
-| 429 | `rate_limit` |
+| 429 (`rate_limit` and `insufficient_quota` alike) | `rate_limit` |
 | 503 (and 529, mapped to 503) | `unavailable` |
 | 504 (and the idle timeout) | `timeout` |
 | 401 `upstream_api_key_invalid`, 502 `upstream_auth_error`, 502 `upstream_credentials_missing` | `auth` |
@@ -1604,7 +1604,18 @@ Use an OpenAI-style shape:
   over it is refused before reading, and a chunked body is counted as it arrives and refused once
   it passes, without reading the rest (#187)
 - `422` unknown or rejected parameter, unsupported tool schema (`unsupported_parameter`)
-- `429` upstream rate limit or usage limit (`rate_limit`)
+- `429` upstream rate limit (`rate_limit`) or a plan's usage limit (`insufficient_quota`, #199).
+  A usage limit is one by its wording (Codex's "usage limit", `usage_limit_reached`) or by a wait
+  of at least 5 minutes (`USAGE_LIMIT_MIN_WAIT_MS`); it is answered with OpenAI's
+  `insufficient_quota` type and code and `x-should-retry: false`, which the OpenAI SDKs obey and
+  Codex CLI treats as fatal, and no `retry-after`, so a client that honors one does not sit out a
+  weekly window. A rate limit whose wait the proxy read (`resetAfterMs`, as for cooldowns) carries
+  `retry-after` (seconds, rounded up) and `retry-after-ms`; one with no readable wait carries
+  neither. Routing is unchanged: both are the `rate_limit` class. A stream that already started
+  carries the code in its error event and no headers, and there the wording alone decides: a
+  limit known only by its wait is `rate_limit` mid-stream, as the wait is read from the response
+  that refused the call, which a started stream doesn't have. The threshold is a policy: a
+  provider whose ordinary rate-limit window is longer than 5 minutes would read as a usage limit
 - `500` internal proxy failure, including an invalid model exposure config
 - `502` the provider rejected pi's stored credential (`upstream_auth_error`), pi has no usable
   credential for the model's provider and no `X-Switchboard-Upstream-Api-Key` was sent

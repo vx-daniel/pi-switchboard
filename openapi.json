@@ -2965,7 +2965,7 @@
             }
           },
           "429": {
-            "description": "The provider rate-limited the request.",
+            "description": "The provider rate-limited the request (`rate_limit`, with `retry-after` and `retry-after-ms` when the provider said when), or the login's usage limit is reached (`insufficient_quota`, with `x-should-retry: false`).",
             "content": {
               "application/json": {
                 "schema": {
