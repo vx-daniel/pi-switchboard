@@ -107,6 +107,8 @@ Hook-backed workflow already exists (`.vite-hooks/`, installed by `vp config` on
 
 CI (`.github/workflows/`): `ci.yml` (`gate`, pull requests into `dev`/`main` and pushes to `dev`), `secret-scan.yml` (gitleaks over every pushed commit), `claude-pr-review.yml` (manual Claude review; needs the `CLAUDE_CODE_OAUTH_TOKEN` secret), `publish.yml` (the release, run by hand on `main` with the version; then `image.yml`, `package.yml` and `binary.yml` for the new tag).
 
+`gate` must pass before a pull request merges into `dev` (repository ruleset "dev: gate must pass", #200; the repository admin can bypass it). `binary` and `secret-scan` run but are advisory, and `main` has no rule: the release workflow pushes its own commit there. `ci.yml` runs on a pull request's open, push and reopen, not on a change of base, so a stacked pull request retargeted to `dev` gets its `gate` only after a new push or a close and reopen.
+
 Do not weaken these hooks or workflows unless the user asks.
 
 ## Git workflow
