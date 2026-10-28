@@ -27,6 +27,12 @@ What else you need depends on how you install it:
 
 Every way needs at least one provider login, stored where pi keeps them: `pi /login`, or `n` in the proxy's own console (`pi-switchboard tui`, [The console](console.md#the-console-logs-logins-and-status-at-a-terminal)). With Docker, you log in through pi inside the container ([Docker](#docker)).
 
+### Headless and scripted setup
+
+- **An API key needs no login.** pi reads provider credentials from the environment: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY` and the others in pi's list (`pi-ai`'s `env-api-keys`; a few are not `_API_KEY` names, such as `HF_TOKEN`, `COPILOT_GITHUB_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS`). Set it where the proxy runs (`docker run -e ANTHROPIC_API_KEY=…`, a systemd `Environment=`, a shell profile) and the provider's models are served from the start.
+- **A subscription (OAuth) is interactive once.** It needs a browser, or a code pasted back, so it can't be scripted: run `pi-switchboard tui` and press `n`, or `pi /login`, once per host. pi keeps the login in `auth.json` and refreshes it from then on. There is no separate `pi-switchboard login` command (#201): it would be the console's `n` without the console.
+- **Restart after a login made elsewhere.** A running proxy reads pi's logins when it starts. A login through its own console is served at once; one made by another process (`pi /login`, another console, an edited `auth.json`) is served after the proxy restarts.
+
 ## Installation
 
 The package is published to GitHub Packages, whose npm registry needs a GitHub token to install anything, public packages included. The Docker image needs none: see [Docker](#docker).
