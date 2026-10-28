@@ -478,6 +478,17 @@ serving model and login reported under `x_pi` and in the log.
       `401 upstream_api_key_invalid` and a missing login `502 upstream_credentials_missing`
       (items 3–4); an upstream 400/422 is `400 upstream_invalid_request` (item 5, #147)
 
+## Follow-ups from the 0.5.0 audit (#334)
+
+- [ ] Nested chat objects strip unknown keys instead of refusing them (#335, needs a decision on `stream_options.include_obfuscation`)
+- [ ] Responses API fields accepted and never forwarded: name them in principle I or refuse them (#336)
+- [ ] Responses stream: a redacted thinking block's summary differs between the stream and the item (#337)
+- [ ] Doctor: cost advice for a model reachable only through a `{provider}-N` login (#338)
+- [ ] One debug line per upstream error, not one per layer (#339)
+- [ ] `PI_SWITCHBOARD_AGENTIC`: remove or keep as reserved (#340)
+- [ ] Test the pi extension's proxy start path (#341)
+- [ ] Small cleanups: an unused constant, two `param` path formats, test env vars in CONTRIBUTING, two functions at the complexity limit (#342)
+
 ## Later, not planned: experimental agentic mode
 
 Kept for when it is picked up: a separate opt-in endpoint, never under an OpenAI route (PLAN
