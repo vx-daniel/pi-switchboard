@@ -98,7 +98,7 @@ How each proxy-side claim is backed:
 
 | Header | Anthropic's layer | pi-switchboard |
 |---|---|---|
-| `x-ratelimit-*`, `retry-after` | passed back | not passed back: the client sees a `429 rate_limit` without them (code: no handler sets them). Quota awareness is #69 |
+| `x-ratelimit-*`, `retry-after` | passed back | `x-ratelimit-*` not passed back. A rate limit whose wait the proxy read gets `retry-after` and `retry-after-ms`; a usage limit (a wait of 5 minutes or more, or Codex's wording) gets `429 insufficient_quota` and `x-should-retry: false` instead (#199, test). Quota awareness is #69 |
 | `request-id` | Anthropic's | `x-request-id`, the proxy's own request ID; `x-client-request-id` echoed when sent (code: `middleware.ts`) |
 | `openai-version`, `openai-processing-ms` | fixed or empty | not sent |
 | `authorization` | the Claude API key | the proxy's own token when proxy auth is on; the provider key comes from pi or `X-Switchboard-Upstream-Api-Key` |

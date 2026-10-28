@@ -91,6 +91,23 @@ const codexUsageLimit: MockReply = (response) => {
   return undefined
 }
 
+/** A wait no client should retry within: a plan's weekly window, in seconds. */
+const WEEKLY_RESET_SECONDS = 86_400
+
+/**
+ * Answers a 429 with no usage-limit wording, only a wait of a day: a usage limit by its length.
+ *
+ * @param response - the mock's response
+ */
+const weeklyLimit: MockReply = (response) => {
+  response.writeHead(429, {
+    'content-type': 'application/json',
+    'retry-after': String(WEEKLY_RESET_SECONDS)
+  })
+  response.end(JSON.stringify({ error: { message: 'Rate limit reached', type: 'upstream_error' } }))
+  return undefined
+}
+
 beforeAll(async () => {
   const answer = sse([...textChunks('ok'), finishChunk('stop')])
   mock = await startMockProvider({
@@ -101,7 +118,8 @@ beforeAll(async () => {
     'unavailable-mock': failingWith(503, answer),
     'overloaded-mock': failingWith(529, answer),
     'steady-mock': answer,
-    'limited-codex': codexUsageLimit
+    'limited-codex': codexUsageLimit,
+    'weekly-mock': weeklyLimit
   })
   const provider = (models: string[]): Record<string, unknown> => ({
     baseUrl: `${mock.origin}/v1`,
@@ -115,6 +133,7 @@ beforeAll(async () => {
         alpha: provider(['limited-mock', 'sibling-mock']),
         beta: provider(['answer-mock']),
         gamma: provider(['unavailable-mock', 'overloaded-mock', 'steady-mock']),
+        delta: provider(['weekly-mock']),
         google: { ...mock.provider('google-generative-ai'), models: [{ id: 'limited-gemini' }] },
         codex: {
           baseUrl: mock.origin,
@@ -158,12 +177,13 @@ function setAliases(aliases: Record<string, AliasTarget>): void {
  *
  * @param model - the request's `model`
  * @param headers - extra request headers
- * @returns the status, the parsed body, and the upstream models in call order
+ * @returns the status, the parsed body, the response's headers, and the upstream models in call
+ *   order
  */
 async function ask(
   model: string,
   headers: Record<string, string> = {}
-): Promise<{ status: number; body: unknown; upstream: unknown[] }> {
+): Promise<{ status: number; body: unknown; headers: Headers; upstream: unknown[] }> {
   const before = mock.requests.length
   const response = await createApp(testConfig(), fileConfigReader).request('/v1/chat/completions', {
     method: 'POST',
@@ -174,7 +194,21 @@ async function ask(
   const upstream = mock.requests
     .slice(before)
     .map((request) => (isRecord(request.body) ? request.body['model'] : undefined))
-  return { status: response.status, body, upstream }
+  return { status: response.status, body, headers: response.headers, upstream }
+}
+
+/**
+ * Reads the retry headers a response carries.
+ *
+ * @param headers - the response's headers
+ * @returns `retry-after`, `retry-after-ms` and `x-should-retry`, `null` where absent
+ */
+function retryHeaders(headers: Headers): Record<string, string | null> {
+  return {
+    'retry-after': headers.get('retry-after'),
+    'retry-after-ms': headers.get('retry-after-ms'),
+    'x-should-retry': headers.get('x-should-retry')
+  }
 }
 
 /**
@@ -342,16 +376,23 @@ describe('a 503 or 529 cools only its model', () => {
 })
 
 describe('a Codex usage limit (#185)', () => {
-  // Catches a Codex usage limit reaching the client as a 502 provider failure: pi throws it with
-  // only its own wording ("You have hit your ChatGPT usage limit"), no status, so the proxy has to
-  // know that wording to answer 429 rate_limit, as for any other provider's limit.
-  test('answers 429 rate_limit', async () => {
+  // Catches a Codex usage limit reaching the client as a 502 provider failure (pi throws it with
+  // only its own wording, no status), or as a plain rate limit the client retries in seconds
+  // (#199): it is OpenAI's insufficient_quota, with x-should-retry: false.
+  test('answers 429 insufficient_quota, telling the client not to retry', async () => {
     setAliases({})
 
     const named = await ask('limited-codex')
 
     expect(named.status).toBe(429)
-    expect(named.body).toMatchObject({ error: { code: 'rate_limit' } })
+    expect(named.body).toMatchObject({
+      error: { type: 'insufficient_quota', code: 'insufficient_quota' }
+    })
+    expect(retryHeaders(named.headers)).toEqual({
+      'retry-after': null,
+      'retry-after-ms': null,
+      'x-should-retry': 'false'
+    })
   })
 
   // Catches the proxy calling Codex over pi's WebSocket, where it sees no response: the 429 body's
@@ -376,6 +417,55 @@ describe('a Codex usage limit (#185)', () => {
         secondsLeft: CODEX_RESETS_IN_SECONDS
       })
     ])
+  })
+})
+
+describe('what a 429 tells the client (#199)', () => {
+  // Catches the provider's wait dropped (the client retries in its own backoff, against a limit
+  // still on), or a short limit answered as a usage limit the client then gives up on.
+  test('a rate limit with a wait says when to retry', async () => {
+    setAliases({})
+
+    const named = await ask('alpha/limited-mock')
+
+    expect(named.status).toBe(429)
+    expect(named.body).toMatchObject({ error: { code: 'rate_limit' } })
+    expect(retryHeaders(named.headers)).toEqual({
+      'retry-after': String(RETRY_AFTER_SECONDS),
+      'retry-after-ms': String(RETRY_AFTER_SECONDS * 1000),
+      'x-should-retry': null
+    })
+  })
+
+  // Catches a wait of a day passed on as retry-after, which a client honoring it sits out, or
+  // answered as a rate limit the SDKs retry at once.
+  test('a wait past the threshold is a usage limit, with no wait to sit out', async () => {
+    setAliases({})
+
+    const named = await ask('delta/weekly-mock')
+
+    expect(named.status).toBe(429)
+    expect(named.body).toMatchObject({ error: { code: 'insufficient_quota' } })
+    expect(retryHeaders(named.headers)).toEqual({
+      'retry-after': null,
+      'retry-after-ms': null,
+      'x-should-retry': 'false'
+    })
+  })
+
+  // Catches a wait made up when the proxy could not read one: Google's API hides the response.
+  test('a rate limit with no readable wait has no retry headers', async () => {
+    setAliases({})
+
+    const named = await ask('google/limited-gemini')
+
+    expect(named.status).toBe(429)
+    expect(named.body).toMatchObject({ error: { code: 'rate_limit' } })
+    expect(retryHeaders(named.headers)).toEqual({
+      'retry-after': null,
+      'retry-after-ms': null,
+      'x-should-retry': null
+    })
   })
 })
 
