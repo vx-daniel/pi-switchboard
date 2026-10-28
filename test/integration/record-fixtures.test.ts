@@ -1,9 +1,10 @@
 /**
  * `scripts/record-fixtures.ts`, run offline: its recorders forward to the mock provider (standing
  * in for Anthropic and Codex, `PI_SWITCHBOARD_RECORD_UPSTREAM`), its logins are a fixture agent
- * dir with a fake API key and a fake Codex token (`PI_SWITCHBOARD_RECORD_AGENT_DIR`), and its
- * recordings go to a temp dir (`PI_SWITCHBOARD_RECORD_OUT_DIR`) instead of the committed
- * `test/fixtures/recordings`. The script runs `main()` on import, so each test imports it afresh.
+ * dir with fake API keys and fake Codex tokens, for each base and its second login
+ * (`PI_SWITCHBOARD_RECORD_AGENT_DIR`), and its recordings go to a temp dir
+ * (`PI_SWITCHBOARD_RECORD_OUT_DIR`) instead of the committed `test/fixtures/recordings`. The
+ * script runs `main()` on import, so each test imports it afresh.
  */
 
 import { spawnSync } from 'node:child_process'
@@ -34,14 +35,20 @@ const ANTHROPIC_SCENARIOS = [
   'model-not-found',
   'quota'
 ] as const
+/** A second login's scenario, saved next to the base's recordings. */
+const SECOND_LOGIN = 'second-login'
 /** Every recording a run with no names makes, in order: `<api>/<scenario>`. */
 const ALL_RECORDINGS = [
   ...ANTHROPIC_SCENARIOS.map((scenario) => `${ANTHROPIC}/${scenario}`),
-  `${CODEX}/quota`
+  `${ANTHROPIC}/${SECOND_LOGIN}`,
+  `${CODEX}/quota`,
+  `${CODEX}/${SECOND_LOGIN}`
 ]
-/** One request per recording, plus the cache-read repeat. */
-const REQUESTS_SENT = ALL_RECORDINGS.length + 1
+/** The Anthropic requests: one per recording, plus the cache-read repeat. */
+const ANTHROPIC_REQUESTS = ANTHROPIC_SCENARIOS.length + 2
 const API_KEY = 'notarealsecret-record-fixtures-key'
+/** `anthropic-2`'s own key, which its second-login request must carry instead of the base's. */
+const SECOND_API_KEY = 'notarealsecret-record-fixtures-key-2'
 const EXIT_FAILURE = 1
 /** How long the fixture's Codex login stays valid: an hour, longer than any test run. */
 const CODEX_LOGIN_LIFETIME_MS = 3_600_000
@@ -127,24 +134,32 @@ afterAll(async () => {
   for (const path of tempDirs) rmSync(path, { recursive: true, force: true })
 })
 
+/** The logins a fixture agent dir holds: all of them, the bases only, or none. */
+type Logins = 'all' | 'bases' | 'none'
+
 /**
  * Creates a fixture agent dir for the script to record with, removed in `afterAll`.
  *
- * @param loggedIn - whether auth.json holds a fake Anthropic key and a fake Codex token
+ * @param logins - which logins auth.json holds: a fake Anthropic key and a fake Codex token for
+ *   each base, and for `all` its second login (`anthropic-2` with its own key, `openai-codex-2`)
  * @returns the agent dir's path
  */
-async function recordingAgentDir(loggedIn: boolean): Promise<string> {
-  const logins = {
-    'anthropic': { type: 'api_key', key: API_KEY },
-    // pi takes Codex as a ChatGPT login only (OAuth); this one never expires during a test.
-    'openai-codex': {
-      type: 'oauth',
-      access: FAKE_CODEX_TOKEN,
-      refresh: 'notarealsecret-codex-refresh',
-      expires: Date.now() + CODEX_LOGIN_LIFETIME_MS
-    }
+async function recordingAgentDir(logins: Logins): Promise<string> {
+  // pi takes Codex as a ChatGPT login only (OAuth); this one never expires during a test.
+  const codex = {
+    type: 'oauth',
+    access: FAKE_CODEX_TOKEN,
+    refresh: 'notarealsecret-codex-refresh',
+    expires: Date.now() + CODEX_LOGIN_LIFETIME_MS
   }
-  const agentDir = await loadFixtureAgentDir(loggedIn ? { authJson: logins } : {})
+  const bases = { 'anthropic': { type: 'api_key', key: API_KEY }, 'openai-codex': codex }
+  const all = {
+    ...bases,
+    'anthropic-2': { type: 'api_key', key: SECOND_API_KEY },
+    'openai-codex-2': codex
+  }
+  const authJson = { all, bases, none: undefined }[logins]
+  const agentDir = await loadFixtureAgentDir(authJson === undefined ? {} : { authJson })
   agentDirs.push(agentDir)
   return agentDir.path
 }
@@ -207,7 +222,7 @@ function withJoinedBody(recording: Recording): unknown {
  * @param scenario - the scenario name
  * @returns an expected value with asymmetric matchers for the timestamp, path, headers and body
  */
-function expectedAnthropic(scenario: (typeof ANTHROPIC_SCENARIOS)[number]): unknown {
+function expectedAnthropic(scenario: string): unknown {
   const missing = scenario === 'model-not-found'
   const answer = missing ? missingModelAnswer : textAnswer
   const model = missing ? MISSING_MODEL_ID : MODEL_ID
@@ -235,23 +250,46 @@ function expectedAnthropic(scenario: (typeof ANTHROPIC_SCENARIOS)[number]): unkn
 
 describe('recording every scenario', () => {
   let run: ScriptRun
+  let requestsBefore = 0
 
   beforeAll(async () => {
-    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir(true))
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir('all'))
     vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     vi.stubEnv('PI_SWITCHBOARD_RECORD_OUT_DIR', saveDir)
+    requestsBefore = upstream.requests.length
     run = await runScript()
   })
 
   // Catches a scenario or a provider dropped from the run, or a run that ends early or reports
   // nothing.
-  test('records each scenario of both providers and says where it saved it', () => {
-    expect({ exitCode: run.exitCode, stdout: run.stdout, stderr: run.stderr }).toEqual({
+  test('records each scenario of every login and says where it saved it', () => {
+    expect({
+      exitCode: run.exitCode,
+      recorded: run.stdout.match(/^recorded .*\n/gm),
+      stderr: run.stderr
+    }).toEqual({
       exitCode: undefined,
-      stdout: ALL_RECORDINGS.map(
+      recorded: ALL_RECORDINGS.map(
         (recording) => `recorded ${recording} -> ${join(saveDir, `${recording}.json`)}\n`
-      ).join(''),
+      ),
       stderr: ''
+    })
+  })
+
+  // Catches the header probe (#238) dropped, or printing a value: each recording is followed by
+  // the response's header names, the quota ones included even where the recording drops some.
+  test('prints each response header name, never a value, after each recording', () => {
+    const headerLines = run.stdout.match(/^response headers: .*$/gm) ?? []
+    expect({
+      lines: headerLines.length,
+      first: headerLines[0]?.split(': ')[1]?.split(', '),
+      values: Object.values(ANTHROPIC_QUOTA_HEADERS).filter((headerValue) =>
+        run.stdout.includes(headerValue)
+      )
+    }).toEqual({
+      lines: ALL_RECORDINGS.length,
+      first: expect.arrayContaining(['content-type', ...Object.keys(ANTHROPIC_QUOTA_HEADERS)]),
+      values: []
     })
   })
 
@@ -259,15 +297,40 @@ describe('recording every scenario', () => {
   // or Codex sent over WebSocket (which bypasses the recorder and carries no quota headers) or to
   // the wrong path.
   test('sends each scenario once, cache-read twice, and Codex over SSE to its path', () => {
-    expect(upstream.requests.map((request) => request.path.split('?')[0])).toEqual([
-      ...Array.from({ length: REQUESTS_SENT - 1 }, () => '/v1/messages'),
+    expect(
+      upstream.requests.slice(requestsBefore).map((request) => request.path.split('?')[0])
+    ).toEqual([
+      ...Array.from({ length: ANTHROPIC_REQUESTS }, () => '/v1/messages'),
+      '/backend-api/codex/responses',
       '/backend-api/codex/responses'
     ])
   })
 
+  // Catches the second login not registered through the proxy's copy (the run would refuse it or
+  // send nothing), sent with the base's key instead of its own, or sent differently from the base.
+  test("sends the second login's call as the base's text call, with its own key", () => {
+    const sent = upstream.requests.slice(requestsBefore)
+    // The base's `text` call is the run's first request; the same call through the second login
+    // is the one carrying its key.
+    const [baseText] = sent
+    const second = sent.filter((request) => request.headers['x-api-key'] === SECOND_API_KEY)
+    const shape = (request: (typeof sent)[number] | undefined): unknown =>
+      request === undefined
+        ? undefined
+        : {
+            path: request.path,
+            headers: Object.keys(request.headers).toSorted(),
+            body: request.body
+          }
+    expect({ count: second.length, shape: shape(second[0]) }).toEqual({
+      count: 1,
+      shape: shape(baseText)
+    })
+  })
+
   // Catches a recording that replay cannot load, or that holds another scenario's exchange, the
   // wrong model, a body other than what the provider sent, or quota headers lost.
-  test.each(ANTHROPIC_SCENARIOS)(
+  test.each([...ANTHROPIC_SCENARIOS, SECOND_LOGIN])(
     'saves %s as a loadable recording of its own exchange',
     (scenario) => {
       expect(withJoinedBody(loadRecording(ANTHROPIC, scenario, saveDir))).toEqual(
@@ -278,18 +341,21 @@ describe('recording every scenario', () => {
 
   // Catches Codex's quota headers lost, or its identifying ones (the turn token, a cookie, a
   // request ID) kept: only the window fields and the plan are recorded.
-  test('saves the Codex quota call with its quota headers only', () => {
-    expect(withJoinedBody(loadRecording(CODEX, 'quota', saveDir))).toMatchObject({
-      api: CODEX,
-      model: CODEX_MODEL_ID,
-      request: { path: '/backend-api/codex/responses', body: { model: CODEX_MODEL_ID } },
-      response: {
-        status: 429,
-        headers: quotaOnly(CODEX_QUOTA_HEADERS),
-        body: CODEX_LIMIT_BODY
-      }
-    })
-  })
+  test.each(['quota', SECOND_LOGIN])(
+    'saves the Codex %s call with its quota headers only',
+    (scenario) => {
+      expect(withJoinedBody(loadRecording(CODEX, scenario, saveDir))).toMatchObject({
+        api: CODEX,
+        model: CODEX_MODEL_ID,
+        request: { path: '/backend-api/codex/responses', body: { model: CODEX_MODEL_ID } },
+        response: {
+          status: 429,
+          headers: quotaOnly(CODEX_QUOTA_HEADERS),
+          body: CODEX_LIMIT_BODY
+        }
+      })
+    }
+  )
 
   // Catches a login's key, Codex token or ChatGPT account ID, or an identifying response header,
   // reaching a committed fixture.
@@ -297,6 +363,7 @@ describe('recording every scenario', () => {
     const saved = readFileSync(join(saveDir, `${recording}.json`), 'utf8')
     const leaks = [
       API_KEY,
+      SECOND_API_KEY,
       FAKE_CODEX_TOKEN,
       'notarealsecret-account',
       'x-api-key',
@@ -312,7 +379,7 @@ describe('choosing what to record', () => {
   // Catches the names on the command line ignored, which would re-record every fixture (and spend
   // every login's quota) to refresh one.
   test('records only the named scenarios', async () => {
-    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir(true))
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', await recordingAgentDir('all'))
     vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     vi.stubEnv('PI_SWITCHBOARD_RECORD_OUT_DIR', tempDir('pi-proxy-record-chosen-'))
     const requestsBefore = upstream.requests.length
@@ -325,8 +392,12 @@ describe('choosing what to record', () => {
       requests: upstream.requests.length - requestsBefore
     }).toEqual({
       exitCode: undefined,
-      recorded: [`recorded ${ANTHROPIC}/quota`, `recorded ${CODEX}/quota`],
-      requests: 2
+      recorded: [
+        `recorded ${ANTHROPIC}/quota`,
+        `recorded ${CODEX}/quota`,
+        `recorded ${CODEX}/${SECOND_LOGIN}`
+      ],
+      requests: 3
     })
   })
 
@@ -387,7 +458,7 @@ describe('refusing to record', () => {
 
   // Catches a run with no login sending unauthenticated requests and recording the 401s.
   test('with no Anthropic login in the agent dir', async () => {
-    const agentDir = await recordingAgentDir(false)
+    const agentDir = await recordingAgentDir('none')
     vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', agentDir)
     vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
     const requestsBefore = upstream.requests.length
@@ -398,6 +469,23 @@ describe('refusing to record', () => {
       exitCode: EXIT_FAILURE,
       stdout: '',
       stderr: `No Anthropic login in ${agentDir}\n`,
+      requests: 0
+    })
+  })
+
+  // Catches a second login missing from the agent dir recorded through the base's credential.
+  test('with no login for a second-login scenario', async () => {
+    const agentDir = await recordingAgentDir('bases')
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_AGENT_DIR', agentDir)
+    vi.stubEnv('PI_SWITCHBOARD_RECORD_UPSTREAM', upstream.origin)
+    const requestsBefore = upstream.requests.length
+
+    const run = await runScript([`${ANTHROPIC}/${SECOND_LOGIN}`])
+
+    expect({ ...run, requests: upstream.requests.length - requestsBefore }).toEqual({
+      exitCode: EXIT_FAILURE,
+      stdout: '',
+      stderr: `No Anthropic 2 login in ${agentDir}\n`,
       requests: 0
     })
   })

@@ -1,6 +1,7 @@
 /**
  * Records real provider traffic as replay fixtures (`test/fixtures/recordings/<api>`): Anthropic
- * (`anthropic-messages`) and ChatGPT's Codex (`openai-codex-responses`).
+ * (`anthropic-messages`), ChatGPT's Codex (`openai-codex-responses`), and a second login of each
+ * (`<api>/second-login`, #233).
  * On demand only: `pnpm run test:live:record [<api>/<scenario> | <api> ...]` records the named
  * scenarios, or all of them. It spends a few cents of quota on the logins used.
  *
@@ -8,10 +9,20 @@
  * on 127.0.0.1, one per provider: pi's `models.json` points each provider at its recorder, so the
  * request is exactly what pi sends in production (the Claude Code OAuth headers and system prompt
  * included), and the response is saved as it arrived, with only its quota headers (#69) and minus
- * every credential. A recording that still contains one is refused, not redacted.
+ * every credential. A recording that still contains one is refused, not redacted. For each
+ * recording, the response's header names (never their values) are printed, to show what a
+ * provider sends whatever the recording keeps (#238).
+ *
+ * SECOND LOGINS: `anthropic-2` and `openai-codex-2` are registered as the proxy registers them, a
+ * copy of a fresh built-in provider made by the proxy's own `accountProvider`
+ * (`src/pi/account-provider.ts`), with the recorder's `models.json` entry under the slot's ID
+ * composed above it. A recording through one therefore proves that copy against the real service:
+ * same request as the base, sent with the slot's own credential. They are saved next to the base's
+ * recordings, as the `second-login` scenario.
  *
  * LOGIN: set PI_SWITCHBOARD_RECORD_AGENT_DIR to a pi agent dir holding the logins made for
- * recording (`PI_CODING_AGENT_DIR=<dir> pi`, then `/login` for each provider). pi reads and
+ * recording (`PI_CODING_AGENT_DIR=<dir> pi`, then `/login` for each provider; log in a second
+ * time, in a private browser window, for `anthropic-2` and `openai-codex-2`). pi reads and
  * refreshes its `auth.json` in place. Never point it at a copy of a login another pi or proxy
  * uses: refreshing an expired OAuth token rotates the refresh token, and every other copy stops
  * working.
@@ -34,11 +45,14 @@ import {
   type Api,
   type Context,
   type Model,
+  type Provider,
   type SimpleStreamOptions,
   Type
 } from '@earendil-works/pi-ai'
+import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import { ModelRuntime, VERSION } from '@earendil-works/pi-coding-agent'
 
+import { accountProvider, parseAccountProviderId } from '../src/pi/account-provider.ts'
 import { type Recorder, saveRecording, startRecorder } from '../test/fixtures/recording.ts'
 
 /** One recorded exchange: what pi is asked, and with which options. */
@@ -89,13 +103,19 @@ const QUOTA_SCENARIO: Scenario = {
   options: { maxTokens: 32 }
 }
 
+/** The short text call, also recorded through a second login. */
+const TEXT_SCENARIO: Scenario = {
+  name: 'text',
+  context: { messages: [userMessage('Reply with exactly: Hello from the recorder.')] },
+  options: { maxTokens: 64 }
+}
+
+/** A second login's scenario name: saved next to the base's recordings, never over them. */
+const SECOND_LOGIN = 'second-login'
+
 /** The Anthropic scenarios, in order; each name becomes a fixture file name. */
 const ANTHROPIC_SCENARIOS: readonly Scenario[] = [
-  {
-    name: 'text',
-    context: { messages: [userMessage('Reply with exactly: Hello from the recorder.')] },
-    options: { maxTokens: 64 }
-  },
+  TEXT_SCENARIO,
   {
     name: 'two-tool-calls',
     context: {
@@ -140,7 +160,7 @@ const ANTHROPIC_SCENARIOS: readonly Scenario[] = [
 
 /** A provider the recorder records, with its scenarios. */
 interface Target {
-  /** pi's provider ID. */
+  /** pi's provider ID; a login slot (`anthropic-2`) is registered as the proxy registers it. */
   readonly provider: string
   /** How refusals name it. */
   readonly label: string
@@ -157,29 +177,44 @@ interface Target {
   readonly scenarios: readonly Scenario[]
 }
 
+/** Anthropic, as the base and its second login record it. */
+const ANTHROPIC_TARGET = {
+  label: 'Anthropic',
+  api: 'anthropic-messages',
+  modelId: 'claude-haiku-5-5',
+  upstream: 'https://api.anthropic.com',
+  basePath: '',
+  options: {}
+} as const
+
+/**
+ * Codex, as the base and its second login record it: over SSE, as the proxy calls Codex (#185).
+ * pi's default WebSocket would bypass the recorder, and only SSE responses carry the quota headers.
+ */
+const CODEX_TARGET = {
+  label: 'ChatGPT (Codex)',
+  api: 'openai-codex-responses',
+  modelId: 'gpt-5.6-luna',
+  upstream: 'https://chatgpt.com',
+  basePath: '/backend-api',
+  options: { transport: 'sse' }
+} as const
+
 /** The providers recorded, in order. */
 const TARGETS: readonly Target[] = [
+  { ...ANTHROPIC_TARGET, provider: 'anthropic', scenarios: ANTHROPIC_SCENARIOS },
   {
-    provider: 'anthropic',
-    label: 'Anthropic',
-    api: 'anthropic-messages',
-    modelId: 'claude-haiku-5-5',
-    upstream: 'https://api.anthropic.com',
-    basePath: '',
-    options: {},
-    scenarios: ANTHROPIC_SCENARIOS
+    ...ANTHROPIC_TARGET,
+    provider: 'anthropic-2',
+    label: 'Anthropic 2',
+    scenarios: [{ ...TEXT_SCENARIO, name: SECOND_LOGIN }]
   },
+  { ...CODEX_TARGET, provider: 'openai-codex', scenarios: [QUOTA_SCENARIO] },
   {
-    // Over SSE, as the proxy calls Codex (#185): pi's default WebSocket would bypass the
-    // recorder, and only SSE responses carry the quota headers.
-    provider: 'openai-codex',
-    label: 'ChatGPT (Codex)',
-    api: 'openai-codex-responses',
-    modelId: 'gpt-5.6-luna',
-    upstream: 'https://chatgpt.com',
-    basePath: '/backend-api',
-    options: { transport: 'sse' },
-    scenarios: [QUOTA_SCENARIO]
+    ...CODEX_TARGET,
+    provider: 'openai-codex-2',
+    label: 'ChatGPT (Codex) 2',
+    scenarios: [{ ...QUOTA_SCENARIO, name: SECOND_LOGIN }]
   }
 ]
 
@@ -235,13 +270,13 @@ function recordingAgentDir(): string {
  * @param recording.recorder - the provider's pass-through recorder
  * @param recording.target - the provider the scenario is sent to
  * @param recording.scenario - the exchange to record
- * @returns the path of the saved recording
+ * @returns the path of the saved recording, and every response header's name (never a value)
  * @throws Error from `saveRecording` when the recording still contains a credential
  */
 async function recordScenario(
   runtime: ModelRuntime,
   recording: { recorder: Recorder; target: Target; scenario: Scenario }
-): Promise<string> {
+): Promise<{ path: string; headerNames: readonly string[] }> {
   const { recorder, target, scenario } = recording
   const base = runtime.getModel(target.provider, target.modelId)
   if (base === undefined) fail(`pi has no ${target.provider}/${target.modelId}`)
@@ -255,7 +290,7 @@ async function recordScenario(
   const captured = recorder.exchanges.at(-1)
   if (captured === undefined) fail(`${target.api}/${scenario.name}: the recorder saw no request`)
   const outDir = process.env.PI_SWITCHBOARD_RECORD_OUT_DIR
-  return saveRecording(
+  const path = saveRecording(
     {
       version: 1,
       api: target.api,
@@ -269,6 +304,7 @@ async function recordScenario(
     // `undefined` takes saveRecording's default, the committed fixtures; so does an empty value.
     outDir === '' ? undefined : outDir
   )
+  return { path, headerNames: captured.responseHeaderNames }
 }
 
 /**
@@ -302,13 +338,29 @@ function chosenTargets(names: readonly string[]): { target: Target; scenarios: S
 }
 
 /**
+ * Copies the built-in provider a login slot belongs to, as the proxy does: from a fresh
+ * `builtinProviders()` instance, by the proxy's own `accountProvider`.
+ *
+ * @param providerId - a target's provider ID
+ * @returns the slot's provider, or `undefined` for a provider that is no login slot
+ */
+function loginCopy(providerId: string): Provider | undefined {
+  const slot = parseAccountProviderId(providerId)
+  if (slot === undefined) return undefined
+  const fresh = builtinProviders().find((provider) => provider.id === slot.base)
+  if (fresh === undefined) fail(`${providerId} is no login slot of a built-in pi provider`)
+  return accountProvider(fresh, { providerId, number: slot.number })
+}
+
+/**
  * Records the chosen scenarios against the login in PI_SWITCHBOARD_RECORD_AGENT_DIR.
  *
  * @remarks
  * Starts one recorder per provider (upstream: PI_SWITCHBOARD_RECORD_UPSTREAM when set, for the
  * offline test, else the provider's own), writes a temporary `models.json` that points each
  * provider at its recorder, and removes that file and stops the recorders when done. Exits via
- * {@link fail} when the dir has no login for a chosen provider.
+ * {@link fail} when the dir has no login for a chosen provider. A login slot is registered first,
+ * as the proxy registers it.
  */
 async function main(): Promise<void> {
   // Names first: a mistyped one is refused before anything else is checked or started.
@@ -332,6 +384,12 @@ async function main(): Promise<void> {
     // The login stays where it is (refreshed in place); only models.json is the recorder's.
     const runtime = await ModelRuntime.create({ authPath: join(agentDir, 'auth.json'), modelsPath })
     for (const { target } of chosen) {
+      const copy = loginCopy(target.provider)
+      // As the proxy registers a slot (`registerAccountProvider`): the recorder's models.json
+      // entry under the slot's ID composes above the copy.
+      if (copy !== undefined) runtime.registerNativeProvider(copy)
+    }
+    for (const { target } of chosen) {
       if (!runtime.isUsingOAuth(target.provider) && !runtime.hasConfiguredAuth(target.provider)) {
         fail(`No ${target.label} login in ${agentDir}`)
       }
@@ -341,8 +399,9 @@ async function main(): Promise<void> {
       if (recorder === undefined) continue
       for (const scenario of scenarios) {
         // Sequential on purpose: each recording is its recorder's latest exchange.
-        const path = await recordScenario(runtime, { recorder, target, scenario })
+        const { path, headerNames } = await recordScenario(runtime, { recorder, target, scenario })
         process.stdout.write(`recorded ${target.api}/${scenario.name} -> ${path}\n`)
+        process.stdout.write(`response headers: ${headerNames.join(', ')}\n`)
       }
     }
   } finally {

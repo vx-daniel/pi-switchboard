@@ -20,7 +20,8 @@
 
 import type { Api, Model } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
-import { isBuiltinProvider, parseAccountProviderId } from '@proxy/pi/accounts'
+import { parseAccountProviderId } from '@proxy/pi/account-provider'
+import { isBuiltinProvider } from '@proxy/pi/accounts'
 import * as z from 'zod'
 
 /** Logger for model exposure, which login routing is part of. */

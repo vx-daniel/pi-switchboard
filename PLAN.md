@@ -610,10 +610,11 @@ Copilot wasn't logged in, so it is unknown.
 - **Recorded for Anthropic only.** `test/fixtures/recordings/anthropic-messages/quota.json` is a
   live call from a login made for recording, and `test/integration/quota-replay.test.ts` replays
   it through pi's client to `/healthz/creds`. Codex is tested with the probe's header names and
-  fake identifying values (`test/fixtures/quota-headers.ts`); its recording and a Copilot probe
-  are #238. The recorder keeps a response's quota headers by exact name and nothing else
-  (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), and records a `quota` call for
-  Anthropic and for Codex (over SSE, as the proxy calls it); it needs a login made for recording
+  fake identifying values (`test/fixtures/quota-headers.ts`); its recording is #238. The
+  recorder keeps a response's quota headers by exact name and nothing else
+  (`KEPT_RESPONSE_HEADER` in `test/fixtures/recording.ts`), prints every response header's name
+  (never a value) for each recording, and records a `quota` call for Anthropic and for Codex
+  (over SSE, as the proxy calls it); it needs a login made for recording
   (`PI_SWITCHBOARD_RECORD_AGENT_DIR`).
 
 **The reserve** (`src/server/route-reserve.ts`, principle VI: configured, and reported). A
@@ -755,7 +756,12 @@ Accounts view, as it leaves aliases to the Models view.
   then the login list offering `groq-3`, a scripted API-key login to it joining the
   model's logins at once, a cancelled login leaving no provider, and a logout dropping the slot
   and its label. A real OAuth refresh and response through a copy need a login made for
-  recording (as #69's recordings do), never a copy of a live login.
+  recording (as #69's recordings do), never a copy of a live login: the recorder's
+  `second-login` scenarios (`anthropic-messages/second-login`, the `text` call, and
+  `openai-codex-responses/second-login`, the `quota` call) go through `anthropic-2` and
+  `openai-codex-2`, registered by the proxy's own copy (`accountProvider`, in
+  `src/pi/account-provider.ts` so the recorder can import it under plain Node). The offline test
+  of the recorder checks the copy sends the base's request with the slot's own key.
 
 ### Usage by route (#70)
 

@@ -11,7 +11,7 @@ pnpm run check:all    # The gate: format, lint + type check, tests with coverage
 vp check --fix        # Format and apply lint fixes
 vp test               # Offline tests (unit + integration): no real login, no network beyond 127.0.0.1
 pnpm run test:live    # Live conformance tests against real providers: uses your pi login and quota
-pnpm run test:live:record [<api>/<scenario> ...]  # Re-record the Anthropic and Codex replay fixtures, or the ones named (needs a login made for recording)
+pnpm run test:live:record [<api>/<scenario> ...]  # Re-record the Anthropic and Codex replay fixtures (each base and its second login, `anthropic-2`/`openai-codex-2`), or the ones named (needs logins made for recording)
 pnpm run openai-spec:update <commit>  # Re-pin OpenAI's OpenAPI spec subset to a full commit SHA
 vp pack               # Build for npm (ESM + .d.ts)
 pnpm run build:binary # Standalone binary for this machine (dist-bin/pi-switchboard); needs Bun

@@ -444,6 +444,14 @@ export default defineConfig({
         rules: {
           'zod/prefer-string-schema-with-trim': 'off'
         }
+      },
+      {
+        // Scripts run under plain Node (`node scripts/record-fixtures.ts`), which cannot resolve the
+        // `@proxy/*` alias: they import `src/` by relative `.ts` path.
+        files: ['scripts/**/*.ts'],
+        rules: {
+          '@limegrass/import-alias/import-alias': 'off'
+        }
       }
     ]
   },

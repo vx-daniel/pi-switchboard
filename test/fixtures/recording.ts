@@ -222,12 +222,22 @@ function parseJson(text: string): unknown {
   }
 }
 
+/** One exchange a recorder saw. */
+interface RecordedExchange {
+  /** What is saved: the kept headers only. */
+  readonly exchange: CapturedExchange
+  /** The credentials the request carried, which the saved recording must not contain. */
+  readonly secrets: string[]
+  /** Every response header's name, lower-case and sorted; never a value (#238's header probe). */
+  readonly responseHeaderNames: string[]
+}
+
 /** A running recorder, from {@link startRecorder}. */
 export interface Recorder {
   /** The recorder's origin, `http://127.0.0.1:<port>`. */
   readonly baseUrl: string
-  /** Every exchange so far, in order, with the credentials each request carried. */
-  readonly exchanges: readonly { readonly exchange: CapturedExchange; readonly secrets: string[] }[]
+  /** Every exchange so far, in order. */
+  readonly exchanges: readonly RecordedExchange[]
   /** Drops open connections and stops the server. */
   close(): Promise<void>
 }
@@ -244,7 +254,7 @@ export interface Recorder {
  * @returns the running recorder: its base URL, the exchanges so far, and `close()`
  */
 export async function startRecorder(upstreamOrigin: string): Promise<Recorder> {
-  const exchanges: { exchange: CapturedExchange; secrets: string[] }[] = []
+  const exchanges: RecordedExchange[] = []
   const server: Server = createServer((incoming, response) => {
     onRequestBody(incoming, (body) => {
       const request = { path: incoming.url ?? '/', headers: incoming.headers, body }
@@ -282,7 +292,8 @@ interface IncomingRequest {
  * @param upstreamOrigin - the real provider's origin
  * @param request - the request pi sent to the recorder
  * @param response - the response to pi
- * @returns the captured exchange (kept headers only) and the credentials the request carried
+ * @returns the captured exchange (kept headers only), the credentials the request carried, and
+ *   every response header's name
  * @throws TypeError when the upstream body yields something other than bytes; `fetch` errors
  *   when the upstream cannot be reached
  */
@@ -290,7 +301,7 @@ async function forward(
   upstreamOrigin: string,
   { path, headers, body }: IncomingRequest,
   response: ServerResponse
-): Promise<{ exchange: CapturedExchange; secrets: string[] }> {
+): Promise<RecordedExchange> {
   const forwarded = new Headers()
   for (const [headerName, headerValue] of Object.entries(headers)) {
     if (!HOP_HEADERS.has(headerName) && typeof headerValue === 'string') {
@@ -333,7 +344,8 @@ async function forward(
         chunks
       }
     },
-    secrets: credentialsIn(headers)
+    secrets: credentialsIn(headers),
+    responseHeaderNames: [...upstream.headers.keys()].toSorted()
   }
 }
 
@@ -355,7 +367,7 @@ async function record(
   upstreamOrigin: string,
   request: IncomingRequest,
   response: ServerResponse,
-  exchanges: { exchange: CapturedExchange; secrets: string[] }[]
+  exchanges: RecordedExchange[]
 ): Promise<void> {
   try {
     exchanges.push(await forward(upstreamOrigin, request, response))

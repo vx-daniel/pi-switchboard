@@ -13,12 +13,11 @@ import type {
 } from '@earendil-works/pi-ai'
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai'
 import { normalizeContext } from '@earendil-works/pi-ai/utils/transcript'
+import { accountProvider, parseAccountProviderId } from '@proxy/pi/account-provider'
 import {
   type AccountRuntime,
-  accountProvider,
   accountProviderId,
   nextAccountSlot,
-  parseAccountProviderId,
   registerAccountProvider,
   registerStoredAccounts,
   unregisterAccountProvider
