@@ -35,7 +35,8 @@ import {
 import type { ConsoleContext } from '@proxy/tui/console'
 import { inBackground } from '@proxy/tui/console-accounts'
 import { askLine, pickLabel, tickList } from '@proxy/tui/dialogs'
-import { modelsItemAt, type ModelsItem, modelsViewData } from '@proxy/tui/models-view'
+import type { ModelsItem } from '@proxy/tui/models-detail'
+import { modelsItemAt, modelsViewData } from '@proxy/tui/models-view'
 
 /** The effort option that keeps the request's own `reasoning_effort`. */
 const REQUEST_EFFORT = "The request's effort (not fixed)"
