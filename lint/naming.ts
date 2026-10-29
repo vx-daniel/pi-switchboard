@@ -292,7 +292,7 @@ const noGenericIterationNames: Rule = {
     schema: ALLOW_SCHEMA,
     messages: {
       generic:
-        'Generic iteration variable — name what it walks (`sessions.map((s) => …)` → `(session) => …`, `for (let i = 0; i < rows.length; ...)` → `rowIndex`). Greppability wins in an agent codebase.'
+        'Generic iteration variable — name what it walks (`sessions.map((item) => …)` → `(session) => …`, `for (let index = 0; index < rows.length; …)` → `rowIndex`). Greppability wins in an agent codebase.'
     }
   },
   create(context) {

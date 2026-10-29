@@ -487,7 +487,7 @@ serving model and login reported under `x_pi` and in the log.
 - [ ] One debug line per upstream error, not one per layer (#339)
 - [x] Remove the unused agentic-mode env flag (#340)
 - [ ] Test the pi extension's proxy start path (#341)
-- [ ] Small cleanups: an unused constant, two `param` path formats, test env vars in CONTRIBUTING, two functions at the complexity limit (#342)
+- [x] Small cleanups (#342): the no-op `MODEL_SELECTOR_EXTRA_ROWS` removed; every error `param` in OpenAI's bracket form (`messages[0].content[1]`); the naming rule's message examples; test env vars in CONTRIBUTING; a Responses API row in the extension's panel and `/proxy show`; `buildStreamOptions` and `convertSchema` split below the complexity limit
 
 ## Later, not planned: experimental agentic mode
 

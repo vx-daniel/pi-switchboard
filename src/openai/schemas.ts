@@ -162,7 +162,7 @@ const toolMessageSchema = z
 
 /**
  * Any accepted chat message, told apart by `role`, so an invalid field is reported at its own
- * path (`messages.2.refusal`) rather than at the message.
+ * path (`messages[2].refusal`) rather than at the message.
  */
 const messageSchema = z.discriminatedUnion('role', [
   systemMessageSchema,

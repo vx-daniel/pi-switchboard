@@ -133,6 +133,7 @@ describe('applySetting: the other settings', () => {
     ['host', '0.0.0.0', { host: '0.0.0.0' }],
     ['port', '8080', { port: 8080 }],
     ['remoteImages', 'on', { remoteImages: true }],
+    ['responsesApi', 'on', { responsesApi: true }],
     ['maxBodySizeMb', '200 MB', { maxBodySizeMb: 200 }],
     ['upstreamTimeoutSec', '300s', { upstreamTimeoutSec: 300 }],
     ['logLevel', 'debug', { logLevel: 'debug' }],
@@ -145,6 +146,15 @@ describe('applySetting: the other settings', () => {
     expect(savedConfig()).toEqual({ ...DEFAULT_CONFIG, ...change })
     expect(state.config).toEqual({ ...DEFAULT_CONFIG, ...change })
     expect(warnings()).toEqual([])
+  })
+
+  // Catches the panel having no row for the Responses API switch (#342), so it can be turned on
+  // only in the file or the console.
+  test('has a Responses API row showing the saved value', () => {
+    const row = buildSettingItems(stateWith({ responsesApi: true })).find(
+      (setting) => setting.id === 'responsesApi'
+    )
+    expect(row).toMatchObject({ currentValue: 'on', values: ['off', 'on'] })
   })
 
   // Catches closing the model selector rewriting the models it just saved.

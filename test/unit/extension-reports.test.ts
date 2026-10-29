@@ -32,7 +32,7 @@ vi.mock('@vx-daniel/pi-switchboard/logging', () => import('@proxy/logging'))
  * the proxy, web pages included, since the host/origin guard is off (#188).
  */
 const DEFAULT_SERVER_LINE =
-  'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: disabled (any program on this machine, and any web page open in a browser on it, can use your provider logins through it; set a token in /proxy config) | host/origin guard: off | remote images: false | docs ui: false | stats: true | max body: 50 MB | timeout: 120s'
+  'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: disabled (any program on this machine, and any web page open in a browser on it, can use your provider logins through it; set a token in /proxy config) | host/origin guard: off | remote images: false | docs ui: false | responses api: false | stats: true | max body: 50 MB | timeout: 120s'
 
 /** The first five public IDs, and the count of the rest, for the two-provider fixture. */
 const ALL_EXPOSED_PREVIEW = 'alpha/a1, alpha/a2, alpha/a3, alpha/a4, alpha/a5 (+3 more)'
@@ -104,7 +104,7 @@ describe('with models on two providers', () => {
       ])
       const report = await buildConfigReport(state)
       expect(report).toEqual(
-        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: notar...; /proxy token shows it) | host/origin guard: off | remote images: false | docs ui: false | stats: true | max body: 50 MB | timeout: 120s\n' +
+        'lifetime: detached | host: 127.0.0.1 | port: 5151 | auth: enabled (token: notar...; /proxy token shows it) | host/origin guard: off | remote images: false | docs ui: false | responses api: false | stats: true | max body: 50 MB | timeout: 120s\n' +
           'id mode: collision-prefixed | exposure: scoped | enabled: 2 pi pattern(s) | exposed: a1 | unresolved: nothing-like-this (no-match)'
       )
     })
@@ -114,9 +114,15 @@ describe('with models on two providers', () => {
     test('an authToken that is not a string shows as invalid', async () => {
       const report = await buildConfigReport(stateWith(agentDir, { authToken: 12345 }))
       expect(report).toEqual(
-        'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: invalid (authToken in proxy-config.json is not a string: the proxy refuses to start) | host/origin guard: off | remote images: false | docs ui: false | stats: true | max body: 50 MB | timeout: 120s\n' +
+        'lifetime: detached | host: 127.0.0.1 | port: 4141 | auth: invalid (authToken in proxy-config.json is not a string: the proxy refuses to start) | host/origin guard: off | remote images: false | docs ui: false | responses api: false | stats: true | max body: 50 MB | timeout: 120s\n' +
           `id mode: collision-prefixed | exposure: scoped | exposed: ${ALL_EXPOSED_PREVIEW}`
       )
+    })
+
+    // Catches `/proxy show` leaving out whether the proxy answers POST /v1/responses (#342).
+    test('lists the Responses API switch', async () => {
+      const report = await buildConfigReport(stateWith(agentDir, { responsesApi: true }))
+      expect(report).toContain('| responses api: true |')
     })
 
     // Catches `/proxy show` hiding the configured aliases, or an alias that the proxy ignores

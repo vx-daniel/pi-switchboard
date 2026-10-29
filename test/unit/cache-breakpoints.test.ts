@@ -220,7 +220,7 @@ describe('a malformed breakpoint', () => {
 
     expect(answer).toMatchObject({
       status: 400,
-      param: 'messages.0.content.0.prompt_cache_breakpoint.mode'
+      param: 'messages[0].content[0].prompt_cache_breakpoint.mode'
     })
   })
 })
