@@ -239,42 +239,52 @@ function openFrames(
 }
 
 /**
- * Encodes a delta of a block.
+ * Encodes a delta of a block. A redacted thinking block's delta is pi's `[Reasoning redacted]`
+ * placeholder (Bedrock streams it as one), not reasoning, so it sends nothing: the item's summary
+ * is empty (`reasoningItem`), and the stream agrees with it (#337).
  *
  * @param state - the stream state
  * @param frameOf - the response
  * @param event - pi's `*_delta` event
- * @returns the frame
+ * @returns the frames: one, or none for a redacted thinking block
  */
-function deltaFrame(
+function deltaFrames(
   state: StreamState,
   frameOf: ResponseFrame,
   event: Extract<
     AssistantMessageEvent,
     { type: 'text_delta' | 'thinking_delta' | 'toolcall_delta' }
   >
-): string {
+): string[] {
   const index = event.contentIndex
   const common = { output_index: index, delta: event.delta }
   if (event.type === 'thinking_delta') {
-    return frame(state, 'response.reasoning_summary_text.delta', {
-      ...common,
-      item_id: itemId(frameOf, 'rs', index),
-      summary_index: 0
-    })
+    const block = event.partial.content[index]
+    if (block?.type === 'thinking' && block.redacted === true) return []
+    return [
+      frame(state, 'response.reasoning_summary_text.delta', {
+        ...common,
+        item_id: itemId(frameOf, 'rs', index),
+        summary_index: 0
+      })
+    ]
   }
   if (event.type === 'text_delta') {
-    return frame(state, 'response.output_text.delta', {
-      ...common,
-      item_id: itemId(frameOf, 'msg', index),
-      content_index: 0,
-      logprobs: []
-    })
+    return [
+      frame(state, 'response.output_text.delta', {
+        ...common,
+        item_id: itemId(frameOf, 'msg', index),
+        content_index: 0,
+        logprobs: []
+      })
+    ]
   }
-  return frame(state, 'response.function_call_arguments.delta', {
-    ...common,
-    item_id: itemId(frameOf, 'fc', index)
-  })
+  return [
+    frame(state, 'response.function_call_arguments.delta', {
+      ...common,
+      item_id: itemId(frameOf, 'fc', index)
+    })
+  ]
 }
 
 /**
@@ -300,10 +310,13 @@ function endFrames(
       block?.type === 'thinking' ? block : { type: 'thinking' as const, thinking: event.content }
     const item = reasoningItem(frameOf, index, { thinking, message })
     state.items[index] = { ...item, status: 'completed' }
-    const part = { type: 'summary_text', text: event.content }
+    // The item's summary text, not `event.content`: for a redacted block that is pi's
+    // `[Reasoning redacted]` placeholder, which the item leaves out (#337).
+    const text = item.summary[0]?.text ?? ''
+    const part = { type: 'summary_text', text }
     const common = { item_id: item.id, output_index: index, summary_index: 0 }
     return [
-      frame(state, 'response.reasoning_summary_text.done', { ...common, text: event.content }),
+      frame(state, 'response.reasoning_summary_text.done', { ...common, text }),
       frame(state, 'response.reasoning_summary_part.done', { ...common, part }),
       frame(state, 'response.output_item.done', { output_index: index, item: state.items[index] })
     ]
@@ -380,7 +393,7 @@ function eventFrames(
     case 'text_delta':
     case 'thinking_delta':
     case 'toolcall_delta':
-      return [deltaFrame(state, frameOf, event)]
+      return deltaFrames(state, frameOf, event)
     case 'text_end':
     case 'thinking_end':
     case 'toolcall_end':

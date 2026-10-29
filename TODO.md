@@ -482,7 +482,7 @@ serving model and login reported under `x_pi` and in the log.
 
 - [ ] Nested chat objects strip unknown keys instead of refusing them (#335, needs a decision on `stream_options.include_obfuscation`)
 - [ ] Responses API fields accepted and never forwarded: name them in principle I or refuse them (#336)
-- [ ] Responses stream: a redacted thinking block's summary differs between the stream and the item (#337)
+- [x] Responses stream: a redacted thinking block's summary differs between the stream and the item (#337)
 - [x] Doctor: cost advice for a model reachable only through a `{provider}-N` login (#338)
 - [x] One debug line per upstream error, not one per layer (#339): `pi.complete` logs it, with the call's model, alias and attempt
 - [x] Remove the unused agentic-mode env flag (#340)
