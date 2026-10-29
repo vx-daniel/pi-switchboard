@@ -236,21 +236,17 @@ function transportOptions(model: Model<Api>): Pick<SimpleStreamOptions, 'transpo
 }
 
 /**
- * Builds pi's `SimpleStreamOptions` from an OpenAI request.
+ * Takes the request's generation settings: reasoning level, temperature and output token limit.
  *
  * @param model - the pi model
  * @param request - the validated chat request
- * @param options - the per-request options; `upstreamApiKey` becomes `apiKey`
- * @param signal - the combined client and idle-timeout signal, or `undefined`
- * @returns the options for `streamSimple`
+ * @returns the options it sets, each only when the request asks for it and the model takes it
  */
-async function buildStreamOptions(
+function generationOptions(
   model: Model<Api>,
-  request: ChatCompletionRequest,
-  options: CompletionOptions,
-  signal: AbortSignal | undefined
-): Promise<SimpleStreamOptions> {
-  const opts: SimpleStreamOptions = {}
+  request: ChatCompletionRequest
+): Pick<SimpleStreamOptions, 'reasoning' | 'temperature' | 'maxTokens'> {
+  const opts: Pick<SimpleStreamOptions, 'reasoning' | 'temperature' | 'maxTokens'> = {}
 
   if (request.reasoning_effort !== undefined) {
     const level = reasoningLevel(model, request.reasoning_effort)
@@ -271,6 +267,21 @@ async function buildStreamOptions(
   if (maxTokens !== undefined) {
     opts.maxTokens = maxTokens
   }
+  return opts
+}
+
+/**
+ * Takes the request's `user` and `prompt_cache_key`, where pi has a place to send them.
+ *
+ * @param model - the pi model
+ * @param request - the validated chat request
+ * @returns `metadata` for an Anthropic model with a `user`, and `sessionId` for a cache key
+ */
+function userAndCacheKeyOptions(
+  model: Model<Api>,
+  request: ChatCompletionRequest
+): Pick<SimpleStreamOptions, 'metadata' | 'sessionId'> {
+  const opts: Pick<SimpleStreamOptions, 'metadata' | 'sessionId'> = {}
 
   // Anthropic takes OpenAI's `user` as metadata.user_id, its only metadata key. pi's Anthropic
   // adapter sends `metadata.user_id` from this option; other adapters do not read it (#48).
@@ -285,6 +296,28 @@ async function buildStreamOptions(
   // login. Elsewhere it is unused. `null` is the same as no key (#39).
   if (request.prompt_cache_key !== undefined && request.prompt_cache_key !== null) {
     opts.sessionId = request.prompt_cache_key
+  }
+  return opts
+}
+
+/**
+ * Builds pi's `SimpleStreamOptions` from an OpenAI request.
+ *
+ * @param model - the pi model
+ * @param request - the validated chat request
+ * @param options - the per-request options; `upstreamApiKey` becomes `apiKey`
+ * @param signal - the combined client and idle-timeout signal, or `undefined`
+ * @returns the options for `streamSimple`
+ */
+async function buildStreamOptions(
+  model: Model<Api>,
+  request: ChatCompletionRequest,
+  options: CompletionOptions,
+  signal: AbortSignal | undefined
+): Promise<SimpleStreamOptions> {
+  const opts: SimpleStreamOptions = {
+    ...generationOptions(model, request),
+    ...userAndCacheKeyOptions(model, request)
   }
 
   // The client disconnect signal combined with the upstream idle timeout

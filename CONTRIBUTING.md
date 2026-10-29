@@ -22,6 +22,16 @@ pnpm run test:binary  # Build it, then run it against the fixtures (test/binary)
 
 Offline tests run with pi pointed at an empty agent directory and credential env vars removed (`test/setup/offline.ts`). Tests that need models or an upstream build them with `test/fixtures/agent-dir.ts` and the local mock provider in `test/fixtures/mock-provider.ts`, which serves scripted replies or replays real provider traffic recorded by `test:live:record` (`test/fixtures/recording.ts`, `test/fixtures/recordings/`). Recording forwards pi's real requests to the provider through a local recorder and saves the responses without credentials; it refuses to save one that contains a credential. Set `PI_SWITCHBOARD_RECORD_AGENT_DIR` to a pi agent directory with a login made for recording: never a copy of a login another pi or proxy uses, because refreshing an expired token rotates it under every copy. Recordings go to `test/fixtures/recordings/` unless `PI_SWITCHBOARD_RECORD_OUT_DIR` names another directory (a relative path is taken from the working directory).
 
+Environment variables for the on-demand test runs:
+
+| Variable | Set by | Meaning |
+|---|---|---|
+| `PI_SWITCHBOARD_LIVE_TESTS` | `pnpm run test:live` | `1` adds the `live` test project (`test/conformance/`), which calls real providers with your pi login (`vite.config.ts`) |
+| `PI_SWITCHBOARD_BINARY_TESTS` | `pnpm run test:binary`, the `binary` CI job | `1` adds the `binary` test project (`test/binary/`), which runs the built standalone binary; build it first (`test:binary` does) |
+| `PI_SWITCHBOARD_RECORD_AGENT_DIR` | you, for `test:live:record` | The pi agent directory holding the logins made for recording |
+| `PI_SWITCHBOARD_RECORD_OUT_DIR` | you, optionally | Where recordings are saved instead of `test/fixtures/recordings/` |
+| `PI_SWITCHBOARD_RECORD_UPSTREAM` | the recorder's offline test | One origin every provider's recorder forwards to, instead of each provider's own (`https://api.anthropic.com`, `https://api.openai.com`); the test points it at its mock. Leave it unset to record real traffic |
+
 `test/integration/openai-spec.test.ts` checks the stable surface against OpenAI's published OpenAPI spec, pinned to one commit of [`openai/openai-openapi`](https://github.com/openai/openai-openapi) in `test/fixtures/openai-spec/openapi-subset.json`. Every response body, stream chunk and error body has to validate against OpenAI's schema for it. Every request field and enum value the proxy accepts has to exist in OpenAI's request, and every one OpenAI has that the proxy doesn't accept is listed in the test with the reason. To move the pin, run `openai-spec:update` with the new commit. If OpenAI added a field or value, the test fails until you accept it or list it.
 
 ### Tooling

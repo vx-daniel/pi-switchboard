@@ -280,29 +280,71 @@ function convertSchema(schema: unknown, path: string): SchemaConversionResult {
   // Example: anyOf: [{type: "string"}, {type: "null"}] -> Union(String, Null)
   const anyOf = schema['anyOf']
   if (Array.isArray(anyOf)) {
-    const keywords = collectKeywords(schema, path, {
-      structural: ['anyOf'],
-      constraints: ANY_OF_CONSTRAINTS
-    })
-    return keywords.ok ? convertAnyOf(anyOf, path, keywords.opts) : keywords
+    return convertAnyOfNode(schema, anyOf, path)
   }
 
-  // enum: a string enum may also carry its type's constraints (e.g. `format`)
   const enumValues = schema['enum']
   if (Array.isArray(enumValues)) {
-    const enumType = schema['type']
-    const keywords = collectKeywords(schema, path, {
-      structural: ['enum', 'type'],
-      constraints:
-        typeof enumType === 'string'
-          ? (TYPE_CONVERTERS.get(enumType)?.constraints ?? NO_CONSTRAINTS)
-          : NO_CONSTRAINTS,
-      ...(typeof enumType === 'string' ? { typeName: enumType } : {})
-    })
-    return keywords.ok ? convertEnum(enumValues, path, keywords.opts) : keywords
+    return convertEnumNode(schema, enumValues, path)
   }
 
-  // The node's type
+  return convertByType(schema, path)
+}
+
+/**
+ * Converts a node with `anyOf`, after checking the keywords beside it.
+ *
+ * @param schema - the node
+ * @param anyOf - its `anyOf` branches
+ * @param path - the node's path, for errors
+ * @returns the TypeBox union, or the error for the first unsupported construct
+ */
+function convertAnyOfNode(
+  schema: Record<string, unknown>,
+  anyOf: unknown[],
+  path: string
+): SchemaConversionResult {
+  const keywords = collectKeywords(schema, path, {
+    structural: ['anyOf'],
+    constraints: ANY_OF_CONSTRAINTS
+  })
+  return keywords.ok ? convertAnyOf(anyOf, path, keywords.opts) : keywords
+}
+
+/**
+ * Converts a node with `enum`. A string enum may also carry its type's constraints (e.g.
+ * `format`).
+ *
+ * @param schema - the node
+ * @param enumValues - its `enum` values
+ * @param path - the node's path, for errors
+ * @returns the TypeBox schema for the values, or the error for the first unsupported construct
+ */
+function convertEnumNode(
+  schema: Record<string, unknown>,
+  enumValues: unknown[],
+  path: string
+): SchemaConversionResult {
+  const enumType = schema['type']
+  const keywords = collectKeywords(schema, path, {
+    structural: ['enum', 'type'],
+    constraints:
+      typeof enumType === 'string'
+        ? (TYPE_CONVERTERS.get(enumType)?.constraints ?? NO_CONSTRAINTS)
+        : NO_CONSTRAINTS,
+    ...(typeof enumType === 'string' ? { typeName: enumType } : {})
+  })
+  return keywords.ok ? convertEnum(enumValues, path, keywords.opts) : keywords
+}
+
+/**
+ * Converts a node by its `type`: a `[T, "null"]` array, a type name, or none.
+ *
+ * @param schema - the node
+ * @param path - the node's path, for errors
+ * @returns the TypeBox schema, or the error for the first unsupported construct
+ */
+function convertByType(schema: Record<string, unknown>, path: string): SchemaConversionResult {
   const rawType = schema['type']
 
   // Nullable via type: [T, "null"]

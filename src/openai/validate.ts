@@ -150,9 +150,9 @@ const MESSAGE_FIELD_DEPTH = 3
  * @remarks
  * A union reports one `invalid_union` issue at its own path, with each branch's issues inside. A
  * user message's parts are a union of a string and an array, so an unknown key on a part would
- * otherwise read as "invalid input" at `messages.0.content`. Branches the input says it is not
+ * otherwise read as "invalid input" at `messages[0].content`. Branches the input says it is not
  * are set aside first: one whose `type` or `role` the input does not have (#318; a Responses
- * `assistant` message with a bad `logprobs` was blamed on `reasoning`'s `content.0.type`). Of the
+ * `assistant` message with a bad `logprobs` was blamed on `reasoning`'s `content[0].type`). Of the
  * rest, the branch whose issue has the longest path is the one the input matched the shape of;
  * its issue is reported, at the full path. On a tie the first branch's issue wins: `toSorted` is
  * stable, as the language requires. When every branch is set aside, all of them are compared.
@@ -191,15 +191,23 @@ function isDiscriminatorMismatch(issue: z.core.$ZodIssue): boolean {
 }
 
 /**
- * Joins an issue path into the dotted `param` form.
+ * Writes a request path in OpenAI's `param` form: an array index in brackets, a key after a dot
+ * (`messages[0].content[1].type`).
  *
- * @param path - the issue path
+ * @param path - the path's segments, from the body down
  * @param key - a key below it, when the issue names one
- * @returns the dotted path, or `null` at the root
+ * @returns the path, or `null` at the root
  */
-function dottedPath(path: readonly PropertyKey[], key?: string): string | null {
-  const parts = [...path.map(String), ...(key === undefined ? [] : [key])]
-  return parts.length > 0 ? parts.join('.') : null
+function paramPath(path: readonly PropertyKey[], key?: string): string | null {
+  let joined = ''
+  for (const segment of key === undefined ? path : [...path, key]) {
+    if (typeof segment === 'number') {
+      joined += `[${String(segment)}]`
+    } else {
+      joined += joined.length > 0 ? `.${String(segment)}` : String(segment)
+    }
+  }
+  return joined.length > 0 ? joined : null
 }
 
 /**
@@ -212,7 +220,7 @@ function dottedPath(path: readonly PropertyKey[], key?: string): string | null {
  */
 function issueRejection(issue: z.core.$ZodIssue, issueCount: number): ValidationError {
   if (issue.code === 'unrecognized_keys') {
-    const fields = issue.keys.map((key) => dottedPath(issue.path, key) ?? key)
+    const fields = issue.keys.map((key) => paramPath(issue.path, key) ?? key)
     validateLogger.warn('Rejected unknown fields {fields}', { fields })
     return {
       ok: false,
@@ -221,7 +229,7 @@ function issueRejection(issue: z.core.$ZodIssue, issueCount: number): Validation
       param: fields[0] ?? null
     }
   }
-  const path = dottedPath(issue.path)
+  const path = paramPath(issue.path)
   const field = issue.path.at(-1)
   const accepted = typeof field === 'string' ? EMPTY_ONLY_FIELDS.get(field) : undefined
   const onMessage = issue.path[0] === 'messages' && issue.path.length === MESSAGE_FIELD_DEPTH
