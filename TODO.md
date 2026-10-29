@@ -484,7 +484,7 @@ serving model and login reported under `x_pi` and in the log.
 - [ ] Responses API fields accepted and never forwarded: name them in principle I or refuse them (#336)
 - [ ] Responses stream: a redacted thinking block's summary differs between the stream and the item (#337)
 - [x] Doctor: cost advice for a model reachable only through a `{provider}-N` login (#338)
-- [ ] One debug line per upstream error, not one per layer (#339)
+- [x] One debug line per upstream error, not one per layer (#339): `pi.complete` logs it, with the call's model, alias and attempt
 - [x] Remove the unused agentic-mode env flag (#340)
 - [ ] Test the pi extension's proxy start path (#341)
 - [x] Small cleanups (#342): the no-op `MODEL_SELECTOR_EXTRA_ROWS` removed; every error `param` in OpenAI's bracket form (`messages[0].content[1]`); the naming rule's message examples; test env vars in CONTRIBUTING; a Responses API row in the extension's panel and `/proxy show`; `buildStreamOptions` and `convertSchema` split below the complexity limit

@@ -130,16 +130,6 @@ export function failureClass(answer: FailedAnswer): FailureClass | undefined {
 }
 
 /**
- * Logs a failed call's raw upstream message at debug, never higher: some providers quote parts of
- * the request back.
- *
- * @param detail - the raw upstream error message, or `undefined` when there is none
- */
-function logUpstreamDetail(detail: string | undefined): void {
-  if (detail !== undefined) chatLogger.debug('Upstream error detail: {detail}', { detail })
-}
-
-/**
  * Logs a mapped upstream failure.
  *
  * @remarks
@@ -149,17 +139,14 @@ function logUpstreamDetail(detail: string | undefined): void {
  * so their line is a warning; any other failure is an error. The level follows the mapped status
  * on purpose: mapping decides whose fault a failure is (a credential problem a provider answers
  * with 400 maps to a 502, so it stays an error), and any future mapping to 400 is a client error
- * too. The raw upstream `detail` stays at debug ({@link logUpstreamDetail}). The request's IDs
- * come from the logging context.
+ * too. The provider's raw text is not logged here: `pi.complete` logs it once, at debug, beside
+ * the line that names the call's model, alias and attempt (#339). The request's IDs come from the
+ * logging context.
  *
  * @param mapped - the status and body the client gets
- * @param detail - the raw upstream error message, or `undefined` when there is none
  * @returns `mapped`, unchanged
  */
-function reportUpstreamFailure(
-  mapped: MappedUpstreamError,
-  detail: string | undefined
-): MappedUpstreamError {
+function reportUpstreamFailure(mapped: MappedUpstreamError): MappedUpstreamError {
   const properties = {
     status: mapped.status,
     message: mapped.body.error.message,
@@ -170,7 +157,6 @@ function reportUpstreamFailure(
   } else {
     chatLogger.error('Upstream call failed with {status}: {message}', properties)
   }
-  logUpstreamDetail(detail)
   if (mapped.status === HTTP_TOO_MANY_REQUESTS || mapped.status === HTTP_SERVICE_UNAVAILABLE) {
     chatLogger.warn('Upstream overloaded ({upstreamStatus}, {code})', {
       upstreamStatus: mapped.status,
@@ -181,16 +167,23 @@ function reportUpstreamFailure(
 }
 
 /**
- * Maps and logs a thrown upstream failure, as {@link reportUpstreamFailure} does.
+ * Maps and logs a throw out of a started stream, as {@link reportUpstreamFailure} does, with the
+ * thrown message at debug, never higher: some providers quote parts of the request back.
+ *
+ * @remarks
+ * The one failure whose text the route logs: such a throw ends no upstream call, so `pi.complete`
+ * never sees it (#339). It reaches the route only when the call has no idle timeout; with one, the
+ * relay logs the text and sends on an error event instead.
  *
  * @param err - the thrown value; an `Error`'s message is both mapped and logged as the detail
  * @returns the status and body the client gets
  */
 function reportThrownFailure(err: unknown): MappedUpstreamError {
-  return reportUpstreamFailure(
-    mapUpstreamError(err),
-    err instanceof Error ? err.message : undefined
-  )
+  const mapped = reportUpstreamFailure(mapUpstreamError(err))
+  if (err instanceof Error) {
+    chatLogger.debug('Upstream error detail: {detail}', { detail: err.message })
+  }
+  return mapped
 }
 
 /**
@@ -345,7 +338,6 @@ type AttemptOutcome =
   | {
       readonly kind: 'failed'
       readonly answer: FailedAnswer
-      readonly detail: string | undefined
       /** Logs the failure when it is the one the client gets. */
       readonly report: () => void
     }
@@ -356,22 +348,16 @@ type AttemptOutcome =
  * An attempt that failed with an upstream error.
  *
  * @param mapped - the mapped error
- * @param detail - the raw upstream message, or `undefined`
  * @param options - the call's options: with the client's own upstream key, a refused credential
  *   is answered as that key's ({@link forClientKey})
  * @returns the outcome, logging the failure only if the client gets it
  */
-function upstreamFailure(
-  mapped: MappedUpstreamError,
-  detail: string | undefined,
-  options: CompletionOptions
-): AttemptOutcome {
+function upstreamFailure(mapped: MappedUpstreamError, options: CompletionOptions): AttemptOutcome {
   const answer = options.upstreamApiKey === undefined ? mapped : forClientKey(mapped)
   return {
     kind: 'failed',
     answer,
-    detail,
-    report: () => reportUpstreamFailure(answer, detail)
+    report: () => reportUpstreamFailure(answer)
   }
 }
 
@@ -429,17 +415,12 @@ async function attemptStream(
     started = await piStream(candidate.model, context, request, options)
   } catch (err: unknown) {
     if (options.signal?.aborted === true) return clientLeft()
-    return upstreamFailure(
-      mapUpstreamError(err),
-      err instanceof Error ? err.message : undefined,
-      options
-    )
+    return upstreamFailure(mapUpstreamError(err), options)
   }
   const { first, events } = started
   if (first.done !== true && first.value.type === 'error') {
     if (options.signal?.aborted === true) return clientLeft()
-    const failed = first.value.error
-    return upstreamFailure(mapFailedCall(failed), failed.errorMessage, options)
+    return upstreamFailure(mapFailedCall(first.value.error), options)
   }
 
   const key = routeKey(job.alias, candidate)
@@ -531,7 +512,7 @@ async function attemptComplete(
       durationMs: Math.round(performance.now() - start)
     })
     if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-      return final(upstreamFailure(mapFailedCall(message), message.errorMessage, options))
+      return final(upstreamFailure(mapFailedCall(message), options))
     }
     noteAvailability(candidate.canonicalId, job.options, 'answered')
     return {
@@ -539,13 +520,7 @@ async function attemptComplete(
       respond: (route) => honoContext.json(job.format.complete(message, route))
     }
   } catch (err: unknown) {
-    return final(
-      upstreamFailure(
-        mapUpstreamError(err),
-        err instanceof Error ? err.message : undefined,
-        options
-      )
-    )
+    return final(upstreamFailure(mapUpstreamError(err), options))
   }
 }
 
@@ -584,12 +559,7 @@ async function runAttempt(
     : undefined
   if (refused !== undefined) {
     // checkCredential already logged why.
-    const outcome: AttemptOutcome = {
-      kind: 'failed',
-      answer: refused,
-      detail: undefined,
-      report: () => undefined
-    }
+    const outcome: AttemptOutcome = { kind: 'failed', answer: refused, report: () => undefined }
     return { outcome, captured: undefined }
   }
   let captured: FailedResponse | undefined
@@ -678,24 +648,21 @@ function skipsCandidate(job: DispatchJob, position: number, attempts: Attempt[])
  *
  * @param job - the route
  * @param position - the failed candidate's index
- * @param failure - the failure's class, or `undefined` for one that never moves on, and the raw
- *   upstream message, logged at debug
+ * @param failed - the failure's class, or `undefined` for one that never moves on
  * @param attempts - the attempts so far; the failed one is added when the request moves on
  * @returns the next candidate's index, or `undefined` to answer with the failure
  */
 function moveOn(
   job: DispatchJob,
   position: number,
-  failure: { readonly failed: FailureClass | undefined; readonly detail: string | undefined },
+  failed: FailureClass | undefined,
   attempts: Attempt[]
 ): number | undefined {
-  const { failed, detail } = failure
   const candidate = job.candidates[position]
   const nextPosition = nextFor(job.candidates, position, job, failed)
   const next = nextPosition === undefined ? undefined : job.candidates[nextPosition]
   if (candidate === undefined || next === undefined || failed === undefined) return undefined
   recordRouteFallback(routeKey(job.alias, candidate))
-  logUpstreamDetail(detail)
   logFallback(job.alias, { failed: candidate, next, failure: failed, attempt: attempts.length + 1 })
   attempts.push({ ...attemptOf(candidate), reason: failed })
   return nextPosition
@@ -743,7 +710,7 @@ async function tryCandidate(
   recordRouteFailure(key, failed)
   const waitMs = captured === undefined ? undefined : resetAfterMs(captured)
   if (sharedLogin) recordCooldown(candidate, failed, waitMs)
-  const next = moveOn(job, position, { failed, detail: outcome.detail }, attempts)
+  const next = moveOn(job, position, failed, attempts)
   if (next !== undefined) return { next }
   outcome.report()
   const { answer, headers } = limitAnswer(outcome.answer, waitMs)
