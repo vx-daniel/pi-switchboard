@@ -972,8 +972,8 @@ Default behavior, at the top level and inside messages and content parts alike (
 strict, #146):
 
 - reject with `422`, naming every unknown field in the message (`Unknown parameter(s): …`) and
-  the first in `param`, as its full dotted path inside a message
-  (`messages.0.content.0.cache_control`)
+  the first in `param`, as its full path inside a message in OpenAI's form, an index in brackets
+  (`messages[0].content[0].cache_control`; #342)
 
 The fields in "Rejected" above (`logprobs`, `top_logprobs`, `logit_bias`, `functions`,
 `function_call`) get `422` too, with `'<field>' is not supported in this version of the proxy`;
@@ -1992,7 +1992,6 @@ release workflow, never in `check:all` or the pre-commit hook.
 ### Agentic mode
 
 Later, not planned (ROADMAP "Later, not planned"). Agentic mode is experimental and not built.
-`PI_SWITCHBOARD_AGENTIC=true` sets a flag that only the startup log reads.
 
 Security defaults for any future agentic mode:
 

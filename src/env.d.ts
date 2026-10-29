@@ -20,7 +20,6 @@ declare namespace NodeJS {
     PI_SWITCHBOARD_HOST?: string | undefined
     PI_SWITCHBOARD_PORT?: string | undefined
     PI_SWITCHBOARD_AUTH_TOKEN?: string | undefined
-    PI_SWITCHBOARD_AGENTIC?: string | undefined
     PI_SWITCHBOARD_HOST_ORIGIN_GUARD?: string | undefined
     PI_SWITCHBOARD_REMOTE_IMAGES?: string | undefined
     PI_SWITCHBOARD_DOCS_UI?: string | undefined
@@ -40,7 +39,7 @@ declare namespace NodeJS {
     PI_SWITCHBOARD_RECORD_AGENT_DIR?: string | undefined
     /** scripts/record-fixtures.ts: where recordings are saved (default test/fixtures/recordings). */
     PI_SWITCHBOARD_RECORD_OUT_DIR?: string | undefined
-    /** scripts/record-fixtures.ts: where the recorder forwards to (default api.anthropic.com). */
+    /** scripts/record-fixtures.ts: one origin all recorders forward to (default: each provider's). */
     PI_SWITCHBOARD_RECORD_UPSTREAM?: string | undefined
     /** Set by the package manager running a script; read by `scripts/gate.ts`. */
     npm_config_user_agent?: string | undefined

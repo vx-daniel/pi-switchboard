@@ -154,6 +154,7 @@ function formatServerSettings(config: ProxyConfig): string[] {
     `host/origin guard: ${config.hostOriginGuard ? 'on' : 'off'}`,
     `remote images: ${String(config.remoteImages)}`,
     `docs ui: ${String(config.docsUi)}`,
+    `responses api: ${String(config.responsesApi)}`,
     `stats: ${String(config.stats)}`,
     `max body: ${String(config.maxBodySizeMb)} MB`,
     `timeout: ${String(config.upstreamTimeoutSec)}s`

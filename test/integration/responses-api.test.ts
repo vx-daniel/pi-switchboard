@@ -386,7 +386,7 @@ describe('the Responses API', () => {
 
     expect(reasoning !== undefined && 'encrypted_content' in reasoning).toBe(false)
     expect(echoed.status).toBe(HTTP_BAD_REQUEST)
-    expect(echoed.body).toMatchObject({ error: { param: 'input.1.encrypted_content' } })
+    expect(echoed.body).toMatchObject({ error: { param: 'input[1].encrypted_content' } })
   })
 
   // Catches reasoning put on the wrong assistant turn when there are several, one of them empty:
@@ -479,7 +479,7 @@ describe('the Responses API', () => {
     })
 
     expect(answer.status).toBe(HTTP_BAD_REQUEST)
-    expect(answer.body).toMatchObject({ error: { param: 'input.1' } })
+    expect(answer.body).toMatchObject({ error: { param: 'input[1]' } })
   })
 
   // Catches an image part dropped or misplaced on the way to the model.
@@ -526,8 +526,8 @@ describe('the Responses API', () => {
     [{ previous_response_id: 'resp_1' }, 'previous_response_id'],
     [{ conversation: 'conv_1' }, 'conversation'],
     [{ store: true }, 'store'],
-    [{ tools: [{ type: 'web_search' }] }, 'tools.0.type'],
-    [{ include: ['message.output_text.logprobs'] }, 'include.0'],
+    [{ tools: [{ type: 'web_search' }] }, 'tools[0].type'],
+    [{ include: ['message.output_text.logprobs'] }, 'include[0]'],
     [{ top_logprobs: 2 }, 'top_logprobs'],
     [{ verbosity: 'low' }, 'verbosity']
   ])('refuses %j by name', async (extra, param) => {
@@ -548,7 +548,7 @@ describe('the Responses API', () => {
     })
 
     expect(answer.status).toBe(HTTP_BAD_REQUEST)
-    expect(answer.body).toMatchObject({ error: { param: 'input.0.encrypted_content' } })
+    expect(answer.body).toMatchObject({ error: { param: 'input[0].encrypted_content' } })
   })
 
   // Catches an item of a type the proxy doesn't take reported at the whole item instead of its
@@ -561,7 +561,7 @@ describe('the Responses API', () => {
     })
 
     expect(answer.status).toBe(HTTP_BAD_REQUEST)
-    expect(answer.body).toMatchObject({ error: { param: 'input.0.type' } })
+    expect(answer.body).toMatchObject({ error: { param: 'input[0].type' } })
   })
 
   // Catches a function tool's or a json_schema format's description trimmed on this route's own
@@ -594,7 +594,7 @@ describe('the Responses API', () => {
 
   // Catches a replayed assistant turn refused for the empty `annotations`/`logprobs` the SDK
   // echoes back, or a non-empty one accepted though the proxy can't send it on, or refused with
-  // another item type's field named (#318: it said `content.0.type`, "expected reasoning_text").
+  // another item type's field named (#318: it said `content[0].type`, "expected reasoning_text").
   test.each(['annotations', 'logprobs'])(
     'takes an empty %s on a replayed output_text, and refuses a non-empty one',
     async (field) => {
@@ -617,7 +617,9 @@ describe('the Responses API', () => {
       expect(empty.status).toBe(HTTP_OK)
       expect(filled.status).toBe(HTTP_BAD_REQUEST)
       expect(filled.body).toMatchObject({
-        error: { param: expect.stringMatching(new RegExp(`^input\\.1\\.content\\.0\\.${field}`)) }
+        error: {
+          param: expect.stringMatching(new RegExp(`^input\\[1\\]\\.content\\[0\\]\\.${field}`))
+        }
       })
     }
   )

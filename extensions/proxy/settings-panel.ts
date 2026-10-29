@@ -165,6 +165,7 @@ const SETTING_DISPLAY_VALUES = {
   'hostOriginGuard': (config: ProxyConfig) => (config.hostOriginGuard ? 'on' : 'off'),
   'remoteImages': (config: ProxyConfig) => (config.remoteImages ? 'on' : 'off'),
   'docsUi': (config: ProxyConfig) => (config.docsUi ? 'on' : 'off'),
+  'responsesApi': (config: ProxyConfig) => (config.responsesApi ? 'on' : 'off'),
   'stats': (config: ProxyConfig) => (config.stats ? 'on' : 'off'),
   'maxBodySizeMb': (config: ProxyConfig) => `${String(config.maxBodySizeMb)} MB`,
   'upstreamTimeoutSec': (config: ProxyConfig) => `${String(config.upstreamTimeoutSec)}s`,
@@ -253,6 +254,14 @@ function serverSettingItems(config: ProxyConfig): SettingItem[] {
       description:
         'Serve the Swagger UI docs page at /docs, without proxy auth; its scripts load from a CDN',
       currentValue: config.docsUi ? 'on' : 'off',
+      values: ['off', 'on']
+    },
+    {
+      id: 'responsesApi',
+      label: 'Responses API',
+      description:
+        'Answer the experimental POST /v1/responses, stateless; off, it answers 404 and says how to turn it on',
+      currentValue: config.responsesApi ? 'on' : 'off',
       values: ['off', 'on']
     },
     {
@@ -411,6 +420,7 @@ const CONFIG_UPDATERS: Record<Exclude<SettingId, 'authToken'>, ConfigUpdater> = 
   'hostOriginGuard': (config, value) => ({ ...config, hostOriginGuard: value === 'on' }),
   'remoteImages': (config, value) => ({ ...config, remoteImages: value === 'on' }),
   'docsUi': (config, value) => ({ ...config, docsUi: value === 'on' }),
+  'responsesApi': (config, value) => ({ ...config, responsesApi: value === 'on' }),
   'stats': (config, value) => ({ ...config, stats: value === 'on' }),
   'maxBodySizeMb': (config, value) => {
     const mb = parsePositiveInt(value)
