@@ -32,13 +32,14 @@ afterEach(() => {
  * Loads an agent dir with one OpenAI Responses model at api.openai.com (an API that caches by
  * `prompt_cache_key`), priced, under a literal fake key; nothing is called.
  *
+ * @param provider - the provider ID to list it under: `openai-2` for a second login (#338)
  * @returns the agent dir
  */
-async function openAiAgentDir(): Promise<FixtureAgentDir> {
+async function openAiAgentDir(provider = 'alpha'): Promise<FixtureAgentDir> {
   const agentDir = await loadFixtureAgentDir({
     modelsJson: {
       providers: {
-        alpha: {
+        [provider]: {
           baseUrl: 'https://api.openai.com/v1',
           api: 'openai-responses',
           apiKey: 'notarealsecret-doctor-key',
@@ -52,9 +53,11 @@ async function openAiAgentDir(): Promise<FixtureAgentDir> {
 }
 
 /**
- * Writes 30 calls on `alpha/one` this minute: nothing read from the cache, and no request keyed.
+ * Writes 30 calls on a model this minute: nothing read from the cache, and no request keyed.
+ *
+ * @param provider - the provider the stats record the model under
  */
-function recordUncachedTraffic(): void {
+function recordUncachedTraffic(provider = 'alpha'): void {
   const minute = Math.floor(Date.now() / MS_PER_MINUTE)
   const store = openStatsStore(statsFilePath())
   store.add({
@@ -62,7 +65,7 @@ function recordUncachedTraffic(): void {
       {
         minute,
         alias: '',
-        model: 'alpha/one',
+        model: `${provider}/one`,
         outcome: 'ok',
         status: 0,
         requests: 30,
@@ -77,8 +80,8 @@ function recordUncachedTraffic(): void {
       {
         minute,
         alias: '',
-        provider: 'alpha',
-        model: 'alpha/one',
+        provider,
+        model: `${provider}/one`,
         attempts: 30,
         failures: 0,
         fallbacks: 0,
@@ -171,6 +174,21 @@ describe('pi-switchboard doctor', () => {
       window: 'week',
       statsAvailable: true,
       limits: expect.any(Array)
+    })
+  })
+
+  // Catches the cache checks quietly skipping a model only a second login serves (#338): the
+  // stats record its calls under the base provider's ID, so its prices must be found there too.
+  test('checks a model only a {provider}-N login serves', async () => {
+    await openAiAgentDir('openai-2')
+    recordUncachedTraffic('openai')
+
+    const { text } = await doctor(true)
+
+    expect(JSON.parse(text)).toMatchObject({
+      cache: expect.arrayContaining([
+        expect.objectContaining({ check: 'prompt-cache-key', subject: 'openai/one' })
+      ])
     })
   })
 
