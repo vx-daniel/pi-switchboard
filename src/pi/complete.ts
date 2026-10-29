@@ -323,11 +323,15 @@ function abortCause(
   return 'unknown'
 }
 
-/** One upstream call, as the logging helpers below see it. */
+/**
+ * One upstream call, as the logging helpers below see it: everything they read, so a call that
+ * threw before pi's options were built is logged from a complete value, not a stub.
+ */
 interface UpstreamCall {
   readonly model: Model<Api>
   readonly options: CompletionOptions
-  readonly opts: SimpleStreamOptions
+  /** The signal pi was given: the client's and the idle timeout's combined. */
+  readonly signal: AbortSignal | undefined
   readonly stream: boolean
   /** `performance.now()` when the call started. */
   readonly startedAt: number
@@ -357,15 +361,17 @@ function callProperties(call: UpstreamCall): Record<string, unknown> {
  * Logs the start of an upstream call at debug: what is sent where, never what it says.
  *
  * @param call - the upstream call
+ * @param opts - pi's options for it, for the thinking level and the token limit
  * @param context - pi's context, for message and tool counts
  * @param request - the validated chat request, for its reasoning effort
  */
 function logUpstreamStart(
   call: UpstreamCall,
+  opts: SimpleStreamOptions,
   context: Context,
   request: ChatCompletionRequest
 ): void {
-  const { model, options, opts, stream } = call
+  const { model, options, stream } = call
   completeLogger.debug('Calling {provider}/{modelId} via {api}', () => ({
     provider: model.provider,
     modelId: model.id,
@@ -428,7 +434,7 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
       () => ({
         ...callProperties(call),
         stopReason: message.stopReason,
-        abortCause: abortCause(call.options.signal, call.opts.signal)
+        abortCause: abortCause(call.options.signal, call.signal)
       })
     )
     logUpstreamErrorDetail(call, message.errorMessage)
@@ -474,11 +480,11 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
  * @param error - what was thrown
  */
 function logUpstreamThrow(call: UpstreamCall, error: unknown): void {
-  const aborted = call.opts.signal?.aborted === true
+  const aborted = call.signal?.aborted === true
   completeLogger.warn('Upstream call to {modelId} threw after {durationMs} ms', () => ({
     ...callProperties(call),
     aborted,
-    abortCause: aborted ? abortCause(call.options.signal, call.opts.signal) : undefined,
+    abortCause: aborted ? abortCause(call.options.signal, call.signal) : undefined,
     errorName: error instanceof Error ? error.name : typeof error
   }))
   logUpstreamErrorDetail(call, errorMessage(error))
@@ -528,20 +534,15 @@ async function openUpstream(
       ? undefined
       : startUpstreamIdleTimeout(options.upstreamTimeoutMs)
   const signal = combineSignals(options.signal, idle?.signal)
-  const startedAt = performance.now()
+  const call: UpstreamCall = { model, options, signal, stream, startedAt: performance.now() }
   let opts: SimpleStreamOptions
   try {
     opts = await buildStreamOptions(model, request, options, signal)
   } catch (error) {
     idle?.dispose()
     // Nothing was sent, but it is logged as the call's throw all the same: the route logs no
-    // upstream failure's text, so this is the only place it is. Its options were never built, so
-    // the call carries only the signal: `logUpstreamThrow` reads nothing else of `opts`, while
-    // `logUpstreamStart` (which reads the rest) never sees this call.
-    logUpstreamThrow(
-      { model, options, opts: signal === undefined ? {} : { signal }, stream, startedAt },
-      error
-    )
+    // upstream failure's text, so this is the only place it is.
+    logUpstreamThrow(call, error)
     throw error
   }
   // Every raw provider event restarts the wait, including those pi makes no event of (#50). The
@@ -551,8 +552,7 @@ async function openUpstream(
       idle.touch()
     }
   }
-  const call: UpstreamCall = { model, options, opts, stream, startedAt }
-  logUpstreamStart(call, context, request)
+  logUpstreamStart(call, opts, context, request)
   let eventStream: AssistantMessageEventStream
   try {
     eventStream = getRuntime().streamSimple(model, context, opts)
