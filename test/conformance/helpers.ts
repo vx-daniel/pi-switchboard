@@ -49,7 +49,12 @@ const TEST_MODEL_MATRIX: readonly TestModel[] = [
   // measured live on a ChatGPT login (PLAN "Cooldowns (#68)").
   { id: 'openai-codex/gpt-6-luna', category: 'fast' },
   { id: 'openai-codex/gpt-6-sol', category: 'mid' },
-  { id: 'openai-codex/gpt-6.1-sol', category: 'reasoning' }
+  { id: 'openai-codex/gpt-6.1-sol', category: 'reasoning' },
+
+  // OpenAI with pi's own `openai` sign-in or API key (#360 review: the tool-schema check runs on
+  // every family). Last in the matrix, so tests that take the first available model are unchanged.
+  { id: 'openai/gpt-6-luna', category: 'fast' },
+  { id: 'openai/gpt-6-sol', category: 'mid' }
 ]
 
 /** The matrix models pi has available, keyed by ID; filled once by {@link setup}. */
