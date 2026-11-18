@@ -13,7 +13,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname, resolve } from 'node:path'
 
 import { isLogLevel, type LogLevel } from '@logtape/logtape'
+import { ADMIN_UI_DEFAULTS, AdminUiConfigSchema, readAdminUi } from '@proxy/config/admin-schema'
 import { piAgentDir } from '@proxy/config/agent-dir'
+import type { FieldReader } from '@proxy/config/field-reader'
 import { proxyLogger } from '@proxy/logging'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
 import { errorCode, isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
@@ -409,7 +411,8 @@ export const ProxyConfigSchema = z.object({
   /** Lowest log level the proxy writes (LogTape levels). */
   logLevel: LogLevelSchema,
   routing: RoutingConfigSchema,
-  zed: ZedSyncConfigSchema
+  zed: ZedSyncConfigSchema,
+  adminUi: AdminUiConfigSchema
 })
 
 /** The proxy's config file contents, every field present and valid. */
@@ -463,7 +466,8 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   zed: {
     providerName: 'Pi Proxy',
     autoSync: false
-  }
+  },
+  adminUi: ADMIN_UI_DEFAULTS
 }
 
 // ---------------------------------------------------------------------------
@@ -584,13 +588,6 @@ const validReserves = validEntries(ReserveShareSchema)
 const validLabels = validEntries(LabelSchema)
 /** Keeps the `routing.logins.order` entries with a provider and a list: each list's valid logins. */
 const validLoginOrder = validEntries(z.array(z.unknown()).transform(validLogins))
-
-/** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
-type FieldReader<Key extends string> = <T>(
-  key: Key,
-  schema: z.ZodType<T>,
-  repair: (value: unknown) => T
-) => T
 
 /**
  * Returns a reader for the fields of one object in the config.
@@ -748,7 +745,8 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     labels: field('labels', fields.labels, validLabels),
     logLevel: field('logLevel', fields.logLevel, () => DEFAULT_CONFIG.logLevel),
     routing: normalizeRoutingConfig(isRecord(raw) ? raw['routing'] : undefined, corrected),
-    zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected)
+    zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected),
+    adminUi: readAdminUi(isRecord(raw) ? raw['adminUi'] : undefined, corrected, fieldReader)
   }
   reportCorrections(corrected)
   return config
