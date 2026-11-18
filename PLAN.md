@@ -1185,8 +1185,9 @@ Supported subset:
 - `type: object` with `properties` and `required`
 - `type: string`, `number`, `integer`, `boolean`, `null`
 - `type: array` with `items` schema
-- `enum` (string values only); a string enum may also carry the `string` constraints below (e.g.
-  `format`)
+- `enum` (string values only), with no `type` or a `type` of `"string"` or `["string", "null"]`
+  (any other `type` is refused: it reaches the provider as written); a string enum may also carry
+  the `string` constraints below (e.g. `format`)
 - nullable types via `type: [T, "null"]`, checked as `T` (its constraints) plus annotations
 - `anyOf` for nullable types and simple unions (max 10 branches); a sibling `type` is carried as
   written

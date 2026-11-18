@@ -318,7 +318,8 @@ function checkAnyOfNode(
 }
 
 /**
- * Checks a node with `enum`. A string enum may also carry its type's constraints (e.g. `format`).
+ * Checks a node with `enum`. A string enum may also carry its type's constraints (e.g. `format`),
+ * and a `type` of `"string"` or `["string", "null"]`.
  *
  * @param schema - the node
  * @param enumValues - its `enum` values
@@ -331,17 +332,41 @@ function checkEnumNode(
   path: string
 ): ToolSchemaResult {
   const enumType = schema['type']
+  const typeError = enumType === undefined ? undefined : checkEnumType(enumType, path)
+  if (typeError !== undefined) return typeError
   const error = checkKeywords(schema, path, {
     structural: ['enum', 'type'],
-    constraints:
-      typeof enumType === 'string'
-        ? (TYPE_RULES.get(enumType)?.constraints ?? NO_CONSTRAINTS)
-        : NO_CONSTRAINTS,
+    constraints: enumType === 'string' ? STRING_CONSTRAINTS : NO_CONSTRAINTS,
     ...(typeof enumType === 'string' ? { typeName: enumType } : {})
   })
   if (error !== undefined) return error
   const valuesError = checkEnumValues(enumValues, path)
   return valuesError ?? { ok: true, schema: carried(schema, {}) }
+}
+
+/**
+ * Checks the `type` beside an `enum`, which goes to pi as written (#363 review): only string
+ * enums are supported, so it is `"string"` or `["string", "null"]`.
+ *
+ * @param enumType - the node's `type`
+ * @param path - the node's path, for errors
+ * @returns the error for any other `type`, or `undefined`
+ */
+function checkEnumType(enumType: unknown, path: string): ToolSchemaError | undefined {
+  if (!KEYWORD_VALUE_KINDS.types.accepts(enumType)) {
+    return {
+      ok: false,
+      message: `'type' must be ${KEYWORD_VALUE_KINDS.types.description} at ${path || 'root'}`,
+      path
+    }
+  }
+  const typeNames: unknown[] = Array.isArray(enumType) ? enumType : [enumType]
+  const nullable =
+    typeNames.length === NULLABLE_TYPE_ARRAY_LENGTH &&
+    typeNames.includes('string') &&
+    typeNames.includes('null')
+  if (enumType === 'string' || nullable) return undefined
+  return { ok: false, message: `Only string enums are supported at ${path || 'root'}`, path }
 }
 
 /**

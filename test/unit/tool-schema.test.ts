@@ -51,6 +51,7 @@ describe('checkToolSchema', () => {
       'a typed string enum with constraints',
       { type: 'string', enum: ['2026-01-01'], format: 'date', maxLength: 10 }
     ],
+    ['a nullable string enum', { type: ['string', 'null'], enum: ['celsius', 'fahrenheit'] }],
     [
       'a nullable type with constraints and annotations',
       { type: ['string', 'null'], maxLength: 3, description: 'zone', default: null }
@@ -189,10 +190,19 @@ describe('checkToolSchema', () => {
     })
   })
 
-  // Catches a construct outside the subset sent upstream to fail there, or dropped.
+  // Catches a construct outside the subset sent upstream to fail there, or dropped. An enum's
+  // `type` goes upstream as written, so it must name the string enum it is (#363 review).
   test.each([
     [{ enum: [1, 2, 3] }, 'Only string enums are supported at p'],
     [{ enum: [] }, 'Empty enum at p'],
+    [{ type: 7, enum: ['red'] }, "'type' must be a type name or an array of type names at p"],
+    [{ type: 'integer', enum: ['red'] }, 'Only string enums are supported at p'],
+    [{ type: ['string', 'number'], enum: ['red'] }, 'Only string enums are supported at p'],
+    [{ type: ['string'], enum: ['red'] }, 'Only string enums are supported at p'],
+    [
+      { type: 'object', properties: { color: { type: 7, enum: ['red'] } } },
+      "'type' must be a type name or an array of type names at p.color"
+    ],
     [
       { type: ['string', 'number', 'null'] },
       'Only [type, "null"] nullable types are supported at p'
