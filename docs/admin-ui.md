@@ -27,9 +27,13 @@ On GitHub, **Settings → Developer settings → GitHub Apps → New GitHub App*
 | Request user authorization (OAuth) during installation | Off |
 | Webhook | Off (untick **Active**) |
 | Permissions | None, when the lists name only logins. When they name teams: **Organization permissions → Members: Read-only** |
-| Where can this GitHub App be installed? | **Only on this account** is enough |
+| Where can this GitHub App be installed? | **Only on this account**. For teams, create it under the organization that owns them (or transfer it there: **Advanced → Transfer ownership**), since a private App installs only on its owner |
 
-Create it, note its **Client ID**, and generate a **client secret**. When a list names teams, install the App on each organization those teams belong to (**Install App** in the App's settings): GitHub answers an App about a team only in an organization it is installed on, with Members: Read-only. A team it can't check counts as one the person isn't in, and the log says so (`Could not check … counted as not a member`): they still get any role their login gives them.
+Create it, note its **Client ID**, and generate a **client secret**.
+
+Logins need nothing more: GitHub says who signed in to any App, installed or not. Teams need the App **installed on each organization those teams belong to** (**Install App** in the App's settings), with Members: Read-only. So a private App under your personal account works for logins but not for an organization's teams; for those, the organization must own the App (or the App must be public).
+
+GitHub answers `404` for a team the App can't see, exactly as for a team the person isn't in, so a missing installation looks like "not in the team": the sign-in is refused, and the log's `Refused sign-in of …` line then names the installation as the likely cause. A team check that fails any other way is logged as `Could not check … counted as not a member`. Either way the person still gets any role their login gives them.
 
 The callback URL must match the admin UI's address exactly: its scheme, host and port. That address is `adminUi.publicUrl`, or `http://<host>:<port>` of the listener when it is unset.
 
