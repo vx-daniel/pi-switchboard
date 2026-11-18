@@ -14,6 +14,10 @@
 - **pi 1.5.2, up from 1.4.0 (#360).** Anthropic message threads, which pi 1.5.1 turns on for `api.anthropic.com`, stay off, and so does their beta header: every request still sends the whole conversation ([#361](https://github.com/vx-daniel/pi-switchboard/issues/361) tracks turning them on).
 - **`pi auth login <provider>` logs in from a shell**, without starting a pi session ([Installing](install.md#headless-and-scripted-setup)).
 
+### The admin UI
+
+- **A GitHub sign-in for an admin web UI, off by default (#367).** With `adminUi.enabled` on, `pi-switchboard` opens a second listener (`127.0.0.1:4142`) where the people its editors and viewers lists name sign in through your own GitHub App. So far it is the sign-in alone; the pages come later. With it on but unsafe or unconfigured (no sign-in secrets, nobody listed, a short session key, plain `http` beyond loopback), the proxy refuses to start and logs why. Nothing changes while it is off. See [The admin UI](admin-ui.md).
+
 ### The pi extension
 
 - **The settings panel has a Responses API row, and `/proxy show` lists `responses api` (#342).** Until now `responsesApi` could be set only in `proxy-config.json` or the console.

@@ -1825,10 +1825,15 @@ no setting loosens them.
 
 ### Admin UI (#367)
 
-Status: designed; the listener, sign-in and pages are built in later slices (constitution 3.13.0
+Status: the listener and sign-in are built; the pages come in later slices (constitution 3.13.0
 admits them). The first slice moved the settings model the console's Settings view renders into
 `src/config/settings.ts`, so the console and the admin UI share one list of settings, their
-groups, when each applies and what overrides it.
+groups, when each applies and what overrides it. The second added the `adminUi` section
+(`src/config/admin-schema.ts`, resolved with its env vars and secrets in `src/config/admin.ts`),
+the listener (`src/admin/listen.ts`, started by `src/cli.ts` after the API's, so by every
+`pi-switchboard` server, the pi package's included, never the console), and sign-in
+(`src/admin/app.ts`, `github.ts`, `sealed.ts`, `roles.ts`): the only API route is
+`GET /admin/api/session`. The operator's guide is [`docs/admin-ui.md`](docs/admin-ui.md).
 
 **What it is.** A web interface for a proxy run in Docker, so it can be configured without the
 terminal console. React with Tailwind CSS 4 and daisyUI 5, as j5's dashboard uses
@@ -1844,8 +1849,8 @@ to `127.0.0.1` by default. In Docker it is published to the host's loopback only
 an SSH tunnel or Tailscale. The routes live under `/admin/` on that listener and never on the API
 listener.
 
-**Who signs in.** Operators, with GitHub, ported from j5's dashboard
-(`packages/hub/src/dashboard-github.ts`, `dashboard-session.ts`):
+**Who signs in.** Operators, with GitHub: the same design as j5's dashboard, written for this
+repository from GitHub's public documentation (j5's code is private and is not copied):
 
 - the GitHub App web flow, with `state` and a PKCE challenge (S256);
 - the code exchanged for a user token with the App's client secret and the verifier;
