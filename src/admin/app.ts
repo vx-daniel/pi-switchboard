@@ -27,6 +27,7 @@
 import { timingSafeEqual } from 'node:crypto'
 
 import { type AdminSession, createAdminApi } from '@proxy/admin/api'
+import type { AdminAssets } from '@proxy/admin/assets'
 import {
   authorizeUrl,
   exchangeCode,
@@ -34,6 +35,7 @@ import {
   isActiveTeamMember,
   readUser
 } from '@proxy/admin/github'
+import { addPageRoutes } from '@proxy/admin/pages'
 import type { AdminServerFacts } from '@proxy/admin/reads'
 import { roleFor, type TeamCheck } from '@proxy/admin/roles'
 import { createSealer, pkceChallenge, randomToken, type Sealer } from '@proxy/admin/sealed'
@@ -108,7 +110,7 @@ function cookieValue(cookieHeader: string | undefined, name: string): string | u
 /** The headers every admin response carries. */
 const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'Content-Security-Policy':
-    "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
+    "default-src 'self'; img-src 'self' data:; base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'",
   'X-Content-Type-Options': 'nosniff',
   'Referrer-Policy': 'no-referrer',
   'Cache-Control': 'no-store'
@@ -146,6 +148,8 @@ export interface AdminAppOptions {
   readonly clientKey?: (env: unknown) => string
   /** The API listener's settings, for the doctor and the stats. */
   readonly server: AdminServerFacts
+  /** The built pages, or `undefined` when this build has none (`/admin/` then says so). */
+  readonly assets?: AdminAssets | undefined
 }
 
 /** What the route groups share. */
@@ -410,7 +414,7 @@ function addSignIn(app: Hono, deps: AdminDeps): void {
       maxAge: SESSION_SECONDS
     })
     authLogger.info('Signed in {login} as {role}', { login: outcome.login, role: outcome.role })
-    return context.redirect('/admin/api/session', HTTP_FOUND)
+    return context.redirect('/admin/', HTTP_FOUND)
   })
 }
 
@@ -473,6 +477,7 @@ export function createAdminApp(options: AdminAppOptions): Hono {
   addGuards(app, deps, options.clientKey ?? socketKey)
   addSignIn(app, deps)
   addSession(app, deps)
+  addPageRoutes(app, options.assets)
   app.notFound((context) => context.text('Not found', HTTP_NOT_FOUND))
   return app
 }
