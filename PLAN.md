@@ -1823,6 +1823,66 @@ token), and a refusal logs a warning naming the reason. The address policy, reso
 are parameters of the fetch (`createApp`'s `remoteImageFetch`) so tests can reach a local server;
 no setting loosens them.
 
+### Admin UI (#367)
+
+Status: designed; the listener, sign-in and pages are built in later slices (constitution 3.13.0
+admits them). The first slice moved the settings model the console's Settings view renders into
+`src/config/settings.ts`, so the console and the admin UI share one list of settings, their
+groups, when each applies and what overrides it.
+
+**What it is.** A web interface for a proxy run in Docker, so it can be configured without the
+terminal console. React with Tailwind CSS 4 and daisyUI 5, as j5's dashboard uses
+(`Viaanix/number-5` `packages/dashboard`); TanStack Query (and `EventSource` for live requests
+and logs), TanStack Table, a small router and uPlot for the stats timeline. Built by Vite and
+served by Hono as static files from the proxy's own package: no second server, no CDN. Its pages
+mirror the console's views: Requests, Accounts, Stats, Models and aliases, Settings, Doctor, and a
+Logins page that only shows the command to run in a terminal
+(`docker exec -it <container> pi auth login <provider>`).
+
+**Where it runs.** On a separate admin listener (for example `:4142`), off by default and bound
+to `127.0.0.1` by default. In Docker it is published to the host's loopback only, or reached over
+an SSH tunnel or Tailscale. The routes live under `/admin/` on that listener and never on the API
+listener.
+
+**Who signs in.** Operators, with GitHub, ported from j5's dashboard
+(`packages/hub/src/dashboard-github.ts`, `dashboard-session.ts`):
+
+- the GitHub App web flow, with `state` and a PKCE challenge (S256);
+- the code exchanged for a user token with the App's client secret and the verifier;
+- `GET /user` and `GET /user/teams` with that token, which is then dropped: never stored, logged,
+  put in a cookie or in an error.
+
+An editor team gives the editor role (writes), a viewer team the viewer role (reads). A sign-in
+cookie (10 minutes: `state` and the verifier) and a session cookie (8 hours: login and role) are
+each a base64url JSON payload and an HMAC-SHA256 of it under the session key, checked in constant
+time. Each names its purpose and version, so neither passes for the other and a change of shape
+signs everyone out. Both are `HttpOnly`, `Secure` and `SameSite=Lax`: Lax because GitHub's
+redirect back is a navigation from another site. The App's client ID and secret and the session
+key come from the environment or Docker secrets, never from `proxy-config.json` or the stats
+file.
+
+**Threat model.**
+
+| Asset | Threat | Control |
+|---|---|---|
+| Provider logins and credentials (pi's `auth.json`) | Read, added or changed over the web | Never reachable: no admin route shows, accepts or changes a credential (constitution I, III). Logins stay `pi auth login` in a terminal. |
+| The proxy token | A client that holds it reconfigures the proxy | The proxy token admits to no admin route. A GitHub session admits to no `/v1` route. Changing the token stays in the console (`p`), since it is a credential (constitution III). |
+| The proxy's configuration | A web page drives an operator's browser to change it (CSRF, DNS rebinding) | `SameSite=Lax` cookies. An `Origin` check on every write. The host/origin guard (`src/server/host-origin-guard.ts`) always on for the admin listener. |
+| The proxy's configuration | Anyone on the network signs in | Bound to loopback by default. The proxy refuses to start with the admin listener beyond loopback unless sign-in is configured. Roles come from GitHub teams; no team, no session. |
+| Session integrity | A forged or replayed cookie | HMAC-SHA256 under the session key, constant-time check, purpose and version signed, 8-hour expiry. Rotating the key signs everyone out. |
+| Operators' GitHub tokens | Kept and later stolen | Used once, then dropped; never stored, logged, put in a cookie or in an error. |
+| The UI's code | Script injection | CSP `default-src 'self'`, `frame-ancestors 'none'`. Every asset self-hosted, unlike `/docs`, which loads Swagger UI from a CDN. No inline scripts. |
+| Accountability | A change nobody can trace | An audit log of every write: the GitHub login, the setting, old and new values; values that are secrets are logged as changed, never shown. |
+| Availability | GitHub unreachable | The console is the break-glass (`docker exec -it <container> pi-switchboard tui`). The container needs outbound `github.com` for sign-in only. |
+
+**Writes (editor role).** What the console changes except the proxy token: the settings in
+`src/config/settings.ts`, aliases, the logins' order, disabled list and labels, and cooldowns.
+Values are validated with the same Zod schemas `proxy-config.json` is parsed with
+(`src/config/schema.ts`).
+
+**Phases.** (1) Read-only pages over SSE and the existing reads. (2) Editor writes with the audit
+log. (3) Per-project budgets (#366) as a Stats tab.
+
 ### Container image
 
 The `Dockerfile` builds the proxy from this repository's source (#60), replacing number-5's
@@ -2028,6 +2088,7 @@ src/
 ├── config/
 │   ├── schema.ts         -- ProxyConfig Zod schema and types, defaults, repair, JSON I/O (exported via ./config)
 │   ├── env.ts            -- ServerConfig from file + env + CLI overrides
+│   ├── settings.ts       -- the settings as an editor lists them, shared by the console and the admin UI (#367)
 │   └── agent-dir.ts      -- pi's agent directory, resolved without loading pi (#165)
 ├── doctor/
 │   ├── command.ts        -- `pi-switchboard doctor` (citty): flags, text and JSON output, exit status

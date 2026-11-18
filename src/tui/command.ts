@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 
+import { settingOverrides } from '@proxy/config/settings'
 import { configureLogging, type LoggingOptions } from '@proxy/logging'
 import {
   buildCliOverrides,
@@ -17,7 +18,6 @@ import {
 } from '@proxy/server/startup'
 import { runConsole } from '@proxy/tui/console'
 import { createLogBuffer } from '@proxy/tui/log-buffer'
-import { settingOverrides } from '@proxy/tui/settings-view'
 import { defineCommand } from 'citty'
 
 /** The most log lines the console keeps for its log view. */

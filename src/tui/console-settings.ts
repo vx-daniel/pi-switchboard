@@ -30,14 +30,6 @@ import {
   PublicModelIdModeSchema,
   saveConfigToFile
 } from '@proxy/config/schema'
-import { proxyLogger } from '@proxy/logging'
-import { canonicalModelId } from '@proxy/pi/model-id'
-import { getAvailableModels } from '@proxy/pi/registry'
-import type { ConsoleContext } from '@proxy/tui/console'
-import { inBackground } from '@proxy/tui/console-accounts'
-import { askLine, type DialogScreens, pickLabel, pickMany, tickList } from '@proxy/tui/dialogs'
-import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
-import type { RestartReport } from '@proxy/tui/proxy-server'
 import {
   appliesOnRestart,
   pendingRestart,
@@ -47,7 +39,15 @@ import {
   type SettingOverrides,
   type SettingRow,
   settingRows
-} from '@proxy/tui/settings-view'
+} from '@proxy/config/settings'
+import { proxyLogger } from '@proxy/logging'
+import { canonicalModelId } from '@proxy/pi/model-id'
+import { getAvailableModels } from '@proxy/pi/registry'
+import type { ConsoleContext } from '@proxy/tui/console'
+import { inBackground } from '@proxy/tui/console-accounts'
+import { askLine, type DialogScreens, pickLabel, pickMany, tickList } from '@proxy/tui/dialogs'
+import { openAuthMenu } from '@proxy/tui/proxy-auth-menu'
+import type { RestartReport } from '@proxy/tui/proxy-server'
 import type * as z from 'zod'
 
 /** Logger for settings saved from the console. */

@@ -22,6 +22,7 @@ import {
 } from '@earendil-works/pi-tui'
 import type { ServerConfig } from '@proxy/config/env'
 import { isLoopbackHost } from '@proxy/config/schema'
+import { SETTING_KEYS } from '@proxy/config/settings'
 import { type DoctorReport, MIN_CALLS } from '@proxy/doctor/findings'
 import { findingsBySeverity } from '@proxy/doctor/summary'
 import { DEFAULT_LOGIN_ROUTING } from '@proxy/openai/model-logins'
@@ -86,7 +87,7 @@ import {
   tableEntries
 } from '@proxy/tui/requests-view'
 import { consoleScreen } from '@proxy/tui/screen'
-import { SETTING_KEYS, settingsViewRows } from '@proxy/tui/settings-view'
+import { settingsViewRows } from '@proxy/tui/settings-view'
 import { type SidebarInput, sidebarRows } from '@proxy/tui/sidebar'
 import { createRefresh } from '@proxy/tui/status-refresh'
 import { requestsPerMinute, type StatusStripInput } from '@proxy/tui/status-strip'
