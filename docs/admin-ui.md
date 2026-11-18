@@ -2,7 +2,7 @@
 
 The admin UI (#367) is a web page for the people who run a pi-switchboard: they sign in with GitHub, and the editors and viewers lists say who may. It is off by default. The `pi-switchboard` server starts it, wherever it runs: the binary, Docker, the npm CLI, or the proxy the pi package starts (which reads the same `proxy-config.json`). The console (`pi-switchboard tui`) ignores it.
 
-So far it is the sign-in alone: the redirect to GitHub, the session it gives, and `GET /admin/api/session`, which says who is signed in with which role. The pages that read the proxy's state, and then the ones that change its settings, come in later releases ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
+So far it is the sign-in and the API the pages will read: who is signed in, the requests (also as a live stream), the logins, the models and aliases, the stats and the doctor's findings, all read-only ([The API](#the-api)). The pages themselves, and then the ones that change settings, come in later releases ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
 
 ## What it never does
 
@@ -133,3 +133,19 @@ The flow is GitHub's [web application flow for GitHub Apps](https://docs.github.
 `POST /admin/auth/sign-out` clears the session cookie. Sign-in and the callback (not sign-out) allow 20 requests a minute from one address; every response forbids framing, caching and sending a `Referer`; and a request that changes something must carry the admin UI's own `Origin`.
 
 Behind a reverse proxy every request comes from the reverse proxy's address, so everyone shares those 20 a minute. The admin UI doesn't trust `X-Forwarded-For`, which a client can write. Limit per client at the reverse proxy if several people sign in at once.
+
+## The API
+
+Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. None writes, calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, and the requests carry no message content.
+
+| Route | Answers |
+|---|---|
+| `GET /admin/api/session` | `{ "login", "role" }` |
+| `GET /admin/api/requests` | The requests the proxy keeps in memory, as the console's Requests view lists them: `requests` (HTTP requests, in flight and answered), `active` and `finished` (the chat requests behind them: model, alias, attempt, outcome) and `events` (where it listens, logins added, …) |
+| `GET /admin/api/requests/stream` | The same, as server-sent events: an `event: requests` at once, then again at most twice a second while the requests change, with a comment every 15 seconds |
+| `GET /admin/api/accounts` | Each login: how pi has it (`type`, `source`, `availableModelCount`), its `label`, its latest `quota`, whether it is `belowReserve`, its `cooldowns`, and its `place` in its provider's routing order |
+| `GET /admin/api/models` | The exposed `models` and `aliases` (as `GET /v1/switchboard/models`), the `configured` aliases, the built-in `latest` ones, and why any is left out; `503` `exposure_invalid` when the exposure config can't be applied |
+| `GET /admin/api/stats?window=today\|week\|all` | The stats over the window, as `GET /v1/switchboard/usage`; `503` while stats are off |
+| `GET /admin/api/doctor?window=today\|week\|all` | The doctor's report on the running proxy, as `pi-switchboard doctor --json`; no login is verified |
+
+A `window` other than `today`, `week` or `all` is a `400`.
