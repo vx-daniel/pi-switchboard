@@ -13,49 +13,48 @@
 /** An operator's role. */
 export type AdminRole = 'editor' | 'viewer'
 
-/**
- * Says whether a list names a team, which needs `GET /user/teams` to check.
- *
- * @param principals - the logins and teams
- * @returns whether any entry is `org/slug`
- */
-export function listsTeams(principals: readonly string[]): boolean {
-  return principals.some((principal) => principal.includes('/'))
-}
+/** Says whether the operator is an active member of a team (`org/slug`, lowercase). */
+export type TeamCheck = (team: string) => Promise<boolean>
 
 /**
- * Says whether a list admits an operator.
+ * Says whether a list admits an operator: by their login first, then by each team it names, in
+ * order, asking GitHub only until one admits them.
  *
  * @param principals - the logins and teams
  * @param login - the operator's GitHub login
- * @param teams - the operator's teams as lowercase `org/slug`
- * @returns whether the list names their login or one of their teams
+ * @param memberOf - asks GitHub about one team
+ * @returns whether the list names their login or a team they are in
  */
-function admits(principals: readonly string[], login: string, teams: ReadonlySet<string>): boolean {
-  const shownLogin = login.toLowerCase()
-  return principals.some((principal) => {
-    const entry = principal.toLowerCase()
-    return entry.includes('/') ? teams.has(entry) : entry === shownLogin
-  })
+async function admits(
+  principals: readonly string[],
+  login: string,
+  memberOf: TeamCheck
+): Promise<boolean> {
+  const listed = principals.map((principal) => principal.toLowerCase())
+  if (listed.includes(login.toLowerCase())) return true
+  for (const team of listed.filter((principal) => principal.includes('/'))) {
+    if (await memberOf(team)) return true
+  }
+  return false
 }
 
 /**
- * Gives an operator their role.
+ * Gives an operator their role, asking GitHub about a team only when a login alone does not
+ * decide: an editor by login needs no team at all.
  *
  * @param lists - the editors and viewers
  * @param lists.editors - who may change settings
  * @param lists.viewers - who may only read
  * @param login - the operator's GitHub login
- * @param teams - their teams as lowercase `org/slug`; empty when no list names a team
+ * @param memberOf - asks GitHub about one team; its caller decides what a failed check counts as
  * @returns `editor`, `viewer`, or `undefined` when neither list admits them
  */
-export function roleFor(
+export async function roleFor(
   lists: { readonly editors: readonly string[]; readonly viewers: readonly string[] },
   login: string,
-  teams: readonly string[]
-): AdminRole | undefined {
-  const teamSet = new Set(teams)
-  if (admits(lists.editors, login, teamSet)) return 'editor'
-  if (admits(lists.viewers, login, teamSet)) return 'viewer'
+  memberOf: TeamCheck
+): Promise<AdminRole | undefined> {
+  if (await admits(lists.editors, login, memberOf)) return 'editor'
+  if (await admits(lists.viewers, login, memberOf)) return 'viewer'
   return undefined
 }

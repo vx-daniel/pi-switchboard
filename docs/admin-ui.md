@@ -29,7 +29,7 @@ On GitHub, **Settings → Developer settings → GitHub Apps → New GitHub App*
 | Permissions | None, when the lists name only logins. When they name teams: **Organization permissions → Members: Read-only** |
 | Where can this GitHub App be installed? | **Only on this account** is enough |
 
-Create it, note its **Client ID**, and generate a **client secret**. When a list names teams, install the App on each organization those teams belong to (**Install App** in the App's settings): GitHub tells an App only about teams in organizations it is installed on.
+Create it, note its **Client ID**, and generate a **client secret**. When a list names teams, install the App on each organization those teams belong to (**Install App** in the App's settings): GitHub answers an App about a team only in an organization it is installed on, with Members: Read-only. A team it can't check counts as one the person isn't in, and the log says so (`Could not check … counted as not a member`): they still get any role their login gives them.
 
 The callback URL must match the admin UI's address exactly: its scheme, host and port. That address is `adminUi.publicUrl`, or `http://<host>:<port>` of the listener when it is unset.
 
@@ -37,7 +37,7 @@ The callback URL must match the admin UI's address exactly: its scheme, host and
 
 `adminUi.editors` and `adminUi.viewers` take GitHub logins (`alice`) and teams (`my-org/ops`, the organization and the team's slug), matched without regard to case. Someone on both lists is an editor. Anyone on neither is refused at sign-in.
 
-The role is decided at sign-in and lasts for the session (8 hours): someone removed from a list keeps their session until it ends or they sign out. To end every session at once, change the session key and restart.
+The role is decided at sign-in and lasts for the session (8 hours): someone removed from a list keeps their session until it ends or they sign out. To end every session at once, change the session key and restart. The lists are checked in order: editors by login, editor teams, viewers by login, viewer teams; GitHub is asked about a team only when no login before it decided, and only an active membership counts (a pending invitation doesn't).
 
 ### 3. Give it its secrets
 
@@ -123,7 +123,9 @@ A reason names the setting to fix, never a secret's value.
 The flow is GitHub's [web application flow for GitHub Apps](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-a-user-access-token-for-a-github-app), with PKCE ([RFC 7636](https://www.rfc-editor.org/rfc/rfc7636), `S256`):
 
 1. `GET /admin/auth/sign-in` sends the browser to GitHub with a random `state` and a PKCE challenge, and sets a short cookie (10 minutes, path `/admin/auth`) holding the `state` and the verifier, signed with the session key.
-2. GitHub sends the browser back to `/admin/auth/callback`. The admin UI checks that the `state` matches its cookie, exchanges the code (with the verifier and the client secret), reads the login and, when a list names teams, the teams, and drops the token.
+2. GitHub sends the browser back to `/admin/auth/callback`. The admin UI checks that the `state` matches its cookie, exchanges the code (with the verifier and the client secret), reads the login and, for each team a list names until one decides, asks whether the login is an active member (`GET /orgs/{org}/teams/{team}/memberships/{login}`), and drops the token.
 3. When a list names that login or one of its teams, it sets the session cookie (8 hours, path `/admin`, `HttpOnly`, `SameSite=Lax`, `Secure` over `https`), signed with the session key and holding only the login, the role and the expiry.
 
-`POST /admin/auth/sign-out` clears the session cookie. Sign-in and the callback allow 20 requests a minute from one address; every response forbids framing, caching and sending a `Referer`; and a request that changes something must carry the admin UI's own `Origin`.
+`POST /admin/auth/sign-out` clears the session cookie. Sign-in and the callback (not sign-out) allow 20 requests a minute from one address; every response forbids framing, caching and sending a `Referer`; and a request that changes something must carry the admin UI's own `Origin`.
+
+Behind a reverse proxy every request comes from the reverse proxy's address, so everyone shares those 20 a minute. The admin UI doesn't trust `X-Forwarded-For`, which a client can write. Limit per client at the reverse proxy if several people sign in at once.

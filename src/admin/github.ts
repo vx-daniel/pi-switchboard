@@ -1,14 +1,14 @@
 /**
  * Signing an operator in with their GitHub App (#367), from GitHub's public documentation of the
  * GitHub App user access token web flow ("Generating a user access token for a GitHub App") and of
- * the REST endpoints `GET /user` and `GET /user/teams`.
+ * the REST endpoints `GET /user` and `GET /orgs/{org}/teams/{team_slug}/memberships/{username}`.
  *
  * @remarks
  * The flow: the browser goes to `<githubUrl>/login/oauth/authorize` with the App's client ID, the
  * callback, a `state` and a PKCE challenge (S256); GitHub sends it back to the callback with a
  * `code`; the proxy exchanges that code at `<githubUrl>/login/oauth/access_token` with the client
- * secret and the PKCE verifier for a user token, then asks the API who the user is and, only when a
- * role lists a team, which teams they are in.
+ * secret and the PKCE verifier for a user token, then asks the API who the user is and, only for
+ * the teams a role lists, whether they are an active member of each.
  *
  * The user token goes no further than those requests: it is never stored, logged, put in a cookie
  * or in an error. A failure names a status or GitHub's OAuth error code, never an answer's body,
@@ -17,6 +17,7 @@
  * @packageDocumentation
  */
 
+import { HTTP_NOT_FOUND } from '@proxy/server/http-status'
 import * as z from 'zod'
 
 /** The `fetch` the client uses: the global one, or a test's. */
@@ -24,12 +25,6 @@ export type GitHubFetch = (input: string, init: RequestInit) => Promise<Response
 
 /** The REST API version the client asks for. */
 const API_VERSION = '2022-11-28'
-
-/** How many teams one page of `GET /user/teams` holds at most. */
-const TEAMS_PER_PAGE = 100
-
-/** The most pages of teams read: ten thousand teams, far past anyone's. */
-const MAX_TEAM_PAGES = 100
 
 /** An OAuth error code, as GitHub sends one (`bad_verification_code`); anything else is not shown. */
 const OAUTH_ERROR_CODE = /^[a-z_]{1,64}$/u
@@ -46,13 +41,15 @@ const UserSchema = z.looseObject({
   id: z.int().positive()
 })
 
-/** One page of `GET /user/teams`; only each team's slug and organization are read. */
-const TeamsPageSchema = z.array(
-  z.looseObject({
-    slug: z.string().trim().min(1),
-    organization: z.looseObject({ login: z.string().trim().min(1) })
-  })
-)
+/** `GET /orgs/{org}/teams/{team_slug}/memberships/{username}`; only the state is read. */
+const MembershipSchema = z.looseObject({ state: z.string().trim() })
+
+/** A team a role lists, and the login to check in it. */
+export interface TeamMembership {
+  /** The team as `org/slug`. */
+  readonly team: string
+  readonly login: string
+}
 
 /** Whom GitHub signed in. */
 export interface GitHubUser {
@@ -159,22 +156,21 @@ export async function exchangeCode(
 }
 
 /**
- * Reads one API path with the user's token.
+ * Asks one API path with the user's token.
  *
  * @param fetchFn - the `fetch` to use
  * @param apiUrl - GitHub's API origin and path
- * @param path - the endpoint and query
+ * @param path - the endpoint
  * @param token - the user's token
- * @returns the answer's JSON, or `undefined` when it is not JSON
- * @throws Error naming the endpoint and the status when GitHub refuses
+ * @returns GitHub's answer, whatever its status
  */
-async function readApi(
+async function askApi(
   fetchFn: GitHubFetch,
   apiUrl: string,
   path: string,
   token: string
-): Promise<unknown> {
-  const response = await fetchFn(`${apiUrl}${path}`, {
+): Promise<Response> {
+  return fetchFn(`${apiUrl}${path}`, {
     method: 'GET',
     headers: {
       'Accept': 'application/vnd.github+json',
@@ -183,10 +179,6 @@ async function readApi(
       'User-Agent': 'pi-switchboard'
     }
   })
-  if (!response.ok) {
-    throw new Error(`GitHub answered ${path.split('?')[0] ?? path} ${String(response.status)}`)
-  }
-  return jsonOrUndefined(response)
 }
 
 /**
@@ -203,43 +195,47 @@ export async function readUser(
   apiUrl: string,
   token: string
 ): Promise<GitHubUser> {
-  const user = UserSchema.safeParse(await readApi(fetchFn, apiUrl, '/user', token))
+  const response = await askApi(fetchFn, apiUrl, '/user', token)
+  if (!response.ok) throw new Error(`GitHub answered /user ${String(response.status)}`)
+  const user = UserSchema.safeParse(await jsonOrUndefined(response))
   if (!user.success) throw new Error('GitHub answered /user without a login and id')
   return { login: user.data.login, id: user.data.id }
 }
 
 /**
- * Lists the teams the token's user is in (`GET /user/teams`, every page), as `org/slug`.
+ * Asks whether a user is an active member of a team
+ * (`GET /orgs/{org}/teams/{team_slug}/memberships/{username}`).
  *
  * @remarks
- * A GitHub App's user token lists only teams in organizations where the App is installed with
- * the organization's Members permission (read); a team elsewhere is simply not listed.
+ * A GitHub App's user token sees a team only in an organization where the App is installed with
+ * the organization's Members permission (read), and only when the user may see the team; GitHub
+ * answers `404` otherwise, as for someone not in it. A pending invitation is no membership.
  *
  * @param fetchFn - the `fetch` to use
  * @param apiUrl - GitHub's API origin and path
  * @param token - the user's token
- * @returns each team as `org/slug`, lowercase
- * @throws Error when GitHub refuses, or answers a page that is not a list of teams
+ * @param membership - the team, as `org/slug`, and the login
+ * @returns whether the membership is `active`
+ * @throws Error when GitHub answers anything but a membership or `404`
  */
-export async function readTeams(
+export async function isActiveTeamMember(
   fetchFn: GitHubFetch,
   apiUrl: string,
-  token: string
-): Promise<string[]> {
-  const teams: string[] = []
-  for (let page = 1; page <= MAX_TEAM_PAGES; page++) {
-    const answer = await readApi(
-      fetchFn,
-      apiUrl,
-      `/user/teams?per_page=${String(TEAMS_PER_PAGE)}&page=${String(page)}`,
-      token
+  token: string,
+  membership: TeamMembership
+): Promise<boolean> {
+  const [org = '', slug = ''] = membership.team.split('/')
+  const path = `/orgs/${encodeURIComponent(org)}/teams/${encodeURIComponent(slug)}/memberships/${encodeURIComponent(membership.login)}`
+  const response = await askApi(fetchFn, apiUrl, path, token)
+  if (response.status === HTTP_NOT_FOUND) return false
+  if (!response.ok) {
+    throw new Error(
+      `GitHub answered the membership of ${membership.team} ${String(response.status)}`
     )
-    const parsed = TeamsPageSchema.safeParse(answer)
-    if (!parsed.success) throw new Error('GitHub answered /user/teams with no list of teams')
-    for (const team of parsed.data) {
-      teams.push(`${team.organization.login}/${team.slug}`.toLowerCase())
-    }
-    if (parsed.data.length < TEAMS_PER_PAGE) break
   }
-  return teams
+  const answer = MembershipSchema.safeParse(await jsonOrUndefined(response))
+  if (!answer.success) {
+    throw new Error(`GitHub answered the membership of ${membership.team} without a state`)
+  }
+  return answer.data.state === 'active'
 }

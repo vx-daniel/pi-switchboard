@@ -30,10 +30,10 @@ import {
   authorizeUrl,
   exchangeCode,
   type GitHubFetch,
-  readTeams,
+  isActiveTeamMember,
   readUser
 } from '@proxy/admin/github'
-import { listsTeams, roleFor } from '@proxy/admin/roles'
+import { roleFor, type TeamCheck } from '@proxy/admin/roles'
 import { createSealer, pkceChallenge, randomToken, type Sealer } from '@proxy/admin/sealed'
 import type { AdminSignIn, AdminUiSettings } from '@proxy/config/admin'
 import { proxyLogger } from '@proxy/logging'
@@ -49,7 +49,7 @@ import {
 } from '@proxy/server/http-status'
 import { errorMessage, isRecord } from '@proxy/utils/guards'
 import { MS_PER_SECOND } from '@proxy/utils/time'
-import { Hono } from 'hono'
+import { Hono, type MiddlewareHandler } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import * as z from 'zod'
 
@@ -133,8 +133,6 @@ interface AdminDeps {
   readonly redirectUri: string
   /** Whether cookies are `Secure`: exactly when the admin UI is `https`. */
   readonly secure: boolean
-  /** Whether a role names a team, so sign-in must ask GitHub for the operator's teams. */
-  readonly teamsNeeded: boolean
 }
 
 /** A refusal a callback answers with: its status and its text. */
@@ -232,13 +230,42 @@ function addGuards(app: Hono, deps: AdminDeps, clientKey: (env: unknown) => stri
     return undefined
   })
 
-  app.use('/admin/auth/*', async (context, next) => {
+  // Only the requests that start or finish a sign-in: sign-out and the API never wait on it. Behind
+  // a reverse proxy every request comes from its address, so per-client limits belong there; the
+  // listener does not trust a forwarded address, which a client can write.
+  const limit: MiddlewareHandler = async (context, next) => {
     if (!allowSignIn(clientKey(context.env))) {
       return context.text('Too many sign-in attempts; wait a minute', HTTP_TOO_MANY_REQUESTS)
     }
     await next()
     return undefined
-  })
+  }
+  app.use('/admin/auth/sign-in', limit)
+  app.use('/admin/auth/callback', limit)
+}
+
+/**
+ * Makes the team check for one sign-in: asks GitHub whether the operator is an active member of a
+ * team, counting a check GitHub fails as no membership, so a failure can only lower a role.
+ *
+ * @param deps - what the routes share
+ * @param token - the operator's user token
+ * @param login - the operator's login
+ * @returns the check
+ */
+function teamCheck(deps: AdminDeps, token: string, login: string): TeamCheck {
+  return async (team) => {
+    try {
+      return await isActiveTeamMember(deps.fetchFn, deps.settings.apiUrl, token, { team, login })
+    } catch (error) {
+      authLogger.warn('Could not check {login} in {team}; counted as not a member: {error}', {
+        login,
+        team,
+        error: errorMessage(error)
+      })
+      return false
+    }
+  }
 }
 
 /**
@@ -270,8 +297,7 @@ async function finishSignIn(
       return { status: HTTP_BAD_GATEWAY, text: 'GitHub refused the sign-in; try again' }
     }
     const user = await readUser(fetchFn, settings.apiUrl, exchanged.token)
-    const teams = deps.teamsNeeded ? await readTeams(fetchFn, settings.apiUrl, exchanged.token) : []
-    const role = roleFor(settings, user.login, teams)
+    const role = await roleFor(settings, user.login, teamCheck(deps, exchanged.token, user.login))
     if (role === undefined) {
       authLogger.info('Refused sign-in of {login}: not in adminUi.editors or viewers', {
         login: user.login
@@ -411,8 +437,7 @@ export function createAdminApp(options: AdminAppOptions): Hono {
     redirectUri: `${publicOrigin.origin}/admin/auth/callback`,
     // A `Secure` cookie is kept from an `http` origin only on localhost; the admin UI is https
     // beyond loopback (`adminUiProblems`), so `Secure` exactly when it is https.
-    secure: publicOrigin.protocol === 'https:',
-    teamsNeeded: listsTeams(settings.editors) || listsTeams(settings.viewers)
+    secure: publicOrigin.protocol === 'https:'
   }
   const app = new Hono()
   addGuards(app, deps, options.clientKey ?? socketKey)

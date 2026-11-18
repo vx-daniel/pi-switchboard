@@ -36,13 +36,17 @@ interface GitHubLog {
 /** How the fake GitHub answers. */
 interface GitHubScript {
   readonly login?: string
-  readonly teams?: readonly { slug: string; organization: { login: string } }[]
+  /**
+   * Team memberships by `org/slug` as the path names them: a state (`active`, `pending`), or a
+   * status GitHub fails with. A team not here answers `404`.
+   */
+  readonly memberships?: Readonly<Record<string, string | number>>
   /** An error answer to the code exchange, instead of a token. */
   readonly exchangeError?: Record<string, unknown>
 }
 
 /**
- * Makes a fake GitHub: the code exchange and `GET /user` and `/user/teams`, recording each call.
+ * Makes a fake GitHub: the code exchange, `GET /user` and team memberships, recording each call.
  *
  * @param script - how it answers
  * @returns its `fetch` and its log
@@ -61,7 +65,13 @@ function fakeGitHub(script: GitHubScript = {}): { fetch: GitHubFetch; log: GitHu
     const auth = new Headers(init.headers).get('authorization')
     if (auth !== `Bearer ${USER_TOKEN}`) return new Response('bad token', { status: 401 })
     if (url.pathname === '/user') return Response.json({ login: script.login ?? 'alice', id: 42 })
-    if (url.pathname === '/user/teams') return Response.json(script.teams ?? [])
+    const membership = /^\/orgs\/([^/]+)\/teams\/([^/]+)\/memberships\/([^/]+)$/u.exec(url.pathname)
+    const answer =
+      membership === null
+        ? undefined
+        : script.memberships?.[`${membership[1] ?? ''}/${membership[2] ?? ''}`]
+    if (typeof answer === 'number') return new Response('GitHub is down', { status: answer })
+    if (typeof answer === 'string') return Response.json({ state: answer, role: 'member' })
     return new Response('not found', { status: 404 })
   }
   return { fetch, log }
@@ -167,33 +177,46 @@ describe('admin sign-in', () => {
     ).not.toContain(USER_TOKEN)
   })
 
-  // Catches teams never asked for, or asked for when no role names one (a GitHub App installed on
-  // no organization would then fail every sign-in).
-  test('gives a role by team, and asks for teams only when a list names one', async () => {
-    const teamGitHub = fakeGitHub({
-      login: 'carol',
-      teams: [{ slug: 'readers', organization: { login: 'My-Org' } }]
-    })
-    const byTeam = createAdminApp({
-      settings: settingsWith({ viewers: ['my-org/readers'] }),
-      fetch: teamGitHub.fetch
-    })
-    const loginGitHub = fakeGitHub()
-    const byLogin = createAdminApp({
-      settings: settingsWith({ editors: ['alice'] }),
-      fetch: loginGitHub.fetch
+  // Catches a team role never given, a pending invitation taken for a membership, or GitHub asked
+  // about a team when the login alone decides.
+  test.each([
+    { who: 'an active member', state: 'active', session: { login: 'carol', role: 'viewer' } },
+    { who: 'someone only invited', state: 'pending', session: null }
+  ])('gives a team role to $who', async ({ state, session: expected }) => {
+    const github = fakeGitHub({ login: 'carol', memberships: { 'my-org/readers': state } })
+    const app = createAdminApp({
+      settings: settingsWith({ viewers: ['My-Org/readers'] }),
+      fetch: github.fetch
     })
 
-    const { callback } = await signIn(byTeam)
-    await signIn(byLogin)
+    const { callback } = await signIn(app)
+    const session = cookieFrom(callback, 'pi_switchboard_admin')
+    const answer = await app.request('/admin/api/session', {
+      headers: { host: HOST, cookie: session ?? '' }
+    })
+
+    expect(github.log.apiCalls).toContain('/orgs/my-org/teams/readers/memberships/carol')
+    expect(answer.ok ? await answer.json() : null).toEqual(expected)
+  })
+
+  // Catches a team check GitHub fails turning into a 502 for everyone (a GitHub App installed on
+  // no organization, or without Members: read): a login still decides, and only the team role is
+  // lost.
+  test('a failed team check only loses the team role', async () => {
+    const github = fakeGitHub({ login: 'bob', memberships: { 'my-org/ops': 403 } })
+    const app = createAdminApp({
+      settings: settingsWith({ editors: ['my-org/ops'], viewers: ['bob'] }),
+      fetch: github.fetch
+    })
+
+    const { callback } = await signIn(app)
     const session = cookieFrom(callback, 'pi_switchboard_admin') ?? ''
-    const answer = await byTeam.request('/admin/api/session', {
+    const answer = await app.request('/admin/api/session', {
       headers: { host: HOST, cookie: session }
     })
 
-    expect(await answer.json()).toEqual({ login: 'carol', role: 'viewer' })
-    expect(teamGitHub.log.apiCalls).toContain('/user/teams')
-    expect(loginGitHub.log.apiCalls).not.toContain('/user/teams')
+    expect(callback.status).toBe(302)
+    expect(await answer.json()).toEqual({ login: 'bob', role: 'viewer' })
   })
 
   // Catches a callback finished without the sign-in it belongs to (login CSRF), someone neither
@@ -308,8 +331,9 @@ describe('admin listener guards', () => {
     expect(response.headers.get('content-security-policy')).toContain("frame-ancestors 'none'")
   })
 
-  // Catches sign-in left open to guessing: past the limit a client is told to wait.
-  test('rate limits sign-in per client', async () => {
+  // Catches sign-in left open to guessing (past the limit a client waits), or the limit reaching
+  // sign-out, which an operator behind a shared reverse-proxy address must always reach.
+  test('rate limits sign-in per client, never sign-out', async () => {
     const limited = createAdminApp({
       settings: settingsWith({ editors: ['alice'] }),
       fetch: fakeGitHub().fetch,
@@ -321,9 +345,14 @@ describe('admin listener guards', () => {
         (await limited.request('/admin/auth/sign-in', { headers: { host: HOST } })).status
       )
     }
+    const signOut = await limited.request('/admin/auth/sign-out', {
+      method: 'POST',
+      headers: { host: HOST, origin: ORIGIN }
+    })
 
     expect(statuses.at(-1)).toBe(429)
     expect(statuses.slice(0, 20).every((status) => status === 302)).toBe(true)
+    expect(signOut.status).toBe(204)
   })
 })
 

@@ -1854,8 +1854,10 @@ repository from GitHub's public documentation (j5's code is private and is not c
 
 - the GitHub App web flow, with `state` and a PKCE challenge (S256);
 - the code exchanged for a user token with the App's client secret and the verifier;
-- `GET /user` and `GET /user/teams` with that token, which is then dropped: never stored, logged,
-  put in a cookie or in an error.
+- `GET /user` with that token, then, for each team a list names until one decides,
+  `GET /orgs/{org}/teams/{team}/memberships/{login}` (only `state: active` counts; a failed check
+  counts as no membership, so it can only lower a role); the token is then dropped: never stored,
+  logged, put in a cookie or in an error.
 
 An editor team gives the editor role (writes), a viewer team the viewer role (reads). A sign-in
 cookie (10 minutes: `state` and the verifier) and a session cookie (8 hours: login and role) are
