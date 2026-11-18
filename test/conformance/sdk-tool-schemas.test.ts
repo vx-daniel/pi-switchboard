@@ -8,7 +8,6 @@
  * Not a named choice: on Codex that fails for another reason (#365).
  */
 
-import { isRecord } from '@proxy/utils/guards'
 import type OpenAI from 'openai'
 import { assert, describe, expect, test } from 'vite-plus/test'
 
@@ -73,9 +72,9 @@ describe('SDK tool schema conformance (#360)', () => {
       assert(call?.type === 'function', `${modelId} made no function call`)
       expect(call.function.name).toBe('set_thermostat')
       const args: unknown = JSON.parse(call.function.arguments)
-      expect(args).toMatchObject({ unit: expect.toBeOneOf(UNITS) })
-      const room = isRecord(args) ? args['room'] : undefined
-      expect(room === null || typeof room === 'string').toBe(true)
+      // The prompt asks for the whole house, which the schema says is `null`: a call that names a
+      // room would pass a looser check without exercising the nullable type (#363 review).
+      expect(args).toMatchObject({ unit: expect.toBeOneOf(UNITS), room: null })
     }
   )
 })
