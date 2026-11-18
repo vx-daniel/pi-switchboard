@@ -4,6 +4,7 @@ import { join } from 'node:path'
 
 import { type AdminUiSettings, adminUiProblems, resolveAdminUi } from '@proxy/config/admin'
 import { ADMIN_UI_DEFAULTS, type AdminUiConfig } from '@proxy/config/admin-schema'
+import { normalizeConfig } from '@proxy/config/schema'
 import { afterAll, describe, expect, test } from 'vite-plus/test'
 
 const SESSION_KEY = 'notarealsecret-session-key-0123456789abcdef'
@@ -87,6 +88,22 @@ describe('resolveAdminUi', () => {
     )
 
     expect(settings.signIn?.clientSecret).toBe('notarealsecret-from-file')
+  })
+
+  // Catches a malformed address throwing out of the schema's refinement, which stops the proxy
+  // starting at all (even with the admin UI off) instead of repairing the field.
+  test.each(['http://', 'not a url', 'https://[', ''])('repairs adminUi URLs of %j', (value) => {
+    const config = normalizeConfig({ adminUi: { publicUrl: value, githubUrl: value } })
+
+    expect(config.adminUi.githubUrl).toBe(ADMIN_UI_DEFAULTS.githubUrl)
+    expect(config.adminUi.publicUrl).toBe(ADMIN_UI_DEFAULTS.publicUrl)
+  })
+
+  // Catches a malformed PI_SWITCHBOARD_ADMIN_URL thrown on rather than ignored for the file's.
+  test('ignores a malformed PI_SWITCHBOARD_ADMIN_URL', () => {
+    expect(resolved({}, { PI_SWITCHBOARD_ADMIN_URL: 'https://[' }).publicUrl).toBe(
+      'http://127.0.0.1:4142'
+    )
   })
 })
 

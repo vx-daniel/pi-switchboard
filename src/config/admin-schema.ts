@@ -34,11 +34,17 @@ const GitHubPrincipalsSchema = z.array(GitHubPrincipalSchema).readonly()
 /**
  * Says whether a URL is an origin only: no path past `/`, no query, no fragment, no credentials.
  *
- * @param value - a URL the schema already parsed
- * @returns whether it names an origin
+ * @remarks
+ * Zod runs a refinement even when the URL check before it failed, so a value that is no URL at all
+ * reaches here and must be refused, not thrown on: a throw would escape `safeParse` and stop the
+ * config from being repaired.
+ *
+ * @param value - the value, a URL or not
+ * @returns whether it parses as a URL and names an origin
  */
 function isOriginOnly(value: string): boolean {
-  const url = new URL(value)
+  const url = URL.parse(value)
+  if (url === null) return false
   return (
     url.pathname === '/' &&
     url.search === '' &&
