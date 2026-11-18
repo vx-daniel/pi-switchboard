@@ -15,13 +15,13 @@
 import type { ServerType } from '@hono/node-server'
 import type { LogLevel } from '@logtape/logtape'
 import type { ServerConfig } from '@proxy/config/env'
+import type { SettingOverrides } from '@proxy/config/settings'
 import { proxyLogger } from '@proxy/logging'
 import { recordConsoleEvent } from '@proxy/server/console-events'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { logEffectiveConfig, openServer } from '@proxy/server/startup'
 import { recordStatsToFile } from '@proxy/stats/recorder'
 import type { StatsView } from '@proxy/tui/dashboard'
-import type { SettingOverrides } from '@proxy/tui/settings-view'
 import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for the server's lifecycle. */

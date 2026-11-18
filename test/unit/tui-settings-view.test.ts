@@ -12,9 +12,9 @@ import {
   type SettingRow,
   settingOverrides,
   settingRows,
-  type SettingsInput,
-  settingsViewRows
-} from '@proxy/tui/settings-view'
+  type SettingsInput
+} from '@proxy/config/settings'
+import { settingsViewRows } from '@proxy/tui/settings-view'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { testConfig } from '../helpers'
