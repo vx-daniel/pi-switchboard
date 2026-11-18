@@ -8,6 +8,7 @@
 import { type ServerType, serve } from '@hono/node-server'
 import { createAdminApp } from '@proxy/admin/app'
 import { type AdminUiSettings, adminUiProblems } from '@proxy/config/admin'
+import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
 import { untilListening } from '@proxy/server/startup'
 
@@ -32,14 +33,24 @@ export function adminUiMayStart(settings: AdminUiSettings): boolean {
 /**
  * Starts the admin listener.
  *
- * @param settings - the resolved settings; sign-in configured ({@link adminUiMayStart})
+ * @param config - the server config: its `adminUi`, with sign-in configured
+ *   ({@link adminUiMayStart}), and the API listener's settings the doctor judges
  * @returns the listening server
  * @throws Error when sign-in is not configured, or the listener cannot listen (`EADDRINUSE`)
  */
-export async function openAdminServer(settings: AdminUiSettings): Promise<ServerType> {
+export async function openAdminServer(config: ServerConfig): Promise<ServerType> {
+  const settings = config.adminUi
   const { signIn } = settings
   if (signIn === undefined) throw new Error('The admin UI needs sign-in configured to start')
-  const app = createAdminApp({ settings: { ...settings, signIn } })
+  const app = createAdminApp({
+    settings: { ...settings, signIn },
+    server: {
+      host: config.host,
+      docsUiEnabled: config.docsUiEnabled,
+      statsEnabled: config.statsEnabled,
+      proxyAuth: config.proxyAuth.kind === 'token'
+    }
+  })
   const server = serve({ fetch: app.fetch, port: settings.port, hostname: settings.host })
   await untilListening(server)
   adminLogger.info('Admin UI at {publicUrl}, listening on {host}:{port}', {

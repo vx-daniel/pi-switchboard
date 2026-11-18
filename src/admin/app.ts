@@ -26,6 +26,7 @@
 
 import { timingSafeEqual } from 'node:crypto'
 
+import { type AdminSession, createAdminApi } from '@proxy/admin/api'
 import {
   authorizeUrl,
   exchangeCode,
@@ -33,6 +34,7 @@ import {
   isActiveTeamMember,
   readUser
 } from '@proxy/admin/github'
+import type { AdminServerFacts } from '@proxy/admin/reads'
 import { roleFor, type TeamCheck } from '@proxy/admin/roles'
 import { createSealer, pkceChallenge, randomToken, type Sealer } from '@proxy/admin/sealed'
 import type { AdminSignIn, AdminUiSettings } from '@proxy/config/admin'
@@ -44,8 +46,7 @@ import {
   HTTP_FOUND,
   HTTP_NO_CONTENT,
   HTTP_NOT_FOUND,
-  HTTP_TOO_MANY_REQUESTS,
-  HTTP_UNAUTHORIZED
+  HTTP_TOO_MANY_REQUESTS
 } from '@proxy/server/http-status'
 import { errorMessage, isRecord } from '@proxy/utils/guards'
 import { MS_PER_SECOND } from '@proxy/utils/time'
@@ -87,6 +88,23 @@ const SIGN_IN_COOKIE = 'pi_switchboard_admin_sign_in'
 /** The session cookie's name. */
 const SESSION_COOKIE = 'pi_switchboard_admin'
 
+/**
+ * Finds one cookie's value in a `Cookie` header. The admin cookies are base64url and `.`, which a
+ * `Cookie` header carries as they are, so nothing is decoded.
+ *
+ * @param cookieHeader - the header, or `undefined` when the request sent none
+ * @param name - the cookie
+ * @returns its value, or `undefined` when the header has none of that name
+ */
+function cookieValue(cookieHeader: string | undefined, name: string): string | undefined {
+  const prefix = `${name}=`
+  return cookieHeader
+    ?.split(';')
+    .map((pair) => pair.trim())
+    .find((pair) => pair.startsWith(prefix))
+    ?.slice(prefix.length)
+}
+
 /** The headers every admin response carries. */
 const SECURITY_HEADERS: Readonly<Record<string, string>> = {
   'Content-Security-Policy':
@@ -108,8 +126,8 @@ const SessionSchema = z.object({
   id: z.int().positive(),
   role: z.enum(['editor', 'viewer'])
 })
-/** A signed-in operator, as the session cookie carries them. */
-type AdminSession = z.infer<typeof SessionSchema>
+/** The session cookie's payload must satisfy {@link AdminSession}. */
+const sessionShape: z.ZodType<AdminSession> = SessionSchema
 
 /** What the admin app runs with. */
 export interface AdminAppOptions {
@@ -126,6 +144,8 @@ export interface AdminAppOptions {
    * @returns a key for the client
    */
   readonly clientKey?: (env: unknown) => string
+  /** The API listener's settings, for the doctor and the stats. */
+  readonly server: AdminServerFacts
 }
 
 /** What the route groups share. */
@@ -138,6 +158,8 @@ interface AdminDeps {
   readonly redirectUri: string
   /** Whether cookies are `Secure`: exactly when the admin UI is `https`. */
   readonly secure: boolean
+  /** The API listener's settings, for the doctor and the stats. */
+  readonly server: AdminServerFacts
 }
 
 /** A refusal a callback answers with: its status and its text. */
@@ -393,7 +415,7 @@ function addSignIn(app: Hono, deps: AdminDeps): void {
 }
 
 /**
- * Adds the session routes: sign-out, the session guard on `/admin/api/*`, and who is signed in.
+ * Adds the session routes: sign-out, and the API under `/admin/api/`, which needs a session.
  *
  * @param app - the admin app
  * @param deps - what the routes share
@@ -407,7 +429,7 @@ function addSession(app: Hono, deps: AdminDeps): void {
    * @returns the operator, or `undefined` when there is no valid session
    */
   const sessionOf = (cookie: string | undefined): AdminSession | undefined =>
-    sealer.unseal('session', cookie, SessionSchema, now())
+    sealer.unseal('session', cookie, sessionShape, now())
 
   app.post('/admin/auth/sign-out', (context) => {
     const session = sessionOf(getCookie(context, SESSION_COOKIE))
@@ -416,18 +438,14 @@ function addSession(app: Hono, deps: AdminDeps): void {
     return context.body(null, HTTP_NO_CONTENT)
   })
 
-  // The one API route so far checks its own session; unknown API paths are a plain 404, which
-  // says nothing about whether one is signed in.
-  app.get('/admin/api/session', (context) => {
-    const session = sessionOf(getCookie(context, SESSION_COOKIE))
-    if (session === undefined) {
-      return context.json(
-        { error: { code: 'not_signed_in', message: 'Sign in at /admin/auth/sign-in' } },
-        HTTP_UNAUTHORIZED
-      )
-    }
-    return context.json({ login: session.login, role: session.role })
-  })
+  app.route(
+    '/admin/api',
+    createAdminApi({
+      sessionOf: (cookieHeader) => sessionOf(cookieValue(cookieHeader, SESSION_COOKIE)),
+      server: deps.server,
+      now
+    })
+  )
 }
 
 /**
@@ -448,7 +466,8 @@ export function createAdminApp(options: AdminAppOptions): Hono {
     redirectUri: `${publicOrigin.origin}/admin/auth/callback`,
     // A `Secure` cookie is kept from an `http` origin only on localhost; the admin UI is https
     // beyond loopback (`adminUiProblems`), so `Secure` exactly when it is https.
-    secure: publicOrigin.protocol === 'https:'
+    secure: publicOrigin.protocol === 'https:',
+    server: options.server
   }
   const app = new Hono()
   addGuards(app, deps, options.clientKey ?? socketKey)

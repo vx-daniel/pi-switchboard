@@ -1825,15 +1825,18 @@ no setting loosens them.
 
 ### Admin UI (#367)
 
-Status: the listener and sign-in are built; the pages come in later slices (constitution 3.13.0
+Status: the listener, sign-in and read API are built; the pages come in later slices (constitution 3.13.0
 admits them). The first slice moved the settings model the console's Settings view renders into
 `src/config/settings.ts`, so the console and the admin UI share one list of settings, their
 groups, when each applies and what overrides it. The second added the `adminUi` section
 (`src/config/admin-schema.ts`, resolved with its env vars and secrets in `src/config/admin.ts`),
 the listener (`src/admin/listen.ts`, started by `src/cli.ts` after the API's, so by every
 `pi-switchboard` server, the pi package's included, never the console), and sign-in
-(`src/admin/app.ts`, `github.ts`, `sealed.ts`, `roles.ts`): the only API route is
-`GET /admin/api/session`. The operator's guide is [`docs/admin-ui.md`](docs/admin-ui.md).
+(`src/admin/app.ts`, `github.ts`, `sealed.ts`, `roles.ts`). The third added the read API the
+phase-1 pages use (`src/admin/api.ts`, read from the running process by `src/admin/reads.ts`):
+`/admin/api/session`, `requests` (and its SSE `requests/stream`), `accounts`, `models`, `stats`
+and `doctor`, each behind a session, none writing. The operator's guide is
+[`docs/admin-ui.md`](docs/admin-ui.md).
 
 **What it is.** A web interface for a proxy run in Docker, so it can be configured without the
 terminal console. React with Tailwind CSS 4 and daisyUI 5, as j5's dashboard uses

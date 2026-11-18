@@ -115,7 +115,7 @@ export function readDoctorStats(
  * @param now - the current time
  * @returns what could be read
  */
-function readStats(enabled: boolean, window: StatsWindow, now: number): DoctorStats {
+export function readStats(enabled: boolean, window: StatsWindow, now: number): DoctorStats {
   if (!enabled) return { state: { kind: 'off' }, fallbacksByAlias: undefined }
   const path = statsFilePath()
   if (!existsSync(path)) return { state: { kind: 'missing', path }, fallbacksByAlias: undefined }
