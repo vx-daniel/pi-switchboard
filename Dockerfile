@@ -17,9 +17,10 @@ WORKDIR /src
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 # No install scripts: `prepare` installs Git hooks, and no dependency may run code at build.
 RUN corepack enable && pnpm install --frozen-lockfile --ignore-scripts
-COPY tsconfig.json vite.config.ts ./
+COPY tsconfig.json vite.config.ts vite.admin.config.ts ./
 COPY src ./src
-RUN pnpm exec vp pack
+# The package's entry points, then the admin UI's pages (dist/admin-ui/, #367).
+RUN pnpm run build
 
 # Production dependencies are installed on the target platform: some ship per-platform binaries.
 FROM ${NODE_IMAGE} AS dependencies

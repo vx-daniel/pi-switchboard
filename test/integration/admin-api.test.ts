@@ -134,6 +134,7 @@ describe('admin API', () => {
       expect.arrayContaining([
         expect.objectContaining({
           provider: 'local',
+          base: 'local',
           label: 'work',
           availableModelCount: 2,
           quota: null,

@@ -2,7 +2,7 @@
 
 The admin UI (#367) is a web page for the people who run a pi-switchboard: they sign in with GitHub, and the editors and viewers lists say who may. It is off by default. The `pi-switchboard` server starts it, wherever it runs: the binary, Docker, the npm CLI, or the proxy the pi package starts (which reads the same `proxy-config.json`). The console (`pi-switchboard tui`) ignores it.
 
-So far it is the sign-in and the API the pages will read: who is signed in, the requests (also as a live stream), the logins, the models and aliases, the stats and the doctor's findings, all read-only ([The API](#the-api)). The pages themselves, and then the ones that change settings, come in later releases ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
+Signed in, it shows the proxy's requests as they happen, its logins with their quota and routing order, the models and aliases, the stats over a day, a week or 30 days, and the doctor's findings, all read-only ([The pages](#the-pages)). Pages that change settings come in a later release ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
 
 ## What it never does
 
@@ -69,7 +69,7 @@ In `proxy-config.json`:
 }
 ```
 
-Then start `pi-switchboard` and open `http://127.0.0.1:4142/admin/auth/sign-in`. After GitHub, the browser lands on `/admin/api/session`, which shows your login and role.
+Then start `pi-switchboard` and open `http://127.0.0.1:4142/admin/`: it offers the GitHub sign-in, and brings you back to the pages.
 
 ## Every setting
 
@@ -133,6 +133,21 @@ The flow is GitHub's [web application flow for GitHub Apps](https://docs.github.
 `POST /admin/auth/sign-out` clears the session cookie. Sign-in and the callback (not sign-out) allow 20 requests a minute from one address; every response forbids framing, caching and sending a `Referer`; and a request that changes something must carry the admin UI's own `Origin`.
 
 Behind a reverse proxy every request comes from the reverse proxy's address, so everyone shares those 20 a minute. The admin UI doesn't trust `X-Forwarded-For`, which a client can write. Limit per client at the reverse proxy if several people sign in at once.
+
+## The pages
+
+`/admin/` is one page, with a tab for each view (the address's `#/accounts` names it, so a view can be bookmarked):
+
+| Tab | Shows |
+|---|---|
+| Requests | Each request, newest first, as it happens: its path, status and time, and for a chat the alias, the model, the attempt and how it ended; the proxy's own events (where it listens, logins added) among them |
+| Accounts | Each login, grouped by provider in routing order: its label, whether it is a subscription or an API key, its place in the order, its quota windows and when they reset, a reserve it is below, and its cooldowns |
+| Models | The models a client can name, with their context and reasoning efforts; each alias and what it points at, the built-in `-latest` ones, and why any is left out |
+| Stats | A day, a week or 30 days: totals, requests and failures over time, each model's numbers, and what failed |
+| Doctor | `pi-switchboard doctor`'s findings over the same windows, most serious first |
+| Logins | The commands that add a login, in a terminal; this page can't |
+
+The npm package, the Docker image and the standalone binary all carry the pages; the binary has them built in. They load nothing from another site: every script and style comes from the admin listener itself.
 
 ## The API
 
