@@ -37,10 +37,10 @@ An alias can name several models, tried in order, and the failures that move to 
 |---|---|
 | `rate_limit` | 429, or a usage limit (a ChatGPT login's Codex limit); the client sees `rate_limit` or `insufficient_quota` ([API](api.md)), routing treats both the same |
 | `unavailable` | 503, 529 overloaded, or a provider saying it is out of capacity |
-| `timeout` | 504, or the upstream idle timeout |
+| `timeout` | 504, the upstream idle timeout, or a connection that timed out before it opened |
 | `auth` | The credential fails (the provider's 401 or 403, or no credential pi can resolve: `502` `upstream_credentials_missing`) |
 | `refused` | The login can't run the model (`404 model_not_found`) |
-| `upstream_error` | Any other upstream failure, a network failure included |
+| `upstream_error` | Any other upstream failure, other network failures included (a refused connection, a dropped one) |
 
 - **Never on the request's own fault, or once the answer has started.** A `400`, the client leaving, and a failure after a stream sent its first byte are answered as they are without a chain. After the last target, the client gets that target's failure.
 - **Visible.** The response's `model` is the model that answered. `x_pi.attempts` lists each model tried before it and why it failed (`[{ "model": "anthropic/claude-opus-5-5", "reason": "rate_limit" }]`), in a non-streamed response and in every stream chunk. Each hop is a warning in the log, naming the alias, the model, the class and the next model. Each upstream call's log lines (`pi.complete`; the result line, with its tokens and cost, is at `debug`) carry the `alias` (`null` for a request that named a model) and the call's `attempt` number, so a log tool can add up usage by route.

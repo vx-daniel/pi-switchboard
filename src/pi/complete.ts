@@ -34,7 +34,7 @@ import {
 import { observingFetch } from '@proxy/pi/quota'
 import { getRuntime } from '@proxy/pi/registry'
 import { capturingFetch, type FailedResponse } from '@proxy/pi/reset-time'
-import { upstreamTemperature } from '@proxy/pi/temperature'
+import { isAnthropicModel, upstreamTemperature } from '@proxy/pi/temperature'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
 import { errorMessage, isRecord } from '@proxy/utils/guards'
 
@@ -236,6 +236,25 @@ function transportOptions(model: Model<Api>): Pick<SimpleStreamOptions, 'transpo
 }
 
 /**
+ * Gives pi an Anthropic model with message threads off.
+ *
+ * @remarks
+ * pi 1.5.1 turns threads on for `api.anthropic.com` (or `compat.supportsMessageThreads`) whenever
+ * a call has a `sessionId`, the request's `prompt_cache_key`. `disableContinuation` stops the
+ * `thread` field, but pi still adds the `message-threads-2026-08-12` beta; with this compat flag
+ * off it sends neither (#360, #361; the decision keeps the beta off Anthropic traffic). The copy
+ * goes to pi only: the proxy keeps reporting and logging the model as it is.
+ *
+ * @param model - the pi model
+ * @returns a copy with `compat.supportsMessageThreads: false` on the Anthropic Messages API, else
+ *   `model`
+ */
+function withoutMessageThreads(model: Model<Api>): Model<Api> {
+  if (!isAnthropicModel(model)) return model
+  return { ...model, compat: { ...model.compat, supportsMessageThreads: false } }
+}
+
+/**
  * Takes the request's generation settings: reasoning level, temperature and output token limit.
  *
  * @param model - the pi model
@@ -317,7 +336,13 @@ async function buildStreamOptions(
 ): Promise<SimpleStreamOptions> {
   const opts: SimpleStreamOptions = {
     ...generationOptions(model, request),
-    ...userAndCacheKeyOptions(model, request)
+    ...userAndCacheKeyOptions(model, request),
+    // No server-side continuation (#360, #361): pi 1.5.1 continues an Anthropic conversation on
+    // the provider's side when calls share a `sessionId`, sending only the new messages. The proxy
+    // keeps no conversation state (constitution, Scope), so every request sends the whole
+    // conversation. This is pi's general switch for any provider's continuation state;
+    // `withoutMessageThreads` also keeps Anthropic's threads beta off.
+    disableContinuation: true
   }
 
   // The client disconnect signal combined with the upstream idle timeout
@@ -588,7 +613,7 @@ async function openUpstream(
   logUpstreamStart(call, opts, context, request)
   let eventStream: AssistantMessageEventStream
   try {
-    eventStream = getRuntime().streamSimple(model, context, opts)
+    eventStream = getRuntime().streamSimple(withoutMessageThreads(model), context, opts)
   } catch (error) {
     idle?.dispose()
     logUpstreamThrow(call, error)

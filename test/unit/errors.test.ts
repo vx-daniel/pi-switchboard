@@ -2,12 +2,10 @@ import type { AssistantMessage } from '@earendil-works/pi-ai'
 import {
   forClientKey,
   invalidRequest,
-  limitAnswer,
   mapFailedCall,
   mapUpstreamError,
   modelNotFound,
-  unsupportedParameter,
-  USAGE_LIMIT_MIN_WAIT_MS
+  unsupportedParameter
 } from '@proxy/server/errors'
 import { describe, expect, test } from 'vite-plus/test'
 
@@ -306,7 +304,20 @@ describe('mapUpstreamError', () => {
       'ServiceUnavailableException: Service unavailable',
       UNAVAILABLE
     ],
-    ['a dropped connection', 'terminated', PROVIDER_FAILED]
+    ['a dropped connection', 'terminated', PROVIDER_FAILED],
+    // pi 1.5 appends a connection failure's deepest cause to the SDK's generic message (pi#11695,
+    // #360). A refusal stays a provider failure; a connect timeout now reads as a timeout, where
+    // pi 1.4's bare "Connection error." was a provider failure. A port number is not a status.
+    [
+      'a refused connection, with pi 1.5 cause',
+      'Connection error.: connect ECONNREFUSED 127.0.0.1:503 (ECONNREFUSED)',
+      PROVIDER_FAILED
+    ],
+    [
+      'a connect timeout, with pi 1.5 cause',
+      'Connection error.: Connect Timeout Error (UND_ERR_CONNECT_TIMEOUT)',
+      TIMED_OUT
+    ]
   ])('maps %s', (_case, upstreamMessage, expected) => {
     expect(mapUpstreamError(new Error(upstreamMessage))).toEqual(expected)
   })
@@ -411,6 +422,15 @@ describe('mapUpstreamError', () => {
     ],
     ['"usage limitations" is not a limit', 'Read the usage limitations first', PROVIDER_FAILED],
     ['usage limits, plural', 'You have reached your usage limits for today', USAGE_LIMITED],
+    // pi 1.5 stopped retrying Zhipu/Z.ai's code 1308 (#360): a plan limit sent as a 429 that
+    // resets after hours. The code decides, whatever the message says; a longer code does not.
+    [
+      'a Zhipu 1308 limit',
+      '429 {"error":{"code":"1308","message":"Limit reached for this period"}}',
+      USAGE_LIMITED
+    ],
+    ['a Zhipu 1308 limit, numeric code', '429 {"error":{"code": 1308}}', USAGE_LIMITED],
+    ['a longer code is not 1308', '429 {"error":{"code":"13080"}}', RATE_LIMITED],
     ['a model at capacity', 'The model is at capacity, please try again later', OVERLOADED],
     ['busy servers', 'Servers are currently busy', OVERLOADED],
     ['a server_busy code', '{"error":{"type":"server_busy"}}', OVERLOADED],
@@ -567,50 +587,5 @@ describe('mapFailedCall', () => {
 
     expect(mapped).toEqual(CONTEXT_OVERFLOW)
     expect(JSON.stringify(mapped)).not.toContain(QUOTED)
-  })
-})
-
-describe('limitAnswer (#199)', () => {
-  const rateLimited = mapUpstreamError(new Error('429 Too Many Requests'))
-  const usageLimited = mapUpstreamError(new Error('You have hit your ChatGPT usage limit.'))
-
-  // Catches a short limit sent without the wait the provider gave (the client retries in its own
-  // backoff, too soon), or with the seconds rounded down to a wait that ends early.
-  test('a rate limit with a known wait says when to retry, rounded up', () => {
-    expect(limitAnswer(rateLimited, 29_500)).toEqual({
-      answer: rateLimited,
-      headers: { 'retry-after': '30', 'retry-after-ms': '29500' }
-    })
-  })
-
-  // Catches a header made up when the provider said nothing.
-  test('a rate limit with no known wait has no retry headers', () => {
-    expect(limitAnswer(rateLimited, undefined)).toEqual({ answer: rateLimited, headers: {} })
-  })
-
-  // Catches the boundary drifting: a wait just under it is a rate limit, at it a usage limit,
-  // which tells the SDKs not to retry and sends no wait of hours for a client to sit out.
-  test('a wait of at least the threshold is a usage limit, with x-should-retry: false', () => {
-    expect(limitAnswer(rateLimited, USAGE_LIMIT_MIN_WAIT_MS - 1).answer).toBe(rateLimited)
-    expect(limitAnswer(rateLimited, USAGE_LIMIT_MIN_WAIT_MS)).toEqual({
-      answer: usageLimited,
-      headers: { 'x-should-retry': 'false' }
-    })
-  })
-
-  // Catches a usage limit recognized by its words answered with a retry wait, or as a rate limit,
-  // when it says no time.
-  test('a usage limit by its words is one whatever the wait', () => {
-    expect(limitAnswer(usageLimited, 10_000)).toEqual({
-      answer: usageLimited,
-      headers: { 'x-should-retry': 'false' }
-    })
-    expect(limitAnswer(usageLimited, undefined).headers).toEqual({ 'x-should-retry': 'false' })
-  })
-
-  // Catches retry headers on a failure that is not a limit.
-  test('any other failure is unchanged, with no headers', () => {
-    const outage = mapUpstreamError(new Error('503: down'))
-    expect(limitAnswer(outage, 60_000)).toEqual({ answer: outage, headers: {} })
   })
 })

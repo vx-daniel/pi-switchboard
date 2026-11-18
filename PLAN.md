@@ -940,7 +940,7 @@ Reason:
 - `parallel_tool_calls`
 - `metadata`
 - `prediction`
-- `prompt_cache_key` (#39): pi's `sessionId`; 1–64 characters after trimming, `null` the same as none. Over 64 is a `400`, because pi itself cuts a key to 64 (`clampOpenAIPromptCacheKey`), which would silently merge keys sharing their first 64 characters. It is never a raw payload field: pi writes it where the API takes one (OpenAI Responses, Codex, chat completions to `api.openai.com`) and sends Anthropic session-affinity headers only when the model's `compat.sendSessionAffinityHeaders` is on and the login is not OAuth. On Codex pi also keeps one WebSocket per key and login for 5 minutes and sends only the new input with `previous_response_id` when the request extends the previous one exactly; any other request goes whole. A client that sends a new key per request leaves one socket open per key for those 5 minutes, which is acceptable for a local proxy (revisit if the proxy is shared). `prompt_cache_retention` (deprecated) and `prompt_cache_options` (no pi equivalent) stay unknown fields (`422`)
+- `prompt_cache_key` (#39): pi's `sessionId`; 1–64 characters after trimming, `null` the same as none. Over 64 is a `400`, because pi itself cuts a key to 64 (`clampOpenAIPromptCacheKey`), which would silently merge keys sharing their first 64 characters. It is never a raw payload field: pi writes it where the API takes one (OpenAI Responses, Codex, chat completions to `api.openai.com`) and sends Anthropic session-affinity headers only when the model's `compat.sendSessionAffinityHeaders` is on and the login is not OAuth. On Codex pi also keeps one WebSocket per key and login for 5 minutes and sends only the new input with `previous_response_id` when the request extends the previous one exactly; any other request goes whole. A client that sends a new key per request leaves one socket open per key for those 5 minutes, which is acceptable for a local proxy (revisit if the proxy is shared). `prompt_cache_retention` (deprecated) and `prompt_cache_options` (no pi equivalent) stay unknown fields (`422`). **Anthropic message threads are off** (#360): from pi 1.5.1, two Anthropic calls sharing a `sessionId` would continue a thread on Anthropic's side, sending only the new messages (on by default for `api.anthropic.com`, or with `compat.supportsMessageThreads`). The proxy keeps no conversation state (constitution, Scope): it gives pi each Anthropic model with `compat.supportsMessageThreads: false` (`withoutMessageThreads`), so pi sends neither `thread` nor the `message-threads-2026-08-12` beta, and passes `disableContinuation: true` on every call, pi's switch for any provider's continuation state (`buildStreamOptions`). Every request sends the whole conversation (`test/integration/message-threads.test.ts`). Whether to turn threads on is #361.
 - `store` (#197): `false` and `null` only. The proxy stores no completion, so "don't store" is what it already does: an honored value (constitution principle I), not a drop. `store` is never a payload field (`OPENAI_PASSTHROUGH_FIELDS` leaves it out): pi sets it itself where the API takes it, and a server that doesn't know it may refuse it. `store: true` is a named 422 (`STORE_TRUE_REFUSAL`, shared with the Responses API). pi's own `openai-completions` adapter sends `store: false` to every host it doesn't recognize (`compat.supportsStore`, guessed from the base URL), so before this every request from pi pointed at the switchboard failed with a 422; `test/integration/pi-client.test.ts` runs pi's adapter against the proxy so the next such field fails a test instead
 - `n` (#197): `1` and `null` only, OpenAI's default. The proxy returns one choice, so `n: 1` is an honored value (constitution principle I). Never a payload field. Any other value is a named 422 (`N_OTHER_THAN_ONE_REFUSAL`, `param: n`). Elixir's LangChain (`brainlid/langchain`) sends `n: 1` on every request, so before this each one failed with a 422. The honored values live in `HONORED_VALUE_FIELDS` (`src/openai/validate.ts`), which also keeps an accepted value from being blamed for another field's error
 - image content parts (base64 data URIs; remote `http`/`https` URLs only with `remoteImages` on, which is off by default, see "Image URL fetching")
@@ -1166,7 +1166,12 @@ Do not claim support for custom tool shapes until a compatible mapping is define
 
 ## Tool schema policy
 
-OpenAI tool parameter schemas are JSON Schema. pi tools expect TypeBox schemas.
+OpenAI tool parameter schemas are JSON Schema, and pi takes them as plain JSON Schema (pi 1.5
+dropped TypeBox from `pi-ai`; pi checks tool arguments with `@earendil-works/pi-schema` in its
+agent loop, which the proxy does not run). The proxy checks a schema against the subset below
+(`src/openai/tool-schema.ts`) and passes it on as the client wrote it, keys in their order, without
+its meta keywords (#360). Before #360 it rebuilt every schema as TypeBox, which sent an `enum` and
+`type: [T, "null"]` as `anyOf` unions.
 
 Stable policy:
 
@@ -1180,10 +1185,10 @@ Supported subset:
 - `type: object` with `properties` and `required`
 - `type: string`, `number`, `integer`, `boolean`, `null`
 - `type: array` with `items` schema
-- `enum` (string values only, mapped to TypeBox Union of literals); a string enum may also carry
+- `enum` (string values only), with no `type` or a `type` of `"string"` or `["string", "null"]`
+  (any other `type` is refused: it reaches the provider as written); a string enum may also carry
   the `string` constraints below (e.g. `format`)
-- nullable types via `type: [T, "null"]`: constraints go on the `T` branch, annotations on the
-  union
+- nullable types via `type: [T, "null"]`, checked as `T` (its constraints) plus annotations
 - `anyOf` for nullable types and simple unions (max 10 branches); a sibling `type` is carried as
   written
 - annotations on any node: `description`, `title`, `default`, `examples`, `deprecated`,
@@ -1262,6 +1267,14 @@ provider's strict subset (Anthropic refuses `minimum`, `maximum`, `multipleOf`, 
 would refuse those requests instead, but it would break every client that sends `strict: true` by
 default on most non-OpenAI routes. Clients that need the guarantee must validate tool arguments
 themselves. docker-agent sends no per-tool `strict` on Chat Completions, so it is unaffected.
+
+**Remembered per session, by decision (#360):** from pi 1.5.1, after Claude rejects a request's
+strict tools for exceeding its strict-tool limits (a 400, after which pi resends the call with
+them non-strict, as before), pi remembers the `sessionId`. Later calls with the same
+`prompt_cache_key` send those tools non-strict at once, on Anthropic and Bedrock, saving the
+rejected request. Clients sharing a key share this. pi bounds it at 10,000 sessions
+(`strict-tool-limits.js`); the proxy never calls `cleanupSessionResources`. It changes no answer:
+`"prefer"` already allows non-strict.
 
 ### Tool schema keywords — resolved
 
@@ -2068,7 +2081,7 @@ src/
 │   ├── responses.ts            -- pi AssistantMessage -> OpenAI ChatCompletion
 │   ├── sse.ts                  -- pi events -> SSE ChatCompletionChunk frames
 │   ├── tools.ts                -- OpenAI function tools -> pi Tool[]
-│   ├── json-schema-to-typebox.ts -- JSON Schema -> TypeBox conversion
+│   ├── tool-schema.ts          -- tool JSON Schema checked against the supported subset (#360)
 │   └── responses-api/          -- the Responses API (#140): request schema and conversion, output, stream, reasoning token, doc schemas
 ├── pi/
 │   ├── registry.ts       -- ModelRuntime + SettingsManager init
@@ -2705,7 +2718,7 @@ Minimum production observability:
 - finish reason mapping
 - usage mapping
 - error mapping
-- JSON Schema -> TypeBox conversion (supported subset and rejected keywords)
+- tool JSON Schema checks (supported subset, rejected keywords, the schema passed on as written)
 - OpenAI function tool -> pi Tool conversion
 - model-exposure filtering, public ID generation, conflict groups
 

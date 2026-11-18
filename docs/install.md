@@ -5,7 +5,7 @@
 | | [Standalone binary](#standalone-binary) | [Docker](#docker) | [npm CLI](#installation) | [pi package](pi-extension.md#pi-integration) |
 |---|---|---|---|---|
 | **Needs** | Nothing else | Docker | Node.js >= 24, a GitHub token for GitHub Packages | Node.js >= 24, pi, a GitHub token |
-| **Logging in** | `./pi-switchboard-<os>-<arch> tui`, then `n`; or `pi /login` | pi, inside the container | `pi-switchboard tui`, then `n`; or `pi /login` | `pi /login` |
+| **Logging in** | `./pi-switchboard-<os>-<arch> tui`, then `n`; or `pi auth login <provider>` | pi, inside the container | `pi-switchboard tui`, then `n`; or `pi auth login <provider>` | `pi auth login <provider>`, or `/login` in pi |
 | **Config and logins** | `~/.pi/agent` | The `pi-agent` volume | `~/.pi/agent` | `~/.pi/agent` |
 | **Updating** | Download the new release's file | Pull the new version's tag; there is no `latest` | `pnpm add -g @vx-daniel/pi-switchboard@latest` | `pi update npm:@vx-daniel/pi-switchboard` |
 | **Console** (`tui`) | Yes | No: it runs headless; [usage over HTTP](api.md#usage-over-http) and the health checks instead | Yes | With the npm CLI installed as well |
@@ -25,13 +25,13 @@ What else you need depends on how you install it:
 | [npm CLI](#installation) | [Node.js](https://nodejs.org) >= 24, the runtime pi uses; pi's packages come with it |
 | [pi package](pi-extension.md#pi-integration) | Node.js >= 24 and [pi](https://github.com/earendil-works/pi) |
 
-Every way needs at least one provider login, stored where pi keeps them: `pi /login`, or `n` in the proxy's own console (`pi-switchboard tui`, [The console](console.md#the-console-logs-logins-and-status-at-a-terminal)). With Docker, you log in through pi inside the container ([Docker](#docker)).
+Every way needs at least one provider login, stored where pi keeps them: `pi auth login <provider>` from a shell (pi 1.5.1 and later; `/login` inside pi does the same), or `n` in the proxy's own console (`pi-switchboard tui`, [The console](console.md#the-console-logs-logins-and-status-at-a-terminal)). With Docker, you log in through pi inside the container ([Docker](#docker)).
 
 ### Headless and scripted setup
 
 - **An API key needs no login.** pi reads provider credentials from the environment: `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GEMINI_API_KEY`, `MISTRAL_API_KEY` and the others in pi's list (`pi-ai`'s `env-api-keys`; a few are not `_API_KEY` names, such as `HF_TOKEN`, `COPILOT_GITHUB_TOKEN` or `GOOGLE_APPLICATION_CREDENTIALS`). Set it where the proxy runs (`docker run -e ANTHROPIC_API_KEY=…`, a systemd `Environment=`, a shell profile) and the provider's models are served from the start.
-- **A subscription (OAuth) is interactive once.** It needs a browser, or a code pasted back, so it can't be scripted: run `pi-switchboard tui` and press `n`, or `pi /login`, once per host. pi keeps the login in `auth.json` and refreshes it from then on. There is no separate `pi-switchboard login` command (#201): it would be the console's `n` without the console.
-- **Restart after a login made elsewhere.** A running proxy reads pi's logins when it starts. A login through its own console is served at once; one made by another process (`pi /login`, another console, an edited `auth.json`) is served after the proxy restarts.
+- **A subscription (OAuth) is interactive once.** It needs a browser, or a code pasted back, so it can't be scripted: run `pi-switchboard tui` and press `n`, or `pi auth login <provider>` (`--no-browser` for a device code or pasted code over SSH, `--api-key` to store a key instead), once per host. pi keeps the login in `auth.json` and refreshes it from then on. There is no separate `pi-switchboard login` command (#201): it would be the console's `n` without the console.
+- **Restart after a login made elsewhere.** A running proxy reads pi's logins when it starts. A login through its own console is served at once; one made by another process (`pi auth login`, `/login` in pi, another console, an edited `auth.json`) is served after the proxy restarts.
 - **Check the result.** `pi-switchboard doctor` (or `./pi-switchboard-<os>-<arch> doctor`) reports, without starting a proxy, whether a login exposes models, what the config gets wrong and how the prompt cache does; it exits with status `1` on an error, for scripts ([Checking the setup](configuration.md#checking-the-setup-pi-switchboard-doctor)).
 
 ## Installation

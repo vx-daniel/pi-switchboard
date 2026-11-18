@@ -115,7 +115,7 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
 ```
 
 - **`lifetime` and `zed` matter only to the pi package**, which starts the proxy from pi and syncs Zed. A standalone proxy (the binary, Docker or the npm CLI) ignores them; leave them out there.
-- **The model IDs are from pi 1.4.0's catalogue.** Catalogues change: use the IDs `GET /v1/models` lists for your logins ([Discovering available models](api.md#discovering-available-models)).
+- **The model IDs are from pi 1.5.2's catalogue.** Catalogues change: use the IDs `GET /v1/models` lists for your logins ([Discovering available models](api.md#discovering-available-models)).
 
 ## What comes from pi
 
@@ -123,7 +123,7 @@ The proxy reads two files from pi's configuration directory (`~/.pi/agent/`):
 
 | File | Managed by | What the proxy uses |
 |---|---|---|
-| `auth.json` | `pi /login` | API keys for each provider (Anthropic, OpenAI, Google, etc.) |
+| `auth.json` | `pi auth login <provider>` (or `/login` in pi) | API keys for each provider (Anthropic, OpenAI, Google, etc.) |
 | `models.json` | pi built-in + user edits | Model definitions, capabilities, and pricing |
 
 From pi's `settings.json` the proxy reads only `enabledModels`, for `scoped` exposure. It does **not** read installed packages, enabled extensions, or session-level model filters (`--models` flag).

@@ -2,21 +2,17 @@
  * Converts OpenAI function tool definitions to pi `Tool` definitions.
  *
  * @remarks
- * Parameter schemas go through `json-schema-to-typebox`, which rejects unsupported JSON Schema
- * constructs. `tool_choice` is not converted here; `src/pi/payload-fields.ts` maps it per API.
+ * Parameter schemas go through `tool-schema`, which rejects unsupported JSON Schema constructs and
+ * passes the rest to pi as plain JSON Schema. `tool_choice` is not converted here;
+ * `src/pi/payload-fields.ts` maps it per API.
  *
  * @packageDocumentation
  */
 
-import {
-  type ConstrainedSamplingConfig,
-  type Tool,
-  type TSchema,
-  Type
-} from '@earendil-works/pi-ai'
+import type { ConstrainedSamplingConfig, Tool } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
-import { jsonSchemaToTypebox } from '@proxy/openai/json-schema-to-typebox'
 import type { OpenAIFunctionTool } from '@proxy/openai/schemas'
+import { checkToolSchema } from '@proxy/openai/tool-schema'
 
 /** Logger for tool conversion. */
 const toolsLogger = proxyLogger('openai', 'tools')
@@ -68,13 +64,13 @@ export function convertTools(openaiTools: OpenAIFunctionTool[]): ToolConversionR
     if (tool === undefined) continue
 
     const fn = tool.function
-    let parameters: TSchema
+    let parameters: Record<string, unknown>
 
     if (fn.parameters === undefined) {
       // No parameters specified: empty object schema
-      parameters = Type.Object({})
+      parameters = { type: 'object', properties: {} }
     } else {
-      const result = jsonSchemaToTypebox(
+      const result = checkToolSchema(
         fn.parameters,
         `tools[${String(toolIndex)}].function.parameters`
       )

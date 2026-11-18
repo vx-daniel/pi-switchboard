@@ -56,7 +56,7 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 
 ## Coding rules that matter in this repo
 
-- Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4 + TypeBox**. Bun is a build tool for the standalone binary only; the binary's tests run in their own CI job, never in the gate or a hook.
+- Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4**. Tool parameter schemas go to pi as plain JSON Schema; the proxy uses no TypeBox (#360). Bun is a build tool for the standalone binary only; the binary's tests run in their own CI job, never in the gate or a hook.
 - Tests import from `vite-plus/test`, not `vitest` or `bun:test`.
 - Use import alias `@proxy/*` for `src/*`. Do **not** introduce relative imports across the source tree. The one exception is `scripts/`, which runs under plain Node (no alias): it imports `src/` by relative `.ts` path, and a module it imports (`src/pi/account-provider.ts`) may import only packages and Node built-ins, which lint enforces (`vite.config.ts`).
 - Use `import type` where required.

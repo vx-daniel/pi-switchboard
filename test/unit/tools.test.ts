@@ -5,10 +5,7 @@ describe('convertTools', () => {
   /**
    * Round-trips a value through JSON, giving the schema as pi sends it upstream.
    *
-   * @remarks
-   * TypeBox adds symbol keys that never leave the process; JSON drops them.
-   *
-   * @param schema - the converted value: a TypeBox schema or a whole conversion result
+   * @param schema - the converted value: a schema or a whole conversion result
    * @returns the JSON-parsed copy
    */
   function asJson(schema: unknown): unknown {
@@ -16,8 +13,9 @@ describe('convertTools', () => {
   }
 
   // Catches a converter that ignores `parameters` (an empty object schema would pass a type check),
-  // drops `required` or descriptions, or encodes an enum as something other than const branches.
-  // Constraint keywords are locked per type in json-schema-to-typebox.test.ts.
+  // drops `required` or descriptions, or rewrites the client's schema, as the TypeBox conversion
+  // before #360 sent an enum as `anyOf` const branches. Constraint keywords are locked per type in
+  // tool-schema.test.ts.
   test('converts a function tool into exactly the schema sent upstream', () => {
     const result = convertTools([
       {
@@ -45,18 +43,13 @@ describe('convertTools', () => {
     expect(tool?.description).toBe('Get the weather for a city')
     expect(asJson(tool?.parameters)).toEqual({
       type: 'object',
-      required: ['city'],
       properties: {
         city: { type: 'string', description: 'The city name' },
-        unit: {
-          anyOf: [
-            { type: 'string', const: 'celsius' },
-            { type: 'string', const: 'fahrenheit' }
-          ]
-        },
+        unit: { type: 'string', enum: ['celsius', 'fahrenheit'] },
         days: { type: 'integer' },
         tags: { type: 'array', items: { type: 'string' } }
-      }
+      },
+      required: ['city']
     })
   })
 
@@ -135,7 +128,8 @@ describe('convertTools', () => {
     })
   })
 
-  // Catches a missing description sent as undefined (some providers reject it) instead of ''.
+  // Catches a missing description sent as undefined (some providers reject it) instead of '', or
+  // the client's `parameters` rewritten.
   test('handles tool with empty description', () => {
     const result = convertTools([
       {
@@ -149,7 +143,7 @@ describe('convertTools', () => {
 
     expect(asJson(result)).toEqual({
       ok: true,
-      tools: [{ name: 'no_desc', description: '', parameters: { type: 'object', properties: {} } }]
+      tools: [{ name: 'no_desc', description: '', parameters: { type: 'object' } }]
     })
   })
 
