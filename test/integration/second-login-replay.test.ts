@@ -3,8 +3,8 @@
  * through `anthropic-2`, a login slot, by the proxy's own copy of pi's Anthropic provider
  * (`src/pi/account-provider.ts`), and Anthropic answered it. Replayed here, the proxy's request
  * for a model put on that login must carry the login's own token and be shaped exactly as the one
- * Anthropic accepted: the same headers (the Claude Code ones an OAuth token needs) and the same
- * system prompt.
+ * Anthropic accepted: the same headers (the Claude Code ones an OAuth token needs; `user-agent` by
+ * its form, as pi stamps its own Claude Code version, #362) and the same system prompt.
  *
  * Expected values come from the recording, so a re-recording tests the same thing. The tokens are
  * fakes; nothing here calls Anthropic.
@@ -31,6 +31,8 @@ const BASE_TOKEN = 'sk-ant-oat01-notarealsecret-base-login'
 const SECOND_TOKEN = 'sk-ant-oat01-notarealsecret-second-login'
 /** How long the fake logins stay valid: past any test, so pi never refreshes them. */
 const LOGIN_LIFETIME_MS = 3_600_000
+/** Claude Code's `user-agent`, which Anthropic expects with an OAuth token: `claude-cli/2.1.322`. */
+const CLAUDE_CODE_USER_AGENT = expect.stringMatching(/^claude-cli\/\d+\.\d+\.\d+$/)
 
 let mock: MockProvider
 let agentDir: FixtureAgentDir
@@ -94,7 +96,10 @@ describe('a second login, replayed from real traffic (#233)', () => {
     expect(isRecord(body) ? body['x_pi'] : undefined).toMatchObject({ login: 'anthropic-2' })
     expect(upstream?.headers.authorization).toBe(`Bearer ${SECOND_TOKEN}`)
     for (const [header, recordedValue] of Object.entries(recording.request.headers)) {
-      expect({ [header]: upstream?.headers[header] }).toEqual({ [header]: recordedValue })
+      // pi stamps its own Claude Code version, and pi 1.5.2 moved it past the recording's (#362):
+      // the header must be there in Claude Code's form; its version is pi's to choose.
+      const expected = header === 'user-agent' ? CLAUDE_CODE_USER_AGENT : recordedValue
+      expect({ [header]: upstream?.headers[header] }).toEqual({ [header]: expected })
     }
     const recorded = isRecord(recording.request.body) ? recording.request.body : {}
     const sent = isRecord(upstream?.body) ? upstream.body : {}

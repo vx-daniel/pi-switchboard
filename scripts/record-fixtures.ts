@@ -41,14 +41,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { homedir, tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 
-import {
-  type Api,
-  type Context,
-  type Model,
-  type Provider,
-  type SimpleStreamOptions,
-  Type
-} from '@earendil-works/pi-ai'
+import type { Api, Context, Model, Provider, SimpleStreamOptions } from '@earendil-works/pi-ai'
 import { builtinProviders } from '@earendil-works/pi-ai/providers/all'
 import { ModelRuntime, VERSION } from '@earendil-works/pi-coding-agent'
 
@@ -82,17 +75,17 @@ const LONG_SYSTEM_PROMPT = Array.from(
     `Reference line ${String(lineIndex)}: the recorder pads this prompt so the provider caches it.`
 ).join('\n')
 
-/** Two tools for the `two-tool-calls` scenario. */
+/** Two tools for the `two-tool-calls` scenario, in plain JSON Schema as pi 1.5 takes it (#360). */
 const WEATHER_TOOLS: Context['tools'] = [
   {
     name: 'get_weather',
     description: 'Current weather for a city',
-    parameters: Type.Object({ city: Type.String() })
+    parameters: { type: 'object', properties: { city: { type: 'string' } }, required: ['city'] }
   },
   {
     name: 'get_time',
     description: 'Current time in a time zone',
-    parameters: Type.Object({ zone: Type.String() })
+    parameters: { type: 'object', properties: { zone: { type: 'string' } }, required: ['zone'] }
   }
 ]
 

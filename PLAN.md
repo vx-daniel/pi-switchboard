@@ -1166,7 +1166,12 @@ Do not claim support for custom tool shapes until a compatible mapping is define
 
 ## Tool schema policy
 
-OpenAI tool parameter schemas are JSON Schema. pi tools expect TypeBox schemas.
+OpenAI tool parameter schemas are JSON Schema, and pi takes them as plain JSON Schema (pi 1.5
+dropped TypeBox from `pi-ai`; pi checks tool arguments with `@earendil-works/pi-schema` in its
+agent loop, which the proxy does not run). The proxy checks a schema against the subset below
+(`src/openai/tool-schema.ts`) and passes it on as the client wrote it, keys in their order, without
+its meta keywords (#360). Before #360 it rebuilt every schema as TypeBox, which sent an `enum` and
+`type: [T, "null"]` as `anyOf` unions.
 
 Stable policy:
 
@@ -1180,10 +1185,9 @@ Supported subset:
 - `type: object` with `properties` and `required`
 - `type: string`, `number`, `integer`, `boolean`, `null`
 - `type: array` with `items` schema
-- `enum` (string values only, mapped to TypeBox Union of literals); a string enum may also carry
-  the `string` constraints below (e.g. `format`)
-- nullable types via `type: [T, "null"]`: constraints go on the `T` branch, annotations on the
-  union
+- `enum` (string values only); a string enum may also carry the `string` constraints below (e.g.
+  `format`)
+- nullable types via `type: [T, "null"]`, checked as `T` (its constraints) plus annotations
 - `anyOf` for nullable types and simple unions (max 10 branches); a sibling `type` is carried as
   written
 - annotations on any node: `description`, `title`, `default`, `examples`, `deprecated`,
@@ -2068,7 +2072,7 @@ src/
 │   ├── responses.ts            -- pi AssistantMessage -> OpenAI ChatCompletion
 │   ├── sse.ts                  -- pi events -> SSE ChatCompletionChunk frames
 │   ├── tools.ts                -- OpenAI function tools -> pi Tool[]
-│   ├── json-schema-to-typebox.ts -- JSON Schema -> TypeBox conversion
+│   ├── tool-schema.ts          -- tool JSON Schema checked against the supported subset (#360)
 │   └── responses-api/          -- the Responses API (#140): request schema and conversion, output, stream, reasoning token, doc schemas
 ├── pi/
 │   ├── registry.ts       -- ModelRuntime + SettingsManager init
@@ -2705,7 +2709,7 @@ Minimum production observability:
 - finish reason mapping
 - usage mapping
 - error mapping
-- JSON Schema -> TypeBox conversion (supported subset and rejected keywords)
+- tool JSON Schema checks (supported subset, rejected keywords, the schema passed on as written)
 - OpenAI function tool -> pi Tool conversion
 - model-exposure filtering, public ID generation, conflict groups
 

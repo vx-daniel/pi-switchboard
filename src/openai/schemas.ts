@@ -188,8 +188,8 @@ const streamOptionsSchema = z.object({
  * OpenAI function tool definition.
  *
  * @remarks
- * `parameters` is only checked to be an object here; conversion to TypeBox happens in
- * `json-schema-to-typebox.ts`.
+ * `parameters` is only checked to be an object here; its schema is checked against the supported
+ * subset in `tool-schema.ts`.
  */
 const functionToolSchema = z.object({
   type: z.literal('function'),

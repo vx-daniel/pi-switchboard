@@ -1,11 +1,16 @@
 /**
- * Converts the JSON Schema of OpenAI function tool parameters to TypeBox.
+ * Checks the JSON Schema of OpenAI function tool parameters against the subset the proxy supports.
  *
  * @remarks
+ * pi takes tool parameters as plain JSON Schema (pi 1.5: `Tool.parameters`, validated by pi with
+ * `@earendil-works/pi-schema` where it validates at all; #360). So the client's schema goes to pi as
+ * written, once it is checked here.
+ *
  * Contract:
  * - Support a documented subset of JSON Schema only
- * - Reject unsupported schema constructs with a {@link SchemaConversionError}
+ * - Reject unsupported schema constructs with a {@link ToolSchemaError}
  * - Do not silently downgrade schemas: every keyword is carried over, dropped as meta, or rejected
+ * - Carry the schema as the client wrote it: no keyword is rewritten, and keys keep their order
  *
  * Supported subset:
  * - type: object, string, number, integer, boolean, array, null
@@ -14,7 +19,7 @@
  * - nullable via type: [T, "null"]
  * - anyOf for nullable types and simple unions (max 10 branches); a sibling `type` is carried
  * - annotations on any node: description, title, default, examples, deprecated, readOnly, writeOnly
- * - constraints per type, carried over (see TYPE_CONVERTERS), also on a string enum:
+ * - constraints per type, carried over (see TYPE_RULES), also on a string enum:
  *   string minLength, maxLength, pattern, format, const; number and integer minimum, maximum,
  *   exclusiveMinimum, exclusiveMaximum, multipleOf, const; boolean const; array minItems,
  *   maxItems, uniqueItems; object minProperties, maxProperties, additionalProperties (boolean)
@@ -31,31 +36,30 @@
  * @packageDocumentation
  */
 
-import { type TSchema, Type } from '@earendil-works/pi-ai'
 import { proxyLogger } from '@proxy/logging'
 import { isRecord } from '@proxy/utils/guards'
 
-/** Successful conversion: the TypeBox schema. */
-export interface SchemaConversionSuccess {
+/** Accepted schema: the client's, without its meta keywords. */
+export interface ToolSchemaSuccess {
   readonly ok: true
-  readonly schema: TSchema
+  readonly schema: Record<string, unknown>
 }
 
-/** Failed conversion: why, and the path of the offending node. */
-export interface SchemaConversionError {
+/** Refused schema: why, and the path of the offending node. */
+export interface ToolSchemaError {
   readonly ok: false
   readonly message: string
   readonly path: string
 }
 
-/** Outcome of {@link jsonSchemaToTypebox}, discriminated on `ok`. */
-export type SchemaConversionResult = SchemaConversionSuccess | SchemaConversionError
+/** Outcome of {@link checkToolSchema}, discriminated on `ok`. */
+export type ToolSchemaResult = ToolSchemaSuccess | ToolSchemaError
 
 /**
  * Unsupported JSON Schema keywords rejected before anything else on a node.
  *
  * @remarks
- * `anyOf` is not here: it is converted for nullable types and simple unions.
+ * `anyOf` is not here: it is supported for nullable types and simple unions.
  */
 const REJECTED_KEYWORDS = [
   '$ref',
@@ -68,7 +72,7 @@ const REJECTED_KEYWORDS = [
   'not'
 ] as const
 
-/** Logger for JSON Schema conversion. */
+/** Logger for JSON Schema checks. */
 const schemaLogger = proxyLogger('openai', 'schema')
 
 /** Maximum number of `anyOf` branches. */
@@ -114,7 +118,7 @@ const KEYWORD_VALUE_KINDS: Readonly<
   json: { description: 'a JSON value', accepts: (keywordValue) => keywordValue !== undefined }
 }
 
-/** Annotations: allowed on any node, carried into the converted schema. */
+/** Annotations: allowed on any node, carried over. */
 const ANNOTATION_KEYWORDS: ReadonlyMap<string, KeywordValueKind> = new Map([
   ['description', 'string'],
   ['title', 'string'],
@@ -153,61 +157,40 @@ const NUMBER_CONSTRAINTS: ReadonlyMap<string, KeywordValueKind> = new Map([
 /** On an `anyOf` node: a sibling `type`, which some generators emit, carried as written. */
 const ANY_OF_CONSTRAINTS: ReadonlyMap<string, KeywordValueKind> = new Map([['type', 'types']])
 
-/** How one supported `type` converts. */
-interface TypeConverter {
-  /** Validation keywords, carried into the converted schema. */
+/** How one supported `type` is checked. */
+interface TypeRule {
+  /** Validation keywords, carried over. */
   readonly constraints: ReadonlyMap<string, KeywordValueKind>
-  /** Keywords `convert` reads itself, besides `type`. */
+  /** Keywords `check` reads itself, besides `type`. */
   readonly structural: readonly string[]
-  convert(
-    opts: Record<string, unknown>,
-    schema: Record<string, unknown>,
-    path: string
-  ): SchemaConversionResult
+  /**
+   * Checks the node's structural keywords.
+   *
+   * @param schema - the node, its other keywords already checked
+   * @param path - the node's path, for errors
+   * @returns the node as carried, or the error for the first unsupported construct below it
+   */
+  check(schema: Record<string, unknown>, path: string): ToolSchemaResult
 }
 
-/** The converter for each supported `type`. */
-const TYPE_CONVERTERS: ReadonlyMap<string, TypeConverter> = new Map<string, TypeConverter>([
-  [
-    'string',
-    {
-      constraints: STRING_CONSTRAINTS,
-      structural: [],
-      convert: (opts) => ({ ok: true, schema: Type.String(opts) })
-    }
-  ],
-  [
-    'number',
-    {
-      constraints: NUMBER_CONSTRAINTS,
-      structural: [],
-      convert: (opts) => ({ ok: true, schema: Type.Number(opts) })
-    }
-  ],
-  [
-    'integer',
-    {
-      constraints: NUMBER_CONSTRAINTS,
-      structural: [],
-      convert: (opts) => ({ ok: true, schema: Type.Integer(opts) })
-    }
-  ],
-  [
-    'boolean',
-    {
-      constraints: new Map([['const', 'json']]),
-      structural: [],
-      convert: (opts) => ({ ok: true, schema: Type.Boolean(opts) })
-    }
-  ],
-  [
-    'null',
-    {
-      constraints: NO_CONSTRAINTS,
-      structural: [],
-      convert: (opts) => ({ ok: true, schema: Type.Null(opts) })
-    }
-  ],
+/**
+ * Checks a node of a type without children: nothing below it to check, so it is carried as
+ * written.
+ *
+ * @param schema - the node, its keywords already checked
+ * @returns the node as carried
+ */
+function checkLeaf(schema: Record<string, unknown>): ToolSchemaResult {
+  return { ok: true, schema: carried(schema, {}) }
+}
+
+/** The rule for each supported `type`. */
+const TYPE_RULES: ReadonlyMap<string, TypeRule> = new Map<string, TypeRule>([
+  ['string', { constraints: STRING_CONSTRAINTS, structural: [], check: checkLeaf }],
+  ['number', { constraints: NUMBER_CONSTRAINTS, structural: [], check: checkLeaf }],
+  ['integer', { constraints: NUMBER_CONSTRAINTS, structural: [], check: checkLeaf }],
+  ['boolean', { constraints: new Map([['const', 'json']]), structural: [], check: checkLeaf }],
+  ['null', { constraints: NO_CONSTRAINTS, structural: [], check: checkLeaf }],
   [
     'array',
     {
@@ -217,7 +200,7 @@ const TYPE_CONVERTERS: ReadonlyMap<string, TypeConverter> = new Map<string, Type
         ['uniqueItems', 'boolean']
       ]),
       structural: ['items'],
-      convert: (opts, schema, path) => convertArray(schema, path, opts)
+      check: checkArray
     }
   ],
   [
@@ -229,22 +212,22 @@ const TYPE_CONVERTERS: ReadonlyMap<string, TypeConverter> = new Map<string, Type
         ['additionalProperties', 'boolean']
       ]),
       structural: ['properties', 'required'],
-      convert: (opts, schema, path) => convertObject(schema, path, opts)
+      check: checkObject
     }
   ]
 ])
 
 /**
- * Converts a JSON Schema object to a TypeBox schema.
+ * Checks a JSON Schema against the supported subset.
  *
  * @param schema - the JSON Schema, of any shape
  * @param path - the request path of the schema, prefixed to error paths; `''` for the root
- * @returns the TypeBox schema, or the error for the first unsupported construct
+ * @returns the schema as it goes to pi, or the error for the first unsupported construct
  */
-export function jsonSchemaToTypebox(schema: unknown, path = ''): SchemaConversionResult {
-  const result = convertSchema(schema, path)
+export function checkToolSchema(schema: unknown, path = ''): ToolSchemaResult {
+  const result = checkNode(schema, path)
   if (result.ok) {
-    schemaLogger.trace('Converted JSON Schema at {path}', { path: path || 'root' })
+    schemaLogger.trace('Accepted JSON Schema at {path}', { path: path || 'root' })
   } else {
     schemaLogger.debug('Rejected JSON Schema at {path}: {reason}', {
       path: result.path || 'root',
@@ -255,14 +238,34 @@ export function jsonSchemaToTypebox(schema: unknown, path = ''): SchemaConversio
 }
 
 /**
- * Converts one schema node, dispatching on `anyOf`, `enum`, a `type` array, a `type` name or no
+ * Copies a node as the client wrote it, keys in their order, without its meta keywords.
+ *
+ * @param schema - the node
+ * @param children - its checked structural keywords (`properties`, `items`, `anyOf`), by keyword,
+ *   which replace the client's values
+ * @returns the node as carried to pi
+ */
+function carried(
+  schema: Record<string, unknown>,
+  children: Readonly<Record<string, unknown>>
+): Record<string, unknown> {
+  const node: Record<string, unknown> = {}
+  for (const [keyword, keywordValue] of Object.entries(schema)) {
+    if (META_KEYWORDS.has(keyword)) continue
+    node[keyword] = Object.hasOwn(children, keyword) ? children[keyword] : keywordValue
+  }
+  return node
+}
+
+/**
+ * Checks one schema node, dispatching on `anyOf`, `enum`, a `type` array, a `type` name or no
  * type.
  *
  * @param schema - the node, of any shape
  * @param path - the node's path, for errors
- * @returns the TypeBox schema, or the error for the first unsupported construct
+ * @returns the node as carried, or the error for the first unsupported construct
  */
-function convertSchema(schema: unknown, path: string): SchemaConversionResult {
+function checkNode(schema: unknown, path: string): ToolSchemaResult {
   if (!isRecord(schema)) {
     return {
       ok: false,
@@ -276,87 +279,90 @@ function convertSchema(schema: unknown, path: string): SchemaConversionResult {
     return rejected
   }
 
-  // anyOf: nullable types and simple type unions.
-  // Example: anyOf: [{type: "string"}, {type: "null"}] -> Union(String, Null)
+  // anyOf: nullable types and simple type unions, e.g. anyOf: [{type: "string"}, {type: "null"}]
   const anyOf = schema['anyOf']
   if (Array.isArray(anyOf)) {
-    return convertAnyOfNode(schema, anyOf, path)
+    return checkAnyOfNode(schema, anyOf, path)
   }
 
   const enumValues = schema['enum']
   if (Array.isArray(enumValues)) {
-    return convertEnumNode(schema, enumValues, path)
+    return checkEnumNode(schema, enumValues, path)
   }
 
-  return convertByType(schema, path)
+  return checkByType(schema, path)
 }
 
 /**
- * Converts a node with `anyOf`, after checking the keywords beside it.
+ * Checks a node with `anyOf`: the keywords beside it, then each branch.
  *
  * @param schema - the node
  * @param anyOf - its `anyOf` branches
  * @param path - the node's path, for errors
- * @returns the TypeBox union, or the error for the first unsupported construct
+ * @returns the node as carried, or the error for the first unsupported construct
  */
-function convertAnyOfNode(
+function checkAnyOfNode(
   schema: Record<string, unknown>,
   anyOf: unknown[],
   path: string
-): SchemaConversionResult {
-  const keywords = collectKeywords(schema, path, {
+): ToolSchemaResult {
+  const error = checkKeywords(schema, path, {
     structural: ['anyOf'],
     constraints: ANY_OF_CONSTRAINTS
   })
-  return keywords.ok ? convertAnyOf(anyOf, path, keywords.opts) : keywords
+  if (error !== undefined) return error
+  const branches = checkAnyOf(anyOf, path)
+  return branches.ok
+    ? { ok: true, schema: carried(schema, { anyOf: branches.branches }) }
+    : branches
 }
 
 /**
- * Converts a node with `enum`. A string enum may also carry its type's constraints (e.g.
- * `format`).
+ * Checks a node with `enum`. A string enum may also carry its type's constraints (e.g. `format`).
  *
  * @param schema - the node
  * @param enumValues - its `enum` values
  * @param path - the node's path, for errors
- * @returns the TypeBox schema for the values, or the error for the first unsupported construct
+ * @returns the node as carried, or the error for the first unsupported construct
  */
-function convertEnumNode(
+function checkEnumNode(
   schema: Record<string, unknown>,
   enumValues: unknown[],
   path: string
-): SchemaConversionResult {
+): ToolSchemaResult {
   const enumType = schema['type']
-  const keywords = collectKeywords(schema, path, {
+  const error = checkKeywords(schema, path, {
     structural: ['enum', 'type'],
     constraints:
       typeof enumType === 'string'
-        ? (TYPE_CONVERTERS.get(enumType)?.constraints ?? NO_CONSTRAINTS)
+        ? (TYPE_RULES.get(enumType)?.constraints ?? NO_CONSTRAINTS)
         : NO_CONSTRAINTS,
     ...(typeof enumType === 'string' ? { typeName: enumType } : {})
   })
-  return keywords.ok ? convertEnum(enumValues, path, keywords.opts) : keywords
+  if (error !== undefined) return error
+  const valuesError = checkEnumValues(enumValues, path)
+  return valuesError ?? { ok: true, schema: carried(schema, {}) }
 }
 
 /**
- * Converts a node by its `type`: a `[T, "null"]` array, a type name, or none.
+ * Checks a node by its `type`: a `[T, "null"]` array, a type name, or none.
  *
  * @param schema - the node
  * @param path - the node's path, for errors
- * @returns the TypeBox schema, or the error for the first unsupported construct
+ * @returns the node as carried, or the error for the first unsupported construct
  */
-function convertByType(schema: Record<string, unknown>, path: string): SchemaConversionResult {
+function checkByType(schema: Record<string, unknown>, path: string): ToolSchemaResult {
   const rawType = schema['type']
 
-  // Nullable via type: [T, "null"]
   if (Array.isArray(rawType)) {
-    return convertNullableType(rawType, schema, path)
+    return checkNullableType(rawType, schema, path)
   }
 
   if (typeof rawType !== 'string') {
-    return convertUntyped(schema, path)
+    return checkUntyped(schema, path)
   }
 
-  return convertTyped(rawType, schema, path)
+  return checkTyped(rawType, schema, path)
 }
 
 /**
@@ -369,7 +375,7 @@ function convertByType(schema: Record<string, unknown>, path: string): SchemaCon
 function findRejectedKeyword(
   schema: Record<string, unknown>,
   path: string
-): SchemaConversionResult | undefined {
+): ToolSchemaError | undefined {
   for (const keyword of REJECTED_KEYWORDS) {
     if (schema[keyword] !== undefined) {
       schemaLogger.debug('Unsupported JSON Schema keyword {keyword} at {path}', {
@@ -386,16 +392,11 @@ function findRejectedKeyword(
   return undefined
 }
 
-/** Outcome of {@link collectKeywords}: the TypeBox options, or the error. */
-type KeywordCollection =
-  | { readonly ok: true; readonly opts: Record<string, unknown> }
-  | SchemaConversionError
-
 /** What a node may carry besides annotations and meta keywords. */
 interface AllowedKeywords {
-  /** Keywords the node's converter reads itself. */
+  /** Keywords the node's rule reads itself. */
   readonly structural: readonly string[]
-  /** Validation keywords carried into the converted schema. */
+  /** Validation keywords, carried over. */
   readonly constraints: ReadonlyMap<string, KeywordValueKind>
   /** The node's `type`, named in the error for a keyword it does not support. */
   readonly typeName?: string
@@ -405,24 +406,22 @@ interface AllowedKeywords {
 const ANNOTATIONS_ONLY: AllowedKeywords = { structural: [], constraints: NO_CONSTRAINTS }
 
 /**
- * Checks that every keyword of a node is allowed on it, and collects its annotations and
- * constraints as TypeBox options.
+ * Checks that every keyword of a node is allowed on it.
  *
  * @remarks
- * Meta keywords are dropped (logged at debug); anything else not allowed is rejected, so nothing
- * is lost silently.
+ * Meta keywords are allowed (logged at debug; {@link carried} drops them); anything else not
+ * allowed is rejected, so nothing is lost silently.
  *
  * @param schema - the node
  * @param path - the node's path, for errors
  * @param allowed - the structural keywords and constraints the node may carry
- * @returns the TypeBox options, or the error for the first keyword not allowed
+ * @returns the error for the first keyword not allowed, or `undefined`
  */
-function collectKeywords(
+function checkKeywords(
   schema: Record<string, unknown>,
   path: string,
   allowed: AllowedKeywords
-): KeywordCollection {
-  const opts: Record<string, unknown> = {}
+): ToolSchemaError | undefined {
   for (const [keyword, keywordValue] of Object.entries(schema)) {
     if (allowed.structural.includes(keyword)) {
       continue
@@ -438,9 +437,8 @@ function collectKeywords(
     if (error !== undefined) {
       return error
     }
-    opts[keyword] = keywordValue
   }
-  return { ok: true, opts }
+  return undefined
 }
 
 /**
@@ -458,7 +456,7 @@ function checkCarriedKeyword(
   keywordValue: unknown,
   path: string,
   allowed: AllowedKeywords
-): SchemaConversionError | undefined {
+): ToolSchemaError | undefined {
   const kind = ANNOTATION_KEYWORDS.get(keyword) ?? allowed.constraints.get(keyword)
   if (kind === undefined) {
     const forType = allowed.typeName === undefined ? '' : ` for type '${allowed.typeName}'`
@@ -480,7 +478,7 @@ function checkCarriedKeyword(
 }
 
 /**
- * Converts a node without a type to an unconstrained schema.
+ * Checks a node without a type: an unconstrained schema.
  *
  * @remarks
  * Allowed only when the node carries nothing but annotations and meta keywords (e.g. `{}` or
@@ -488,9 +486,9 @@ function checkCarriedKeyword(
  *
  * @param schema - the node
  * @param path - the node's path, for errors
- * @returns `Type.Unknown` with the annotations, or the error for any other keyword
+ * @returns the node as carried, or the error for any other keyword
  */
-function convertUntyped(schema: Record<string, unknown>, path: string): SchemaConversionResult {
+function checkUntyped(schema: Record<string, unknown>, path: string): ToolSchemaResult {
   const onlyAnnotations = Object.keys(schema).every(
     (keyword) => ANNOTATION_KEYWORDS.has(keyword) || META_KEYWORDS.has(keyword)
   )
@@ -501,41 +499,43 @@ function convertUntyped(schema: Record<string, unknown>, path: string): SchemaCo
       path
     }
   }
-  const keywords = collectKeywords(schema, path, ANNOTATIONS_ONLY)
-  return keywords.ok ? { ok: true, schema: Type.Unknown(keywords.opts) } : keywords
+  return checkKeywords(schema, path, ANNOTATIONS_ONLY) ?? { ok: true, schema: carried(schema, {}) }
 }
 
 /**
- * Converts a node with a single `type` name through its {@link TYPE_CONVERTERS} entry.
+ * Checks a node with a single `type` name through its {@link TYPE_RULES} entry.
  *
  * @param rawType - the `type` value
  * @param schema - the node
  * @param path - the node's path, for errors
- * @returns the TypeBox schema, or the error for an unsupported type or keyword
+ * @returns the node as carried, or the error for an unsupported type or keyword
  */
-function convertTyped(
+function checkTyped(
   rawType: string,
   schema: Record<string, unknown>,
   path: string
-): SchemaConversionResult {
-  const converter = TYPE_CONVERTERS.get(rawType)
-  if (converter === undefined) {
+): ToolSchemaResult {
+  const rule = TYPE_RULES.get(rawType)
+  if (rule === undefined) {
     return {
       ok: false,
       message: `Unsupported type '${rawType}' at ${path || 'root'}`,
       path
     }
   }
-  const keywords = collectKeywords(schema, path, {
-    structural: ['type', ...converter.structural],
-    constraints: converter.constraints,
+  const error = checkKeywords(schema, path, {
+    structural: ['type', ...rule.structural],
+    constraints: rule.constraints,
     typeName: rawType
   })
-  return keywords.ok ? converter.convert(keywords.opts, schema, path) : keywords
+  return error ?? rule.check(schema, path)
 }
 
+/** Checked `anyOf` branches, as carried. */
+type AnyOfResult = { readonly ok: true; readonly branches: unknown[] } | ToolSchemaError
+
 /**
- * Converts `anyOf` to a TypeBox Union.
+ * Checks `anyOf` branches.
  *
  * @remarks
  * Supports nullable types (`anyOf: [{type: T}, {type: "null"}]`) and unions of supported
@@ -544,14 +544,10 @@ function convertTyped(
  *
  * @param branches - the `anyOf` array
  * @param path - the node's path, for errors
- * @param opts - the node's collected annotations and sibling `type`
- * @returns the union, or the error for an empty or too long array or a failing branch
+ * @returns the branches as carried, or the error for an empty or too long array or a failing
+ *   branch
  */
-function convertAnyOf(
-  branches: unknown[],
-  path: string,
-  opts: Record<string, unknown>
-): SchemaConversionResult {
+function checkAnyOf(branches: unknown[], path: string): AnyOfResult {
   if (branches.length === 0) {
     return { ok: false, message: `Empty 'anyOf' at ${path || 'root'}`, path }
   }
@@ -563,74 +559,62 @@ function convertAnyOf(
     }
   }
 
-  const converted: TSchema[] = []
+  const checked: unknown[] = []
   for (let branchIndex = 0; branchIndex < branches.length; branchIndex++) {
     // Same form as a property path: no `root` segment when the node is the root.
     const branchSegment = `anyOf[${String(branchIndex)}]`
     const branchPath = path.length > 0 ? `${path}.${branchSegment}` : branchSegment
-    const result = convertSchema(branches[branchIndex], branchPath)
+    const result = checkNode(branches[branchIndex], branchPath)
     if (!result.ok) {
       return result
     }
-    converted.push(result.schema)
+    checked.push(result.schema)
   }
-
-  return { ok: true, schema: Type.Union(converted, opts) }
+  return { ok: true, branches: checked }
 }
 
 /**
- * Converts a string `enum` to a union of string literals.
+ * Checks the values of an `enum`: strings only, at least one.
  *
  * @param values - the `enum` array
  * @param path - the node's path, for errors
- * @param opts - the node's collected annotations and constraints
- * @returns the union, or the error for a non-string value or an empty enum
+ * @returns the error for a non-string value or an empty enum, or `undefined`
  */
-function convertEnum(
-  values: unknown[],
-  path: string,
-  opts: Record<string, unknown>
-): SchemaConversionResult {
-  const stringValues: string[] = []
-  for (const enumValue of values) {
-    if (typeof enumValue !== 'string') {
-      return {
-        ok: false,
-        message: `Only string enums are supported at ${path || 'root'}`,
-        path
-      }
+function checkEnumValues(values: unknown[], path: string): ToolSchemaError | undefined {
+  if (values.some((enumValue) => typeof enumValue !== 'string')) {
+    return {
+      ok: false,
+      message: `Only string enums are supported at ${path || 'root'}`,
+      path
     }
-    stringValues.push(enumValue)
   }
-  if (stringValues.length === 0) {
+  if (values.length === 0) {
     return {
       ok: false,
       message: `Empty enum at ${path || 'root'}`,
       path
     }
   }
-  // A union of literals for the string enum
-  const literals = stringValues.map((enumValue) => Type.Literal(enumValue))
-  return { ok: true, schema: Type.Union(literals, opts) }
+  return undefined
 }
 
 /**
- * Converts `type: [T, "null"]` to a union of `T` and null.
+ * Checks `type: [T, "null"]`.
  *
  * @remarks
- * The annotations go on the union, everything else on the `T` branch, which is converted (and
- * checked) as if `type` were `T`.
+ * The annotations are checked as annotations, everything else as if `type` were `T`. The node is
+ * carried with its `type` array as written.
  *
  * @param typeArray - the `type` array
  * @param schema - the node
  * @param path - the node's path, for errors
- * @returns the union, or the error for any other type array or a failing `T` branch
+ * @returns the node as carried, or the error for any other type array or a failing `T` node
  */
-function convertNullableType(
+function checkNullableType(
   typeArray: unknown[],
   schema: Record<string, unknown>,
   path: string
-): SchemaConversionResult {
+): ToolSchemaResult {
   const nonNullTypes = typeArray.filter((typeName) => typeName !== 'null')
   if (nonNullTypes.length !== 1 || typeArray.length !== NULLABLE_TYPE_ARRAY_LENGTH) {
     return {
@@ -660,60 +644,47 @@ function convertNullableType(
   }
   innerSchema['type'] = innerType
 
-  const annotations = collectKeywords(annotationSchema, path, ANNOTATIONS_ONLY)
-  if (!annotations.ok) {
-    return annotations
+  const annotationsError = checkKeywords(annotationSchema, path, ANNOTATIONS_ONLY)
+  if (annotationsError !== undefined) {
+    return annotationsError
   }
-  const innerResult = convertSchema(innerSchema, path)
-  if (!innerResult.ok) {
-    return innerResult
+  const inner = checkNode(innerSchema, path)
+  if (!inner.ok) {
+    return inner
   }
-
-  return {
-    ok: true,
-    schema: Type.Union([innerResult.schema, Type.Null()], annotations.opts)
-  }
+  // The inner node's checked children (`properties`, `items`), with the `type` array as written.
+  return { ok: true, schema: carried(schema, { ...inner.schema, type: typeArray }) }
 }
 
 /**
  * Reads an object's `required` list.
  *
  * @param rawRequired - the `required` value, or `undefined` when the node has none
- * @returns the required property names (empty without `required`), or `undefined` when `required`
- *   is not an array of strings, which JSON Schema does not allow
+ * @returns whether `required` is absent or an array of strings, the only forms JSON Schema allows
  */
-function collectRequiredNames(rawRequired: unknown): Set<string> | undefined {
-  if (rawRequired === undefined) return new Set()
-  if (!Array.isArray(rawRequired)) return undefined
-  const requiredSet = new Set<string>()
-  for (const requiredName of rawRequired) {
-    if (typeof requiredName !== 'string') return undefined
-    requiredSet.add(requiredName)
-  }
-  return requiredSet
+function isRequiredList(rawRequired: unknown): boolean {
+  return (
+    rawRequired === undefined ||
+    (Array.isArray(rawRequired) &&
+      rawRequired.every((requiredName) => typeof requiredName === 'string'))
+  )
 }
 
 /**
- * Converts an `object` node; properties not in `required` become optional.
+ * Checks an `object` node and each of its properties.
  *
  * @remarks
  * Property paths are `<path>.<name>`, without a `properties` segment. A `required` that is not an
- * array of strings is refused rather than ignored: ignoring it would make every property optional,
- * a silent downgrade of the client's schema.
+ * array of strings is refused rather than passed on: a provider that ignored it would make every
+ * property optional, a silent downgrade of the client's schema.
  *
  * @param schema - the node
  * @param path - the node's path, for errors
- * @param opts - the node's collected annotations and constraints
- * @returns the object schema (empty without `properties`), or the error for a non-object
- *   `properties`, a malformed `required` or a failing property
+ * @returns the node as carried, or the error for a non-object `properties`, a malformed
+ *   `required` or a failing property
  */
-function convertObject(
-  schema: Record<string, unknown>,
-  path: string,
-  opts: Record<string, unknown>
-): SchemaConversionResult {
-  const requiredSet = collectRequiredNames(schema['required'])
-  if (requiredSet === undefined) {
+function checkObject(schema: Record<string, unknown>, path: string): ToolSchemaResult {
+  if (!isRequiredList(schema['required'])) {
     return {
       ok: false,
       message: `'required' must be an array of property names at ${path || 'root'}`,
@@ -722,12 +693,9 @@ function convertObject(
   }
 
   const rawProperties = schema['properties']
-
-  // No properties: an empty object type
   if (rawProperties === undefined) {
-    return { ok: true, schema: Type.Object({}, opts) }
+    return { ok: true, schema: carried(schema, {}) }
   }
-
   if (!isRecord(rawProperties)) {
     return {
       ok: false,
@@ -736,45 +704,37 @@ function convertObject(
     }
   }
 
-  const typeboxProperties: Record<string, TSchema> = {}
-
+  // Keys here are property names, not keywords: a property named `$id` is kept.
+  const properties: Record<string, unknown> = {}
   for (const [key, propSchema] of Object.entries(rawProperties)) {
     const propPath = path.length > 0 ? `${path}.${key}` : key
-    const result = convertSchema(propSchema, propPath)
+    const result = checkNode(propSchema, propPath)
     if (!result.ok) {
       return result
     }
-    typeboxProperties[key] = requiredSet.has(key) ? result.schema : Type.Optional(result.schema)
+    properties[key] = result.schema
   }
-
-  return { ok: true, schema: Type.Object(typeboxProperties, opts) }
+  return { ok: true, schema: carried(schema, { properties }) }
 }
 
 /**
- * Converts an `array` node.
+ * Checks an `array` node and its `items` schema.
  *
  * @param schema - the node
  * @param path - the node's path, for errors; the item path is `<path>.items`
- * @param opts - the node's collected annotations and constraints
- * @returns the array schema (of unknown items without `items`), or the error for a failing
- *   `items` schema
+ * @returns the node as carried (any items without `items`), or the error for a failing `items`
+ *   schema
  */
-function convertArray(
-  schema: Record<string, unknown>,
-  path: string,
-  opts: Record<string, unknown>
-): SchemaConversionResult {
+function checkArray(schema: Record<string, unknown>, path: string): ToolSchemaResult {
   const items = schema['items']
   if (items === undefined) {
-    // No items schema: allow any items
-    return { ok: true, schema: Type.Array(Type.Unknown(), opts) }
+    return { ok: true, schema: carried(schema, {}) }
   }
 
   const itemPath = path.length > 0 ? `${path}.items` : 'items'
-  const itemResult = convertSchema(items, itemPath)
+  const itemResult = checkNode(items, itemPath)
   if (!itemResult.ok) {
     return itemResult
   }
-
-  return { ok: true, schema: Type.Array(itemResult.schema, opts) }
+  return { ok: true, schema: carried(schema, { items: itemResult.schema }) }
 }

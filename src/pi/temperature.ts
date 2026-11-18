@@ -5,9 +5,9 @@
  * Both drops are listed in constitution principle I, and each is logged: at info the first time
  * per model, so the operator sees it, then at debug, as a client that always sends a temperature
  * would otherwise log a line per request.
- * - The Codex backend rejects temperature ("Unsupported parameter: temperature"), though pi 1.4.0
- *   forwards it. The proxy drops it there, so clients that always send one keep working on Codex
- *   models (#49).
+ * - The Codex backend rejects temperature ("Unsupported parameter: temperature"), though pi 1.5.2
+ *   still forwards it (`api/openai-codex-responses.js`). The proxy drops it there, so clients that
+ *   always send one keep working on Codex models (#49).
  * - pi's Anthropic adapter leaves it out itself on Claude models that refuse it, and whenever
  *   thinking is on. The proxy still passes it to pi, which decides; it only says so in the log
  *   (#147), so a drift between this copy of pi's rule and pi changes the log, never the request.
@@ -42,7 +42,7 @@ function isAnthropicModel(model: Model<Api>): model is Model<'anthropic-messages
  * Says why pi's Anthropic adapter will not send `temperature` for `model`, if it will not.
  *
  * @remarks
- * Mirrors pi-ai 1.4.0's `buildParams` (`api/anthropic-messages.js`): temperature is sent only
+ * Mirrors pi-ai 1.5.2's `buildParams` (`api/anthropic-messages.js`): temperature is sent only
  * with thinking off, and only to a model whose compat neither sets `supportsMidConvoEffort` nor
  * clears `supportsTemperature`. pi's catalog marks Claude 4.7 and later that way, and Claude
  * refuses a temperature below 1 on them (#147).

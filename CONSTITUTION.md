@@ -1,21 +1,21 @@
 <!--
 Sync Impact Report
-Version change: 3.11.0 → 3.12.0 (MINOR)
-Rationale: #197 accepted `store: false`, which asks for what the proxy does anyway, and recorded
-why that is not a drop in PLAN only. A reviewer flagged it as an interpretation of principle I
-living outside the constitution, and `n: 1` needed the same reasoning. Principle I now names
-honored values: a field accepted at the one value that asks for what the proxy already does, and
-refused by name at any other, with no amendment per field. Pi's own adapter sends `store: false`,
-and Elixir's LangChain sends `n: 1`, on every request.
-MINOR: materially expanded guidance in principle I; no principle added or removed.
+Version change: 3.12.0 → 3.12.1 (PATCH)
+Rationale: pi 1.5 dropped TypeBox from `pi-ai` (#360): its `Tool.parameters` takes plain JSON
+Schema, and `pi-ai` no longer re-exports `Type`. The Stack named TypeBox and that re-export, both
+now false. The proxy checks a tool's JSON Schema against its subset and passes it to pi as
+written; it uses no TypeBox.
+PATCH: a stack fact corrected; no principle or guidance changed.
 Modified sections:
-- I. OpenAI Compatibility: honored values, beside the exceptions
+- Development Workflow and Quality Gates: the Stack
 Templates requiring updates:
-- ✅ AGENTS.md: the "Reject unsupported parameters" bullet under "Core constraints"
-- ✅ PLAN.md: "Supported fields" (`store`, `n`) and the rejected fields
-- ✅ docs/api.md; docs/reference/claude-openai-compatibility.md
+- ✅ AGENTS.md: "Runtime/tooling" under "Coding rules that matter in this repo"
+- ✅ PLAN.md: "Tool schema policy"; docs/architecture.md: "Pi SDK layers used"
 Follow-up TODOs:
 - None.
+
+3.12.0 (2026-10-28): principle I names honored values: a field accepted at the one value that asks
+for what the proxy already does (`store: false`, `n: 1`, #197), refused by name at any other.
 
 3.11.0 (2026-10-26): every family the exposed models name has a built-in `-latest` alias
 (principle VI's second recorded default, #231).
@@ -180,7 +180,7 @@ Rationale: routing changes which model and account a client is billed on. Doing 
 
 ## Development Workflow and Quality Gates
 
-- Stack: Node (≥ 24) runtime; the Vite+ toolchain (`vp`: Oxfmt, Oxlint with tsgolint, Vitest, tsdown); fallow for dead code, duplication and complexity; pnpm for packages and scripts; TypeScript, Hono, Zod v4, and TypeBox. TypeBox is used only where pi's API requires it, imported through `@earendil-works/pi-ai`'s re-export so the proxy never ships a second copy. Bun builds the standalone binary only (`bun build --compile`); the npm package and the Docker image run on Node.
+- Stack: Node (≥ 24) runtime; the Vite+ toolchain (`vp`: Oxfmt, Oxlint with tsgolint, Vitest, tsdown); fallow for dead code, duplication and complexity; pnpm for packages and scripts; TypeScript, Hono, and Zod v4. Tool parameter schemas go to pi as plain JSON Schema (pi 1.5 dropped TypeBox from `@earendil-works/pi-ai`), so the proxy uses no TypeBox. Bun builds the standalone binary only (`bun build --compile`); the npm package and the Docker image run on Node.
 - Imports: the `@proxy/*` alias for `src/*` (no relative imports across the source tree), `node:` protocol for Node built-ins, `import * as z from "zod"`, and `vite-plus/test` in tests.
 - `pnpm run check:all` (`scripts/gate.ts`: format, lint with the type check, offline tests with coverage, fallow, build) is the single definition of green. The pre-commit hook, CI, and the release workflow all run it; a new check is added there, not in a hook or a workflow. The one exception is the standalone binary's tests, which need Bun: they run in their own CI job and in the release workflow, so the gate and the pre-commit hook never require Bun.
 - Hooks in `.vite-hooks/` MUST be preserved: `commit-msg` (commitlint), `pre-commit` (the gate), `pre-push` (lockfile sync). Lint passes only with zero warnings. Do not weaken lint, type, or test gates unless the maintainer explicitly asks.
@@ -210,4 +210,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.12.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-28
+**Version**: 3.12.1 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-11-18

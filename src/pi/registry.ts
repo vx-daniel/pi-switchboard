@@ -85,8 +85,8 @@ function splitModelsJsonError(error: string): { detail: string; path: string | u
  * only where it is (V8) or, when the engine gives no location (JavaScriptCore, the Bun binary),
  * its reason if that is one known to quote nothing ({@link JSON_ERROR_JSC_REASON}). Load errors
  * (the fs message) and schema errors (property paths, which name the user's providers and models,
- * and TypeBox's fixed messages) quote no values and pass through. The file's path is dropped;
- * callers that log it take it separately.
+ * and pi-schema's fixed messages, which quote the schema's values and never the file's) quote no
+ * values and pass through. The file's path is dropped; callers that log it take it separately.
  *
  * @param error - pi's models.json error, as `ModelRuntime.getError()` returns it
  * @returns the reduced message
