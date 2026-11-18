@@ -1,4 +1,4 @@
-import { screen } from '@testing-library/react'
+import { screen, within } from '@testing-library/react'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { renderApp, stubApi, VIEWER } from './harness'
@@ -53,13 +53,14 @@ describe('the Accounts page', () => {
 
     renderApp('#/accounts')
 
-    expect(await screen.findByText('work')).toBeTruthy()
-    expect(screen.getByText('first of 2')).toBeTruthy()
-    expect(screen.getByText('disabled · 2 of 2')).toBeTruthy()
-    expect(screen.getByText('42% used · resets in 2h 10m', { exact: false })).toBeTruthy()
-    expect(screen.getByText('below its reserve of', { exact: false })).toBeTruthy()
-    expect(screen.getByText('Cooling every model after rate_limit', { exact: false })).toBeTruthy()
-    expect(screen.getAllByText('subscription')).toHaveLength(3)
+    const page = within(await screen.findByRole('main'))
+    expect(await page.findByText('work')).toBeTruthy()
+    expect(page.getByText('first of 2')).toBeTruthy()
+    expect(page.getByText('disabled · 2 of 2')).toBeTruthy()
+    expect(page.getByText('42% used · resets in 2h 10m', { exact: false })).toBeTruthy()
+    expect(page.getByText('below its reserve of', { exact: false })).toBeTruthy()
+    expect(page.getByText('Cooling every model after rate_limit', { exact: false })).toBeTruthy()
+    expect(page.getAllByText('subscription')).toHaveLength(3)
   })
 
   // Catches a provider's logins split up by another provider's, as pi lists them: each provider's
@@ -87,13 +88,14 @@ describe('the Accounts page', () => {
 
     renderApp('#/accounts')
 
-    await screen.findByRole('heading', { level: 2, name: /openai-codex/u })
-    const cards = screen
+    const page = within(await screen.findByRole('main'))
+    await page.findByRole('heading', { level: 2, name: /openai-codex/u })
+    const cards = page
       .getAllByRole('heading', { level: 3 })
       .map((heading) => heading.querySelector('.font-mono')?.textContent)
     expect(cards).toEqual(['anthropic', 'anthropic-2', 'openai-codex'])
     expect(
-      screen.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)
+      page.getAllByRole('heading', { level: 2 }).map((heading) => heading.textContent)
     ).toEqual(['anthropic 2 logins', 'openai-codex 1 login'])
   })
 

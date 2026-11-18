@@ -10,8 +10,9 @@ import { DataTable } from '@proxy/admin/web/data-table'
 import { dollars, duration, tokens } from '@proxy/admin/web/format'
 import { Loaded } from '@proxy/admin/web/loaded'
 import { Timeline } from '@proxy/admin/web/pages/timeline'
+import type { PageView } from '@proxy/admin/web/router'
 import { useQuery } from '@tanstack/react-query'
-import { type ReactElement, useState } from 'react'
+import type { ReactElement } from 'react'
 
 /** The windows, as the picker offers them. */
 const WINDOWS: readonly { readonly id: StatsWindow; readonly title: string }[] = [
@@ -38,7 +39,7 @@ export function WindowPicker(picker: {
         <button
           key={option.id}
           type="button"
-          className={`btn btn-sm join-item ${option.id === picker.window ? 'btn-active' : ''}`}
+          className={`btn btn-sm join-item ${option.id === picker.window ? 'btn-primary' : ''}`}
           aria-pressed={option.id === picker.window}
           onClick={() => {
             picker.onPick(option.id)
@@ -141,19 +142,19 @@ function UsageView(view: { readonly usage: Usage }): ReactElement {
 }
 
 /**
- * The Stats page.
+ * The Stats page, over the window the shell keeps (`t`, `w`, `a`).
  *
+ * @param view - the window, and how to pick another
  * @returns the page
  */
-export function StatsPage(): ReactElement {
-  const [statsWindow, setStatsWindow] = useState<StatsWindow>('today')
+export function StatsPage(view: PageView): ReactElement {
   const query = useQuery({
-    queryKey: ['stats', statsWindow],
-    queryFn: () => readApi(`/stats?window=${statsWindow}`, UsageSchema)
+    queryKey: ['stats', view.statsWindow],
+    queryFn: () => readApi(`/stats?window=${view.statsWindow}`, UsageSchema)
   })
   return (
     <div className="flex flex-col gap-4">
-      <WindowPicker window={statsWindow} onPick={setStatsWindow} />
+      <WindowPicker window={view.statsWindow} onPick={view.onPickWindow} />
       <Loaded query={query}>{(usage) => <UsageView usage={usage} />}</Loaded>
     </div>
   )

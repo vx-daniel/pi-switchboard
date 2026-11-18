@@ -84,11 +84,24 @@ export function Timeline(chart: { readonly timeline: Usage['timeline'] }): React
     const element = container.current
     if (element === null) return undefined
     const drawn = drawTimeline(element, chart.timeline)
+    // The chart follows its container's width: the sidebar hidden (`s`) or the window resized.
+    // jsdom, the page tests' browser, has no ResizeObserver; there the chart keeps its width.
+    const resized =
+      typeof ResizeObserver === 'undefined'
+        ? undefined
+        : new ResizeObserver(() => {
+            void drawn.then((plot) => {
+              plot.setSize({ width: element.clientWidth, height: CHART_HEIGHT })
+              return plot
+            })
+          })
+    resized?.observe(element)
     /** Removes the chart once it is drawn. */
     const remove = async (): Promise<void> => {
       ;(await drawn).destroy()
     }
     return () => {
+      resized?.disconnect()
       void remove()
     }
   }, [chart.timeline])

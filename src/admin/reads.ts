@@ -49,8 +49,11 @@ import { fileConfigReader } from '@proxy/server/routes'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { type LoginPlace, loginPlaces } from '@proxy/tui/login-routing'
 
-/** What the server runs with that the doctor judges: the API listener's settings. */
-export type AdminServerFacts = Pick<ServerConfig, 'host' | 'docsUiEnabled' | 'statsEnabled'> & {
+/** What the server runs with that the doctor and the status strip read: the API listener's settings. */
+export type AdminServerFacts = Pick<
+  ServerConfig,
+  'host' | 'port' | 'docsUiEnabled' | 'statsEnabled'
+> & {
   /** Whether proxy auth needs a token. */
   readonly proxyAuth: boolean
 }
