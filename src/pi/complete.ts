@@ -317,7 +317,13 @@ async function buildStreamOptions(
 ): Promise<SimpleStreamOptions> {
   const opts: SimpleStreamOptions = {
     ...generationOptions(model, request),
-    ...userAndCacheKeyOptions(model, request)
+    ...userAndCacheKeyOptions(model, request),
+    // No server-side continuation (#360, #361): pi 1.5.1 continues an Anthropic conversation on
+    // the provider's side when calls share a `sessionId`, sending only the new messages. The proxy
+    // keeps no conversation state (constitution, Scope), so every request sends the whole
+    // conversation. pi still sends the threads beta header; without `thread` the request is a
+    // normal one.
+    disableContinuation: true
   }
 
   // The client disconnect signal combined with the upstream idle timeout
