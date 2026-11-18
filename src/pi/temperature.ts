@@ -34,7 +34,7 @@ const logDropped = firstTimeInfoLog(completeLogger)
  * @param model - the pi model
  * @returns whether its API is `anthropic-messages`
  */
-function isAnthropicModel(model: Model<Api>): model is Model<'anthropic-messages'> {
+export function isAnthropicModel(model: Model<Api>): model is Model<'anthropic-messages'> {
   return model.api === 'anthropic-messages'
 }
 

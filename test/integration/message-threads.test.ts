@@ -46,15 +46,15 @@ afterAll(async () => {
 
 /**
  * Sends one non-streamed chat completion with the session key, and returns the reply text and the
- * body that reached the provider.
+ * request that reached the provider.
  *
  * @param messages - the conversation so far
- * @returns the assistant's text, and the upstream request body
+ * @returns the assistant's text, and the upstream request's body and `anthropic-beta` header
  * @throws Error when the proxy's answer is not a chat completion with text
  */
 async function turn(
   messages: readonly Record<string, unknown>[]
-): Promise<{ text: string; upstream: unknown }> {
+): Promise<{ text: string; upstream: unknown; betas: string | string[] | undefined }> {
   const before = mock.requests.length
   const response = await testApp().request('/v1/chat/completions', {
     method: 'POST',
@@ -66,21 +66,27 @@ async function turn(
   const message = Array.isArray(choices) && isRecord(choices[0]) ? choices[0]['message'] : undefined
   const text = isRecord(message) ? message['content'] : undefined
   if (typeof text !== 'string') throw new Error(`expected a reply, got ${JSON.stringify(body)}`)
-  return { text, upstream: mock.requests[before]?.body }
+  const upstream = mock.requests[before]
+  return { text, upstream: upstream?.body, betas: upstream?.headers['anthropic-beta'] }
 }
 
 // Catches threads left on: the second turn would carry `thread: { type: "continue" }` and only the
-// last user message, so the answer would depend on state the proxy keeps between requests.
-test('the second turn of a session sends the whole conversation and no thread', async () => {
+// last user message, so the answer would depend on state the proxy keeps between requests. Also
+// catches the threads beta still sent (#363 review): #360 keeps the beta off Anthropic traffic.
+test('a session sends the whole conversation each turn, with no thread and no threads beta', async () => {
   const first = [{ role: 'user', content: 'Hi' }]
-  const { text } = await turn(first)
+  const firstTurn = await turn(first)
 
-  const { upstream } = await turn([
+  const secondTurn = await turn([
     ...first,
-    { role: 'assistant', content: text },
+    { role: 'assistant', content: firstTurn.text },
     { role: 'user', content: 'And again' }
   ])
 
+  const { upstream } = secondTurn
   expect(isRecord(upstream) && 'thread' in upstream).toBe(false)
   expect(isRecord(upstream) ? upstream['messages'] : undefined).toHaveLength(3)
+  for (const { betas } of [firstTurn, secondTurn]) {
+    expect(String(betas ?? '')).not.toContain('message-threads')
+  }
 })

@@ -11,7 +11,7 @@
 
 ### pi
 
-- **pi 1.5.2, up from 1.4.0 (#360).** Anthropic message threads, which pi 1.5.1 turns on for `api.anthropic.com`, stay off: every request still sends the whole conversation ([#361](https://github.com/vx-daniel/pi-switchboard/issues/361) tracks turning them on). pi still adds the threads beta header to those requests.
+- **pi 1.5.2, up from 1.4.0 (#360).** Anthropic message threads, which pi 1.5.1 turns on for `api.anthropic.com`, stay off, and so does their beta header: every request still sends the whole conversation ([#361](https://github.com/vx-daniel/pi-switchboard/issues/361) tracks turning them on).
 - **`pi auth login <provider>` logs in from a shell**, without starting a pi session ([Installing](install.md#headless-and-scripted-setup)).
 
 ### The pi extension
