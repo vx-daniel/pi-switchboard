@@ -5,7 +5,7 @@
  * admin listener and the API listener never accept each other's credentials (constitution I, III).
  */
 
-import { createAdminApp } from '@proxy/admin/app'
+import { type AdminAppOptions, createAdminApp } from '@proxy/admin/app'
 import type { GitHubFetch } from '@proxy/admin/github'
 import { pkceChallenge } from '@proxy/admin/sealed'
 import { type AdminUiSettings, resolveAdminUi } from '@proxy/config/admin'
@@ -25,6 +25,19 @@ const ENV = {
   PI_SWITCHBOARD_GITHUB_CLIENT_ID: 'Iv1.notarealclient',
   PI_SWITCHBOARD_GITHUB_CLIENT_SECRET: CLIENT_SECRET,
   PI_SWITCHBOARD_ADMIN_SESSION_KEY: 'notarealsecret-session-key-0123456789abcdef'
+}
+
+/**
+ * Creates the admin app as the listener would, with a loopback API listener behind it.
+ *
+ * @param options - the app's options but the API listener's settings
+ * @returns the app
+ */
+function adminApp(options: Omit<AdminAppOptions, 'server'>): Hono {
+  return createAdminApp({
+    ...options,
+    server: { host: '127.0.0.1', docsUiEnabled: false, statsEnabled: false, proxyAuth: false }
+  })
 }
 
 /** What the fake GitHub saw. */
@@ -135,7 +148,7 @@ describe('admin sign-in', () => {
   // the verifier whose hash is that challenge, with the client secret.
   test('sends GitHub a PKCE challenge and exchanges the code with its verifier', async () => {
     const github = fakeGitHub()
-    const app = createAdminApp({
+    const app = adminApp({
       settings: settingsWith({ editors: ['alice'] }),
       fetch: github.fetch
     })
@@ -160,7 +173,7 @@ describe('admin sign-in', () => {
   // Catches a session that does not say who signed in with which role, or a user token kept in
   // the cookie.
   test('gives an editor a session that names them and holds no token', async () => {
-    const app = createAdminApp({
+    const app = adminApp({
       settings: settingsWith({ editors: ['alice'] }),
       fetch: fakeGitHub().fetch
     })
@@ -184,7 +197,7 @@ describe('admin sign-in', () => {
     { who: 'someone only invited', state: 'pending', session: null }
   ])('gives a team role to $who', async ({ state, session: expected }) => {
     const github = fakeGitHub({ login: 'carol', memberships: { 'my-org/readers': state } })
-    const app = createAdminApp({
+    const app = adminApp({
       settings: settingsWith({ viewers: ['My-Org/readers'] }),
       fetch: github.fetch
     })
@@ -204,7 +217,7 @@ describe('admin sign-in', () => {
   // lost.
   test('a failed team check only loses the team role', async () => {
     const github = fakeGitHub({ login: 'bob', memberships: { 'my-org/ops': 403 } })
-    const app = createAdminApp({
+    const app = adminApp({
       settings: settingsWith({ editors: ['my-org/ops'], viewers: ['bob'] }),
       fetch: github.fetch
     })
@@ -249,7 +262,7 @@ describe('admin sign-in', () => {
       status: 502
     }
   ])('refuses $refused, with no session', async ({ settings, script, state, status }) => {
-    const app = createAdminApp({ settings, fetch: fakeGitHub(script).fetch })
+    const app = adminApp({ settings, fetch: fakeGitHub(script).fetch })
 
     const { callback } = await signIn(app, state)
 
@@ -260,7 +273,7 @@ describe('admin sign-in', () => {
 
   // Catches the callback replayed with the same sign-in cookie after it finished once.
   test('the sign-in cookie is cleared by the callback', async () => {
-    const app = createAdminApp({
+    const app = adminApp({
       settings: settingsWith({ editors: ['alice'] }),
       fetch: fakeGitHub().fetch
     })
@@ -276,7 +289,7 @@ describe('admin sign-in', () => {
 })
 
 describe('admin listener guards', () => {
-  const app = createAdminApp({
+  const app = adminApp({
     settings: settingsWith({ editors: ['alice'] }),
     fetch: fakeGitHub().fetch
   })
@@ -334,7 +347,7 @@ describe('admin listener guards', () => {
   // Catches sign-in left open to guessing (past the limit a client waits), or the limit reaching
   // sign-out, which an operator behind a shared reverse-proxy address must always reach.
   test('rate limits sign-in per client, never sign-out', async () => {
-    const limited = createAdminApp({
+    const limited = adminApp({
       settings: settingsWith({ editors: ['alice'] }),
       fetch: fakeGitHub().fetch,
       clientKey: () => 'one-client'
@@ -359,7 +372,7 @@ describe('admin listener guards', () => {
 describe('the two listeners never accept each other', () => {
   // Catches the proxy token (which every client, j5 workers included, holds) opening the admin UI.
   test('the proxy token does not sign in to the admin UI', async () => {
-    const app = createAdminApp({
+    const app = adminApp({
       settings: settingsWith({ editors: ['alice'] }),
       fetch: fakeGitHub().fetch
     })
@@ -374,7 +387,7 @@ describe('the two listeners never accept each other', () => {
   // Catches an operator's session cookie admitted to the API listener, and the admin routes served
   // there.
   test('an admin session admits to no API route, and the API serves no admin route', async () => {
-    const admin = createAdminApp({
+    const admin = adminApp({
       settings: settingsWith({ editors: ['alice'] }),
       fetch: fakeGitHub().fetch
     })

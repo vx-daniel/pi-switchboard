@@ -115,7 +115,7 @@ const main = defineCommand({
 
     // The admin UI (#367), on its own listener, after the API's: the port clients wait on.
     const admin = config.adminUi.enabled
-      ? await openAdminServer(config.adminUi).catch((error: unknown): undefined => {
+      ? await openAdminServer(config).catch((error: unknown): undefined => {
           lifecycleLogger.fatal('Cannot start the admin UI on {host}:{port}: {error}', {
             host: config.adminUi.host,
             port: config.adminUi.port,
