@@ -6,9 +6,13 @@
 
 /** HTTP 200 OK, the first success status. */
 export const HTTP_OK = 200
+/** HTTP 204 No Content. */
+export const HTTP_NO_CONTENT = 204
 
 /** The first status that is not a success (2xx). */
 export const HTTP_MULTIPLE_CHOICES = 300
+/** HTTP 302 Found: a redirect, as the admin UI's sign-in answers (#367). */
+export const HTTP_FOUND = 302
 
 /** HTTP 400 Bad Request. */
 export const HTTP_BAD_REQUEST = 400
