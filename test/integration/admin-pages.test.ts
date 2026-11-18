@@ -51,7 +51,13 @@ function adminApp(pages: AdminAppOptions['assets']): Hono {
   if (signIn === undefined) throw new Error('sign-in should be configured')
   return createAdminApp({
     settings: { ...settings, signIn },
-    server: { host: '127.0.0.1', docsUiEnabled: false, statsEnabled: false, proxyAuth: false },
+    server: {
+      host: '127.0.0.1',
+      port: 4141,
+      docsUiEnabled: false,
+      statsEnabled: false,
+      proxyAuth: false
+    },
     assets: pages
   })
 }

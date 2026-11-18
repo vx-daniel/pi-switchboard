@@ -48,6 +48,7 @@ export async function openAdminServer(config: ServerConfig): Promise<ServerType>
     assets: await adminAssets(),
     server: {
       host: config.host,
+      port: config.port,
       docsUiEnabled: config.docsUiEnabled,
       statsEnabled: config.statsEnabled,
       proxyAuth: config.proxyAuth.kind === 'token'
