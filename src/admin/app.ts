@@ -72,6 +72,11 @@ const SIGN_IN_SECONDS = SIGN_IN_MINUTES * SECONDS_PER_MINUTE
 const SESSION_SECONDS = SESSION_HOURS * MINUTES_PER_HOUR * SECONDS_PER_MINUTE
 /** Sign-in and callback requests one client address may make per window. */
 const SIGN_IN_LIMIT = 20
+
+/** What a refusal adds when a list names a team: the cause GitHub's `404` cannot tell apart. */
+const TEAM_REFUSAL_HINT =
+  '; if they are in a listed team, check that the GitHub App is installed on its organization with Members: read (a private App installs only on the account that owns it)'
+
 /** The rate limit's window, in milliseconds. */
 const SIGN_IN_WINDOW_MS = SECONDS_PER_MINUTE * MS_PER_SECOND
 /** The most client addresses the rate limit tracks; past it, the oldest are forgotten. */
@@ -299,8 +304,14 @@ async function finishSignIn(
     const user = await readUser(fetchFn, settings.apiUrl, exchanged.token)
     const role = await roleFor(settings, user.login, teamCheck(deps, exchanged.token, user.login))
     if (role === undefined) {
-      authLogger.info('Refused sign-in of {login}: not in adminUi.editors or viewers', {
-        login: user.login
+      // GitHub answers 404 for a team in an org the App is not installed on, as for a team the
+      // operator is not in, so the log names that cause whenever a list names a team.
+      const namesTeams = [...settings.editors, ...settings.viewers].some((principal) =>
+        principal.includes('/')
+      )
+      authLogger.info('Refused sign-in of {login}: not in adminUi.editors or viewers{hint}', {
+        login: user.login,
+        hint: namesTeams ? TEAM_REFUSAL_HINT : ''
       })
       return { status: HTTP_FORBIDDEN, text: `${user.login} may not use this admin UI` }
     }
