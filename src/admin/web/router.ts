@@ -5,6 +5,7 @@
  * @packageDocumentation
  */
 
+import type { StatsWindow } from '@proxy/admin/web/api'
 import { useSyncExternalStore } from 'react'
 
 /** The pages, in the order the tabs show them. */
@@ -19,6 +20,12 @@ export const PAGES = [
 
 /** A page's ID. */
 export type PageId = (typeof PAGES)[number]['id']
+
+/** What every page is given: the window the Stats and Doctor pages share, as the console's. */
+export interface PageView {
+  readonly statsWindow: StatsWindow
+  readonly onPickWindow: (statsWindow: StatsWindow) => void
+}
 
 /**
  * Reads the page a hash names: the first page for any other hash.

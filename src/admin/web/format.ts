@@ -64,6 +64,27 @@ export function until(at: number, now: number): string {
   return hours > 0 ? `in ${String(hours)}h ${String(minutes)}m` : `in ${String(minutes)}m`
 }
 
+/** Hours in a day. */
+const HOURS_PER_DAY = 24
+/** Milliseconds in a day. */
+const MS_PER_DAY = HOURS_PER_DAY * MS_PER_HOUR
+
+/**
+ * Writes a duration compactly, as the console's sidebar and strip do: its two largest units.
+ *
+ * @param ms - the duration in milliseconds
+ * @returns `45s`, `12m`, `3h 12m` or `2d 4h`
+ */
+export function compactDuration(ms: number): string {
+  const span = Math.max(0, ms)
+  if (span < MS_PER_MINUTE) return `${String(Math.floor(span / MS_PER_SECOND))}s`
+  if (span < MS_PER_HOUR) return `${String(Math.floor(span / MS_PER_MINUTE))}m`
+  if (span < MS_PER_DAY) {
+    return `${String(Math.floor(span / MS_PER_HOUR))}h ${String(Math.floor((span % MS_PER_HOUR) / MS_PER_MINUTE))}m`
+  }
+  return `${String(Math.floor(span / MS_PER_DAY))}d ${String(Math.floor((span % MS_PER_DAY) / MS_PER_HOUR))}h`
+}
+
 /**
  * Writes a clock time.
  *

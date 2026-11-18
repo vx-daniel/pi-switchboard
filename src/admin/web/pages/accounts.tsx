@@ -6,10 +6,10 @@
  * @packageDocumentation
  */
 
-import { type Account, AccountsSchema, readApi } from '@proxy/admin/web/api'
+import type { Account } from '@proxy/admin/web/api'
 import { percent, until } from '@proxy/admin/web/format'
 import { Loaded } from '@proxy/admin/web/loaded'
-import { useQuery } from '@tanstack/react-query'
+import { useAccounts } from '@proxy/admin/web/queries'
 import type { ReactElement } from 'react'
 
 /** A quota share used past this is a warning. */
@@ -143,10 +143,7 @@ function providerGroups(
  * @returns the page
  */
 export function AccountsPage(): ReactElement {
-  const query = useQuery({
-    queryKey: ['accounts'],
-    queryFn: () => readApi('/accounts', AccountsSchema)
-  })
+  const query = useAccounts()
   return (
     <Loaded query={query}>
       {(accounts) =>

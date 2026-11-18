@@ -217,6 +217,37 @@ export type Doctor = z.infer<typeof DoctorSchema>
 /** One doctor finding. */
 export type Finding = z.infer<typeof FindingSchema>
 
+/** One route's traffic since the proxy started. */
+const RouteTotalsSchema = z.looseObject({
+  alias: z.string().trim().nullable(),
+  model: z.string().trim(),
+  requests: z.int(),
+  failures: z.int(),
+  fallbacks: z.int(),
+  inputTokens: z.int(),
+  outputTokens: z.int(),
+  cacheReadTokens: z.int()
+})
+
+/** `GET /admin/api/status`: the status strip's and the sidebar's data. */
+export const StatusSchema = z.looseObject({
+  version: z.string().trim(),
+  address: z.string().trim(),
+  proxyAuth: z.enum(['token', 'off']),
+  beyondLoopback: z.boolean(),
+  uptimeMs: z.number(),
+  available: z.int(),
+  exposed: z.union([z.int(), z.string().trim()]),
+  modelsJsonError: z.string().trim().nullable(),
+  cooldowns: z.int(),
+  perMinute: z.array(z.int()),
+  saturated: z.boolean(),
+  todayCostUsd: z.number().nullable(),
+  session: z.looseObject({ since: z.number(), totals: z.array(RouteTotalsSchema) })
+})
+/** The proxy's status. */
+export type Status = z.infer<typeof StatusSchema>
+
 /** A stats window. */
 export type StatsWindow = Doctor['window']
 

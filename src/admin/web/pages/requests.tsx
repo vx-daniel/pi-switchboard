@@ -1,20 +1,18 @@
 /**
  * The Requests page (#367): the proxy's requests and lifecycle events, newest first, kept current
- * by `/admin/api/requests/stream`.
+ * by the shell's `/admin/api/requests/stream` (`useFollowedRequests`).
  *
  * @packageDocumentation
  */
 
-import { checked, readApi, type Requests, RequestsSchema } from '@proxy/admin/web/api'
+import type { Requests } from '@proxy/admin/web/api'
 import { DataTable } from '@proxy/admin/web/data-table'
 import { clock, duration } from '@proxy/admin/web/format'
 import { Loaded } from '@proxy/admin/web/loaded'
+import { useRequests } from '@proxy/admin/web/queries'
 import { type EventRow, type RequestRow, requestRows } from '@proxy/admin/web/request-rows'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { type ReactElement, useEffect } from 'react'
+import type { ReactElement } from 'react'
 
-/** The query's key. */
-const REQUESTS_KEY = ['requests'] as const
 /** The first status that is not a success. */
 const FIRST_FAILURE_STATUS = 400
 /** How each event level is colored; written out whole, so Tailwind finds each class. */
@@ -30,25 +28,6 @@ const OUTCOME_BADGE = {
   left: 'badge-warning',
   rejected: 'badge-warning'
 } as const
-
-/**
- * Follows the requests stream, replacing the snapshot on each event.
- */
-function useRequestsStream(): void {
-  const queryClient = useQueryClient()
-  useEffect(() => {
-    const source = new EventSource('/admin/api/requests/stream')
-    const onRequests = (message: MessageEvent<string>): void => {
-      const snapshot = checked(RequestsSchema, JSON.parse(message.data), '/requests/stream')
-      queryClient.setQueryData(REQUESTS_KEY, snapshot)
-    }
-    source.addEventListener('requests', onRequests)
-    return () => {
-      source.removeEventListener('requests', onRequests)
-      source.close()
-    }
-  }, [queryClient])
-}
 
 /**
  * Shows one HTTP request.
@@ -147,10 +126,6 @@ function RequestsTable(table: { readonly requests: Requests }): ReactElement {
  * @returns the page
  */
 export function RequestsPage(): ReactElement {
-  const query = useQuery({
-    queryKey: REQUESTS_KEY,
-    queryFn: () => readApi('/requests', RequestsSchema)
-  })
-  useRequestsStream()
+  const query = useRequests()
   return <Loaded query={query}>{(requests) => <RequestsTable requests={requests} />}</Loaded>
 }

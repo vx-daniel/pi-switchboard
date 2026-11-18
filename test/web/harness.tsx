@@ -25,6 +25,44 @@ export interface Call {
 /** The signed-in operator most tests use. */
 export const VIEWER = { login: 'alice', role: 'viewer' }
 
+/** Minutes the status's sparkline covers. */
+const SPARK_MINUTES = 30
+/** The scripted proxy's uptime: 3h 12m. */
+const UPTIME_MS = 11_520_000
+/** Chat requests in the current minute, the strip's rate. */
+const CURRENT_RATE = 3
+
+/** The status the shell's strip and sidebar read, unless a test scripts another. */
+export const STATUS = {
+  version: '0.6.0',
+  address: '127.0.0.1:4141',
+  proxyAuth: 'off',
+  beyondLoopback: false,
+  uptimeMs: UPTIME_MS,
+  available: 62,
+  exposed: 26,
+  modelsJsonError: null,
+  cooldowns: 0,
+  perMinute: [...Array.from({ length: SPARK_MINUTES - 1 }, () => 0), CURRENT_RATE],
+  saturated: false,
+  todayCostUsd: 1.5,
+  session: { since: 0, totals: [] }
+}
+
+/** What the shell reads on every page, unless a test scripts another answer. */
+const SHELL_ANSWERS: Readonly<Record<string, Answer>> = {
+  '/status': STATUS,
+  '/accounts': [],
+  '/requests': { requests: [], active: [], finished: [], events: [] },
+  '/doctor?window=today': {
+    general: [],
+    cache: [],
+    window: 'today',
+    statsAvailable: true,
+    limits: []
+  }
+}
+
 /**
  * Tells a scripted answer with a status from a bare body.
  *
@@ -36,13 +74,16 @@ function hasStatus(answer: Answer): answer is { readonly status: number; readonl
 }
 
 /**
- * Stubs `fetch` with scripted answers, by path under `/admin/api` (`/accounts`, `/stats?window=week`).
+ * Stubs `fetch` with scripted answers, by path under `/admin/api` (`/accounts`, `/stats?window=week`),
+ * on top of what the shell reads on every page, and `EventSource` with {@link stubEventSource}.
  * A path not scripted answers `404`. Sign-out answers `204`.
  *
- * @param answers - path -> its answer
+ * @param scripted - path -> its answer
  * @returns every request made, in order
  */
-export function stubApi(answers: Readonly<Record<string, Answer>>): Call[] {
+export function stubApi(scripted: Readonly<Record<string, Answer>>): Call[] {
+  const answers = { ...SHELL_ANSWERS, ...scripted }
+  stubEventSource()
   const calls: Call[] = []
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? 'GET'

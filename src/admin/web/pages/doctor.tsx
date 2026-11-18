@@ -5,17 +5,12 @@
  * @packageDocumentation
  */
 
-import {
-  type Doctor,
-  DoctorSchema,
-  type Finding,
-  readApi,
-  type StatsWindow
-} from '@proxy/admin/web/api'
+import type { Doctor, Finding } from '@proxy/admin/web/api'
 import { Loaded } from '@proxy/admin/web/loaded'
 import { WindowPicker } from '@proxy/admin/web/pages/stats'
-import { useQuery } from '@tanstack/react-query'
-import { type ReactElement, useState } from 'react'
+import { useDoctor } from '@proxy/admin/web/queries'
+import type { PageView } from '@proxy/admin/web/router'
+import type { ReactElement } from 'react'
 
 /** How each severity is shown, most serious first. */
 const SEVERITIES = [
@@ -96,19 +91,16 @@ function DoctorView(view: { readonly doctor: Doctor }): ReactElement {
 }
 
 /**
- * The Doctor page.
+ * The Doctor page, over the window the shell keeps (`t`, `w`, `a`).
  *
+ * @param view - the window, and how to pick another
  * @returns the page
  */
-export function DoctorPage(): ReactElement {
-  const [statsWindow, setStatsWindow] = useState<StatsWindow>('today')
-  const query = useQuery({
-    queryKey: ['doctor', statsWindow],
-    queryFn: () => readApi(`/doctor?window=${statsWindow}`, DoctorSchema)
-  })
+export function DoctorPage(view: PageView): ReactElement {
+  const query = useDoctor(view.statsWindow)
   return (
     <div className="flex flex-col gap-4">
-      <WindowPicker window={statsWindow} onPick={setStatsWindow} />
+      <WindowPicker window={view.statsWindow} onPick={view.onPickWindow} />
       <Loaded query={query}>{(doctor) => <DoctorView doctor={doctor} />}</Loaded>
     </div>
   )

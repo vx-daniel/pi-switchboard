@@ -27,15 +27,16 @@ describe('the admin UI shell', () => {
     expect(await screen.findByText('alice')).toBeTruthy()
     expect(screen.getByText('viewer')).toBeTruthy()
     const tabs = within(screen.getByRole('tablist')).getAllByRole('tab')
+    // Each tab carries its number key, as the console's do.
     expect(tabs.map((tab) => tab.textContent)).toEqual([
-      'Requests',
-      'Accounts',
-      'Models',
-      'Stats',
-      'Doctor',
-      'Logins'
+      '1Requests',
+      '2Accounts',
+      '3Models',
+      '4Stats',
+      '5Doctor',
+      '6Logins'
     ])
-    expect(screen.getByRole('tab', { name: 'Requests' }).getAttribute('aria-selected')).toBe('true')
+    expect(tabs[0]?.getAttribute('aria-selected')).toBe('true')
   })
 
   // Catches a page whose session ended mid-use left blank or showing a raw error.

@@ -136,7 +136,14 @@ Behind a reverse proxy every request comes from the reverse proxy's address, so 
 
 ## The pages
 
-`/admin/` is one page, with a tab for each view (the address's `#/accounts` names it, so a view can be bookmarked):
+`/admin/` is laid out as the console (`pi-switchboard tui`), in its Tokyo Night Storm colors:
+
+- **The status strip**, on top: the version, where the proxy listens and whether proxy auth is on, the models exposed of those available, cooldowns, uptime, and on the right the last half hour of chat requests with the current rate and what today cost. Under it, the alerts the console gives a row of their own: proxy auth off beyond this machine, an exposure config that can't be applied, a `models.json` that didn't load.
+- **The tabs**, numbered; Doctor's carries the count of its errors and warnings, in the color of the worst.
+- **The page**, beside **the sidebar**: QUOTA (each login's windows), IN FLIGHT (the chat requests running), RECENT (the last minute and the latest finished) and SESSION (the traffic since the proxy started).
+- **The footer**, with the keys, which work as the console's: `1` to `6` pick a tab, `s` hides or shows the sidebar, and `t`, `w` and `a` pick the window (today, the week, 30 days) that Stats and Doctor share.
+
+The address's `#/accounts` names the tab, so a tab can be bookmarked. The tabs:
 
 | Tab | Shows |
 |---|---|
@@ -147,7 +154,7 @@ Behind a reverse proxy every request comes from the reverse proxy's address, so 
 | Doctor | `pi-switchboard doctor`'s findings over the same windows, most serious first |
 | Logins | The commands that add a login, in a terminal; this page can't |
 
-The npm package, the Docker image and the standalone binary all carry the pages; the binary has them built in. They load nothing from another site: every script and style comes from the admin listener itself.
+The npm package, the Docker image and the standalone binary all carry the pages; the binary has them built in. They load nothing from another site: every script and style comes from the admin listener itself. The console's count of open client connections is the one part of its strip the admin UI leaves out: it needs the API listener's server, which the admin listener doesn't hold.
 
 ## The API
 
@@ -162,5 +169,6 @@ Every route under `/admin/api/` needs a session, editor or viewer, and answers `
 | `GET /admin/api/models` | The exposed `models` and `aliases` (as `GET /v1/switchboard/models`), the `configured` aliases, the built-in `latest` ones, and why any is left out; `503` `exposure_invalid` when the exposure config can't be applied |
 | `GET /admin/api/stats?window=today\|week\|all` | The stats over the window, as `GET /v1/switchboard/usage`; `503` while stats are off |
 | `GET /admin/api/doctor?window=today\|week\|all` | The doctor's report on the running proxy, as `pi-switchboard doctor --json`; no login is verified |
+| `GET /admin/api/status` | The status strip's and sidebar's data: `version`, `address`, `proxyAuth`, `beyondLoopback`, `uptimeMs`, the `exposed` and `available` models, `modelsJsonError`, `cooldowns`, `perMinute` (chat requests a minute over the last half hour, oldest first) with `saturated`, `todayCostUsd` (`null` while stats are off), and `session`'s route totals since the start |
 
 A `window` other than `today`, `week` or `all` is a `400`.

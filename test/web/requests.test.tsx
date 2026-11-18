@@ -1,4 +1,4 @@
-import { act, screen } from '@testing-library/react'
+import { act, screen, within } from '@testing-library/react'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { openedSources, renderApp, stubApi, stubEventSource, VIEWER } from './harness'
@@ -51,12 +51,13 @@ describe('the Requests page', () => {
 
     renderApp('#/requests')
 
-    expect(await screen.findByText('/v1/chat/completions', { exact: false })).toBeTruthy()
-    expect(screen.getByText('quick')).toBeTruthy()
-    expect(screen.getByText('anthropic/claude-haiku-5-5')).toBeTruthy()
-    expect(screen.getByText('attempt 2')).toBeTruthy()
-    expect(screen.getByText('1.5 s')).toBeTruthy()
-    expect(screen.getByText('Listening on http://127.0.0.1:4141')).toBeTruthy()
+    const page = within(await screen.findByRole('main'))
+    expect(await page.findByText('/v1/chat/completions', { exact: false })).toBeTruthy()
+    expect(page.getByText('quick')).toBeTruthy()
+    expect(page.getByText('anthropic/claude-haiku-5-5')).toBeTruthy()
+    expect(page.getByText('attempt 2')).toBeTruthy()
+    expect(page.getByText('1.5 s')).toBeTruthy()
+    expect(page.getByText('Listening on http://127.0.0.1:4141')).toBeTruthy()
   })
 
   // Catches the page not following the stream, so a new request shows only after a reload.

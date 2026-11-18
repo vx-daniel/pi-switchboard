@@ -1849,7 +1849,11 @@ Hono as static files from the proxy's own package: no second server, no CDN. Its
 mirror the console's views: Requests, Accounts, Models and aliases, Stats, Doctor, and a Logins
 page that only shows the command to run in a terminal
 (`docker exec -it <container> pi auth login <provider>`). Settings comes with phase 2, whose
-writes it exists for.
+writes it exists for. The screen is laid out as the console's (`src/admin/web/shell.tsx`): the
+status strip and its alerts, numbered tabs (Doctor's with its count), the page beside the
+QUOTA/IN FLIGHT/RECENT/SESSION sidebar, a footer of the keys (`1`–`6`, `s`, `t`/`w`/`a`), and
+Tokyo Night Storm as a daisyUI theme. The strip's and sidebar's data come from
+`GET /admin/api/status` (`src/admin/status.ts`), from the console's own counters.
 
 **Where it runs.** On a separate admin listener (for example `:4142`), off by default and bound
 to `127.0.0.1` by default. In Docker it is published to the host's loopback only, or reached over
