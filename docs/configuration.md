@@ -60,6 +60,7 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | [Login labels](logins.md#several-logins-per-provider) | — | — | `labels` | `{}` | Login → the label the console shows |
 | [Lifetime](pi-extension.md#settings-panel) (pi package) | — | — | `lifetime` | `detached` | `detached` (outlives the pi session), `session` |
 | [Zed sync](pi-extension.md#zed-sync) (pi package) | — | — | `zed.providerName`, `zed.autoSync` | `"Pi Proxy"`, `false` | A name; `true`, `false` |
+| [Admin UI](admin-ui.md#every-setting) | — | `PI_SWITCHBOARD_ADMIN_UI`, `_ADMIN_HOST`, `_ADMIN_PORT`, `_ADMIN_URL`, `_ADMIN_EDITORS`, `_ADMIN_VIEWERS` | `adminUi.enabled`, `.host`, `.port`, `.publicUrl`, `.githubUrl`, `.editors`, `.viewers` | off, `127.0.0.1:4142` | See [The admin UI](admin-ui.md#every-setting) |
 
 Environment variables with no flag or file key:
 
@@ -69,6 +70,7 @@ Environment variables with no flag or file key:
 | `PI_SWITCHBOARD_EXTENSION_LOG_FILE` | Where the pi extension writes its log, which it otherwise keeps quiet ([Logging](#logging)) |
 | `NO_COLOR` | Any value but empty turns off the console's colors and the pretty log's |
 | `PI_CACHE_RETENTION` | pi's own: `long` asks every provider that has one for its longer prompt cache. pi reads it from the proxy's environment; `pi-switchboard doctor` reads it from its own to judge whether that pays ([Retention](caching.md#retention)) |
+| `PI_SWITCHBOARD_GITHUB_CLIENT_ID`, `PI_SWITCHBOARD_GITHUB_CLIENT_SECRET`, `PI_SWITCHBOARD_ADMIN_SESSION_KEY` (each also as `…_FILE`) | The admin UI's sign-in: its GitHub App and the key that signs its cookies ([Give it its secrets](admin-ui.md#3-give-it-its-secrets)) |
 
 ## A complete `proxy-config.json`
 
@@ -110,11 +112,20 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
   },
   "labels": { "anthropic": "work", "anthropic-2": "personal" },
   "lifetime": "detached",
-  "zed": { "providerName": "Pi Proxy", "autoSync": false }
+  "zed": { "providerName": "Pi Proxy", "autoSync": false },
+  "adminUi": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 4142,
+    "publicUrl": "",
+    "githubUrl": "https://github.com",
+    "editors": [],
+    "viewers": []
+  }
 }
 ```
 
-- **`lifetime` and `zed` matter only to the pi package**, which starts the proxy from pi and syncs Zed. A standalone proxy (the binary, Docker or the npm CLI) ignores them; leave them out there.
+- **`lifetime` and `zed` matter only to the pi package**, which starts the proxy from pi and syncs Zed. A standalone proxy (the binary, Docker or the npm CLI) ignores them; leave them out there. **`adminUi` matters to every `pi-switchboard` server, the pi package's included**, but not to the console (`pi-switchboard tui`).
 - **The model IDs are from pi 1.5.2's catalogue.** Catalogues change: use the IDs `GET /v1/models` lists for your logins ([Discovering available models](api.md#discovering-available-models)).
 
 ## What comes from pi

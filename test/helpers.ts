@@ -7,7 +7,9 @@
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
+import { resolveAdminUi } from '@proxy/config/admin'
 import type { ServerConfig } from '@proxy/config/env'
+import { DEFAULT_CONFIG } from '@proxy/config/schema'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
@@ -153,7 +155,8 @@ export function testConfig(): ServerConfig {
     customModels: [],
     providerPrefixes: {},
     aliases: {},
-    logLevel: 'info'
+    logLevel: 'info',
+    adminUi: resolveAdminUi(DEFAULT_CONFIG.adminUi, {})
   }
 }
 

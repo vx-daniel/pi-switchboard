@@ -10,6 +10,7 @@
  * @packageDocumentation
  */
 
+import { adminUiMayStart, openAdminServer } from '@proxy/admin/listen'
 import { configFileAuthTokenInvalid, getConfigPath, loadConfigFromFile } from '@proxy/config/schema'
 import { LOG_FORMATS, proxyLogger, resolveLogFormat } from '@proxy/logging'
 import { initRegistry } from '@proxy/pi/registry'
@@ -90,8 +91,9 @@ const main = defineCommand({
     const config = loadConfigWithLogging(args, {
       format: resolveLogFormat(args['log-format'], process.env.PI_SWITCHBOARD_LOG_FORMAT)
     })
-    // Proxy auth set but unusable: logged, and the proxy does not start.
-    if (config === undefined) {
+    // Proxy auth set but unusable, or the admin UI on but unsafe or unusable (constitution III):
+    // logged, and nothing starts.
+    if (config === undefined || !adminUiMayStart(config.adminUi)) {
       process.exitCode = 1
       return
     }
@@ -111,6 +113,23 @@ const main = defineCommand({
     if (server === undefined) return
     const listening = server
 
+    // The admin UI (#367), on its own listener, after the API's: the port clients wait on.
+    const admin = config.adminUi.enabled
+      ? await openAdminServer(config.adminUi).catch((error: unknown): undefined => {
+          lifecycleLogger.fatal('Cannot start the admin UI on {host}:{port}: {error}', {
+            host: config.adminUi.host,
+            port: config.adminUi.port,
+            error: errorMessage(error)
+          })
+          return undefined
+        })
+      : undefined
+    if (config.adminUi.enabled && admin === undefined) {
+      listening.close()
+      process.exitCode = 1
+      return
+    }
+
     // --- Graceful shutdown ---
     let shutdownInitiated = false
 
@@ -128,6 +147,7 @@ const main = defineCommand({
       const SHUTDOWN_TIMEOUT_MS = 10_000
 
       listening.close()
+      admin?.close()
 
       setTimeout(() => {
         lifecycleLogger.warn('Shutdown timed out after {timeoutMs} ms; forcing exit', {

@@ -351,7 +351,16 @@ describe('normalizeConfig', () => {
           disabled: ['anthropic-3']
         }
       },
-      zed: { providerName: 'My Proxy', autoSync: true }
+      zed: { providerName: 'My Proxy', autoSync: true },
+      adminUi: {
+        enabled: true,
+        host: '0.0.0.0',
+        port: 9443,
+        publicUrl: 'https://admin.example.com',
+        githubUrl: 'https://github.example.com',
+        editors: ['my-org/ops', 'alice'],
+        viewers: ['bob']
+      }
     }
     expect(normalizeConfig(full)).toEqual(full)
   })
