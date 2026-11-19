@@ -1879,8 +1879,10 @@ models, families with an exposed member, efforts the model runs at) and the logi
 (`src/admin/logins.ts`: first, disabled, label, and `DELETE /admin/api/cooldowns` through
 `clearCooldownsAnswer`), through the console's own writers, now in `src/config/aliases.ts` and
 `src/config/login-routing.ts`. Every non-GET route is an editor's (one check in
-`src/admin/api.ts`), and every change is logged under `admin.audit`. Phase 3 (per-project
-budgets, #366) is next.
+`src/admin/api.ts`), and every change is logged under `admin.audit`. Phase 3 (#366) adds per-project
+budgets: the stats, the usage route, the console and the doctor report them (see "Projects and
+budgets (#366)"), and an editor sets them on the Stats tab (`src/admin/budgets.ts`: `GET
+/admin/api/budgets`, `PUT` and `DELETE /admin/api/budgets/{project}`, the project URL-encoded).
 
 **What it is.** A web interface for a proxy run in Docker, so it can be configured without the
 terminal console. React with Tailwind CSS 4 and daisyUI 5, as j5's dashboard uses

@@ -226,6 +226,21 @@ export const UsageSchema = z.looseObject({
 /** The Stats page's data. */
 export type Usage = z.infer<typeof UsageSchema>
 
+/** One project's budget per window, in US dollars. */
+const BudgetSchema = z.looseObject({
+  today: z.number().optional(),
+  week: z.number().optional(),
+  all: z.number().optional()
+})
+
+/** `GET /admin/api/budgets`, and what a budget write answers. */
+export const BudgetsSchema = z.looseObject({
+  budgets: z.record(z.string().trim(), BudgetSchema)
+})
+
+/** Project -> its budget per window. */
+export type Budgets = z.infer<typeof BudgetsSchema>['budgets']
+
 /** One doctor finding. */
 const FindingSchema = z.looseObject({
   check: z.string().trim(),

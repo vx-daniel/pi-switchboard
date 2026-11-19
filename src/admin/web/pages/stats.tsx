@@ -7,6 +7,7 @@
  */
 
 import { readApi, type StatsWindow, type Usage, UsageSchema } from '@proxy/admin/web/api'
+import { BudgetEditor } from '@proxy/admin/web/budget-editor'
 import { DataTable } from '@proxy/admin/web/data-table'
 import { dollars, duration, percent, tokens } from '@proxy/admin/web/format'
 import { Loaded } from '@proxy/admin/web/loaded'
@@ -213,7 +214,7 @@ function UsageView(view: { readonly usage: Usage }): ReactElement {
 /**
  * The Stats page, over the window the shell keeps (`t`, `w`, `a`).
  *
- * @param view - the window, and how to pick another
+ * @param view - the window, how to pick another, and whether the operator may edit budgets
  * @returns the page
  */
 export function StatsPage(view: PageView): ReactElement {
@@ -225,6 +226,7 @@ export function StatsPage(view: PageView): ReactElement {
     <div className="flex flex-col gap-4">
       <WindowPicker window={view.statsWindow} onPick={view.onPickWindow} />
       <Loaded query={query}>{(usage) => <UsageView usage={usage} />}</Loaded>
+      {view.editor ? <BudgetEditor /> : null}
     </div>
   )
 }

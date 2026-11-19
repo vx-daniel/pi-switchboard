@@ -34,7 +34,7 @@ What is kept is the label and the counts: never message content, the request's `
 }
 ```
 
-A budget is read on every request that shows it, so a change shows at once, with no restart. An entry with an invalid project label, an amount that isn't a positive number, or a window other than those three is dropped, and the proxy logs the field's name.
+A budget is read on every request that shows it, so a change shows at once, with no restart. An editor can also set it on the admin UI's Stats tab ([Changing budgets](admin-ui.md#changing-budgets)). An entry with an invalid project label, an amount that isn't a positive number, or a window other than those three is dropped, and the proxy logs the field's name.
 
 Cost is what the [stats](configuration.md#what-the-proxy-adds) price each request at: pi's list prices, `0` where pi has no price. A subscription's real cost is not this.
 
