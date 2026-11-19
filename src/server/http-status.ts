@@ -24,6 +24,8 @@ export const HTTP_FORBIDDEN = 403
 export const HTTP_NOT_FOUND = 404
 /** HTTP 408 Request Timeout. */
 export const HTTP_REQUEST_TIMEOUT = 408
+/** HTTP 409 Conflict: the admin UI's answer to a write over a config file it can't read (#367). */
+export const HTTP_CONFLICT = 409
 /** HTTP 413 Payload Too Large. */
 export const HTTP_PAYLOAD_TOO_LARGE = 413
 /** HTTP 422 Unprocessable Entity. */

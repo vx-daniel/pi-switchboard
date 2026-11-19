@@ -12,9 +12,11 @@
 
 import { adminUiMayStart, openAdminServer } from '@proxy/admin/listen'
 import { configFileAuthTokenInvalid, getConfigPath, loadConfigFromFile } from '@proxy/config/schema'
+import { settingOverrides } from '@proxy/config/settings'
 import { LOG_FORMATS, proxyLogger, resolveLogFormat } from '@proxy/logging'
 import { initRegistry } from '@proxy/pi/registry'
 import {
+  buildCliOverrides,
   invalidFlag,
   listen,
   loadConfigWithLogging,
@@ -115,14 +117,16 @@ const main = defineCommand({
 
     // The admin UI (#367), on its own listener, after the API's: the port clients wait on.
     const admin = config.adminUi.enabled
-      ? await openAdminServer(config).catch((error: unknown): undefined => {
-          lifecycleLogger.fatal('Cannot start the admin UI on {host}:{port}: {error}', {
-            host: config.adminUi.host,
-            port: config.adminUi.port,
-            error: errorMessage(error)
-          })
-          return undefined
-        })
+      ? await openAdminServer(config, settingOverrides(buildCliOverrides(args), process.env)).catch(
+          (error: unknown): undefined => {
+            lifecycleLogger.fatal('Cannot start the admin UI on {host}:{port}: {error}', {
+              host: config.adminUi.host,
+              port: config.adminUi.port,
+              error: errorMessage(error)
+            })
+            return undefined
+          }
+        )
       : undefined
     if (config.adminUi.enabled && admin === undefined) {
       listening.close()

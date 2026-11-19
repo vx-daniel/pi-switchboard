@@ -21,6 +21,7 @@ import {
   describeConfigFileProblem,
   loadConfigFromFile
 } from '@proxy/config/schema'
+import type { SettingOverrides } from '@proxy/config/settings'
 import { readStats, judgeDoctorInputs, serverSettingsOf } from '@proxy/doctor/collect'
 import type { DoctorReport } from '@proxy/doctor/findings'
 import type { AliasDiagnostic } from '@proxy/openai/model-aliases'
@@ -49,11 +50,12 @@ import { fileConfigReader } from '@proxy/server/routes'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { type LoginPlace, loginPlaces } from '@proxy/tui/login-routing'
 
-/** What the server runs with that the doctor and the status strip read: the API listener's settings. */
-export type AdminServerFacts = Pick<
-  ServerConfig,
-  'host' | 'port' | 'docsUiEnabled' | 'statsEnabled'
-> & {
+/** What the API listener runs with, as the admin UI reads it. */
+export interface AdminServerFacts {
+  /** The config the API listener started with: a change to the file applies on a restart. */
+  readonly running: ServerConfig
+  /** The settings a flag or env var holds, which a change to the file doesn't move. */
+  readonly overrides: SettingOverrides
   /** Whether proxy auth needs a token. */
   readonly proxyAuth: boolean
 }
@@ -198,11 +200,11 @@ export async function doctorSnapshot(
 ): Promise<DoctorReport> {
   const problem = configFileProblem()
   return judgeDoctorInputs({
-    server: serverSettingsOf(server, server.proxyAuth),
+    server: serverSettingsOf(server.running, server.proxyAuth),
     requestConfig: await fileConfigReader(),
     credentials: { ...(await credentialsHealthReport(false)).body, howToVerify: HOW_TO_VERIFY },
     configFileProblem: problem === undefined ? undefined : describeConfigFileProblem(problem),
-    stats: readStats(server.statsEnabled, window, now),
+    stats: readStats(server.running.statsEnabled, window, now),
     window,
     howToWiden: HOW_TO_WIDEN
   })

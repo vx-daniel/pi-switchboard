@@ -77,9 +77,9 @@ export async function statusSnapshot(
   const { perMinute, saturated } = requestsPerMinute(finishedRequests(), now)
   return {
     version: packageJson.version,
-    address: `${server.host}:${String(server.port)}`,
+    address: `${server.running.host}:${String(server.running.port)}`,
     proxyAuth: server.proxyAuth ? 'token' : 'off',
-    beyondLoopback: !isLoopbackHost(server.host),
+    beyondLoopback: !isLoopbackHost(server.running.host),
     uptimeMs: Math.round(process.uptime() * MS_PER_SECOND),
     available: available.length,
     exposed: exposure.ok ? exposure.models.length : exposure.message,
