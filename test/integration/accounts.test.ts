@@ -7,12 +7,17 @@
  * logins apart by the key each request carries.
  */
 
+import {
+  loginLabels,
+  saveLoginDisabled,
+  saveLoginFirst,
+  saveLoginLabel
+} from '@proxy/config/login-routing'
 import { activeCooldown, clearAllCooldowns } from '@proxy/pi/cooldowns'
 import { getRuntime } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
-import { loginLabels, loginOptions, runLogin, runLogout, saveLoginLabel } from '@proxy/tui/login'
-import { saveLoginDisabled, saveLoginFirst } from '@proxy/tui/login-routing'
+import { loginOptions, runLogin, runLogout } from '@proxy/tui/login'
 import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 

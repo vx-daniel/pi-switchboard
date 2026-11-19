@@ -14,6 +14,14 @@
  */
 
 import { getLogLevels } from '@logtape/logtape'
+import {
+  badRequest,
+  fileUnusable,
+  notFound,
+  notWritten,
+  type Refusal,
+  type WriteAnswer
+} from '@proxy/admin/answers'
 import type { AdminServerFacts } from '@proxy/admin/reads'
 import {
   configFileAuthTokenInvalid,
@@ -43,14 +51,7 @@ import {
 import { proxyLogger } from '@proxy/logging'
 import { canonicalModelId } from '@proxy/pi/model-id'
 import { getAvailableModels, getCredentialStatuses } from '@proxy/pi/registry'
-import {
-  HTTP_BAD_REQUEST,
-  HTTP_CONFLICT,
-  HTTP_FORBIDDEN,
-  HTTP_INTERNAL_SERVER_ERROR,
-  HTTP_NOT_FOUND,
-  HTTP_OK
-} from '@proxy/server/http-status'
+import { HTTP_OK } from '@proxy/server/http-status'
 
 /** Logger for the changes operators make. */
 const auditLogger = proxyLogger('admin', 'audit')
@@ -86,21 +87,8 @@ export interface SettingsSnapshot {
   readonly pendingRestart: number
 }
 
-/** A refusal's HTTP status. */
-type RefusalStatus =
-  | typeof HTTP_BAD_REQUEST
-  | typeof HTTP_FORBIDDEN
-  | typeof HTTP_NOT_FOUND
-  | typeof HTTP_CONFLICT
-  | typeof HTTP_INTERNAL_SERVER_ERROR
-
-/** A write's answer: its HTTP status, and the page's data or why not. */
-export type SettingAnswer =
-  | { readonly status: typeof HTTP_OK; readonly body: SettingsSnapshot }
-  | {
-      readonly status: RefusalStatus
-      readonly body: { readonly error: { readonly code: string; readonly message: string } }
-    }
+/** A write's answer: the page's data after it, or why it was refused. */
+export type SettingAnswer = WriteAnswer<SettingsSnapshot>
 
 /** The file's fields, whose schemas bound the numbers. */
 const FIELDS = ProxyConfigSchema.shape
@@ -216,24 +204,10 @@ function shown(file: ProxyConfig, server: AdminServerFacts, key: SettingKey): st
   return rows.find((row) => row.key === key)?.saved ?? ''
 }
 
-/**
- * Answers a refusal.
- *
- * @param status - its HTTP status
- * @param code - its machine-readable code
- * @param message - what to tell the operator
- * @returns the answer
- */
-function refused(status: RefusalStatus, code: string, message: string): SettingAnswer {
-  return { status, body: { error: { code, message } } }
-}
-
 /** What a write sends. */
 export interface SettingChange {
-  /** The operator, for the audit line. */
+  /** The operator, an editor, for the audit line. */
   readonly login: string
-  /** Whether they may change settings. */
-  readonly editor: boolean
   readonly key: string
   readonly value: unknown
   /** Whether they confirmed listening beyond this machine with proxy auth off. */
@@ -246,14 +220,11 @@ export interface SettingChange {
  * @param key - the name sent
  * @returns the setting, or the answer refusing it
  */
-function writableKey(key: string): WritableSetting | SettingAnswer {
+function writableKey(key: string): WritableSetting | Refusal {
   const setting = SETTING_KEYS.find((candidate) => candidate === key)
-  if (setting === undefined) {
-    return refused(HTTP_NOT_FOUND, 'unknown_setting', `There is no setting ${key}.`)
-  }
+  if (setting === undefined) return notFound('unknown_setting', `There is no setting ${key}.`)
   if (!isWritableSetting(setting)) {
-    return refused(
-      HTTP_BAD_REQUEST,
+    return badRequest(
       'console_only',
       'Proxy auth is a credential: change it in the console (pi-switchboard tui, p).'
     )
@@ -262,7 +233,8 @@ function writableKey(key: string): WritableSetting | SettingAnswer {
 }
 
 /**
- * Changes one setting for an editor: checks it, saves it, and logs who changed what.
+ * Changes one setting for an editor: checks it, saves it, and logs who changed what. Only an
+ * editor's request reaches it (`src/admin/api.ts` refuses a viewer's write).
  *
  * @param server - the running config and what overrides it
  * @param change - who, which setting and the value
@@ -272,39 +244,23 @@ export async function changeSetting(
   server: AdminServerFacts,
   change: SettingChange
 ): Promise<SettingAnswer> {
-  if (!change.editor) {
-    return refused(HTTP_FORBIDDEN, 'editor_only', 'Only an editor may change settings.')
-  }
   const key = writableKey(change.key)
   if (typeof key !== 'string') return key
-  const problem = configFileProblem()
-  if (problem !== undefined) {
-    return refused(
-      HTTP_CONFLICT,
-      'file_unusable',
-      `proxy-config.json ${describeConfigFileProblem(problem)}: fix or remove it first; nothing is saved over it.`
-    )
-  }
+  const unusable = fileUnusable()
+  if (unusable !== undefined) return unusable
   const file = loadConfigFromFile()
   const written = writeSetting(file, key, change.value, {
     authOn: server.proxyAuth,
     confirmed: change.confirmed
   })
   if (!written.ok) {
-    return refused(
-      HTTP_BAD_REQUEST,
+    return badRequest(
       written.code === 'confirm' ? 'confirm_required' : 'invalid_value',
       written.message
     )
   }
   if (JSON.stringify(written.file) !== JSON.stringify(file)) {
-    if (!saveConfigToFile(written.file)) {
-      return refused(
-        HTTP_INTERNAL_SERVER_ERROR,
-        'not_written',
-        'Could not write proxy-config.json; nothing changed. The log says why.'
-      )
-    }
+    if (!saveConfigToFile(written.file)) return notWritten()
     auditLogger.info('{login} changed {setting} from {before} to {after}', {
       login: change.login,
       setting: key,

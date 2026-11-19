@@ -12,6 +12,13 @@ import {
   OAuthSelectorComponent
 } from '@earendil-works/pi-coding-agent'
 import type { TuiAltScreen } from '@earendil-works/pi-tui'
+import {
+  type LoginPlace,
+  loginPlaces,
+  saveLoginDisabled,
+  saveLoginFirst,
+  saveLoginLabel
+} from '@proxy/config/login-routing'
 import { proxyLogger } from '@proxy/logging'
 import { DEFAULT_LOGIN_ROUTING } from '@proxy/openai/model-logins'
 import {
@@ -22,20 +29,7 @@ import {
 } from '@proxy/pi/registry'
 import type { ConsoleContext } from '@proxy/tui/console'
 import { askLine, pickLabel, showDialog } from '@proxy/tui/dialogs'
-import {
-  loginOptions,
-  logoutOptions,
-  providerName,
-  runLogin,
-  runLogout,
-  saveLoginLabel
-} from '@proxy/tui/login'
-import {
-  type LoginPlace,
-  loginPlaces,
-  saveLoginDisabled,
-  saveLoginFirst
-} from '@proxy/tui/login-routing'
+import { loginOptions, logoutOptions, providerName, runLogin, runLogout } from '@proxy/tui/login'
 import { type AccountAction, accountActions, clampSelection } from '@proxy/tui/navigation'
 import { credentialChanged } from '@proxy/tui/status-refresh'
 import { errorMessage } from '@proxy/utils/guards'

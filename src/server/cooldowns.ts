@@ -38,7 +38,7 @@ export const cooldownViewSchema = z.object({
 })
 
 /** One active cooldown, as the API shows it. */
-type CooldownView = z.infer<typeof cooldownViewSchema>
+export type CooldownView = z.infer<typeof cooldownViewSchema>
 
 /**
  * Shows a cooldown over HTTP: login and model names only, never a credential.
