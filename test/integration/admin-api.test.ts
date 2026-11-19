@@ -64,7 +64,13 @@ function adminApp(overrides: Partial<AdminAppOptions> = {}): Hono {
   return createAdminApp({
     settings: { ...settings, signIn },
     fetch: () => Promise.reject(new Error('GitHub is not asked by the API')),
-    server: { host: '127.0.0.1', docsUiEnabled: false, statsEnabled: false, proxyAuth: false },
+    server: {
+      host: '127.0.0.1',
+      port: 4141,
+      docsUiEnabled: false,
+      statsEnabled: false,
+      proxyAuth: false
+    },
     ...overrides
   })
 }
@@ -106,6 +112,7 @@ describe('admin API', () => {
     '/accounts',
     '/models',
     '/stats',
+    '/status',
     '/doctor',
     '/nope'
   ])('%s answers 401 without a session', async (path) => {
@@ -116,7 +123,7 @@ describe('admin API', () => {
 
   // Catches a credential reaching the admin UI (constitution III): neither models.json's key nor
   // auth.json's appears in any page's answer.
-  test.each(['/accounts', '/models', '/doctor', '/requests'])(
+  test.each(['/accounts', '/models', '/doctor', '/requests', '/status'])(
     '%s carries no credential',
     async (path) => {
       const text = await (await read(adminApp(), path)).text()
@@ -134,6 +141,7 @@ describe('admin API', () => {
       expect.arrayContaining([
         expect.objectContaining({
           provider: 'local',
+          base: 'local',
           label: 'work',
           availableModelCount: 2,
           quota: null,
@@ -199,5 +207,25 @@ describe('admin API', () => {
     const report: unknown = await (await read(adminApp(), '/doctor?window=week')).json()
 
     expect(report).toMatchObject({ window: 'week', statsAvailable: false })
+  })
+
+  // Catches the status strip showing another address or auth than the API listener's, the models
+  // miscounted, a sparkline of the wrong length, or stats off read as a cost of nothing.
+  test("reads the strip's status from the running proxy", async () => {
+    const status: unknown = await (await read(adminApp(), '/status')).json()
+
+    expect(status).toMatchObject({
+      address: '127.0.0.1:4141',
+      proxyAuth: 'off',
+      beyondLoopback: false,
+      exposed: expect.any(Number),
+      available: expect.any(Number),
+      modelsJsonError: null,
+      todayCostUsd: null,
+      perMinute: expect.arrayContaining([expect.any(Number)]),
+      session: { since: expect.any(Number), totals: expect.any(Array) }
+    })
+    expect(status).toHaveProperty('perMinute.length', 30)
+    expect(status).toHaveProperty('version', expect.stringMatching(/^\d+\.\d+\.\d+/u))
   })
 })

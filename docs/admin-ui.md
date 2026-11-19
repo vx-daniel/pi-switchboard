@@ -2,7 +2,7 @@
 
 The admin UI (#367) is a web page for the people who run a pi-switchboard: they sign in with GitHub, and the editors and viewers lists say who may. It is off by default. The `pi-switchboard` server starts it, wherever it runs: the binary, Docker, the npm CLI, or the proxy the pi package starts (which reads the same `proxy-config.json`). The console (`pi-switchboard tui`) ignores it.
 
-So far it is the sign-in and the API the pages will read: who is signed in, the requests (also as a live stream), the logins, the models and aliases, the stats and the doctor's findings, all read-only ([The API](#the-api)). The pages themselves, and then the ones that change settings, come in later releases ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
+Signed in, it shows the proxy's requests as they happen, its logins with their quota and routing order, the models and aliases, the stats over a day, a week or 30 days, and the doctor's findings, all read-only ([The pages](#the-pages)). Pages that change settings come in a later release ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
 
 ## What it never does
 
@@ -69,7 +69,7 @@ In `proxy-config.json`:
 }
 ```
 
-Then start `pi-switchboard` and open `http://127.0.0.1:4142/admin/auth/sign-in`. After GitHub, the browser lands on `/admin/api/session`, which shows your login and role.
+Then start `pi-switchboard` and open `http://127.0.0.1:4142/admin/`: it offers the GitHub sign-in, and brings you back to the pages.
 
 ## Every setting
 
@@ -134,6 +134,28 @@ The flow is GitHub's [web application flow for GitHub Apps](https://docs.github.
 
 Behind a reverse proxy every request comes from the reverse proxy's address, so everyone shares those 20 a minute. The admin UI doesn't trust `X-Forwarded-For`, which a client can write. Limit per client at the reverse proxy if several people sign in at once.
 
+## The pages
+
+`/admin/` is laid out as the console (`pi-switchboard tui`), in its Tokyo Night Storm colors:
+
+- **The status strip**, on top: the version, where the proxy listens and whether proxy auth is on, the models exposed of those available, cooldowns, uptime, and on the right the last half hour of chat requests with the current rate and what today cost. Under it, the alerts the console gives a row of their own: proxy auth off beyond this machine, an exposure config that can't be applied, a `models.json` that didn't load.
+- **The tabs**, numbered; Doctor's carries the count of its errors and warnings, in the color of the worst.
+- **The page**, beside **the sidebar**: QUOTA (each login's windows), IN FLIGHT (the chat requests running), RECENT (the last minute and the latest finished) and SESSION (the traffic since the proxy started).
+- **The footer**, with the keys, which work as the console's: `1` to `6` pick a tab, `s` hides or shows the sidebar, and `t`, `w` and `a` pick the window (today, the week, 30 days) that Stats and Doctor share.
+
+The address's `#/accounts` names the tab, so a tab can be bookmarked. The tabs:
+
+| Tab | Shows |
+|---|---|
+| Requests | Each request, newest first, as it happens: its path, status and time, and for a chat the alias, the model, the attempt and how it ended; the proxy's own events (where it listens, logins added) among them |
+| Accounts | Each login, grouped by provider in routing order: its label, whether it is a subscription or an API key, its place in the order, its quota windows and when they reset, a reserve it is below, and its cooldowns |
+| Models | The models a client can name, with their context and reasoning efforts; each alias and what it points at, the built-in `-latest` ones, and why any is left out |
+| Stats | A day, a week or 30 days: totals, requests and failures over time, each model's numbers, and what failed |
+| Doctor | `pi-switchboard doctor`'s findings over the same windows, most serious first |
+| Logins | The commands that add a login, in a terminal; this page can't |
+
+The npm package, the Docker image and the standalone binary all carry the pages; the binary has them built in. They load nothing from another site: every script and style comes from the admin listener itself. The console's count of open client connections is the one part of its strip the admin UI leaves out: it needs the API listener's server, which the admin listener doesn't hold.
+
 ## The API
 
 Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. None writes, calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, and the requests carry no message content.
@@ -147,5 +169,6 @@ Every route under `/admin/api/` needs a session, editor or viewer, and answers `
 | `GET /admin/api/models` | The exposed `models` and `aliases` (as `GET /v1/switchboard/models`), the `configured` aliases, the built-in `latest` ones, and why any is left out; `503` `exposure_invalid` when the exposure config can't be applied |
 | `GET /admin/api/stats?window=today\|week\|all` | The stats over the window, as `GET /v1/switchboard/usage`; `503` while stats are off |
 | `GET /admin/api/doctor?window=today\|week\|all` | The doctor's report on the running proxy, as `pi-switchboard doctor --json`; no login is verified |
+| `GET /admin/api/status` | The status strip's and sidebar's data: `version`, `address`, `proxyAuth`, `beyondLoopback`, `uptimeMs`, the `exposed` and `available` models, `modelsJsonError`, `cooldowns`, `perMinute` (chat requests a minute over the last half hour, oldest first) with `saturated`, `todayCostUsd` (`null` while stats are off), and `session`'s route totals since the start |
 
 A `window` other than `today`, `week` or `all` is a `400`.

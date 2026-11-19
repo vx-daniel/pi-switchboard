@@ -11,7 +11,7 @@
 
 import { type ChildProcess, spawn } from 'node:child_process'
 import { once } from 'node:events'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -241,5 +241,35 @@ describe('standalone binary', () => {
     const binary = await startBinary(baseEnv(home), home)
     expect((await fetch(`${binary.url}/v1/models`)).status).toBe(200)
     expect(existsSync(marker)).toBe(false)
+  })
+
+  // Catches the admin UI's pages left out of the binary, which has no `dist/admin-ui/` beside it:
+  // `/admin/` and every asset its page loads must be the bytes the build wrote (#367).
+  test('serves the admin pages it embeds', async () => {
+    const adminPort = await freePort()
+    const binary = await startBinary({
+      ...baseEnv(tempHome()),
+      PI_SWITCHBOARD_ADMIN_UI: 'true',
+      PI_SWITCHBOARD_ADMIN_PORT: String(adminPort),
+      PI_SWITCHBOARD_ADMIN_EDITORS: 'alice',
+      PI_SWITCHBOARD_GITHUB_CLIENT_ID: 'Iv1.notarealclient',
+      PI_SWITCHBOARD_GITHUB_CLIENT_SECRET: 'notarealsecret-client-secret',
+      PI_SWITCHBOARD_ADMIN_SESSION_KEY: 'notarealsecret-session-key-0123456789abcdef'
+    })
+    const admin = `http://127.0.0.1:${String(adminPort)}`
+    await expect
+      .poll(async () => (await fetch(`${admin}/admin/`).catch(() => undefined))?.status)
+      .toBe(200)
+    const page = await (await fetch(`${admin}/admin/`)).text()
+    const built = join('dist', 'admin-ui')
+    expect(page).toBe(readFileSync(join(built, 'index.html'), 'utf8'))
+    const assets = [...page.matchAll(/"\/admin\/(assets\/[^"]+)"/gu)].map((match) => match[1] ?? '')
+    expect(assets.length).toBeGreaterThan(0)
+    for (const asset of assets) {
+      const served = Buffer.from(await (await fetch(`${admin}/admin/${asset}`)).arrayBuffer())
+      expect(served.equals(readFileSync(join(built, asset))), `${asset}: ${binary.output()}`).toBe(
+        true
+      )
+    }
   })
 })

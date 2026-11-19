@@ -1,3 +1,4 @@
+import react from '@vitejs/plugin-react'
 import { defineConfig } from 'vite-plus'
 
 export default defineConfig({
@@ -420,7 +421,7 @@ export default defineConfig({
       },
       // Repo overrides
       {
-        files: ['**/*.test.ts'],
+        files: ['**/*.test.ts', '**/*.test.tsx'],
         rules: {
           'typescript/await-thenable': 'off',
           'typescript/unbound-method': 'off',
@@ -480,6 +481,18 @@ export default defineConfig({
           setupFiles: ['test/setup/offline.ts']
         }
       },
+      // The admin UI's pages (#367), rendered in jsdom with Testing Library; their reads are
+      // answered by a stubbed `fetch`, so they never reach a proxy.
+      {
+        extends: true,
+        plugins: [react()],
+        test: {
+          name: 'web',
+          environment: 'jsdom',
+          include: ['test/web/**/*.test.tsx'],
+          setupFiles: ['test/web/setup.ts']
+        }
+      },
       ...(process.env.PI_SWITCHBOARD_LIVE_TESTS === '1'
         ? [{ extends: true, test: { name: 'live', include: ['test/conformance/**/*.test.ts'] } }]
         : []),
@@ -503,7 +516,13 @@ export default defineConfig({
       provider: 'v8',
       reporter: ['json'],
       reportsDirectory: 'coverage',
-      include: ['src/**/*.ts', 'extensions/**/*.ts', 'lint/**/*.ts', 'scripts/**/*.ts']
+      include: [
+        'src/**/*.ts',
+        'src/**/*.tsx',
+        'extensions/**/*.ts',
+        'lint/**/*.ts',
+        'scripts/**/*.ts'
+      ]
     }
   },
 

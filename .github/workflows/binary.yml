@@ -171,8 +171,9 @@ jobs:
         if: env.PLATFORMS == 'unix'
         run: pnpm run test:binary
 
+      # The admin UI's pages (#367) are built first: the binary embeds them.
       - name: Compile every target of the set
-        run: node scripts/build-binary.ts ${{ steps.plan.outputs.flag }}
+        run: pnpm run build && node scripts/build-binary.ts ${{ steps.plan.outputs.flag }}
 
       - name: Keep the binaries for the next jobs
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

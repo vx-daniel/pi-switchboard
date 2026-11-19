@@ -9,12 +9,12 @@ vp install            # Install dependencies (pnpm); also installs the Git hooks
 vp run dev            # Rebuild on change and restart the proxy on port 4142 (PI_SWITCHBOARD_DEV_PORT to change)
 pnpm run check:all    # The gate: format, lint + type check, tests with coverage, fallow, build, smoke (the built CLI starts)
 vp check --fix        # Format and apply lint fixes
-vp test               # Offline tests (unit + integration): no real login, no network beyond 127.0.0.1
+vp test               # Offline tests (unit + integration), and the admin UI's pages in jsdom (test/web): no real login, no network beyond 127.0.0.1
 pnpm run test:live    # Live conformance tests against real providers: uses your pi login and quota
 pnpm run test:live:record [<api>/<scenario> ...]  # Re-record the Anthropic and Codex replay fixtures (each base and its second login, `anthropic-2`/`openai-codex-2`), or the ones named (needs logins made for recording)
 pnpm run openai-spec:update <commit>  # Re-pin OpenAI's OpenAPI spec subset to a full commit SHA
-vp pack               # Build for npm (ESM + .d.ts)
-pnpm run build:binary # Standalone binary for this machine (dist-bin/pi-switchboard); needs Bun
+pnpm run build        # Build for npm (ESM + .d.ts, `vp pack`), then the admin UI's pages into dist/admin-ui (`vite.admin.config.ts`)
+pnpm run build:binary # Standalone binary for this machine (dist-bin/pi-switchboard), with the admin UI's pages embedded; needs Bun
 pnpm run test:binary  # Build it, then run it against the fixtures (test/binary); needs Bun, not in the gate
 ```
 

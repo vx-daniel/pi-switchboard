@@ -20,12 +20,14 @@ import {
   requestsSnapshot
 } from '@proxy/admin/reads'
 import type { AdminRole } from '@proxy/admin/roles'
+import { statusSnapshot } from '@proxy/admin/status'
 import { proxyLogger } from '@proxy/logging'
 import { onActiveRequestsChange } from '@proxy/server/active-requests'
 import { onConsoleEventsChange } from '@proxy/server/console-events'
 import { onHttpRequestsChange } from '@proxy/server/http-requests'
 import {
   HTTP_BAD_REQUEST,
+  HTTP_OK,
   HTTP_SERVICE_UNAVAILABLE,
   HTTP_UNAUTHORIZED
 } from '@proxy/server/http-status'
@@ -157,6 +159,16 @@ function addPages(api: Hono<AdminApiEnv>, deps: AdminApiDeps): void {
   api.get('/stats', (context) => {
     const answer = usage(context.req.query('window'), deps.now())
     return context.json(answer.body, answer.status)
+  })
+
+  api.get('/status', async (context) => {
+    const now = deps.now()
+    const today = usage('today', now)
+    const cost =
+      today.status === HTTP_OK
+        ? today.body.models.reduce((total, model) => total + model.cost_usd, 0)
+        : null
+    return context.json(await statusSnapshot(deps.server, cost, now))
   })
 
   api.get('/doctor', async (context) => {

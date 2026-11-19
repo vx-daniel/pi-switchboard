@@ -7,6 +7,7 @@
 
 import { type ServerType, serve } from '@hono/node-server'
 import { createAdminApp } from '@proxy/admin/app'
+import { adminAssets } from '@proxy/admin/assets'
 import { type AdminUiSettings, adminUiProblems } from '@proxy/config/admin'
 import type { ServerConfig } from '@proxy/config/env'
 import { proxyLogger } from '@proxy/logging'
@@ -44,8 +45,10 @@ export async function openAdminServer(config: ServerConfig): Promise<ServerType>
   if (signIn === undefined) throw new Error('The admin UI needs sign-in configured to start')
   const app = createAdminApp({
     settings: { ...settings, signIn },
+    assets: await adminAssets(),
     server: {
       host: config.host,
+      port: config.port,
       docsUiEnabled: config.docsUiEnabled,
       statsEnabled: config.statsEnabled,
       proxyAuth: config.proxyAuth.kind === 'token'

@@ -25,7 +25,7 @@ import { readStats, judgeDoctorInputs, serverSettingsOf } from '@proxy/doctor/co
 import type { DoctorReport } from '@proxy/doctor/findings'
 import type { AliasDiagnostic } from '@proxy/openai/model-aliases'
 import { computeModelExposure } from '@proxy/openai/model-exposure'
-import type { LoginDiagnostic } from '@proxy/openai/model-logins'
+import { type LoginDiagnostic, loginBase } from '@proxy/openai/model-logins'
 import { buildPiModelList, type PiModelList } from '@proxy/openai/models'
 import { activeCooldowns, type Cooldown } from '@proxy/pi/cooldowns'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
@@ -49,8 +49,11 @@ import { fileConfigReader } from '@proxy/server/routes'
 import type { StatsWindow } from '@proxy/stats/windows'
 import { type LoginPlace, loginPlaces } from '@proxy/tui/login-routing'
 
-/** What the server runs with that the doctor judges: the API listener's settings. */
-export type AdminServerFacts = Pick<ServerConfig, 'host' | 'docsUiEnabled' | 'statsEnabled'> & {
+/** What the server runs with that the doctor and the status strip read: the API listener's settings. */
+export type AdminServerFacts = Pick<
+  ServerConfig,
+  'host' | 'port' | 'docsUiEnabled' | 'statsEnabled'
+> & {
   /** Whether proxy auth needs a token. */
   readonly proxyAuth: boolean
 }
@@ -69,6 +72,8 @@ export interface RequestsSnapshot {
 
 /** One login on the Accounts page. */
 export interface AccountSnapshot extends ProviderCredentialStatus {
+  /** The provider it is a login of: `anthropic` for `anthropic-account-2` (#227). */
+  readonly base: string
   /** The label the operator gave it (`labels`), or `null`. */
   readonly label: string | null
   /** Its latest quota report, or `null` when it reported none. */
@@ -109,6 +114,10 @@ export interface ModelsUnavailable {
 /** The too-few-calls advice's recommendation on the admin UI: its window choice. */
 const HOW_TO_WIDEN = 'Try a longer window (All: 30 days), or come back after more traffic.'
 
+/** The not-verified advice's recommendation on the admin UI, which verifies no login. */
+const HOW_TO_VERIFY =
+  "Run `pi-switchboard doctor --verify` in a terminal on the proxy's machine (as /healthz/creds?verify=true, it may refresh an OAuth token)."
+
 /**
  * Reads the Requests page's snapshot from the stores the API listener fills.
  *
@@ -140,6 +149,7 @@ export async function accountsSnapshot(now: number): Promise<AccountSnapshot[]> 
   const cooldowns = activeCooldowns(now)
   return accounts.map((account) => ({
     ...account,
+    base: loginBase(account.provider).base,
     label: file.labels[account.provider] ?? null,
     quota: providerQuota(account.provider, now) ?? null,
     belowReserve: providerBelowReserve(account.provider, file.routing.reserve, now) ?? null,
@@ -190,7 +200,7 @@ export async function doctorSnapshot(
   return judgeDoctorInputs({
     server: serverSettingsOf(server, server.proxyAuth),
     requestConfig: await fileConfigReader(),
-    credentials: (await credentialsHealthReport(false)).body,
+    credentials: { ...(await credentialsHealthReport(false)).body, howToVerify: HOW_TO_VERIFY },
     configFileProblem: problem === undefined ? undefined : describeConfigFileProblem(problem),
     stats: readStats(server.statsEnabled, window, now),
     window,

@@ -1825,7 +1825,7 @@ no setting loosens them.
 
 ### Admin UI (#367)
 
-Status: the listener, sign-in and read API are built; the pages come in later slices (constitution 3.13.0
+Status: phase 1 is built: the listener, sign-in, the read API and the read-only pages (constitution 3.13.0
 admits them). The first slice moved the settings model the console's Settings view renders into
 `src/config/settings.ts`, so the console and the admin UI share one list of settings, their
 groups, when each applies and what overrides it. The second added the `adminUi` section
@@ -1835,17 +1835,25 @@ the listener (`src/admin/listen.ts`, started by `src/cli.ts` after the API's, so
 (`src/admin/app.ts`, `github.ts`, `sealed.ts`, `roles.ts`). The third added the read API the
 phase-1 pages use (`src/admin/api.ts`, read from the running process by `src/admin/reads.ts`):
 `/admin/api/session`, `requests` (and its SSE `requests/stream`), `accounts`, `models`, `stats`
-and `doctor`, each behind a session, none writing. The operator's guide is
+and `doctor`, each behind a session, none writing. The fourth added the pages
+(`src/admin/web/`, built by `vite.admin.config.ts` into `dist/admin-ui/` and served under `/admin/`
+by `src/admin/pages.ts` from `src/admin/assets.ts`, which reads the build directory on Node and
+the files `scripts/build-binary.ts` embeds in the standalone binary). The operator's guide is
 [`docs/admin-ui.md`](docs/admin-ui.md).
 
 **What it is.** A web interface for a proxy run in Docker, so it can be configured without the
 terminal console. React with Tailwind CSS 4 and daisyUI 5, as j5's dashboard uses
-(`Viaanix/number-5` `packages/dashboard`); TanStack Query (and `EventSource` for live requests
-and logs), TanStack Table, a small router and uPlot for the stats timeline. Built by Vite and
-served by Hono as static files from the proxy's own package: no second server, no CDN. Its pages
-mirror the console's views: Requests, Accounts, Stats, Models and aliases, Settings, Doctor, and a
-Logins page that only shows the command to run in a terminal
-(`docker exec -it <container> pi auth login <provider>`).
+(`Viaanix/number-5` `packages/dashboard`); TanStack Query (and `EventSource` for live requests),
+daisyUI tables, a small hash router and uPlot for the stats timeline. Built by Vite and served by
+Hono as static files from the proxy's own package: no second server, no CDN. Its phase-1 pages
+mirror the console's views: Requests, Accounts, Models and aliases, Stats, Doctor, and a Logins
+page that only shows the command to run in a terminal
+(`docker exec -it <container> pi auth login <provider>`). Settings comes with phase 2, whose
+writes it exists for. The screen is laid out as the console's (`src/admin/web/shell.tsx`): the
+status strip and its alerts, numbered tabs (Doctor's with its count), the page beside the
+QUOTA/IN FLIGHT/RECENT/SESSION sidebar, a footer of the keys (`1`–`6`, `s`, `t`/`w`/`a`), and
+Tokyo Night Storm as a daisyUI theme. The strip's and sidebar's data come from
+`GET /admin/api/status` (`src/admin/status.ts`), from the console's own counters.
 
 **Where it runs.** On a separate admin listener (for example `:4142`), off by default and bound
 to `127.0.0.1` by default. In Docker it is published to the host's loopback only, or reached over

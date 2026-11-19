@@ -59,10 +59,10 @@ function libraryFileKey(
 
 /** Files whose every declaration is in scope: the code, and every non-test file under `test/`. */
 const FULL_SCOPE =
-  /^(?:(?:src|extensions|scripts|lint|test)\/(?!.*\.test\.ts$).+|vite\.config\.ts)$/u
+  /^(?:(?:src|extensions|scripts|lint|test)\/(?!.*\.test\.tsx?$).+|vite\.(?:admin\.)?config\.ts)$/u
 
 /** Test files: only their helper functions are in scope. */
-const TEST_FILE = /^test\/.+\.test\.ts$/u
+const TEST_FILE = /^test\/.+\.test\.tsx?$/u
 
 /** The TSDoc standard tags; anything else (`@return`, `@type`, `@module`) is JSDoc or a typo. */
 const TSDOC_TAGS = new Set([
@@ -523,7 +523,7 @@ function sampleProblems(files: Readonly<Record<string, string>>): string[] {
 function filesInScope(): string[] {
   const listing = spawnSync(
     'git',
-    ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '*.ts'],
+    ['ls-files', '-z', '--cached', '--others', '--exclude-standard', '*.ts', '*.tsx'],
     { cwd: REPOSITORY_ROOT, encoding: 'utf8' }
   )
   if (listing.status !== 0) throw new Error(`git ls-files failed: ${listing.stderr}`)
