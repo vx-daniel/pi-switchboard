@@ -1,13 +1,14 @@
 /**
  * The Stats page (#367): the stats file's usage over a window, as `GET /v1/switchboard/usage`
- * answers it: totals, the timeline, each model's numbers, and what failed.
+ * answers it: totals, the timeline, each model's numbers, each project's spend against its budget
+ * (#366), and what failed.
  *
  * @packageDocumentation
  */
 
 import { readApi, type StatsWindow, type Usage, UsageSchema } from '@proxy/admin/web/api'
 import { DataTable } from '@proxy/admin/web/data-table'
-import { dollars, duration, tokens } from '@proxy/admin/web/format'
+import { dollars, duration, percent, tokens } from '@proxy/admin/web/format'
 import { Loaded } from '@proxy/admin/web/loaded'
 import { Timeline } from '@proxy/admin/web/pages/timeline'
 import type { PageView } from '@proxy/admin/web/router'
@@ -110,6 +111,67 @@ function ModelsUsage(table: { readonly usage: Usage }): ReactElement {
   )
 }
 
+/** From this share of its budget a project's bar is a warning, as the doctor's advice starts. */
+const NEAR_BUDGET = 0.8
+/** The progress bars' scale. */
+const PROGRESS_MAX = 100
+
+/**
+ * Picks a project's bar colour, as the doctor judges its spend: past the budget an error, from
+ * {@link NEAR_BUDGET} of it a warning.
+ *
+ * @param share - the share of its budget spent
+ * @returns the progress class
+ */
+function barColor(share: number): string {
+  if (share > 1) return 'progress-error'
+  return share >= NEAR_BUDGET ? 'progress-warning' : 'progress-success'
+}
+
+/**
+ * Shows each project's spend against its budget for the window: `X-Switchboard-Project`'s label,
+ * counted only with proxy auth on, and `budgets` in proxy-config.json. Reported, never enforced.
+ *
+ * @param table - the usage
+ * @param table.usage - the window's numbers
+ * @returns the table
+ */
+function ProjectsUsage(table: { readonly usage: Usage }): ReactElement {
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="text-lg font-semibold">Projects</h2>
+      <DataTable headings={['Project', 'Requests', 'Failed', 'Cost', 'Budget', 'Spent']}>
+        {table.usage.projects.map((project) => {
+          const share =
+            project.budget_usd === null ? undefined : project.cost_usd / project.budget_usd
+          return (
+            <tr key={project.project}>
+              <td className="font-mono text-xs">{project.project}</td>
+              <td>{project.requests}</td>
+              <td>{project.failed}</td>
+              <td>{dollars(project.cost_usd)}</td>
+              <td>{project.budget_usd === null ? '' : dollars(project.budget_usd)}</td>
+              <td>
+                {share === undefined ? null : (
+                  <div className="flex items-center gap-2">
+                    <progress
+                      className={`progress w-24 ${barColor(share)}`}
+                      aria-label={`${project.project} spent`}
+                      value={Math.min(PROGRESS_MAX, Math.round(share * PROGRESS_MAX))}
+                      max={PROGRESS_MAX}
+                    />
+                    <span className="text-xs">{percent(share)}</span>
+                  </div>
+                )}
+              </td>
+            </tr>
+          )
+        })}
+      </DataTable>
+    </section>
+  )
+}
+
 /**
  * Shows a window's usage.
  *
@@ -119,14 +181,21 @@ function ModelsUsage(table: { readonly usage: Usage }): ReactElement {
  */
 function UsageView(view: { readonly usage: Usage }): ReactElement {
   const { usage } = view
+  const projects = usage.projects.length === 0 ? null : <ProjectsUsage usage={usage} />
   if (usage.models.length === 0 && usage.rejected.length === 0) {
-    return <p className="p-4 text-base-content/60">No requests in this window.</p>
+    return (
+      <div className="flex flex-col gap-6">
+        <p className="p-4 text-base-content/60">No requests in this window.</p>
+        {projects}
+      </div>
+    )
   }
   return (
     <div className="flex flex-col gap-6">
       <Totals usage={usage} />
       <Timeline timeline={usage.timeline} />
       <ModelsUsage usage={usage} />
+      {projects}
       {[
         ...usage.failures.map((failure) => `${String(failure.count)} ${failure.class}`),
         ...usage.rejected.map(

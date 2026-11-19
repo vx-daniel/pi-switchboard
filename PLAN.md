@@ -777,7 +777,8 @@ Accounts view, as it leaves aliases to the Models view.
 ### Usage by route (#70)
 
 The operator's view of usage, keyed by what the proxy knows: alias × provider × served model. No
-client-supplied key (#177 settled this), and never the request's `user`.
+client-supplied key (#177 settled this), and never the request's `user`, with one exception
+(#366, below): the project a request names in `X-Switchboard-Project`.
 
 - **Log tags.** Every `pi.complete` line of an upstream call (start, result, throw) carries `alias`
   (`null` for a request that named a model) and `attempt`, the call's number in the chain from 1.
@@ -810,6 +811,31 @@ client-supplied key (#177 settled this), and never the request's `user`.
 - **Readers.** The terminal console (#61) reads `routeTotals()` in-process and subscribes with
   `onRouteTotalsChange()`. Over HTTP, usage comes from the stats file instead, which survives a
   restart: `GET /v1/switchboard/usage` (#224, below).
+
+### Projects and budgets (#366)
+
+`X-Switchboard-Project` reverses #177 for one key, within limits, by the decision taken on #366:
+
+- **Read only with proxy auth on** (`src/server/project-header.ts`, after proxy auth on both chat
+  routes). Without a token any program that reaches the proxy could charge its traffic to any
+  project, so the header is ignored and the log says why once per server. With a token, a label
+  that isn't one (1–64 characters, a letter or digit then letters, digits and `._:/@-`,
+  `ProjectLabelSchema` in `src/config/projects.ts`) is refused with a `400` naming the header,
+  never cut or cleaned (principle I). The label's shape keeps it apart from the stats' own
+  `(other)`.
+- **Carried beside the route, not in it.** The project travels on the request
+  (`ActiveRequest.project`) and on each route event (`RouteKey.project`), but the in-memory route
+  totals are still keyed by alias × provider × model: the console's totals add projects together.
+- **Stored per minute** in `project_minutes` (schema version 3): requests and failures from the
+  finished requests, tokens and cost from each upstream call. The recorder keeps at most 50
+  distinct projects a minute, the rest as `(other)`, as it bounds rejected model names.
+- **Budgets** (`budgets` in `proxy-config.json`): US dollars per project per stats window,
+  reported beside each project's usage (`GET /v1/switchboard/usage`'s `projects`, the console's
+  PROJECTS panel, the admin UI's Stats tab) and checked by the doctor's `budget` check (a warning
+  past one, advice from 80%). Never enforced: refusing a request past a budget would be a routing
+  decision under principle VI, not taken.
+- **Out of scope here:** #366's tool-output compression (`X-Switchboard-Compress`), which needs a
+  principle I amendment for requested transformations.
 
 ### Route handling
 
@@ -2190,7 +2216,7 @@ src/
 ├── standalone/
 │   ├── main.ts           -- the standalone binary's entry point (#61)
 │   └── sandbox-env.ts    -- recovers process.env where a sandbox empties it for Bun
-├── stats/                -- the stats store (#216): store.ts, recorder.ts, windows.ts, cache.ts
+├── stats/                -- the stats store (#216): store.ts, recorder.ts, windows.ts, cache.ts, project-store.ts (#366)
 ├── sync/
 │   └── zed.ts            -- Zed settings.json model sync
 ├── tui/                  -- the console (selected files; see "Console" below)
@@ -2472,21 +2498,22 @@ default (`stats`, `--no-stats`, `PI_SWITCHBOARD_STATS=false`).
   in WAL mode, so a console can read while proxies in other processes write. The busy timeout is
   250 ms: `node:sqlite` waits synchronously, on the thread that serves requests, so a write that
   can't get the lock in time is dropped rather than stalling every request in flight. `PRAGMA
-  user_version` holds the schema version, now 2; a file from a newer proxy is refused with a
+  user_version` holds the schema version, now 3; a file from a newer proxy is refused with a
   message saying to upgrade, and an older one is migrated in place, keeping its rows
-  (`MIGRATIONS` in `store.ts`, each step an `ALTER TABLE … ADD COLUMN … DEFAULT 0`, all in one
+  (`MIGRATIONS` in `store.ts`, each step adds a column `… DEFAULT 0` or a table, all in one
   transaction with the new `user_version`). Version 2 (#299) added
-  `request_minutes.prompt_cache_key_requests`.
+  `request_minutes.prompt_cache_key_requests`; version 3 (#366) added `project_minutes`.
 - **Mixed versions.** An older proxy refuses a newer file, and then runs without stats (a
   warning, never a failed start). A pi package and a standalone binary (or an image) sharing one
   agent dir must therefore both be upgraded: once the newer one has migrated the file to
-  version 2, the older one records nothing.
+  version 3, the older one records nothing.
 - **Tables** (`store.ts`), each keyed by the minute: `request_minutes` (finished requests by
   alias, model, outcome and, for a rejected one, status, with total and longest duration, the
   total time to a stream's first event, and how many sent a `prompt_cache_key`: a count, never
   the key, which can be a conversation ID the client chose), `attempt_minutes` (#70's attempts,
-  failures, fallbacks, tokens and cost by alias and served model) and `failure_minutes` (failed
-  attempts by model and class). Routes, counts and timings only: never message content, the
+  failures, fallbacks, tokens and cost by alias and served model), `failure_minutes` (failed
+  attempts by model and class) and `project_minutes` (#366: each project's requests, failures,
+  tokens and cost). Routes, counts and timings only: never message content, the
   request's `user`, or a credential. A rejected request's model is the name the client sent, so
   it is cut to 128 characters, and past 20 distinct names in a minute the rest are filed as
   `(other)`. Queries: a timeline in buckets with empty ones filled in, per-model and per-alias

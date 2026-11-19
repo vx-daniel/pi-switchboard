@@ -57,7 +57,7 @@ The stable routes are the first three rows. [`PLAN.md`](../PLAN.md) "Stable surf
 | `POST /v1/chat/completions` | Chat completions (streaming and non-streaming) |
 | `POST /v1/responses` | Off by default, experimental: OpenAI's Responses API, stateless ([below](#responses-api-experimental)) |
 | `GET /v1/switchboard/models` | Not OpenAI's: each exposed model's pi capabilities, such as its supported `reasoning_effort` values ([below](#discovering-available-models)) |
-| `GET /v1/switchboard/usage` | Not OpenAI's: usage over today, the last week or 30 days, per model and per alias, from the stats file ([below](#usage-over-http)) |
+| `GET /v1/switchboard/usage` | Not OpenAI's: usage over today, the last week or 30 days, per model, per alias and per project, from the stats file ([below](#usage-over-http)) |
 | `DELETE /v1/switchboard/cooldowns` | Not OpenAI's: ends cooldowns early, all of them or one login's or model's ([Cooldowns](routing.md#cooldowns)) |
 | `GET /v1/switchboard/openapi.json` | Not OpenAI's: this API as an OpenAPI 3.1 document ([below](#api-documentation)) |
 | `GET /docs` | Off by default: Swagger UI for the document, to read the API and try requests ([below](#api-documentation)) |
@@ -77,10 +77,11 @@ curl -s "http://localhost:4141/v1/switchboard/usage?window=week" -H "Authorizati
 - **`window`:** `today` (from midnight, the proxy's local time; the default), `week` (the last 7 days) or `all` (the 30 days the file keeps). Anything else is a `400`.
 - **`models` and `aliases`:** per served model and per alias, busiest first: `requests`, `failed`, `left` (the client went away), `average_ms`, `slowest_ms`, `average_first_event_ms`, `attempts`, `fallbacks`, `input_tokens` (the uncached input only), `output_tokens`, `cache_read_tokens` and `cache_write_tokens` (the prompt is `input_tokens` plus both; the cache hit rate is `cache_read_tokens` over that sum, see [Prompt caching](caching.md#reading-the-numbers)) and `cost_usd`. An alias counts every model its fallback chain tried; `alias: null` is the requests that named a model directly. Before #297 the reads and writes came added together as `cache_tokens`, which is gone.
 - **`failures` and `rejected`:** failed attempts by failure class, and rejected requests by HTTP status.
+- **`projects`:** per [project](projects.md) (`X-Switchboard-Project`, counted only with proxy auth on), most spent first: `requests`, `failed`, the four token counts, `cost_usd`, and `budget_usd`, the project's budget for the window (`null` without one). A project with a budget for the window but no traffic in it is listed at zero; `(other)` holds the projects past the cap of 50 a minute.
 - **`timeline`:** requests per hour (`today`), per 6 hours (`week`) or per day (`all`), with failed and rejected ones; `bucket_minutes` says which.
 - **Stats off** (`--no-stats`), or a file that can't be read, answers `503` with code `stats_unavailable`, not empty numbers.
 
-Routes, counts, timings, tokens and cost only: never message content, a request's `user`, or a credential.
+Routes, counts, timings, tokens and cost only: never message content, a request's `user`, or a credential. A project is the label the client sent, and nothing more.
 
 ### Health checks
 
@@ -268,6 +269,10 @@ curl http://localhost:4141/v1/chat/completions \
 If the provider rejects that key, the proxy answers `401` `authentication_error` with code `upstream_api_key_invalid` and a fixed message naming the header: the key is yours to fix. A rejected stored pi login stays `502` `upstream_auth_error`, as the client did nothing wrong.
 
 An empty header (`X-Switchboard-Upstream-Api-Key:` with no value, or only spaces) is refused with `400` before anything is called: leave the header out to use pi's stored login.
+
+## Counting usage by project
+
+The `X-Switchboard-Project` header names the project a chat request is for (`owner/repository`, up to 64 characters), and the proxy counts its requests, tokens and cost apart, in `GET /v1/switchboard/usage`, the console and the admin UI. It is read only with proxy auth on; without a token it is ignored. With auth on, a label that isn't one is refused with `400`. Budgets per project, and the rest: [Projects and budgets](projects.md).
 
 ## API compatibility
 
