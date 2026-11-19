@@ -2,7 +2,7 @@
 
 The admin UI (#367) is a web page for the people who run a pi-switchboard: they sign in with GitHub, and the editors and viewers lists say who may. It is off by default. The `pi-switchboard` server starts it, wherever it runs: the binary, Docker, the npm CLI, or the proxy the pi package starts (which reads the same `proxy-config.json`). The console (`pi-switchboard tui`) ignores it.
 
-Signed in, it shows the proxy's requests as they happen, its logins with their quota and routing order, the models and aliases, the stats over a day, a week or 30 days, and the doctor's findings ([The pages](#the-pages)). An editor also changes the proxy's settings, as the console's Settings view does; a viewer only reads them ([Changing settings](#changing-settings)). Editing aliases and logins' routing comes in a later release ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
+Signed in, it shows the proxy's requests as they happen, its logins with their quota and routing order, the models and aliases, the stats over a day, a week or 30 days, and the doctor's findings ([The pages](#the-pages)). An editor also changes what the console changes: the settings, the aliases, and the logins' order, labels and disabling, and ends cooldowns; a viewer only reads ([Changing settings](#changing-settings), [Changing aliases and logins](#changing-aliases-and-logins)).
 
 ## What it never does
 
@@ -148,9 +148,9 @@ The address's `#/accounts` names the tab, so a tab can be bookmarked. The tabs:
 | Tab | Shows |
 |---|---|
 | Requests | Each request, newest first, as it happens: its path, status and time, and for a chat the alias, the model, the attempt and how it ended; the proxy's own events (where it listens, logins added) among them |
-| Accounts | Each login, grouped by provider in routing order: its label, whether it is a subscription or an API key, its place in the order, its quota windows and when they reset, a reserve it is below, and its cooldowns |
+| Accounts | Each login, grouped by provider in routing order: its label, whether it is a subscription or an API key, its place in the order, its quota windows and when they reset, a reserve it is below, and its cooldowns; an editor puts a login first, disables or enables it, labels it, and ends cooldowns ([Changing aliases and logins](#changing-aliases-and-logins)) |
 | Stats | A day, a week or 30 days: totals, requests and failures over time, each model's numbers, and what failed |
-| Models | The models a client can name, with their context and reasoning efforts; each alias and what it points at, the built-in `-latest` ones, and why any is left out |
+| Models | The models a client can name, with their context and reasoning efforts; each alias and what it points at, the built-in `-latest` ones, and why any is left out; an editor adds, edits, renames and deletes the configured aliases |
 | Settings | `proxy-config.json`'s settings, grouped as the console's Settings view groups them: each one's saved value, the value running when it differs, a flag or environment variable that holds it, and what it does; an editor changes them here ([Changing settings](#changing-settings)) |
 | Doctor | `pi-switchboard doctor`'s findings over the same windows, most serious first |
 | Logins | The commands that add a login, in a terminal; this page can't |
@@ -170,9 +170,20 @@ On the Settings tab, an editor changes what the console's Settings view changes,
 
 Every change is logged at `info` under the category `pi-switchboard.admin.audit`: who made it (the GitHub login), the setting, and its value before and after, as the Settings view shows them (proxy auth as `on` or `off`).
 
+## Changing aliases and logins
+
+An editor changes on the Models and Accounts tabs what the console's Models and Accounts views change. Each change is saved to `proxy-config.json` and used by the next request, with no restart; each is logged under `pi-switchboard.admin.audit` with who made it, and for an alias or a label its value before and after.
+
+- **Aliases** (Models). **+ New alias**, or **Edit** on a configured alias: its name, its targets in order, and the failures that move a request to the next target. A target is an exposed model, or a family that follows its newest exposed model (or one pinned); its effort is one the model runs at, or the request's own. Renaming keeps the alias's place in the file. **Delete** asks first. The built-in `-latest` aliases can't be changed; a configured alias of the same name replaces one.
+- **What the proxy checks.** The editor offers only what the console's does, and the API checks the same: a model that isn't exposed, an effort the model doesn't run at, a pin outside its family, or a name that is a model's ID is refused, and nothing is saved.
+- **Logins** (Accounts). **Use first** puts a login first among its provider's logins; **Disable** keeps routing from calling it (its credential stays in pi's store), and **Enable** undoes it. Disabling a provider's only enabled login withdraws its models, so it asks first. **Label…** sets the note shown beside a login; an empty label removes it.
+- **Cooldowns.** **End cooldowns** on a login ends its cooldowns; **End all cooldowns** ends every one, as the console's `c` and `DELETE /v1/switchboard/cooldowns` do.
+
+Logging in and out stay in a terminal (the Logins tab), and nothing here shows or changes a credential.
+
 ## The API
 
-Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. Only `PUT /admin/api/settings/{key}` writes, only for an editor, and only with the admin page's `Origin` (a write from another site is a `403`). None calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, proxy auth is `on` or `off`, and the requests carry no message content.
+Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. Every route that writes (`PUT`, `POST`, `DELETE`) is an editor's: a viewer's write is a `403` `editor_only`, and a write without the admin page's `Origin` (from another site) is a `403` too. None calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, proxy auth is `on` or `off`, and the requests carry no message content. A write refused for its content answers `{ "error": { "code", "message" } }`; one over a config file that can't be read is a `409` `file_unusable`, and one the file didn't take a `500` `not_written`.
 
 | Route | Answers |
 |---|---|
@@ -180,11 +191,17 @@ Every route under `/admin/api/` needs a session, editor or viewer, and answers `
 | `GET /admin/api/requests` | The requests the proxy keeps in memory, as the console's Requests view lists them: `requests` (HTTP requests, in flight and answered), `active` and `finished` (the chat requests behind them: model, alias, attempt, outcome) and `events` (where it listens, logins added, …) |
 | `GET /admin/api/requests/stream` | The same, as server-sent events: an `event: requests` at once, then again at most twice a second while the requests change, with a comment every 15 seconds |
 | `GET /admin/api/accounts` | Each login: how pi has it (`type`, `source`, `availableModelCount`), its `label`, its latest `quota`, whether it is `belowReserve`, its `cooldowns`, and its `place` in its provider's routing order |
-| `GET /admin/api/models` | The exposed `models` and `aliases` (as `GET /v1/switchboard/models`), the `configured` aliases, the built-in `latest` ones, and why any is left out; `503` `exposure_invalid` when the exposure config can't be applied |
+| `GET /admin/api/models` | The exposed `models` and `aliases` (as `GET /v1/switchboard/models`), the `configured` aliases, the built-in `latest` ones, why any is left out, and the alias editor's `options` (the exposed `models` with the `efforts` each runs at, the `families` with their `members` and `newest`, and the `failures` a fallback may name); `503` `exposure_invalid` when the exposure config can't be applied |
 | `GET /admin/api/stats?window=today\|week\|all` | The stats over the window, as `GET /v1/switchboard/usage`; `503` while stats are off |
 | `GET /admin/api/doctor?window=today\|week\|all` | The doctor's report on the running proxy, as `pi-switchboard doctor --json`; no login is verified |
 | `GET /admin/api/status` | The status strip's and sidebar's data: `version`, `address`, `proxyAuth`, `beyondLoopback`, `uptimeMs`, the `exposed` and `available` models, `modelsJsonError`, `cooldowns`, `perMinute` (chat requests a minute over the last half hour, oldest first) with `saturated`, `todayCostUsd` (`null` while stats are off), and `session`'s route totals since the start |
 | `GET /admin/api/settings` | The config file's `path`, a `fileProblem` that stops writes (or `null`), and each setting: `key`, `label`, `section`, `help`, the `saved` and `running` values as shown, the `override` that holds it, when it `applies` (`live` or `restart`), the `value` an editor changes (`null` for proxy auth), and its `input` (`text`, `int` with `min`/`max`, `switch`, `choice`, `many`, `prefixes` or `shares` with their `options`, or `console`); and `pendingRestart`, the count saved but not running |
 | `PUT /admin/api/settings/{key}` | Editors only: `{ "value", "confirm"? }` saves one setting and answers as `GET /admin/api/settings`. Refused with `400` `invalid_value` (the reason), `400` `confirm_required` (beyond loopback with proxy auth off; send `"confirm": true`), `400` `console_only` (`authToken`), `403` `editor_only`, `404` `unknown_setting`, `409` `file_unusable`, or `500` `not_written` |
+| `PUT /admin/api/aliases/{name}` | `{ "targets": [{ "model", "reasoningEffort"? } \| { "family", "pin"?, "reasoningEffort"? }], "fallbackOn": […], "previousName"? }` saves an alias (renaming `previousName`) and answers as `GET /admin/api/models`. Refused with `400` `invalid_body`, `invalid_name` or `invalid_target` (the reason), or `409` `name_taken` |
+| `DELETE /admin/api/aliases/{name}` | Deletes a configured alias and answers as `GET /admin/api/models`; `404` `unknown_alias` |
+| `POST /admin/api/logins/{login}/first` | Puts the login first among its provider's logins and answers as `GET /admin/api/accounts`; `404` `unknown_login` |
+| `PUT /admin/api/logins/{login}/disabled` | `{ "disabled", "confirm"? }` disables or enables the login and answers as `GET /admin/api/accounts`; `400` `confirm_required` for the provider's only enabled login (send `"confirm": true`), `404` `unknown_login` |
+| `PUT /admin/api/logins/{login}/label` | `{ "label" }` sets the login's label, or removes it when empty, and answers as `GET /admin/api/accounts`; `404` `unknown_login` |
+| `DELETE /admin/api/cooldowns?provider=&model=` | Ends the cooldowns of a login, of a model, or every one, and answers `{ "ended": […] }`; `404` `unknown_login` or `unknown_model` for a name nothing is known by |
 
 A `window` other than `today`, `week` or `all` is a `400`.
