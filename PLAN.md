@@ -1841,17 +1841,26 @@ by `src/admin/pages.ts` from `src/admin/assets.ts`, which reads the build direct
 the files `scripts/build-binary.ts` embeds in the standalone binary). The operator's guide is
 [`docs/admin-ui.md`](docs/admin-ui.md).
 
+Phase 2's first slice is built: the Settings page (`src/admin/web/pages/settings.tsx`) and its API
+(`src/admin/settings.ts`: `GET /admin/api/settings`, and `PUT /admin/api/settings/{key}` for an
+editor). A write is checked by `src/config/setting-writes.ts` with the schemas the file loads
+with, refused over an unusable file, asks for a confirmation before listening beyond loopback with
+proxy auth off, and is logged under `admin.audit` with the login and the values before and after
+as the Settings view shows them. Proxy auth is shown as on or off and changed only in the console
+(constitution III). Its second slice (aliases, logins' order, labels and disabling, clearing
+cooldowns) is next.
+
 **What it is.** A web interface for a proxy run in Docker, so it can be configured without the
 terminal console. React with Tailwind CSS 4 and daisyUI 5, as j5's dashboard uses
 (`Viaanix/number-5` `packages/dashboard`); TanStack Query (and `EventSource` for live requests),
 daisyUI tables, a small hash router and uPlot for the stats timeline. Built by Vite and served by
-Hono as static files from the proxy's own package: no second server, no CDN. Its phase-1 pages
-mirror the console's views: Requests, Accounts, Models and aliases, Stats, Doctor, and a Logins
-page that only shows the command to run in a terminal
-(`docker exec -it <container> pi auth login <provider>`). Settings comes with phase 2, whose
-writes it exists for. The screen is laid out as the console's (`src/admin/web/shell.tsx`): the
+Hono as static files from the proxy's own package: no second server, no CDN. Its pages mirror the
+console's views in its order: Requests, Accounts, Stats, Models and aliases, Settings (phase 2,
+whose writes it exists for), Doctor, then a Logins page that only shows the command to run in a
+terminal (`docker exec -it <container> pi auth login <provider>`). The screen is laid out as the
+console's (`src/admin/web/shell.tsx`): the
 status strip and its alerts, numbered tabs (Doctor's with its count), the page beside the
-QUOTA/IN FLIGHT/RECENT/SESSION sidebar, a footer of the keys (`1`–`6`, `s`, `t`/`w`/`a`), and
+QUOTA/IN FLIGHT/RECENT/SESSION sidebar, a footer of the keys (`1`–`7`, `s`, `t`/`w`/`a`), and
 Tokyo Night Storm as a daisyUI theme. The strip's and sidebar's data come from
 `GET /admin/api/status` (`src/admin/status.ts`), from the console's own counters.
 

@@ -20,6 +20,7 @@ import {
   requestsSnapshot
 } from '@proxy/admin/reads'
 import type { AdminRole } from '@proxy/admin/roles'
+import { changeSetting, settingsSnapshot } from '@proxy/admin/settings'
 import { statusSnapshot } from '@proxy/admin/status'
 import { proxyLogger } from '@proxy/logging'
 import { onActiveRequestsChange } from '@proxy/server/active-requests'
@@ -36,6 +37,7 @@ import { isStatsWindow, type StatsWindow } from '@proxy/stats/windows'
 import { errorMessage } from '@proxy/utils/guards'
 import { Hono } from 'hono'
 import { streamSSE } from 'hono/streaming'
+import * as z from 'zod'
 
 /** Logger for the admin UI's reads. */
 const adminLogger = proxyLogger('admin')
@@ -142,7 +144,7 @@ function addRequests(api: Hono<AdminApiEnv>): void {
  * @param deps - what the API reads with
  */
 function addPages(api: Hono<AdminApiEnv>, deps: AdminApiDeps): void {
-  const usage = createUsageAnswer(deps.server.statsEnabled)
+  const usage = createUsageAnswer(deps.server.running.statsEnabled)
 
   api.get('/accounts', async (context) => context.json(await accountsSnapshot(deps.now())))
 
@@ -178,6 +180,43 @@ function addPages(api: Hono<AdminApiEnv>, deps: AdminApiDeps): void {
   })
 }
 
+/** What a settings write sends: the new value, and whether a confirmation was given. */
+const SettingBodySchema = z.object({
+  value: z.unknown(),
+  confirm: z.boolean().optional()
+})
+
+/**
+ * Adds the settings routes: the page's data, and an editor's change to one setting.
+ *
+ * @param api - the API app
+ * @param deps - what the API reads with
+ */
+function addSettings(api: Hono<AdminApiEnv>, deps: AdminApiDeps): void {
+  api.get('/settings', async (context) => context.json(await settingsSnapshot(deps.server)))
+
+  api.put('/settings/:key', async (context) => {
+    const body = SettingBodySchema.safeParse(
+      await context.req.json<unknown>().catch((): undefined => undefined)
+    )
+    if (!body.success) {
+      return context.json(
+        { error: { code: 'invalid_body', message: 'Send the new value as { "value": … }.' } },
+        HTTP_BAD_REQUEST
+      )
+    }
+    const { login, role } = context.get('session')
+    const answer = await changeSetting(deps.server, {
+      login,
+      editor: role === 'editor',
+      key: context.req.param('key'),
+      value: body.data.value,
+      confirmed: body.data.confirm === true
+    })
+    return context.json(answer.body, answer.status)
+  })
+}
+
 /**
  * Creates the API, to mount at `/admin/api`.
  *
@@ -209,5 +248,6 @@ export function createAdminApi(deps: AdminApiDeps): Hono<AdminApiEnv> {
   })
   addRequests(api)
   addPages(api, deps)
+  addSettings(api, deps)
   return api
 }

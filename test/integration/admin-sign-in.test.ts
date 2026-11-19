@@ -36,13 +36,7 @@ const ENV = {
 function adminApp(options: Omit<AdminAppOptions, 'server'>): Hono {
   return createAdminApp({
     ...options,
-    server: {
-      host: '127.0.0.1',
-      port: 4141,
-      docsUiEnabled: false,
-      statsEnabled: false,
-      proxyAuth: false
-    }
+    server: { running: testConfig(), overrides: {}, proxyAuth: false }
   })
 }
 

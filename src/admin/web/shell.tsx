@@ -1,7 +1,7 @@
 /**
  * The signed-in admin UI's layout (#367), as the console's screen: the status strip and its
  * alerts, the tabs (Doctor's with the count of its errors and warnings), the page beside the
- * sidebar, and a footer of the keys. The keys work as the console's: `1`–`6` pick a page, `s`
+ * sidebar, and a footer of the keys. The keys work as the console's: `1`–`7` pick a page, `s`
  * hides or shows the sidebar, and `t`, `w` and `a` pick the window the Stats and Doctor pages
  * share.
  *
@@ -14,6 +14,7 @@ import { DoctorPage } from '@proxy/admin/web/pages/doctor'
 import { LoginsPage } from '@proxy/admin/web/pages/logins'
 import { ModelsPage } from '@proxy/admin/web/pages/models'
 import { RequestsPage } from '@proxy/admin/web/pages/requests'
+import { SettingsPage } from '@proxy/admin/web/pages/settings'
 import { StatsPage } from '@proxy/admin/web/pages/stats'
 import {
   useAccounts,
@@ -31,8 +32,9 @@ import { type ReactElement, useCallback, useEffect, useState } from 'react'
 const PAGE_VIEWS: Readonly<Record<PageId, (view: PageView) => ReactElement>> = {
   requests: RequestsPage,
   accounts: AccountsPage,
-  models: ModelsPage,
   stats: StatsPage,
+  models: ModelsPage,
+  settings: SettingsPage,
   doctor: DoctorPage,
   logins: LoginsPage
 }
@@ -158,7 +160,11 @@ export function Shell(shell: { readonly session: Session }): ReactElement {
         className={`grid flex-1 grid-cols-1 gap-4 p-4 ${sidebarShown ? 'lg:grid-cols-[minmax(0,1fr)_22rem]' : ''}`}
       >
         <main className="min-w-0">
-          <View statsWindow={statsWindow} onPickWindow={setStatsWindow} />
+          <View
+            statsWindow={statsWindow}
+            onPickWindow={setStatsWindow}
+            editor={shell.session.role === 'editor'}
+          />
         </main>
         {sidebarShown ? (
           <Sidebar
@@ -171,7 +177,7 @@ export function Shell(shell: { readonly session: Session }): ReactElement {
       </div>
       <footer className="flex flex-wrap gap-x-4 bg-base-100 px-4 py-1 text-xs text-base-content/60">
         <span>
-          <kbd className="kbd kbd-xs">1</kbd>–<kbd className="kbd kbd-xs">6</kbd> page
+          <kbd className="kbd kbd-xs">1</kbd>–<kbd className="kbd kbd-xs">7</kbd> page
         </span>
         <span>
           <kbd className="kbd kbd-xs">s</kbd> sidebar

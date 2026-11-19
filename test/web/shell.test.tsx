@@ -83,7 +83,7 @@ describe('the console layout', () => {
     renderApp()
     await screen.findByRole('complementary', { name: 'Sidebar' })
 
-    fireEvent.keyDown(window, { key: '4' })
+    fireEvent.keyDown(window, { key: '3' })
     fireEvent.keyDown(window, { key: 'w' })
     fireEvent.keyDown(window, { key: 's' })
 

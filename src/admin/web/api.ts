@@ -20,7 +20,7 @@ export class NotSignedInError extends Error {
 }
 
 /** The proxy answered with an error other than a missing session. */
-class ApiError extends Error {
+export class ApiError extends Error {
   /** Names the error. */
   override readonly name = 'ApiError'
 
@@ -29,10 +29,12 @@ class ApiError extends Error {
    *
    * @param message - the proxy's message, or a description of the failure
    * @param status - the HTTP status
+   * @param code - the proxy's error code (`confirm_required`, …), or `''` when it sent none
    */
   constructor(
     message: string,
-    readonly status: number
+    readonly status: number,
+    readonly code = ''
   ) {
     super(message)
   }
@@ -43,7 +45,7 @@ const UNAUTHORIZED = 401
 
 /** An error body, as the proxy sends one. */
 const ErrorBodySchema = z.looseObject({
-  error: z.looseObject({ message: z.string().trim() })
+  error: z.looseObject({ message: z.string().trim(), code: z.string().trim().optional() })
 })
 
 /** `GET /admin/api/session`. */
@@ -251,15 +253,57 @@ export type Status = z.infer<typeof StatusSchema>
 /** A stats window. */
 export type StatsWindow = Doctor['window']
 
+/** The input a setting takes on the page. */
+const SettingInputSchema = z.discriminatedUnion('kind', [
+  z.looseObject({ kind: z.literal('text') }),
+  z.looseObject({ kind: z.literal('int'), min: z.int(), max: z.int() }),
+  z.looseObject({ kind: z.literal('switch') }),
+  z.looseObject({ kind: z.literal('choice'), options: z.array(z.string().trim()) }),
+  z.looseObject({ kind: z.literal('many'), options: z.array(z.string().trim()) }),
+  z.looseObject({ kind: z.literal('prefixes'), options: z.array(z.string().trim()) }),
+  z.looseObject({ kind: z.literal('shares'), options: z.array(z.string().trim()) }),
+  z.looseObject({ kind: z.literal('console') })
+])
+
+/** One setting. */
+const SettingSchema = z.looseObject({
+  key: z.string().trim(),
+  label: z.string().trim(),
+  section: z.enum(['server', 'features', 'auth', 'models', 'routing']),
+  help: z.string().trim(),
+  saved: z.string().trim(),
+  running: z.string().trim().optional(),
+  override: z.string().trim().optional(),
+  applies: z.enum(['live', 'restart']),
+  value: z.unknown(),
+  input: SettingInputSchema
+})
+
+/** `GET /admin/api/settings`. */
+export const SettingsSchema = z.looseObject({
+  path: z.string().trim(),
+  fileProblem: z.string().trim().nullable(),
+  settings: z.array(SettingSchema),
+  pendingRestart: z.int()
+})
+/** The Settings page's data. */
+export type Settings = z.infer<typeof SettingsSchema>
+/** One setting. */
+export type Setting = z.infer<typeof SettingSchema>
+/** The input a setting takes. */
+export type SettingInput = z.infer<typeof SettingInputSchema>
+
 /**
- * Reads why a failed answer failed: the proxy's message, or its status.
+ * Reads why a failed answer failed: the proxy's error, or its status.
  *
  * @param response - the failed answer
- * @returns the message
+ * @returns the error to throw
  */
-async function failureMessage(response: Response): Promise<string> {
+async function failure(response: Response): Promise<ApiError> {
   const body = ErrorBodySchema.safeParse(await response.json().catch(() => undefined))
-  return body.success ? body.data.error.message : `The proxy answered ${String(response.status)}`
+  return body.success
+    ? new ApiError(body.data.error.message, response.status, body.data.error.code)
+    : new ApiError(`The proxy answered ${String(response.status)}`, response.status)
 }
 
 /**
@@ -290,8 +334,29 @@ export function checked<T>(schema: z.ZodType<T>, value: unknown, path: string): 
 export async function readApi<T>(path: string, schema: z.ZodType<T>): Promise<T> {
   const response = await fetch(`/admin/api${path}`, { headers: { Accept: 'application/json' } })
   if (response.status === UNAUTHORIZED) throw new NotSignedInError('Not signed in')
-  if (!response.ok) throw new ApiError(await failureMessage(response), response.status)
+  if (!response.ok) throw await failure(response)
   return checked(schema, await response.json(), path)
+}
+
+/**
+ * Changes one setting, as an editor.
+ *
+ * @param key - the setting
+ * @param value - its new value
+ * @param confirm - whether the operator confirmed what the proxy asked them to
+ * @returns the settings after the change
+ * @throws NotSignedInError when there is no session; ApiError when the proxy refused it, with its
+ *   code (`confirm_required` asks for the confirmation)
+ */
+export async function putSetting(key: string, value: unknown, confirm = false): Promise<Settings> {
+  const response = await fetch(`/admin/api/settings/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value, confirm })
+  })
+  if (response.status === UNAUTHORIZED) throw new NotSignedInError('Not signed in')
+  if (!response.ok) throw await failure(response)
+  return checked(SettingsSchema, await response.json(), '/settings')
 }
 
 /**

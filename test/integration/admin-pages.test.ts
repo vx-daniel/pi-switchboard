@@ -14,6 +14,8 @@ import { ADMIN_UI_DEFAULTS } from '@proxy/config/admin-schema'
 import type { Hono } from 'hono'
 import { afterAll, beforeAll, describe, expect, test } from 'vite-plus/test'
 
+import { testConfig } from '../helpers'
+
 const HOST = '127.0.0.1:4142'
 const ENV = {
   PI_SWITCHBOARD_GITHUB_CLIENT_ID: 'Iv1.notarealclient',
@@ -51,13 +53,7 @@ function adminApp(pages: AdminAppOptions['assets']): Hono {
   if (signIn === undefined) throw new Error('sign-in should be configured')
   return createAdminApp({
     settings: { ...settings, signIn },
-    server: {
-      host: '127.0.0.1',
-      port: 4141,
-      docsUiEnabled: false,
-      statsEnabled: false,
-      proxyAuth: false
-    },
+    server: { running: testConfig(), overrides: {}, proxyAuth: false },
     assets: pages
   })
 }

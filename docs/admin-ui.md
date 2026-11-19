@@ -2,7 +2,7 @@
 
 The admin UI (#367) is a web page for the people who run a pi-switchboard: they sign in with GitHub, and the editors and viewers lists say who may. It is off by default. The `pi-switchboard` server starts it, wherever it runs: the binary, Docker, the npm CLI, or the proxy the pi package starts (which reads the same `proxy-config.json`). The console (`pi-switchboard tui`) ignores it.
 
-Signed in, it shows the proxy's requests as they happen, its logins with their quota and routing order, the models and aliases, the stats over a day, a week or 30 days, and the doctor's findings, all read-only ([The pages](#the-pages)). Pages that change settings come in a later release ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
+Signed in, it shows the proxy's requests as they happen, its logins with their quota and routing order, the models and aliases, the stats over a day, a week or 30 days, and the doctor's findings ([The pages](#the-pages)). An editor also changes the proxy's settings, as the console's Settings view does; a viewer only reads them ([Changing settings](#changing-settings)). Editing aliases and logins' routing comes in a later release ([#367](https://github.com/vx-daniel/pi-switchboard/issues/367)).
 
 ## What it never does
 
@@ -141,7 +141,7 @@ Behind a reverse proxy every request comes from the reverse proxy's address, so 
 - **The status strip**, on top: the version, where the proxy listens and whether proxy auth is on, the models exposed of those available, cooldowns, uptime, and on the right the last half hour of chat requests with the current rate and what today cost. Under it, the alerts the console gives a row of their own: proxy auth off beyond this machine, an exposure config that can't be applied, a `models.json` that didn't load.
 - **The tabs**, numbered; Doctor's carries the count of its errors and warnings, in the color of the worst.
 - **The page**, beside **the sidebar**: QUOTA (each login's windows), IN FLIGHT (the chat requests running), RECENT (the last minute and the latest finished) and SESSION (the traffic since the proxy started).
-- **The footer**, with the keys, which work as the console's: `1` to `6` pick a tab, `s` hides or shows the sidebar, and `t`, `w` and `a` pick the window (today, the week, 30 days) that Stats and Doctor share.
+- **The footer**, with the keys, which work as the console's: `1` to `7` pick a tab (the console's six in its order, then Logins), `s` hides or shows the sidebar, and `t`, `w` and `a` pick the window (today, the week, 30 days) that Stats and Doctor share.
 
 The address's `#/accounts` names the tab, so a tab can be bookmarked. The tabs:
 
@@ -149,16 +149,30 @@ The address's `#/accounts` names the tab, so a tab can be bookmarked. The tabs:
 |---|---|
 | Requests | Each request, newest first, as it happens: its path, status and time, and for a chat the alias, the model, the attempt and how it ended; the proxy's own events (where it listens, logins added) among them |
 | Accounts | Each login, grouped by provider in routing order: its label, whether it is a subscription or an API key, its place in the order, its quota windows and when they reset, a reserve it is below, and its cooldowns |
-| Models | The models a client can name, with their context and reasoning efforts; each alias and what it points at, the built-in `-latest` ones, and why any is left out |
 | Stats | A day, a week or 30 days: totals, requests and failures over time, each model's numbers, and what failed |
+| Models | The models a client can name, with their context and reasoning efforts; each alias and what it points at, the built-in `-latest` ones, and why any is left out |
+| Settings | `proxy-config.json`'s settings, grouped as the console's Settings view groups them: each one's saved value, the value running when it differs, a flag or environment variable that holds it, and what it does; an editor changes them here ([Changing settings](#changing-settings)) |
 | Doctor | `pi-switchboard doctor`'s findings over the same windows, most serious first |
 | Logins | The commands that add a login, in a terminal; this page can't |
 
 The npm package, the Docker image and the standalone binary all carry the pages; the binary has them built in. They load nothing from another site: every script and style comes from the admin listener itself. The console's count of open client connections is the one part of its strip the admin UI leaves out: it needs the API listener's server, which the admin listener doesn't hold.
 
+## Changing settings
+
+On the Settings tab, an editor changes what the console's Settings view changes, and the change is saved to `proxy-config.json` (the path is on the page). A viewer sees the same values without the controls, and the API refuses a viewer's write (`403` `editor_only`).
+
+- **When it applies.** Proxy auth, Models and Routing apply to the next request. Server and Features apply when pi-switchboard restarts: the page says how many saved settings aren't running yet. The admin UI can't restart the proxy; restart the process, or the container.
+- **A flag or an environment variable wins.** A setting held by one (`--port`, `PI_SWITCHBOARD_PORT`, …) is marked so: the value saved is used once the flag or variable is gone.
+- **What it checks.** Each value is checked as the file is when the proxy loads it: a port out of range, an unknown log level or a reserve above 1 is refused with the reason, and nothing is saved.
+- **Listening beyond this machine** with proxy auth off asks first, as the console does: the page asks you to confirm, and only then saves the address.
+- **Proxy auth is not changed here.** The page shows whether a token is set, never the token; set or clear it in the console (`p`) or the config file.
+- **A config file that can't be read** (bad JSON, a value out of range) is never written over: the page says what is wrong; fix or remove the file first.
+
+Every change is logged at `info` under the category `pi-switchboard.admin.audit`: who made it (the GitHub login), the setting, and its value before and after, as the Settings view shows them (proxy auth as `on` or `off`).
+
 ## The API
 
-Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. None writes, calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, and the requests carry no message content.
+Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. Only `PUT /admin/api/settings/{key}` writes, only for an editor, and only with the admin page's `Origin` (a write from another site is a `403`). None calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, proxy auth is `on` or `off`, and the requests carry no message content.
 
 | Route | Answers |
 |---|---|
@@ -170,5 +184,7 @@ Every route under `/admin/api/` needs a session, editor or viewer, and answers `
 | `GET /admin/api/stats?window=today\|week\|all` | The stats over the window, as `GET /v1/switchboard/usage`; `503` while stats are off |
 | `GET /admin/api/doctor?window=today\|week\|all` | The doctor's report on the running proxy, as `pi-switchboard doctor --json`; no login is verified |
 | `GET /admin/api/status` | The status strip's and sidebar's data: `version`, `address`, `proxyAuth`, `beyondLoopback`, `uptimeMs`, the `exposed` and `available` models, `modelsJsonError`, `cooldowns`, `perMinute` (chat requests a minute over the last half hour, oldest first) with `saturated`, `todayCostUsd` (`null` while stats are off), and `session`'s route totals since the start |
+| `GET /admin/api/settings` | The config file's `path`, a `fileProblem` that stops writes (or `null`), and each setting: `key`, `label`, `section`, `help`, the `saved` and `running` values as shown, the `override` that holds it, when it `applies` (`live` or `restart`), the `value` an editor changes (`null` for proxy auth), and its `input` (`text`, `int` with `min`/`max`, `switch`, `choice`, `many`, `prefixes` or `shares` with their `options`, or `console`); and `pendingRestart`, the count saved but not running |
+| `PUT /admin/api/settings/{key}` | Editors only: `{ "value", "confirm"? }` saves one setting and answers as `GET /admin/api/settings`. Refused with `400` `invalid_value` (the reason), `400` `confirm_required` (beyond loopback with proxy auth off; send `"confirm": true`), `400` `console_only` (`authToken`), `403` `editor_only`, `404` `unknown_setting`, `409` `file_unusable`, or `500` `not_written` |
 
 A `window` other than `today`, `week` or `all` is a `400`.

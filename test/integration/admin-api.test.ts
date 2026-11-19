@@ -64,13 +64,7 @@ function adminApp(overrides: Partial<AdminAppOptions> = {}): Hono {
   return createAdminApp({
     settings: { ...settings, signIn },
     fetch: () => Promise.reject(new Error('GitHub is not asked by the API')),
-    server: {
-      host: '127.0.0.1',
-      port: 4141,
-      docsUiEnabled: false,
-      statsEnabled: false,
-      proxyAuth: false
-    },
+    server: { running: testConfig(), overrides: {}, proxyAuth: false },
     ...overrides
   })
 }
