@@ -149,7 +149,7 @@ The address's `#/accounts` names the tab, so a tab can be bookmarked. The tabs:
 |---|---|
 | Requests | Each request, newest first, as it happens: its path, status and time, and for a chat the alias, the model, the attempt and how it ended; the proxy's own events (where it listens, logins added) among them |
 | Accounts | Each login, grouped by provider in routing order: its label, whether it is a subscription or an API key, its place in the order, its quota windows and when they reset, a reserve it is below, and its cooldowns; an editor puts a login first, disables or enables it, labels it, and ends cooldowns ([Changing aliases and logins](#changing-aliases-and-logins)) |
-| Stats | A day, a week or 30 days: totals, requests and failures over time, each model's numbers, each [project](projects.md)'s spend against its budget for the window, and what failed |
+| Stats | A day, a week or 30 days: totals, requests and failures over time, each model's numbers, each [project](projects.md)'s spend against its budget for the window, and what failed; an editor sets each project's budget ([Changing budgets](#changing-budgets)) |
 | Models | The models a client can name, with their context and reasoning efforts; each alias and what it points at, the built-in `-latest` ones, and why any is left out; an editor adds, edits, renames and deletes the configured aliases |
 | Settings | `proxy-config.json`'s settings, grouped as the console's Settings view groups them: each one's saved value, the value running when it differs, a flag or environment variable that holds it, and what it does; an editor changes them here ([Changing settings](#changing-settings)) |
 | Doctor | `pi-switchboard doctor`'s findings over the same windows, most serious first |
@@ -181,6 +181,10 @@ An editor changes on the Models and Accounts tabs what the console's Models and 
 
 Logging in and out stay in a terminal (the Logins tab), and nothing here shows or changes a credential.
 
+## Changing budgets
+
+An editor sets each [project](projects.md)'s budget on the Stats tab, under **Budgets**: an amount in US dollars for any of `today`, `week` and `all`, with an empty field for none. **Save** replaces the project's budget whole, so a field emptied there removes that window's; **Remove** removes the project's budget; the last row adds a project, named as clients send it in `X-Switchboard-Project`. Each change is saved to `budgets` in `proxy-config.json`, shown at once, and logged under `pi-switchboard.admin.audit` with who made it and the budget before and after. Budgets are reported, never enforced.
+
 ## The API
 
 Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. Every route that writes (`PUT`, `POST`, `DELETE`) is an editor's: a viewer's write is a `403` `editor_only`, and a write without the admin page's `Origin` (from another site) is a `403` too. None calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, proxy auth is `on` or `off`, and the requests carry no message content. A write refused for its content answers `{ "error": { "code", "message" } }`; one over a config file that can't be read is a `409` `file_unusable`, and one the file didn't take a `500` `not_written`.
@@ -203,5 +207,8 @@ Every route under `/admin/api/` needs a session, editor or viewer, and answers `
 | `PUT /admin/api/logins/{login}/disabled` | `{ "disabled", "confirm"? }` disables or enables the login and answers as `GET /admin/api/accounts`; `400` `confirm_required` for the provider's only enabled login (send `"confirm": true`), `404` `unknown_login` |
 | `PUT /admin/api/logins/{login}/label` | `{ "label" }` sets the login's label, or removes it when empty, and answers as `GET /admin/api/accounts`; `404` `unknown_login` |
 | `DELETE /admin/api/cooldowns?provider=&model=` | Ends the cooldowns of a login, of a model, or every one, and answers `{ "ended": […] }`; `404` `unknown_login` or `unknown_model` for a name nothing is known by |
+| `GET /admin/api/budgets` | `{ "budgets" }`: each project's budget per window, as `proxy-config.json` holds it |
+| `PUT /admin/api/budgets/{project}` | `{ "today"?, "week"?, "all"? }`, each in US dollars above 0, replaces the project's budget (URL-encode the project: it may hold `/`) and answers as `GET /admin/api/budgets`; no window removes it. Refused with `400` `invalid_body` or `invalid_project` |
+| `DELETE /admin/api/budgets/{project}` | Removes the project's budget and answers as `GET /admin/api/budgets`; `400` `invalid_project` |
 
 A `window` other than `today`, `week` or `all` is a `400`.

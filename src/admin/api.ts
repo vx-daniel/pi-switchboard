@@ -14,6 +14,7 @@
 
 import { AliasBodySchema, changeAlias, removeAlias } from '@proxy/admin/aliases'
 import type { Refusal } from '@proxy/admin/answers'
+import { readBudgets, setBudget } from '@proxy/admin/budgets'
 import {
   endCooldowns,
   type LoginChange,
@@ -32,6 +33,7 @@ import {
 import type { AdminRole } from '@proxy/admin/roles'
 import { changeSetting, settingsSnapshot } from '@proxy/admin/settings'
 import { statusSnapshot } from '@proxy/admin/status'
+import { BudgetSchema } from '@proxy/config/projects'
 import { proxyLogger } from '@proxy/logging'
 import type { ModelExposureResult } from '@proxy/openai/model-exposure'
 import { onActiveRequestsChange } from '@proxy/server/active-requests'
@@ -373,6 +375,41 @@ function addLogins(api: Hono<AdminApiEnv>, deps: AdminApiDeps): void {
 }
 
 /**
+ * Adds the budget routes (#366): the budgets, and an editor's change to one project's, or its
+ * removal. Each write answers with the budgets after it. A project is URL-encoded in the path, as
+ * a label may hold `/`.
+ *
+ * @param api - the API app
+ */
+function addBudgets(api: Hono<AdminApiEnv>): void {
+  const budgets = (): Promise<unknown> => Promise.resolve({ budgets: readBudgets() })
+
+  api.get('/budgets', async (context) => context.json(await budgets()))
+
+  api.put('/budgets/:project', async (context) => {
+    const body = await bodyOf(context, BudgetSchema)
+    if (body === undefined) {
+      return invalidBody(context, 'Send { "today"?, "week"?, "all"? }: US dollars above 0.')
+    }
+    const refusal = setBudget({
+      login: context.get('session').login,
+      project: context.req.param('project'),
+      budget: body
+    })
+    return written(context, refusal, budgets)
+  })
+
+  api.delete('/budgets/:project', async (context) => {
+    const refusal = setBudget({
+      login: context.get('session').login,
+      project: context.req.param('project'),
+      budget: {}
+    })
+    return written(context, refusal, budgets)
+  })
+}
+
+/**
  * Works out the exposure for the cooldowns check, which needs one that applies.
  *
  * @returns the exposure
@@ -430,5 +467,6 @@ export function createAdminApi(deps: AdminApiDeps): Hono<AdminApiEnv> {
   addSettings(api, deps)
   addAliases(api)
   addLogins(api, deps)
+  addBudgets(api)
   return api
 }
