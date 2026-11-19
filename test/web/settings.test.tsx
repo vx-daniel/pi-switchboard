@@ -1,9 +1,7 @@
 import { fireEvent, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vite-plus/test'
 
-import { renderApp, stubApi, VIEWER } from './harness'
-
-const EDITOR = { login: 'alice', role: 'editor' }
+import { EDITOR, renderApp, stubApi, VIEWER, writesTo } from './harness'
 
 /** A setting as the proxy sends it. */
 const STATS = {
@@ -50,22 +48,6 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-/**
- * Reads the bodies the page sent to change a setting.
- *
- * @param calls - every request made
- * @param key - the setting
- * @returns each body, parsed
- */
-function writes(
-  calls: readonly { method: string; path: string; body: string | undefined }[],
-  key: string
-): unknown[] {
-  return calls
-    .filter((call) => call.method === 'PUT' && call.path === `/admin/api/settings/${key}`)
-    .map((call): unknown => JSON.parse(call.body ?? 'null'))
-}
-
 describe('the Settings page', () => {
   // Catches a viewer offered controls the API would refuse, or the restart that applies a saved
   // setting not mentioned.
@@ -93,7 +75,7 @@ describe('the Settings page', () => {
     fireEvent.click(await screen.findByRole('checkbox', { name: 'Stats' }))
 
     await waitFor(() => {
-      expect(writes(calls, 'stats')).toEqual([{ value: false, confirm: false }])
+      expect(writesTo(calls, 'PUT', '/settings/stats')).toEqual([{ value: false, confirm: false }])
     })
     expect(screen.getByText('Change it in the console (p).')).toBeTruthy()
   })
@@ -121,7 +103,7 @@ describe('the Settings page', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Save' }))
     expect(await screen.findByText('Listen beyond this machine with no token?')).toBeTruthy()
     expect(confirm).toHaveBeenCalledTimes(1)
-    expect(writes(calls, 'host')).toEqual([
+    expect(writesTo(calls, 'PUT', '/settings/host')).toEqual([
       { value: '0.0.0.0', confirm: false },
       { value: '0.0.0.0', confirm: true }
     ])

@@ -8,10 +8,6 @@ import { readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 
 import { resetSync } from '@logtape/logtape'
-import { createAdminApp } from '@proxy/admin/app'
-import { createSealer } from '@proxy/admin/sealed'
-import { resolveAdminUi } from '@proxy/config/admin'
-import { ADMIN_UI_DEFAULTS } from '@proxy/config/admin-schema'
 import { configureLogging } from '@proxy/logging'
 import type { Hono } from 'hono'
 import {
@@ -26,31 +22,33 @@ import {
 } from 'vite-plus/test'
 
 import {
+  ADMIN_HOST,
+  adminApp,
+  adminRequest,
+  auditRecords,
+  savedConfig,
+  sessionCookie,
+  type TestRole
+} from '../fixtures/admin-app'
+import {
   type FixtureAgentDir,
   loadFixtureAgentDir,
   offlineProvider,
   writeProxyConfig
 } from '../fixtures/agent-dir'
-import { testConfig } from '../helpers'
 
-const HOST = '127.0.0.1:4142'
-const ORIGIN = 'http://127.0.0.1:4142'
-const SESSION_KEY = 'notarealsecret-session-key-0123456789abcdef'
 const TOKEN = 'notarealsecret-proxy-token'
-const MINUTE_MS = 60_000
-const ENV = {
-  PI_SWITCHBOARD_GITHUB_CLIENT_ID: 'Iv1.notarealclient',
-  PI_SWITCHBOARD_GITHUB_CLIENT_SECRET: 'notarealsecret-client-secret',
-  PI_SWITCHBOARD_ADMIN_SESSION_KEY: SESSION_KEY
-}
 
 let agentDir: FixtureAgentDir
 let lines: string[]
+let app: Hono
 
 beforeAll(async () => {
   agentDir = await loadFixtureAgentDir({
     modelsJson: { providers: { local: offlineProvider('alpha') } }
   })
+  // A running proxy without proxy auth, with `--port` given.
+  app = adminApp({ overrides: { port: '--port' } })
 })
 
 afterAll(() => {
@@ -69,36 +67,6 @@ afterEach(() => {
 })
 
 /**
- * Creates the admin app over a running proxy without proxy auth and with `--port` given.
- *
- * @returns the app
- */
-function adminApp(): Hono {
-  const settings = resolveAdminUi({ ...ADMIN_UI_DEFAULTS, enabled: true, editors: ['alice'] }, ENV)
-  const { signIn } = settings
-  if (signIn === undefined) throw new Error('sign-in should be configured')
-  return createAdminApp({
-    settings: { ...settings, signIn },
-    server: { running: testConfig(), overrides: { port: '--port' }, proxyAuth: false }
-  })
-}
-
-/**
- * Makes a session cookie, as sign-in would set it.
- *
- * @param role - the operator's role
- * @returns the `Cookie` header
- */
-function cookie(role: 'editor' | 'viewer'): string {
-  const sealed = createSealer(SESSION_KEY).seal(
-    'session',
-    { login: role === 'editor' ? 'alice' : 'bob', id: 1, role },
-    Date.now() + MINUTE_MS
-  )
-  return `pi_switchboard_admin=${sealed}`
-}
-
-/**
  * Changes a setting from the admin UI.
  *
  * @param role - who changes it
@@ -106,38 +74,15 @@ function cookie(role: 'editor' | 'viewer'): string {
  * @param body - what is sent
  * @returns the response
  */
-function put(role: 'editor' | 'viewer', key: string, body: unknown): Promise<Response> {
-  return Promise.resolve(
-    adminApp().request(`/admin/api/settings/${key}`, {
-      method: 'PUT',
-      headers: {
-        'host': HOST,
-        'origin': ORIGIN,
-        'cookie': cookie(role),
-        'content-type': 'application/json'
-      },
-      body: JSON.stringify(body)
-    })
-  )
-}
-
-/**
- * Reads the config file as saved.
- *
- * @returns its contents
- */
-function savedFile(): Record<string, unknown> {
-  const parsed: unknown = JSON.parse(readFileSync(join(agentDir.path, 'proxy-config.json'), 'utf8'))
-  return typeof parsed === 'object' && parsed !== null ? { ...parsed } : {}
+function put(role: TestRole, key: string, body: unknown): Promise<Response> {
+  return adminRequest(app, { method: 'PUT', path: `/settings/${key}`, role, body })
 }
 
 describe('admin settings', () => {
   // Catches the page told nothing of the token, or given it: proxy auth shows on or off only, a
   // setting a flag holds says so, and a restart-only setting says when it applies.
   test('lists each setting with its value, its input and what holds it', async () => {
-    const response = await adminApp().request('/admin/api/settings', {
-      headers: { host: HOST, cookie: cookie('viewer') }
-    })
+    const response = await adminRequest(app, { method: 'GET', path: '/settings', role: 'viewer' })
     const text = await response.text()
 
     expect(text).not.toContain(TOKEN)
@@ -170,13 +115,17 @@ describe('admin settings', () => {
     const response = await put('editor', 'upstreamTimeoutSec', { value: 300 })
 
     expect(response.status).toBe(200)
-    expect(savedFile()).toMatchObject({ upstreamTimeoutSec: 300, authToken: TOKEN })
-    const audit = lines
-      .map((line): unknown => JSON.parse(line))
-      .find((record) => JSON.stringify(record).includes('pi-switchboard.admin.audit'))
-    expect(audit).toMatchObject({
-      properties: { login: 'alice', setting: 'upstreamTimeoutSec', before: '120 s', after: '300 s' }
-    })
+    expect(savedConfig(agentDir.path)).toMatchObject({ upstreamTimeoutSec: 300, authToken: TOKEN })
+    expect(auditRecords(lines)).toMatchObject([
+      {
+        properties: {
+          login: 'alice',
+          setting: 'upstreamTimeoutSec',
+          before: '120 s',
+          after: '300 s'
+        }
+      }
+    ])
   })
 
   // Catches a viewer, the proxy token, a value the file would refuse, or listening beyond loopback
@@ -223,13 +172,13 @@ describe('admin settings', () => {
       code: 'confirm_required'
     }
   ] as const)('refuses $refused', async ({ role, key, body, status, code }) => {
-    const before = savedFile()
+    const before = savedConfig(agentDir.path)
 
     const response = await put(role, key, body)
 
     expect(response.status).toBe(status)
     expect(await response.json()).toMatchObject({ error: { code } })
-    expect(savedFile()).toEqual(before)
+    expect(savedConfig(agentDir.path)).toEqual(before)
   })
 
   // Catches the admin UI writing over a file it can't parse, which would lose what the operator had.
@@ -245,13 +194,17 @@ describe('admin settings', () => {
   // Catches a cross-site page changing settings through an editor's browser: a write without the
   // admin UI's Origin is refused before it reaches the setting.
   test('refuses a write without the admin UI’s Origin', async () => {
-    const response = await adminApp().request('/admin/api/settings/stats', {
+    const response = await app.request('/admin/api/settings/stats', {
       method: 'PUT',
-      headers: { 'host': HOST, 'cookie': cookie('editor'), 'content-type': 'application/json' },
+      headers: {
+        'host': ADMIN_HOST,
+        'cookie': sessionCookie('editor'),
+        'content-type': 'application/json'
+      },
       body: JSON.stringify({ value: false })
     })
 
     expect(response.status).toBe(403)
-    expect(savedFile()).not.toHaveProperty('stats')
+    expect(savedConfig(agentDir.path)).not.toHaveProperty('stats')
   })
 })

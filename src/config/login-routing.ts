@@ -1,8 +1,7 @@
 /**
- * Ordering and disabling a provider's logins from the console's Accounts view (#233): where each
- * login stands in its provider's routing order, and the `routing.logins.order` and
- * `routing.logins.disabled` writes the account menu's **Use first**, **Disable** and **Enable**
- * make in `proxy-config.json`.
+ * Ordering, disabling and labelling a provider's logins (#233), shared by the console's Accounts
+ * view and the admin UI (#367): where each login stands in its provider's routing order, and the
+ * `routing.logins.order`, `routing.logins.disabled` and `labels` writes in `proxy-config.json`.
  *
  * @remarks
  * The proxy reads the config file on every request (`fileConfigReader`), so a change is used by
@@ -12,11 +11,16 @@
  * @packageDocumentation
  */
 
-import { loadConfigFromFile, type LoginsConfig, saveConfigToFile } from '@proxy/config/schema'
+import {
+  loadConfigFromFile,
+  type LoginLabels,
+  type LoginsConfig,
+  saveConfigToFile
+} from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { loginBase, type LoginRouting, orderLogins } from '@proxy/openai/model-logins'
 
-/** Logger for the console's login routing edits: the config category, as saves to the file are. */
+/** Logger for login routing and label edits: the config category, as saves to the file are. */
 const configLogger = proxyLogger('config')
 
 /** Where a login stands among its provider's logins, in routing order. */
@@ -128,6 +132,42 @@ export function saveLoginDisabled(login: string, disabled: boolean): boolean {
   })
   if (written) {
     configLogger.info(disabled ? 'Disabled login {login}' : 'Enabled login {login}', { login })
+  }
+  return written
+}
+
+/**
+ * Reads the labels the operator gave logins, from the config file.
+ *
+ * @returns provider -> label
+ */
+export function loginLabels(): LoginLabels {
+  return loadConfigFromFile().labels
+}
+
+/**
+ * Saves a login's label in the config file (`labels`), or removes it.
+ *
+ * @remarks
+ * The label is the operator's description of an account (`work`), kept beside the proxy's own
+ * settings, never in pi's credential store and never sent anywhere. A label that is only
+ * whitespace removes the entry.
+ *
+ * @param providerId - the login
+ * @param label - the label; empty removes it
+ * @returns whether the config file was written
+ */
+export function saveLoginLabel(providerId: string, label: string): boolean {
+  const config = loadConfigFromFile()
+  const { [providerId]: _previous, ...others } = config.labels
+  const trimmed = label.trim()
+  const labels = trimmed.length === 0 ? others : { ...others, [providerId]: trimmed }
+  const written = saveConfigToFile({ ...config, labels })
+  if (written) {
+    configLogger.info(
+      trimmed.length === 0 ? 'Removed the label of {provider}' : 'Labelled {provider}',
+      { provider: providerId }
+    )
   }
   return written
 }

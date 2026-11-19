@@ -723,7 +723,7 @@ distinct set, and `all-logins-disabled` names a provider whose models left; neit
 check. `/v1/switchboard/models` lists each model's enabled logins in routing order, then its
 disabled ones, each with `disabled`. The console's Accounts view marks the login called first
 (`▲ first`) and the disabled ones, and the account menu's **Use first**, **Disable** and
-**Enable** write the two settings (`src/tui/login-routing.ts`, through `saveConfigToFile`);
+**Enable** write the two settings (`src/config/login-routing.ts`, through `saveConfigToFile`);
 disabling a provider's only enabled login asks first. The Settings view leaves them to the
 Accounts view, as it leaves aliases to the Models view.
 
@@ -1873,8 +1873,14 @@ editor). A write is checked by `src/config/setting-writes.ts` with the schemas t
 with, refused over an unusable file, asks for a confirmation before listening beyond loopback with
 proxy auth off, and is logged under `admin.audit` with the login and the values before and after
 as the Settings view shows them. Proxy auth is shown as on or off and changed only in the console
-(constitution III). Its second slice (aliases, logins' order, labels and disabling, clearing
-cooldowns) is next.
+(constitution III). Its second slice adds the aliases (`src/admin/aliases.ts`: `PUT` and `DELETE
+/admin/api/aliases/{name}`, with the targets the console's editor would offer checked: exposed
+models, families with an exposed member, efforts the model runs at) and the logins
+(`src/admin/logins.ts`: first, disabled, label, and `DELETE /admin/api/cooldowns` through
+`clearCooldownsAnswer`), through the console's own writers, now in `src/config/aliases.ts` and
+`src/config/login-routing.ts`. Every non-GET route is an editor's (one check in
+`src/admin/api.ts`), and every change is logged under `admin.audit`. Phase 3 (per-project
+budgets, #366) is next.
 
 **What it is.** A web interface for a proxy run in Docker, so it can be configured without the
 terminal console. React with Tailwind CSS 4 and daisyUI 5, as j5's dashboard uses
@@ -2142,6 +2148,9 @@ src/
 │   ├── schema.ts         -- ProxyConfig Zod schema and types, defaults, repair, JSON I/O (exported via ./config)
 │   ├── env.ts            -- ServerConfig from file + env + CLI overrides
 │   ├── settings.ts       -- the settings as an editor lists them, shared by the console and the admin UI (#367)
+│   ├── setting-writes.ts -- one setting's checked write, for the admin UI (#367)
+│   ├── aliases.ts        -- alias saves, renames and deletes, shared by the console and the admin UI (#230, #367)
+│   ├── login-routing.ts  -- login order, disabling and labels, shared by the console and the admin UI (#233, #367)
 │   └── agent-dir.ts      -- pi's agent directory, resolved without loading pi (#165)
 ├── doctor/
 │   ├── command.ts        -- `pi-switchboard doctor` (citty): flags, text and JSON output, exit status
@@ -2434,7 +2443,7 @@ everything in memory and needs no HTTP surface of its own. Quitting it stops the
   both fall back for the rest of the session, rather than trying again (and maybe waiting out the
   busy timeout) on every redraw. Panels, label-value lines and compact numbers are shared with the
   sidebar (`panel.ts`).
-- **Models** (`models-view.ts`, `console-models.ts`, `aliases.ts`; #230). The exposed models
+- **Models** (`models-view.ts`, `console-models.ts`, and `src/config/aliases.ts`; #230). The exposed models
   as a matrix, grouped by provider in the order they first appear: a dot under each of
   `REASONING_EFFORTS` the model runs at as asked (`supportedReasoningEfforts`), then any cooldown
   (the time left, `3m00s`, and the reason when it fits). Then an ALIASES box, beside the matrix
