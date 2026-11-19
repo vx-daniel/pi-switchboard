@@ -1355,6 +1355,74 @@
               "additionalProperties": false
             }
           },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project": {
+                  "type": "string",
+                  "description": "The `X-Switchboard-Project` label (counted only with proxy auth on); `(other)` for projects past the cap a minute."
+                },
+                "requests": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Finished requests, rejected ones excluded."
+                },
+                "failed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "input_tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Uncached input tokens. The prompt is these plus `cache_read_tokens` and `cache_write_tokens`."
+                },
+                "output_tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "cache_read_tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Input tokens read from the provider's cache."
+                },
+                "cache_write_tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Input tokens written to the provider's cache."
+                },
+                "cost_usd": {
+                  "type": "number"
+                },
+                "budget_usd": {
+                  "description": "The project's budget for this window (`budgets` in proxy-config.json), or `null`. Reported, never enforced.",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "project",
+                "requests",
+                "failed",
+                "input_tokens",
+                "output_tokens",
+                "cache_read_tokens",
+                "cache_write_tokens",
+                "cost_usd",
+                "budget_usd"
+              ],
+              "additionalProperties": false
+            }
+          },
           "timeline": {
             "type": "array",
             "items": {
@@ -1402,6 +1470,7 @@
           "aliases",
           "failures",
           "rejected",
+          "projects",
           "timeline"
         ],
         "additionalProperties": false,
@@ -3068,6 +3137,14 @@
               "minLength": 1
             },
             "description": "An API key for the model's provider, used instead of pi's stored credential for this request. Empty or only spaces is refused with 400; leave the header out to use the stored credential. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400."
+          },
+          {
+            "in": "header",
+            "name": "x-switchboard-project",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The project this request counts under in the stats and `GET /v1/switchboard/usage` (1 to 64 characters: a letter or digit, then letters, digits and `._:/@-`). Read only with proxy auth on: without a token it is ignored. With auth on, an invalid label is refused with 400."
           }
         ],
         "requestBody": {
@@ -3831,6 +3908,14 @@
               "minLength": 1
             },
             "description": "An API key for the model's provider, used instead of pi's stored credential for this request. Empty or only spaces is refused with 400; leave the header out to use the stored credential. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400."
+          },
+          {
+            "in": "header",
+            "name": "x-switchboard-project",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The project this request counts under in the stats and `GET /v1/switchboard/usage` (1 to 64 characters: a letter or digit, then letters, digits and `._:/@-`). Read only with proxy auth on: without a token it is ignored. With auth on, an invalid label is refused with 400."
           }
         ],
         "requestBody": {

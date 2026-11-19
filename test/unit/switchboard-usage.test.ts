@@ -26,6 +26,7 @@ function emptyStore(fail = false): {
     },
     aliases: () => [],
     errors: () => ({ failures: [], rejected: [] }),
+    projects: () => [],
     close: () => {
       closes += 1
     }
@@ -39,10 +40,13 @@ describe('the usage answer', () => {
   test('a file that will not open is a 503, and is opened again on the next request', () => {
     const { store } = emptyStore()
     let opens = 0
-    const answer = createUsageAnswer(true, () => {
-      opens += 1
-      if (opens === 1) throw new Error('database is locked')
-      return store
+    const answer = createUsageAnswer(true, {
+      open: () => {
+        opens += 1
+        if (opens === 1) throw new Error('database is locked')
+        return store
+      },
+      budgets: () => ({})
     })
 
     expect(answer('today', NOW)).toMatchObject({
@@ -62,7 +66,10 @@ describe('the usage answer', () => {
     }
     const healthy = emptyStore()
     const stores = [broken.store, healthy.store]
-    const answer = createUsageAnswer(true, () => stores.shift() ?? healthy.store)
+    const answer = createUsageAnswer(true, {
+      open: () => stores.shift() ?? healthy.store,
+      budgets: () => ({})
+    })
 
     expect(answer('week', NOW).status).toBe(503)
     expect(answer('week', NOW + 1).status).toBe(200)
@@ -73,7 +80,7 @@ describe('the usage answer', () => {
   // stale answer kept past the recorder's next write.
   test('one window is read once per 5 seconds, another at once', () => {
     const { store, reads } = emptyStore()
-    const answer = createUsageAnswer(true, () => store)
+    const answer = createUsageAnswer(true, { open: () => store, budgets: () => ({}) })
 
     answer('today', NOW)
     answer('today', NOW + 4999)
@@ -87,27 +94,68 @@ describe('the usage answer', () => {
   // Catches a window without traffic answered with missing fields instead of empty lists.
   test('a window without traffic has empty lists and a full timeline', () => {
     const { store } = emptyStore()
-    const answer = createUsageAnswer(true, () => ({
-      ...store,
-      timeline: (range, bucketMinutes) =>
-        Array.from(
-          { length: Math.ceil((range.toMinute - range.fromMinute) / bucketMinutes) },
-          (_, bucketIndex) => ({
-            minute: range.fromMinute + bucketIndex * bucketMinutes,
-            requests: 0,
-            failed: 0,
-            rejected: 0
-          })
-        )
-    }))
+    const answer = createUsageAnswer(true, {
+      open: () => ({
+        ...store,
+        timeline: (range, bucketMinutes) =>
+          Array.from(
+            { length: Math.ceil((range.toMinute - range.fromMinute) / bucketMinutes) },
+            (_, bucketIndex) => ({
+              minute: range.fromMinute + bucketIndex * bucketMinutes,
+              requests: 0,
+              failed: 0,
+              rejected: 0
+            })
+          )
+      }),
+      budgets: () => ({})
+    })
 
     const result = answer('all', NOW)
 
     expect(result).toMatchObject({
       status: 200,
-      body: { models: [], aliases: [], failures: [], rejected: [], bucket_minutes: 1440 }
+      body: {
+        models: [],
+        aliases: [],
+        failures: [],
+        rejected: [],
+        projects: [],
+        bucket_minutes: 1440
+      }
     })
     // All 30 days, by day.
     expect(result.status === 200 ? result.body.timeline.length : 0).toBe(30)
+  })
+
+  // Catches a budget shown for the wrong window, a project with a budget hidden until it spends,
+  // or a project listed for a budget in another window.
+  test("puts each project's budget for the window beside its spend", () => {
+    const { store } = emptyStore()
+    const spend = {
+      project: 'j5',
+      requests: 4,
+      failed: 1,
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 3,
+      costUsd: 3
+    }
+    const answer = createUsageAnswer(true, {
+      open: () => ({ ...store, projects: () => [spend] }),
+      budgets: () => ({
+        'j5': { week: 10, today: 2 },
+        'idle': { week: 5 },
+        'today-only': { today: 1 }
+      })
+    })
+
+    const result = answer('week', NOW)
+
+    expect(result.status === 200 ? result.body.projects : []).toEqual([
+      expect.objectContaining({ project: 'j5', cost_usd: 3, requests: 4, budget_usd: 10 }),
+      expect.objectContaining({ project: 'idle', cost_usd: 0, requests: 0, budget_usd: 5 })
+    ])
   })
 })

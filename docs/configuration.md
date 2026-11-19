@@ -58,6 +58,7 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | [Login order](logins.md#order-and-disabled-logins) | — | — | `routing.logins.order` | `{}` | Provider → its logins to try first, in order; the others follow |
 | [Disabled logins](logins.md#order-and-disabled-logins) | — | — | `routing.logins.disabled` | `[]` | Logins routing never calls; they stay logged in |
 | [Login labels](logins.md#several-logins-per-provider) | — | — | `labels` | `{}` | Login → the label the console shows |
+| [Project budgets](projects.md#budgets) | — | — | `budgets` | `{}` | Project → US dollars per stats window (`today`, `week`, `all`); reported, never enforced |
 | [Lifetime](pi-extension.md#settings-panel) (pi package) | — | — | `lifetime` | `detached` | `detached` (outlives the pi session), `session` |
 | [Zed sync](pi-extension.md#zed-sync) (pi package) | — | — | `zed.providerName`, `zed.autoSync` | `"Pi Proxy"`, `false` | A name; `true`, `false` |
 | [Admin UI](admin-ui.md#every-setting) | — | `PI_SWITCHBOARD_ADMIN_UI`, `_ADMIN_HOST`, `_ADMIN_PORT`, `_ADMIN_URL`, `_ADMIN_EDITORS`, `_ADMIN_VIEWERS` | `adminUi.enabled`, `.host`, `.port`, `.publicUrl`, `.githubUrl`, `.editors`, `.viewers` | off, `127.0.0.1:4142` | See [The admin UI](admin-ui.md#every-setting) |
@@ -111,6 +112,7 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
     }
   },
   "labels": { "anthropic": "work", "anthropic-2": "personal" },
+  "budgets": { "vx-daniel/pi-switchboard": { "week": 50, "all": 150 } },
   "lifetime": "detached",
   "zed": { "providerName": "Pi Proxy", "autoSync": false },
   "adminUi": {
@@ -172,6 +174,7 @@ Model exposure and routing are set in the config file only, and read from it on 
 | `routing.logins.order` | `{}` | Base provider -> its logins to try first, in order (`{ "anthropic": ["anthropic-2"] }`); logins left out follow in the usual order. Set from the console's Accounts view with **Use first** ([Order and disabled logins](logins.md#order-and-disabled-logins)) |
 | `routing.logins.disabled` | `[]` | Logins routing never calls, though they stay logged in; a model whose every login is disabled leaves `/v1/models`. Set from the Accounts view with **Disable** and **Enable** ([Order and disabled logins](logins.md#order-and-disabled-logins)) |
 | `labels` | `{}` | Login -> the label the console shows beside it, in your words, up to 40 characters ([Several logins per provider](logins.md#several-logins-per-provider)) |
+| `budgets` | `{}` | Project (as `X-Switchboard-Project` names it) -> its budget in US dollars for any of `today`, `week` and `all`; shown beside the project's usage and checked by the doctor, never enforced ([Projects and budgets](projects.md)) |
 
 A proxy the pi extension starts gets the file's server settings as `PI_SWITCHBOARD_*` variables when it starts, so a change there needs `/proxy restart`; it reads the settings above from the file on every request, as any proxy does.
 
@@ -191,7 +194,7 @@ pi-switchboard doctor --json          # the report as JSON, for scripts
 - **General**: what `/healthz/models` and `/healthz/creds` judge (no model exposed, an invalid exposure config, `enabledModels` patterns that match nothing, alias diagnostics, a `routing.logins` name that is no login or a provider whose every login is disabled, no login, a login that fails `--verify`), a config file that can't be read, proxy auth that is set but can't be applied (an error: the proxy would refuse to start), proxy auth off or the docs page on while bound to an address other machines reach, stats off, and an alias's or `routing.logins`'s `fallbackOn` naming `upstream_error` or `timeout` (an alias's with its fallbacks in the window; the stats can't tell a move between logins from one to another model, so `routing.logins`' has no count). Cooldowns are not findings.
 - **Cache**: from the stats file, each model with at least 20 calls in the window: a hit rate under 50%, cache writes over 40% of its cost (at catalog prices), whether `PI_CACHE_RETENTION=long` pays against its break-even (Anthropic and Bedrock only), fallbacks over 5% of its calls, and over 10% of its requests without a `prompt_cache_key` on an API that caches by key. [Prompt caching](caching.md) explains each; the doctor reads `PI_CACHE_RETENTION` from its own environment, which may not be the proxy's. Stats that are off, absent or unreadable are said so, not shown as an empty section, and so is a window in which no model had 20 calls. The section ends with what the doctor cannot tell.
 
-Each finding has a `check` (`exposure`, `alias`, `login-routing`, `credentials`, `proxy-auth`, `docs-ui`, `stats`, `fallback-on`, `config-file`, `models-json`, `enabled-models`, `logins`; `window` (no model had 20 calls), `hit-rate`, `cache-write-cost`, `retention`, `fallbacks`, `prompt-cache-key`), a `severity` (`error`, `warning` or `advice`), a `subject` when it is about one model, alias, provider, pattern or address, a `message` and a `recommendation`. `--json` prints:
+Each finding has a `check` (`exposure`, `alias`, `login-routing`, `credentials`, `proxy-auth`, `docs-ui`, `stats`, `fallback-on`, `budget`, `config-file`, `models-json`, `enabled-models`, `logins`; `window` (no model had 20 calls), `hit-rate`, `cache-write-cost`, `retention`, `fallbacks`, `prompt-cache-key`), a `severity` (`error`, `warning` or `advice`), a `subject` when it is about one model, alias, provider, project, pattern or address, a `message` and a `recommendation`. `--json` prints:
 
 ```json
 {

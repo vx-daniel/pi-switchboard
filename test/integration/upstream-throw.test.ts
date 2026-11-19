@@ -213,6 +213,7 @@ async function dispatchDirect(dispatch: DirectDispatch): Promise<{ status: numbe
     dispatchChat(honoContext, {
       requestId,
       alias: undefined,
+      project: undefined,
       candidates: dispatch.candidates.map(({ provider, id }) => exposed(provider, id)),
       fallbackOn: dispatch.fallbackOn,
       loginFallbackOn: new Set(),
@@ -232,7 +233,8 @@ async function dispatchDirect(dispatch: DirectDispatch): Promise<{ status: numbe
         alias: null,
         model: MODEL,
         stream: true,
-        promptCacheKey: false
+        promptCacheKey: false,
+        project: undefined
       })
     })
   )

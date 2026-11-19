@@ -408,7 +408,8 @@ async function runChat(
 
   // Upstream credentials first: a request that cannot reach any provider must not make the proxy
   // fetch anything on its behalf (#109 review).
-  const start = await findCredentialedStart(route, upstreamApiKey, resolved.alias)
+  const project = context.get('project')
+  const start = await findCredentialedStart(route, upstreamApiKey, resolved.alias, project)
   if (start.kind === 'refused') return context.json(start.answer.body, start.answer.status)
 
   const prepared = await inlineImages(context, request, config, remoteImageFetch)
@@ -425,7 +426,8 @@ async function runChat(
     model: start.candidates[0]?.canonicalId ?? first.canonicalId,
     stream: request.stream === true,
     // Whether a key was sent (`null` is none), for the stats' count (#299); never the key itself.
-    promptCacheKey: typeof request.prompt_cache_key === 'string'
+    promptCacheKey: typeof request.prompt_cache_key === 'string',
+    project
   })
   context.set('chatDispatched', true)
   // The client's disconnect only. The dispatch reads it to tell a client that left from an
@@ -437,6 +439,7 @@ async function runChat(
     const response = await dispatchChat(context, {
       requestId,
       alias: resolved.alias,
+      project,
       candidates: start.candidates,
       fallbackOn: route.fallbackOn,
       loginFallbackOn: route.loginFallbackOn,

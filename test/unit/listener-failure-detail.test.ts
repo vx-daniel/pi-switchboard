@@ -47,7 +47,8 @@ describe('a listener that throws (#250)', () => {
           alias: null,
           model: 'p/m',
           stream: false,
-          promptCacheKey: false
+          promptCacheKey: false,
+          project: undefined
         })
       }
     ],
@@ -55,7 +56,7 @@ describe('a listener that throws (#250)', () => {
       'route totals',
       onRouteTotalsChange,
       () => {
-        recordRouteAttempt({ alias: null, provider: 'p', model: 'p/m' })
+        recordRouteAttempt({ alias: null, provider: 'p', model: 'p/m', project: null })
       }
     ],
     [

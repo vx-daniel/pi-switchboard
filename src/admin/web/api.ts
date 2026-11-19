@@ -205,6 +205,15 @@ export const UsageSchema = z.looseObject({
   models: z.array(UsageFieldsSchema.extend({ model: z.string().trim() })),
   failures: z.array(z.looseObject({ class: z.string().trim(), count: z.int() })),
   rejected: z.array(z.looseObject({ status: z.int(), count: z.int() })),
+  projects: z.array(
+    z.looseObject({
+      project: z.string().trim(),
+      requests: z.int(),
+      failed: z.int(),
+      cost_usd: z.number(),
+      budget_usd: z.number().nullable()
+    })
+  ),
   timeline: z.array(
     z.looseObject({
       start: z.string().trim(),

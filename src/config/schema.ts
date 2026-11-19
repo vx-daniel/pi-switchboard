@@ -16,6 +16,8 @@ import { isLogLevel, type LogLevel } from '@logtape/logtape'
 import { ADMIN_UI_DEFAULTS, AdminUiConfigSchema, readAdminUi } from '@proxy/config/admin-schema'
 import { piAgentDir } from '@proxy/config/agent-dir'
 import type { FieldReader } from '@proxy/config/field-reader'
+import { BudgetSchema, BudgetsSchema, ProjectLabelSchema } from '@proxy/config/projects'
+import { validEntries, validList } from '@proxy/config/repair'
 import { proxyLogger } from '@proxy/logging'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
 import { errorCode, isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
@@ -408,6 +410,11 @@ export const ProxyConfigSchema = z.object({
    * words (`{ "anthropic-2": "work" }`). Never sent anywhere.
    */
   labels: LabelsSchema,
+  /**
+   * Project -> what it may spend in US dollars per stats window (#366): `{ "j5": { "week": 50 } }`.
+   * Reported beside the project's usage, never enforced.
+   */
+  budgets: BudgetsSchema,
   /** Lowest log level the proxy writes (LogTape levels). */
   logLevel: LogLevelSchema,
   routing: RoutingConfigSchema,
@@ -461,6 +468,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   providerPrefixes: {},
   aliases: {},
   labels: {},
+  budgets: {},
   logLevel: 'info',
   routing: { reserve: {}, logins: { fallbackOn: ['rate_limit'], order: {}, disabled: [] } },
   zed: {
@@ -521,25 +529,6 @@ export const UpstreamTimeoutMsSchema = scaledInt(
   MS_PER_SECOND
 )
 
-/**
- * Returns a repairer that keeps the list entries `schema` accepts.
- *
- * @typeParam T - The entry type.
- * @param schema - The schema each entry must pass.
- * @returns The repairer: the valid entries, empty when the value is not an array.
- */
-function validList<T>(schema: z.ZodType<T>): (value: unknown) => T[] {
-  return (value) => {
-    if (!Array.isArray(value)) return []
-    const result: T[] = []
-    for (const candidate of value) {
-      const parsed = schema.safeParse(candidate)
-      if (parsed.success) result.push(parsed.data)
-    }
-    return result
-  }
-}
-
 /** Keeps the list entries {@link VerbatimNameSchema} accepts. */
 const validNames = validList(VerbatimNameSchema)
 /** Keeps the login names `routing.logins` accepts: non-empty, trimmed. */
@@ -561,29 +550,13 @@ function validNameEntries(value: unknown): Record<string, string> {
   return result
 }
 
-/**
- * Returns a repairer that keeps the map entries with a non-empty key and a value `schema` accepts.
- *
- * @typeParam T - The value type.
- * @param schema - The schema each value must pass.
- * @returns The repairer: the valid entries, empty when the value is not a plain object.
- */
-function validEntries<T>(schema: z.ZodType<T>): (value: unknown) => Record<string, T> {
-  return (value) => {
-    if (!isRecord(value)) return {}
-    const entries: Record<string, T> = {}
-    for (const [key, candidate] of Object.entries(value)) {
-      const parsed = schema.safeParse(candidate)
-      if (key.length > 0 && parsed.success) entries[key] = parsed.data
-    }
-    return entries
-  }
-}
-
 /** Keeps the `aliases` entries the schema accepts: a non-empty name for a valid target. */
 const validAliases = validEntries(AliasTargetSchema)
 /** Keeps the `routing.reserve` entries the schema accepts: a provider and a share from 0 to 1. */
 const validReserves = validEntries(ReserveShareSchema)
+/** Keeps the `budgets` entries the schema accepts: a project label and a valid budget (#366). */
+const validBudgets = validEntries(BudgetSchema, ProjectLabelSchema)
+
 /** Keeps the `labels` entries the schema accepts: a provider and a short, non-empty label. */
 const validLabels = validEntries(LabelSchema)
 /** Keeps the `routing.logins.order` entries with a provider and a list: each list's valid logins. */
@@ -743,6 +716,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     providerPrefixes: field('providerPrefixes', fields.providerPrefixes, validNameEntries),
     aliases: field('aliases', fields.aliases, validAliases),
     labels: field('labels', fields.labels, validLabels),
+    budgets: field('budgets', fields.budgets, validBudgets),
     logLevel: field('logLevel', fields.logLevel, () => DEFAULT_CONFIG.logLevel),
     routing: normalizeRoutingConfig(isRecord(raw) ? raw['routing'] : undefined, corrected),
     zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected),

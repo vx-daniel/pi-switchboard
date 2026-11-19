@@ -49,6 +49,7 @@ function usage(window: string): Record<string, unknown> {
     models: [USAGE_MODEL],
     failures: [{ class: 'rate_limit', count: 2 }],
     rejected: [{ status: 401, count: 1 }],
+    projects: [],
     timeline: [{ start: '2026-11-18T14:00:00.000Z', requests: 40, failed: 2, rejected: 1 }]
   }
 }
@@ -101,5 +102,40 @@ describe('the Stats page', () => {
     renderApp('#/stats')
 
     expect(await screen.findByText('Stats are off', { exact: false })).toBeTruthy()
+  })
+
+  // Catches a project's spend shown without its budget, one past its budget shown as within it,
+  // or a budgeted project hidden in a window without requests (#366).
+  test("shows each project's spend against its budget, even in an idle window", async () => {
+    const project = (name: string, costUsd: number, budgetUsd: number | null): unknown => ({
+      project: name,
+      requests: 3,
+      failed: 0,
+      cost_usd: costUsd,
+      budget_usd: budgetUsd
+    })
+    stubApi({
+      '/session': VIEWER,
+      '/stats?window=today': {
+        ...usage('today'),
+        projects: [project('j5', 12, 10), project('loose', 1, null)]
+      },
+      '/stats?window=week': {
+        ...usage('week'),
+        models: [],
+        rejected: [],
+        projects: [project('idle', 0, 5)]
+      }
+    })
+
+    renderApp('#/stats')
+
+    const over = await screen.findByRole('progressbar', { name: 'j5 spent' })
+    expect(over.className).toContain('progress-error')
+    expect(screen.getByText('120%')).toBeTruthy()
+    expect(screen.queryByRole('progressbar', { name: 'loose spent' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Week' }))
+    expect(await screen.findByText('No requests in this window.')).toBeTruthy()
+    expect(screen.getByRole('progressbar', { name: 'idle spent' })).toBeTruthy()
   })
 })

@@ -149,7 +149,7 @@ The address's `#/accounts` names the tab, so a tab can be bookmarked. The tabs:
 |---|---|
 | Requests | Each request, newest first, as it happens: its path, status and time, and for a chat the alias, the model, the attempt and how it ended; the proxy's own events (where it listens, logins added) among them |
 | Accounts | Each login, grouped by provider in routing order: its label, whether it is a subscription or an API key, its place in the order, its quota windows and when they reset, a reserve it is below, and its cooldowns; an editor puts a login first, disables or enables it, labels it, and ends cooldowns ([Changing aliases and logins](#changing-aliases-and-logins)) |
-| Stats | A day, a week or 30 days: totals, requests and failures over time, each model's numbers, and what failed |
+| Stats | A day, a week or 30 days: totals, requests and failures over time, each model's numbers, each [project](projects.md)'s spend against its budget for the window, and what failed |
 | Models | The models a client can name, with their context and reasoning efforts; each alias and what it points at, the built-in `-latest` ones, and why any is left out; an editor adds, edits, renames and deletes the configured aliases |
 | Settings | `proxy-config.json`'s settings, grouped as the console's Settings view groups them: each one's saved value, the value running when it differs, a flag or environment variable that holds it, and what it does; an editor changes them here ([Changing settings](#changing-settings)) |
 | Doctor | `pi-switchboard doctor`'s findings over the same windows, most serious first |

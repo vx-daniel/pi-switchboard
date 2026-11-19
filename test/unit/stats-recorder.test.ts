@@ -56,15 +56,22 @@ describe('the stats recorder', () => {
     const reads = { models: store.models, errors: store.errors, timeline: store.timeline }
     // Closing is the recorder's job; keep the store readable after it.
     const stop = startStatsRecorder({ ...store, close: () => undefined }, { now: () => NOW })
-    const key = { alias: 'coding', provider: 'alpha', model: 'alpha/one' }
+    const key = { alias: 'coding', provider: 'alpha', model: 'alpha/one', project: null }
     recordRouteAttempt(key)
     recordRouteFailure(key, 'rate_limit')
     recordRouteFallback(key)
-    const next = { alias: 'coding', provider: 'beta', model: 'beta/two' }
+    const next = { alias: 'coding', provider: 'beta', model: 'beta/two', project: null }
     recordRouteAttempt(next)
     recordRouteUsage(next, usage(100, 0.5))
     const request = beginActiveRequest(
-      { requestId: 'r1', alias: 'coding', model: 'alpha/one', stream: true, promptCacheKey: false },
+      {
+        requestId: 'r1',
+        alias: 'coding',
+        model: 'alpha/one',
+        stream: true,
+        promptCacheKey: false,
+        project: undefined
+      },
       NOW - 2000
     )
     request.attempt('beta/two', 2)
@@ -109,7 +116,14 @@ describe('the stats recorder', () => {
       ['keyless', false]
     ] as const) {
       beginActiveRequest(
-        { requestId, alias: null, model: 'alpha/one', stream: false, promptCacheKey },
+        {
+          requestId,
+          alias: null,
+          model: 'alpha/one',
+          stream: false,
+          promptCacheKey,
+          project: undefined
+        },
         NOW - 1000
       ).end('ok', NOW)
     }
@@ -140,10 +154,10 @@ describe('the stats recorder', () => {
       close: () => undefined
     }
     const stop = startStatsRecorder(flaky, { now: () => NOW, flushMs: 1000 })
-    recordRouteAttempt({ alias: null, provider: 'alpha', model: 'alpha/dropped' })
+    recordRouteAttempt({ alias: null, provider: 'alpha', model: 'alpha/dropped', project: null })
     vi.advanceTimersByTime(1000)
     refuse = false
-    recordRouteAttempt({ alias: null, provider: 'alpha', model: 'alpha/kept' })
+    recordRouteAttempt({ alias: null, provider: 'alpha', model: 'alpha/kept', project: null })
     vi.advanceTimersByTime(1000)
 
     // Written by the timer, before the stop.
@@ -181,6 +195,55 @@ describe('the stats recorder', () => {
     expect(rows.find((row) => row['model'] === '(other)')?.['requests']).toBe(11)
   })
 
+  // Catches a project's spend or requests filed under another project or none, traffic without a
+  // project given a row, or a client adding project rows without limit (#366).
+  test("files each project's requests and spend, and caps distinct projects a minute", () => {
+    const store = openStatsStore(':memory:')
+    const stop = startStatsRecorder({ ...store, close: () => undefined }, { now: () => NOW })
+    const key = { alias: null, provider: 'alpha', model: 'alpha/one', project: 'j5' }
+    recordRouteUsage(key, usage(100, 0.5))
+    recordRouteUsage({ ...key, project: null }, usage(7, 9))
+    const finish = (
+      requestId: string,
+      project: string | undefined,
+      outcome: 'ok' | 'failed'
+    ): void => {
+      beginActiveRequest(
+        {
+          requestId,
+          alias: null,
+          model: 'alpha/one',
+          stream: false,
+          promptCacheKey: false,
+          project
+        },
+        NOW - 10
+      ).end(outcome, NOW)
+    }
+    finish('j5-run', 'j5', 'failed')
+    finish('unlabelled', undefined, 'ok')
+    // j5 is the first of the minute's 50 projects: p0 to p48 are kept, p49 and p50 are not.
+    for (let projectIndex = 0; projectIndex <= 50; projectIndex += 1) {
+      finish(`p${String(projectIndex)}`, `p${String(projectIndex)}`, 'ok')
+    }
+    stop()
+
+    const projects = store.projects(ALL)
+    expect(projects.find((row) => row.project === 'j5')).toEqual({
+      project: 'j5',
+      requests: 1,
+      failed: 1,
+      inputTokens: 100,
+      outputTokens: 10,
+      cacheReadTokens: 5,
+      cacheWriteTokens: 3,
+      costUsd: 0.5
+    })
+    expect(projects).toHaveLength(51)
+    expect(projects.find((row) => row.project === '(other)')?.requests).toBe(2)
+    store.close()
+  })
+
   // Catches the retention never running, so the file grows for ever, or running on the wrong
   // side and deleting the rows it should keep.
   test('prunes rows past the retention when it starts', () => {
@@ -204,7 +267,8 @@ describe('the stats recorder', () => {
           costUsd: 0
         }
       ],
-      failures: []
+      failures: [],
+      projects: []
     })
     // One day of retention, at minute 5000: minute 5000 - 1440 is the first kept.
     store.add(row(5000 - 1441))

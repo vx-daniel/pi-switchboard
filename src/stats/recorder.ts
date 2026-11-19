@@ -15,10 +15,12 @@
 import { join } from 'node:path'
 
 import { piAgentDir } from '@proxy/config/agent-dir'
+import { MAX_PROJECT_LENGTH } from '@proxy/config/projects'
 import { proxyLogger } from '@proxy/logging'
 import { type FinishedRequest, onActiveRequestsChange } from '@proxy/server/active-requests'
 import { recordConsoleEvent } from '@proxy/server/console-events'
-import { onRouteTotalsChange, type RouteEvent } from '@proxy/server/route-totals'
+import { onRouteTotalsChange, type RouteEvent, type RouteUsage } from '@proxy/server/route-totals'
+import { OTHER_PROJECT, type ProjectMinute } from '@proxy/stats/project-store'
 import { openStatsStore } from '@proxy/stats/store'
 import type {
   AttemptMinute,
@@ -50,6 +52,11 @@ const MAX_REJECTED_MODEL_LENGTH = 128
 const MAX_REJECTED_MODELS_PER_MINUTE = 20
 /** What rejected requests past {@link MAX_REJECTED_MODELS_PER_MINUTE} names are filed under. */
 const OTHER_REJECTED_MODEL = '(other)'
+/**
+ * Distinct projects kept per minute, before the rest are {@link OTHER_PROJECT}: a project is the
+ * client's label (#366), so it is bounded as a rejected model name is.
+ */
+const MAX_PROJECTS_PER_MINUTE = 50
 
 /** How the recorder runs; the defaults are the production ones. */
 export interface RecorderOptions {
@@ -61,11 +68,15 @@ export interface RecorderOptions {
   readonly now?: () => number
 }
 
+/** A row while it is counted: the same fields, writable. */
+type Mutable<Row> = { -readonly [Field in keyof Row]: Row[Field] }
+
 /** A recorder's mutable counts, each keyed by its row's primary key as JSON. */
 interface Pending {
-  readonly requests: Map<string, { -readonly [Field in keyof RequestMinute]: RequestMinute[Field] }>
-  readonly attempts: Map<string, { -readonly [Field in keyof AttemptMinute]: AttemptMinute[Field] }>
-  readonly failures: Map<string, { -readonly [Field in keyof FailureMinute]: FailureMinute[Field] }>
+  readonly requests: Map<string, Mutable<RequestMinute>>
+  readonly attempts: Map<string, Mutable<AttemptMinute>>
+  readonly failures: Map<string, Mutable<FailureMinute>>
+  readonly projects: Map<string, Mutable<ProjectMinute>>
 }
 
 /**
@@ -74,7 +85,32 @@ interface Pending {
  * @returns the counts
  */
 function emptyPending(): Pending {
-  return { requests: new Map(), attempts: new Map(), failures: new Map() }
+  return { requests: new Map(), attempts: new Map(), failures: new Map(), projects: new Map() }
+}
+
+/**
+ * Returns a project's row for a minute, creating an empty one the first time.
+ *
+ * @param pending - the counts
+ * @param minute - the minute
+ * @param project - the project, as {@link boundedNames} files it
+ * @returns the row
+ */
+function projectRow(pending: Pending, minute: number, project: string): Mutable<ProjectMinute> {
+  const id = JSON.stringify([minute, project])
+  const row = pending.projects.get(id) ?? {
+    minute,
+    project,
+    requests: 0,
+    failed: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0
+  }
+  pending.projects.set(id, row)
+  return row
 }
 
 /**
@@ -83,7 +119,7 @@ function emptyPending(): Pending {
  * @param pending - the counts
  * @param request - the request
  * @param model - the model to file it under: the served one, or for a rejected request the name it
- *   gave, as {@link rejectedModelNames} bounds it
+ *   gave, as {@link boundedNames} bounds it
  */
 function addFinished(pending: Pending, request: FinishedRequest, model: string): void {
   const minute = Math.floor(request.endedAt / MS_PER_MINUTE)
@@ -115,24 +151,57 @@ function addFinished(pending: Pending, request: FinishedRequest, model: string):
   pending.requests.set(id, row)
 }
 
+/** How {@link boundedNames} bounds a name a client chose. */
+interface NameBounds {
+  /** The longest name kept; a longer one is cut. */
+  readonly maxLength: number
+  /** Distinct names kept per minute. */
+  readonly perMinute: number
+  /** What names past {@link NameBounds.perMinute} are filed under. */
+  readonly other: string
+}
+
 /**
- * Bounds what a rejected request's model name puts on disk: the name comes from the client, which
- * can send any string of any length. A name is cut to {@link MAX_REJECTED_MODEL_LENGTH}, and past
- * {@link MAX_REJECTED_MODELS_PER_MINUTE} distinct names in a minute the rest are filed as
- * {@link OTHER_REJECTED_MODEL}, so a client can't add rows without limit.
+ * Bounds what a name the client chose puts on disk: a rejected request's model name, or a
+ * request's project (#366), each of which a client can send any of. A name is cut to its longest,
+ * and past the distinct names a minute keeps the rest are filed under one, so a client can't add
+ * rows without limit.
  *
- * @returns a function from a rejected request's minute and model name to the name to store
+ * @param bounds - the longest name, the distinct names a minute, and the name for the rest
+ * @returns a function from a minute and a name to the name to store
  */
-function rejectedModelNames(): (minute: number, model: string) => string {
+function boundedNames(bounds: NameBounds): (minute: number, name: string) => string {
   let current = { minute: Number.NaN, names: new Set<string>() }
-  return (minute, model) => {
+  return (minute, sent) => {
     if (minute !== current.minute) current = { minute, names: new Set() }
-    const name = model.slice(0, MAX_REJECTED_MODEL_LENGTH)
+    const name = sent.slice(0, bounds.maxLength)
     if (current.names.has(name)) return name
-    if (current.names.size >= MAX_REJECTED_MODELS_PER_MINUTE) return OTHER_REJECTED_MODEL
+    if (current.names.size >= bounds.perMinute) return bounds.other
     current.names.add(name)
     return name
   }
+}
+
+/** The counts a route row and a project row both add an upstream call's usage to. */
+type Spend = Mutable<
+  Pick<
+    AttemptMinute,
+    'inputTokens' | 'outputTokens' | 'cacheReadTokens' | 'cacheWriteTokens' | 'costUsd'
+  >
+>
+
+/**
+ * Adds one upstream call's tokens and cost to a row.
+ *
+ * @param row - the row: a route's or a project's
+ * @param usage - the call's usage, as the route event carries it
+ */
+function addSpend(row: Spend, usage: RouteUsage): void {
+  row.inputTokens += usage.inputTokens
+  row.outputTokens += usage.outputTokens
+  row.cacheReadTokens += usage.cacheReadTokens
+  row.cacheWriteTokens += usage.cacheWriteTokens
+  row.costUsd += usage.costUsd
 }
 
 /**
@@ -164,13 +233,8 @@ function addRouteEvent(pending: Pending, event: RouteEvent, now: number): void {
   pending.attempts.set(id, row)
   if (event.kind === 'attempt') row.attempts += 1
   else if (event.kind === 'fallback') row.fallbacks += 1
-  else if (event.kind === 'usage') {
-    row.inputTokens += event.usage.inputTokens
-    row.outputTokens += event.usage.outputTokens
-    row.cacheReadTokens += event.usage.cacheReadTokens
-    row.cacheWriteTokens += event.usage.cacheWriteTokens
-    row.costUsd += event.usage.costUsd
-  } else {
+  else if (event.kind === 'usage') addSpend(row, event.usage)
+  else {
     row.failures += 1
     // A failure with no class (a 400) is counted on the route but has no class row.
     if (event.failure !== undefined) addFailure(pending, minute, event.key.model, event.failure)
@@ -199,12 +263,52 @@ function addFailure(pending: Pending, minute: number, model: string, failureClas
  * @returns the batch, or `undefined` when there is nothing to write
  */
 function toBatch(pending: Pending): StatsBatch | undefined {
-  if (pending.requests.size + pending.attempts.size + pending.failures.size === 0) return undefined
+  const sizes = [pending.requests, pending.attempts, pending.failures, pending.projects]
+  if (sizes.every((rows) => rows.size === 0)) return undefined
   return {
     requests: [...pending.requests.values()],
     attempts: [...pending.attempts.values()],
-    failures: [...pending.failures.values()]
+    failures: [...pending.failures.values()],
+    projects: [...pending.projects.values()]
   }
+}
+
+/**
+ * Adds a finished request to its project's row, if it named one and reached a model.
+ *
+ * @param pending - the counts
+ * @param request - the request
+ * @param nameProject - files the project under its bounded name
+ */
+function addProjectRequest(
+  pending: Pending,
+  request: FinishedRequest,
+  nameProject: (minute: number, project: string) => string
+): void {
+  if (request.project === null || request.outcome === 'rejected') return
+  const minute = Math.floor(request.endedAt / MS_PER_MINUTE)
+  const row = projectRow(pending, minute, nameProject(minute, request.project))
+  row.requests += 1
+  if (request.outcome === 'failed') row.failed += 1
+}
+
+/**
+ * Adds an upstream call's tokens and cost to its project's row, if the request named one.
+ *
+ * @param pending - the counts
+ * @param event - the route event
+ * @param now - when it happened
+ * @param nameProject - files the project under its bounded name
+ */
+function addProjectUsage(
+  pending: Pending,
+  event: RouteEvent,
+  now: number,
+  nameProject: (minute: number, project: string) => string
+): void {
+  if (event.kind !== 'usage' || event.key.project === null) return
+  const minute = Math.floor(now / MS_PER_MINUTE)
+  addSpend(projectRow(pending, minute, nameProject(minute, event.key.project)), event.usage)
 }
 
 /**
@@ -245,10 +349,21 @@ export function startStatsRecorder(store: StatsStore, options: RecorderOptions =
     }
   }
   prune()
-  const stopTotals = onRouteTotalsChange((event) => {
-    addRouteEvent(pending, event, now())
+  const nameProject = boundedNames({
+    maxLength: MAX_PROJECT_LENGTH,
+    perMinute: MAX_PROJECTS_PER_MINUTE,
+    other: OTHER_PROJECT
   })
-  const nameRejected = rejectedModelNames()
+  const stopTotals = onRouteTotalsChange((event) => {
+    const at = now()
+    addRouteEvent(pending, event, at)
+    addProjectUsage(pending, event, at, nameProject)
+  })
+  const nameRejected = boundedNames({
+    maxLength: MAX_REJECTED_MODEL_LENGTH,
+    perMinute: MAX_REJECTED_MODELS_PER_MINUTE,
+    other: OTHER_REJECTED_MODEL
+  })
   const stopRequests = onActiveRequestsChange((finishedRequest) => {
     if (finishedRequest === undefined) return
     const model =
@@ -256,6 +371,7 @@ export function startStatsRecorder(store: StatsStore, options: RecorderOptions =
         ? nameRejected(Math.floor(finishedRequest.endedAt / MS_PER_MINUTE), finishedRequest.model)
         : finishedRequest.model
     addFinished(pending, finishedRequest, model)
+    addProjectRequest(pending, finishedRequest, nameProject)
   })
   const timer = setInterval(flush, options.flushMs ?? DEFAULT_FLUSH_MS)
   // The timer alone must not keep a process alive that is otherwise done.

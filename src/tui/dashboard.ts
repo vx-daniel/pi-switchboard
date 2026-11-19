@@ -16,11 +16,14 @@
  */
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
+import type { Budgets } from '@proxy/config/projects'
+import { loadConfigFromFile } from '@proxy/config/schema'
 import type { DoctorStats } from '@proxy/doctor/collect'
 import type { StatsState } from '@proxy/doctor/findings'
 import { proxyLogger } from '@proxy/logging'
 import { routeTotals, routeTotalsSince } from '@proxy/server/route-totals'
 import { promptTokens } from '@proxy/stats/cache'
+import { type BudgetedProject, budgetedProjects } from '@proxy/stats/project-store'
 import { statsFilePath } from '@proxy/stats/recorder'
 import {
   type AliasStats,
@@ -38,6 +41,7 @@ import {
   type StatsWindow,
   windowMinutes
 } from '@proxy/stats/windows'
+import { dashboardLayout } from '@proxy/tui/dashboard-layout'
 import { STATS_WINDOW_KEYS } from '@proxy/tui/navigation'
 import {
   compactCount,
@@ -49,12 +53,13 @@ import {
   spread,
   usd
 } from '@proxy/tui/panel'
+import { projectLines } from '@proxy/tui/projects-panel'
 import {
   createDoctorStatsSource,
   createTodayCostSource,
   SNAPSHOT_MS
 } from '@proxy/tui/stats-snapshots'
-import { fitLabel, statsRows } from '@proxy/tui/stats-view'
+import { fitLabel, statsRows, tableLines } from '@proxy/tui/stats-view'
 import { activeTab, type ConsoleColor, keycap, paint, strong, tabAccent } from '@proxy/tui/theme'
 import { errorMessage } from '@proxy/utils/guards'
 import { MS_PER_MINUTE } from '@proxy/utils/time'
@@ -64,12 +69,6 @@ const consoleLogger = proxyLogger('tui')
 
 /** Minutes in an hour. */
 const MINUTES_PER_HOUR = 60
-/** Rows the timeline's bars take at most and at least. */
-const CHART_ROWS = { most: 16, least: 3 } as const
-/** Model rows the layout makes room for before the timeline takes the rest. */
-const MODEL_ROWS_WANTED = 6
-/** Alias rows the layout makes room for, when any request named an alias. */
-const ALIAS_ROWS_WANTED = 4
 /** The bar heights, in eighths of a row. */
 const EIGHTHS = [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'] as const
 /** Eighths in a full cell. */
@@ -78,25 +77,10 @@ const FULL_CELL = 8
 const PER_REQUEST_COST_DECIMALS = 3
 /** Decimal places the REQUESTS tile's rate per hour is shown with. */
 const RATE_DECIMALS = 1
-/** The dashboard's panels that always show; ALIASES shows when a request named an alias. */
-const PANELS = ['TIMELINE', 'MODELS'] as const
-/** Rows a panel's frame takes: its top and bottom borders. */
-const BORDER_ROWS = 2
-/** Rows the panels' frames take. */
-const FRAME_ROWS = PANELS.length * BORDER_ROWS
-/**
- * Rows that don't change with the screen, by where they are: the window line, the timeline's peak
- * and axis lines, the models' heading and the errors line.
- */
-const FIXED_LINES = { window: 1, timeline: 2, modelsHeading: 1, errors: 1 } as const
-/** Rows the tiles take: a blank row under the window line, then each tile's label, number and caption. */
-const TILE_ROWS = 4
 /** The dashboard's narrowest width that shows all six tiles; a narrower one shows four. */
 const ALL_TILES_LEAST_WIDTH = 110
 /** What comes before the first tile's text, and between a tile's rule and its text. */
 const TILE_PADDING = ' '
-/** Rows the ALIASES panel takes besides its alias rows: its frame and its heading. */
-const ALIAS_PANEL_ROWS = BORDER_ROWS + 1
 /** The label column's narrowest width. */
 const LABEL_LEAST = 12
 /** Which of the usage table's number columns is the failures. */
@@ -150,6 +134,8 @@ export interface DashboardData {
   /** Each alias's numbers, requests that named a model directly under ''. */
   readonly aliases: readonly AliasStats[]
   readonly errors: ErrorStats
+  /** Each project, with its budget for the window (#366). */
+  readonly projects: readonly BudgetedProject[]
 }
 
 /**
@@ -182,15 +168,18 @@ function chartColumns(width: number): number {
 
 /**
  * Creates the dashboard's reader of the stats store: a snapshot is read again only after a few
- * seconds, or for another window or chart width.
+ * seconds, or for another window or chart width. The projects' budgets are read from the config
+ * file with each snapshot.
  *
  * @param store - the stats store
  * @param now - the clock
+ * @param budgets - reads the budgets; the config file's but in tests
  * @returns a function from a window and the chart's width to the snapshot
  */
 export function createDashboardSource(
-  store: Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors'>,
-  now: () => number = Date.now
+  store: Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors' | 'projects'>,
+  now: () => number = Date.now,
+  budgets: () => Budgets = () => loadConfigFromFile().budgets
 ): (window: StatsWindow, columns: number) => DashboardData {
   let cached: { key: string; at: number; data: DashboardData } | undefined
   return (window, columns) => {
@@ -205,7 +194,8 @@ export function createDashboardSource(
       timeline: store.timeline(range, bucketMinutes),
       models: store.models(range),
       aliases: store.aliases(range),
-      errors: store.errors(range)
+      errors: store.errors(range),
+      projects: budgetedProjects(store.projects(range), budgets(), window)
     }
     cached = { key, at, data }
     return data
@@ -515,9 +505,7 @@ function usageLines(
     if (usage.failed > 0) cells[FAILED_COLUMN] = paint('error', cells[FAILED_COLUMN] ?? '')
     return `${fitLabel(label, labelWidth)} ${cells.join(' ')}`
   })
-  if (rows.length <= room) return [head, ...rows]
-  const kept = Math.max(0, room - 1)
-  return [head, ...rows.slice(0, kept), paint('dim', `+${String(rows.length - kept)} more`)]
+  return tableLines(head, rows, room)
 }
 
 /**
@@ -574,56 +562,12 @@ function errorLine(totals: WindowTotals, errors: ErrorStats, width: number): str
   return truncateToWidth(` ${line}`, width, '…', true)
 }
 
-/** How the dashboard's rows are shared out at one height. */
-interface DashboardLayout {
-  /** Whether the tiles show. */
-  readonly tiles: boolean
-  /** Rows of timeline bars. */
-  readonly chart: number
-  /** Rows for the MODELS table's entries. */
-  readonly modelRoom: number
-  /** Rows for the ALIASES table's entries; 0 without the panel. */
-  readonly aliasRoom: number
-}
-
-/**
- * Shares out the dashboard's rows. What gives way first on a short screen, last first: the
- * timeline's bars past {@link CHART_ROWS}' least, the tables' rows past one each, then the tiles;
- * the timeline keeps its least rows and each table one row while the screen has room for them.
- *
- * @param entries - how many rows each table has
- * @param entries.models - models served in the window
- * @param entries.aliases - aliases in the ALIASES table; 0 when it isn't shown
- * @param height - the dashboard's rows
- * @returns the layout
- */
-function dashboardLayout(
-  entries: { readonly models: number; readonly aliases: number },
-  height: number
-): DashboardLayout {
-  const aliasPanel = entries.aliases === 0 ? 0 : ALIAS_PANEL_ROWS
-  const fixed =
-    FRAME_ROWS + aliasPanel + Object.values(FIXED_LINES).reduce((total, rows) => total + rows, 0)
-  // One row for the models, and one for the aliases when their panel shows.
-  const leastTableRows = 1 + Math.min(1, entries.aliases)
-  const tiles = height - fixed - CHART_ROWS.least - leastTableRows >= TILE_ROWS
-  const room = height - fixed - (tiles ? TILE_ROWS : 0)
-  const modelsWanted = Math.min(Math.max(1, entries.models), MODEL_ROWS_WANTED)
-  const aliasesWanted = Math.min(entries.aliases, ALIAS_ROWS_WANTED)
-  const chart = Math.min(
-    CHART_ROWS.most,
-    Math.max(CHART_ROWS.least, room - modelsWanted - aliasesWanted)
-  )
-  const tableRoom = Math.max(1, room - chart)
-  const aliasRoom = entries.aliases === 0 ? 0 : Math.max(1, Math.min(aliasesWanted, tableRoom - 1))
-  return { tiles, chart, modelRoom: Math.max(1, tableRoom - aliasRoom), aliasRoom }
-}
-
 /**
  * Renders the dashboard: the window pills, the tiles, then TIMELINE, MODELS, ALIASES (when a
- * request named an alias) and the errors line. The timeline takes the room the tables don't need,
- * between 3 and 16 rows of bars; on a short screen {@link dashboardLayout} says what gives way,
- * and below the least of everything the bottom is cut.
+ * request named an alias), PROJECTS (when a request named a project or one has a budget) and the
+ * errors line. The timeline takes the room the tables don't need, between 3 and 16 rows of bars;
+ * on a short screen {@link dashboardLayout} says what gives way, and below the least of
+ * everything the bottom is cut.
  *
  * @param data - the snapshot
  * @param size - the space available
@@ -639,7 +583,7 @@ export function dashboardRows(
   // Only direct requests: the table would repeat the totals, so it isn't shown.
   const aliases = data.aliases.some((alias) => alias.alias !== '') ? data.aliases : []
   const layout = dashboardLayout(
-    { models: data.models.length, aliases: aliases.length },
+    { models: data.models.length, aliases: aliases.length, projects: data.projects.length },
     size.height
   )
   const totals = windowTotals(data)
@@ -657,6 +601,9 @@ export function dashboardRows(
     ...(aliases.length === 0
       ? []
       : panel('ALIASES', usageLines('alias', aliasEntries, layout.aliasRoom, inner), size.width)),
+    ...(data.projects.length === 0
+      ? []
+      : panel('PROJECTS', projectLines(data.projects, layout.projectRoom, inner), size.width)),
     errorLine(totals, data.errors, size.width)
   ]
   return rows.slice(0, Math.max(0, size.height))
@@ -707,7 +654,10 @@ export interface StatsView {
 }
 
 /** The store's methods the Stats view uses. */
-type DashboardStore = Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors' | 'close'>
+type DashboardStore = Pick<
+  StatsStore,
+  'timeline' | 'models' | 'aliases' | 'errors' | 'projects' | 'close'
+>
 
 /**
  * Renders the totals since the proxy started (#70), under a line that says why the dashboard isn't

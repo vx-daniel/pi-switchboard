@@ -11,7 +11,8 @@
  */
 
 import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
-import type { DoctorCheck, DoctorReport, Finding, Severity } from '@proxy/doctor/findings'
+import type { DoctorCheck, DoctorReport, Finding } from '@proxy/doctor/findings'
+import type { Severity } from '@proxy/doctor/severity'
 import { findingCounts, findingsBySeverity, SEVERITY_LABEL } from '@proxy/doctor/summary'
 import type { StatsWindow } from '@proxy/stats/windows'
 import type { TabBadge } from '@proxy/tui/frame'
@@ -57,7 +58,9 @@ const DOCTOR_POINTERS: Readonly<Partial<Record<DoctorCheck, Pointer>>> = {
   'fallbacks': STATS,
   'prompt-cache-key': STATS,
   // An alias's `fallbackOn` is edited with the alias; the logins' in Settings.
-  'fallback-on': (found) => (found.subject === 'routing.logins' ? SETTINGS : MODELS)
+  'fallback-on': (found) => (found.subject === 'routing.logins' ? SETTINGS : MODELS),
+  // Each project's spend against its budget is on the Stats view; budgets are set in the file.
+  'budget': STATS
 }
 
 /** Each severity's color, for its label in a row. */

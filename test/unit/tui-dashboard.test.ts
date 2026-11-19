@@ -73,6 +73,7 @@ function snapshot(parts: Partial<DashboardData>): DashboardData {
     models: [],
     aliases: [],
     errors: NO_ERRORS,
+    projects: [],
     ...parts
   }
 }
@@ -155,7 +156,7 @@ describe('createDashboardSource', () => {
    * @returns the store and its query count
    */
   function countingStore(): {
-    store: Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors'>
+    store: Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors' | 'projects'>
     reads: () => number
   } {
     let count = 0
@@ -167,7 +168,8 @@ describe('createDashboardSource', () => {
         },
         models: () => [],
         aliases: () => [],
-        errors: () => NO_ERRORS
+        errors: () => NO_ERRORS,
+        projects: () => []
       },
       reads: () => count
     }
@@ -470,6 +472,33 @@ describe('dashboardRows', () => {
     expect(directOnly.some((row) => row.includes('ALIASES'))).toBe(false)
   })
 
+  // Catches the PROJECTS panel hidden when a project spent (the per-project cost is the point),
+  // shown without any, or a project past its budget shown as if within it (#366).
+  test('the PROJECTS panel shows each project with its budget and the share spent', () => {
+    const project = (name: string, costUsd: number, budgetUsd: number | null) => ({
+      project: name,
+      requests: 4,
+      failed: 0,
+      inputTokens: 0,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd,
+      budgetUsd
+    })
+    const size = { height: 40, width: 120 }
+
+    const rows = plainRows(
+      snapshot({ projects: [project('j5', 12, 10), project('loose', 1, null)] }),
+      size
+    )
+
+    expect(rows.some((row) => row.includes('PROJECTS'))).toBe(true)
+    expect(rows.some((row) => /j5\s+4\s+0\s+\$12\.00\s+\$10\.00\s+120%/.test(row))).toBe(true)
+    expect(rows.some((row) => /loose\s+4\s+0\s+\$1\.00\s+-\s+-/.test(row))).toBe(true)
+    expect(plainRows(snapshot({}), size).some((row) => row.includes('PROJECTS'))).toBe(false)
+  })
+
   // Catches an empty window rendering a blank table the operator can't tell from a broken one, or
   // a tile dividing by its zero requests.
   test('a window without requests says so, with no NaN in the tiles', () => {
@@ -517,6 +546,7 @@ describe('openStatsView', () => {
       models: () => [modelStats({ model: 'a/one', costUsd: 0.42 })],
       aliases: () => [],
       errors: () => NO_ERRORS,
+      projects: () => [],
       close: () => undefined
     }))
     const cost = view.todayCostUsd()
@@ -534,6 +564,7 @@ describe('openStatsView', () => {
       models: () => [],
       aliases: () => [],
       errors: () => NO_ERRORS,
+      projects: () => [],
       close: () => undefined
     }))
     const perBar = view.perBar('week', 100)
@@ -561,6 +592,7 @@ describe('openStatsView', () => {
       },
       aliases: () => [],
       errors: () => NO_ERRORS,
+      projects: () => [],
       close: () => undefined
     }))
 
@@ -584,6 +616,7 @@ describe('openStatsView', () => {
       models: () => [],
       aliases: () => [],
       errors: () => NO_ERRORS,
+      projects: () => [],
       close: () => undefined
     }))
     const size = { height: 10, width: 100 }
