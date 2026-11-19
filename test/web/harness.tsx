@@ -20,6 +20,8 @@ export interface Call {
   readonly method: string
   /** The path and query, such as `/admin/api/stats?window=week`. */
   readonly path: string
+  /** The body sent, for a write; `undefined` for a read. */
+  readonly body: string | undefined
 }
 
 /** The signed-in operator most tests use. */
@@ -87,7 +89,11 @@ export function stubApi(scripted: Readonly<Record<string, Answer>>): Call[] {
   const calls: Call[] = []
   vi.stubGlobal('fetch', async (input: string, init?: RequestInit): Promise<Response> => {
     const method = init?.method ?? 'GET'
-    calls.push({ method, path: input })
+    calls.push({
+      method,
+      path: input,
+      body: typeof init?.body === 'string' ? init.body : undefined
+    })
     if (input === '/admin/auth/sign-out') return new Response(null, { status: 204 })
     const answer = answers[input.replace(/^\/admin\/api/u, '')]
     if (answer === undefined) {

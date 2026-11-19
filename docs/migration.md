@@ -16,7 +16,7 @@
 
 ### The admin UI
 
-- **An admin web UI, off by default (#367).** With `adminUi.enabled` on, `pi-switchboard` opens a second listener (`127.0.0.1:4142`) where the people its editors and viewers lists name sign in through your own GitHub App, and see the proxy's requests live, its logins, models and aliases, stats and doctor's findings, read-only, at `/admin/`. The npm package, the Docker image and the standalone binary all carry the pages. With it on but unsafe or unconfigured (no sign-in secrets, nobody listed, a short session key, plain `http` beyond loopback), the proxy refuses to start and logs why. Nothing changes while it is off. See [The admin UI](admin-ui.md).
+- **An admin web UI, off by default (#367).** With `adminUi.enabled` on, `pi-switchboard` opens a second listener (`127.0.0.1:4142`) where the people its editors and viewers lists name sign in through your own GitHub App, and see the proxy's requests live, its logins, models and aliases, stats and doctor's findings at `/admin/`. Editors also change `proxy-config.json`'s settings on its Settings tab, each change logged under `pi-switchboard.admin.audit` with who made it; the proxy token stays in the console. The npm package, the Docker image and the standalone binary all carry the pages. With it on but unsafe or unconfigured (no sign-in secrets, nobody listed, a short session key, plain `http` beyond loopback), the proxy refuses to start and logs why. Nothing changes while it is off. See [The admin UI](admin-ui.md).
 
 ### The pi extension
 

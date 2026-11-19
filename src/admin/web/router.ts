@@ -8,12 +8,13 @@
 import type { StatsWindow } from '@proxy/admin/web/api'
 import { useSyncExternalStore } from 'react'
 
-/** The pages, in the order the tabs show them. */
+/** The pages, in the console's order (its `1`–`6`), then Logins, which the console has no tab for. */
 export const PAGES = [
   { id: 'requests', title: 'Requests' },
   { id: 'accounts', title: 'Accounts' },
-  { id: 'models', title: 'Models' },
   { id: 'stats', title: 'Stats' },
+  { id: 'models', title: 'Models' },
+  { id: 'settings', title: 'Settings' },
   { id: 'doctor', title: 'Doctor' },
   { id: 'logins', title: 'Logins' }
 ] as const
@@ -21,10 +22,12 @@ export const PAGES = [
 /** A page's ID. */
 export type PageId = (typeof PAGES)[number]['id']
 
-/** What every page is given: the window the Stats and Doctor pages share, as the console's. */
+/** What every page is given: the window Stats and Doctor share, and whether the operator edits. */
 export interface PageView {
   readonly statsWindow: StatsWindow
   readonly onPickWindow: (statsWindow: StatsWindow) => void
+  /** Whether the operator may change settings (the editor role). */
+  readonly editor: boolean
 }
 
 /**

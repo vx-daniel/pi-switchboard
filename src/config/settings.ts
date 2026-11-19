@@ -204,7 +204,7 @@ const SPECS: Readonly<Record<SettingKey, SettingSpec>> = {
   authToken: {
     section: 'auth',
     label: 'Proxy auth',
-    help: 'The bearer token clients must send. Enter opens the proxy auth menu, as p does anywhere.',
+    help: 'The bearer token clients must send.',
     // The view shows whether a token is set, never the token.
     saved: (file) => onOff(file.authToken.length > 0),
     flag: '--auth-token',

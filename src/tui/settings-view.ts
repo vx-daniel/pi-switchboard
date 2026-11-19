@@ -16,11 +16,28 @@ import {
   type Section,
   sectionHeading,
   settingHelp,
+  type SettingKey,
   type SettingRow,
   settingSection
 } from '@proxy/config/settings'
 import { firstShown } from '@proxy/tui/panel'
 import { highlight, paint, strong } from '@proxy/tui/theme'
+
+/** What a setting's keys do in the console, after its help; the admin UI has no such keys. */
+const CONSOLE_HINTS: Partial<Record<SettingKey, string>> = {
+  authToken: 'Enter opens the proxy auth menu, as p does anywhere.'
+}
+
+/**
+ * Says what a setting does, with what its keys do in the console.
+ *
+ * @param key - the setting
+ * @returns the help line
+ */
+function consoleHelp(key: SettingKey): string {
+  const hint = CONSOLE_HINTS[key]
+  return hint === undefined ? settingHelp(key) : `${settingHelp(key)} ${hint}`
+}
 
 /** Columns the selection mark takes before a row: `› ` or two spaces. */
 const MARK_COLUMNS = 2
@@ -131,7 +148,7 @@ export function settingsViewRows(
   const banner = problemBanner(problem, width)
   const chosen = rows[selected]
   const help =
-    chosen === undefined ? [] : wrapTextWithAnsi(paint('dim', settingHelp(chosen.key)), width)
+    chosen === undefined ? [] : wrapTextWithAnsi(paint('dim', consoleHelp(chosen.key)), width)
   const helpRows = help.length === 0 ? 0 : Math.min(help.length + 1, HELP_ROWS + 1)
   const visible = Math.max(1, height - helpRows - banner.length)
   const { lines, selectedLine } = listLines(rows, selected, width)

@@ -27,14 +27,15 @@ describe('the admin UI shell', () => {
     expect(await screen.findByText('alice')).toBeTruthy()
     expect(screen.getByText('viewer')).toBeTruthy()
     const tabs = within(screen.getByRole('tablist')).getAllByRole('tab')
-    // Each tab carries its number key, as the console's do.
+    // Each tab carries its number key, in the console's order, as the console's do.
     expect(tabs.map((tab) => tab.textContent)).toEqual([
       '1Requests',
       '2Accounts',
-      '3Models',
-      '4Stats',
-      '5Doctor',
-      '6Logins'
+      '3Stats',
+      '4Models',
+      '5Settings',
+      '6Doctor',
+      '7Logins'
     ])
     expect(tabs[0]?.getAttribute('aria-selected')).toBe('true')
   })
