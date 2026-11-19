@@ -19,5 +19,7 @@ export interface ProxyEnv {
     chatModel?: string
     /** Set when a chat request reaches the dispatch: one answered without it was rejected. */
     chatDispatched?: true
+    /** The project a chat request's usage counts under (`X-Switchboard-Project`, #366); unset for none. */
+    project?: string
   }
 }

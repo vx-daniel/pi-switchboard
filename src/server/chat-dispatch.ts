@@ -270,12 +270,14 @@ export type CredentialedStart =
  * @param route - the planned candidates and fallback classes
  * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined`
  * @param alias - the alias whose chain it is, for the log
+ * @param project - the project the request named, for the stats; `undefined` for none
  * @returns the candidates from that one on, with the attempts skipped, or the last 502 answer
  */
 export async function findCredentialedStart(
   route: ChatRoute,
   upstreamApiKey: string | undefined,
-  alias: string | undefined
+  alias: string | undefined,
+  project: string | undefined
 ): Promise<CredentialedStart> {
   const attempts: Attempt[] = []
   let position = 0
@@ -291,7 +293,7 @@ export async function findCredentialedStart(
       return { kind: 'ready', candidates: route.candidates.slice(position), attempts }
     }
     // A refused credential is an attempt that failed `auth`, as `x_pi.attempts` lists it.
-    const key = routeKey(alias, candidate)
+    const key = routeKey(alias, candidate, project)
     recordRouteAttempt(key)
     recordRouteFailure(key, failureClass(refused))
     const nextPosition = nextFor(route.candidates, position, route, 'auth')
@@ -312,6 +314,8 @@ export interface DispatchJob extends RouteHops {
   readonly requestId: string
   /** The alias the request named (#66): reported as `x_pi.alias`. */
   readonly alias: string | undefined
+  /** The project the request named (`X-Switchboard-Project`, #366), for the stats. */
+  readonly project: string | undefined
   /** The candidates in order. The first one's credential was already checked. */
   readonly candidates: readonly ExposedModel[]
   /** The quota reserve per login (`routing.reserve`, #69). */
@@ -423,7 +427,7 @@ async function attemptStream(
     return upstreamFailure(mapFailedCall(first.value.error), options)
   }
 
-  const key = routeKey(job.alias, candidate)
+  const key = routeKey(job.alias, candidate, job.project)
   const respond = (route: ResponseRoute): Response => {
     honoContext.header('content-type', 'text/event-stream')
     honoContext.header('cache-control', 'no-cache')
@@ -563,7 +567,7 @@ async function runAttempt(
     return { outcome, captured: undefined }
   }
   let captured: FailedResponse | undefined
-  const key = routeKey(job.alias, candidate)
+  const key = routeKey(job.alias, candidate, job.project)
   const capturing: DispatchJob = {
     ...job,
     request: withAliasEffort(job.request, job.alias, candidate),
@@ -662,7 +666,7 @@ function moveOn(
   const nextPosition = nextFor(job.candidates, position, job, failed)
   const next = nextPosition === undefined ? undefined : job.candidates[nextPosition]
   if (candidate === undefined || next === undefined || failed === undefined) return undefined
-  recordRouteFallback(routeKey(job.alias, candidate))
+  recordRouteFallback(routeKey(job.alias, candidate, job.project))
   logFallback(job.alias, { failed: candidate, next, failure: failed, attempt: attempts.length + 1 })
   attempts.push({ ...attemptOf(candidate), reason: failed })
   return nextPosition
@@ -692,7 +696,7 @@ async function tryCandidate(
   // say nothing about the login other clients share (#181 review).
   const sharedLogin = job.options.upstreamApiKey === undefined
   const sentAt = Date.now()
-  const key = routeKey(job.alias, candidate)
+  const key = routeKey(job.alias, candidate, job.project)
   job.active.attempt(candidate.canonicalId, attempts.length + 1)
   recordRouteAttempt(key)
   const { outcome, captured } = await runAttempt(honoContext, candidate, job, {

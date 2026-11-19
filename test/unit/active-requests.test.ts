@@ -19,7 +19,8 @@ describe('the finished requests kept for the console', () => {
         alias: null,
         model: 'alpha/model',
         stream: false,
-        promptCacheKey: false
+        promptCacheKey: false,
+        project: undefined
       }).end('ok')
     }
 
@@ -37,7 +38,8 @@ describe('the finished requests kept for the console', () => {
       alias: null,
       model: 'alpha/model',
       stream: true,
-      promptCacheKey: false
+      promptCacheKey: false,
+      project: undefined
     })
     handle.streaming()
     handle.settled('ok')
@@ -58,7 +60,8 @@ describe('the finished requests kept for the console', () => {
       alias: null,
       model: 'alpha/model',
       stream: true,
-      promptCacheKey: false
+      promptCacheKey: false,
+      project: undefined
     })
     handle.settled('failed')
 
@@ -76,7 +79,8 @@ describe('the finished requests kept for the console', () => {
       alias: null,
       model: 'alpha/model',
       stream: false,
-      promptCacheKey: false
+      promptCacheKey: false,
+      project: undefined
     })
     served.end('ok')
     for (let requestIndex = 0; requestIndex <= REJECTED_KEPT * 2; requestIndex += 1) {

@@ -52,6 +52,7 @@ function request(fields: Partial<ActiveRequest>, ageMs = 12_000): ActiveRequest 
     attempt: 1,
     stream: true,
     promptCacheKey: false,
+    project: null,
     firstEventAt: undefined,
     startedAt: NOW - ageMs,
     ...fields

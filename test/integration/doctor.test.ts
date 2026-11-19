@@ -92,7 +92,8 @@ function recordUncachedTraffic(provider = 'alpha'): void {
         costUsd: 0.03
       }
     ],
-    failures: []
+    failures: [],
+    projects: []
   })
   store.close()
 }

@@ -56,6 +56,8 @@ export interface ActiveRequest {
    * which can be a conversation ID the client chose.
    */
   readonly promptCacheKey: boolean
+  /** The project the request named (`X-Switchboard-Project`, #366), or `null`. */
+  readonly project: string | null
   /** When the dispatch started, in milliseconds since the epoch. */
   readonly startedAt: number
   /** When a stream's first event arrived; `undefined` until then, and for a plain request. */
@@ -86,11 +88,11 @@ export interface RejectedRequest {
   readonly startedAt: number
 }
 
-/** What a request starts with. */
+/** What a request starts with: its project as the request context holds it, `undefined` for none. */
 export type ActiveRequestStart = Pick<
   ActiveRequest,
   'requestId' | 'alias' | 'model' | 'stream' | 'promptCacheKey'
->
+> & { readonly project: string | undefined }
 
 /** The dispatcher's handle on one request in flight. */
 export interface ActiveRequestHandle {
@@ -210,6 +212,7 @@ export function recordRejectedRequest(rejected: RejectedRequest, now: number = D
     attempt: 0,
     stream: false,
     promptCacheKey: false,
+    project: null,
     startedAt: rejected.startedAt,
     firstEventAt: undefined,
     outcome: 'rejected',
@@ -231,7 +234,13 @@ export function beginActiveRequest(
 ): ActiveRequestHandle {
   const key = nextKey
   nextKey += 1
-  requests.set(key, { ...start, attempt: 1, startedAt: now, firstEventAt: undefined })
+  requests.set(key, {
+    ...start,
+    project: start.project ?? null,
+    attempt: 1,
+    startedAt: now,
+    firstEventAt: undefined
+  })
   notify()
   /**
    * Replaces fields of the request while it is still in flight.

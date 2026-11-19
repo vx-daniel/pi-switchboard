@@ -61,6 +61,7 @@ function chatFor(request: HttpRequest, fields: Partial<ActiveRequest> = {}): Act
     attempt: 1,
     stream: true,
     promptCacheKey: false,
+    project: null,
     startedAt: request.startedAt,
     firstEventAt: undefined,
     ...fields

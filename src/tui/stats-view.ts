@@ -179,6 +179,21 @@ export function fitLabel(text: string, width: number): string {
 }
 
 /**
+ * Fits a dashboard table (MODELS, ALIASES, PROJECTS) to the room left: its heading, then every
+ * row, or as many as fit above a `+N more` line.
+ *
+ * @param head - the table's heading row
+ * @param rows - one row per entry, in the order shown
+ * @param room - the rows the entries may take
+ * @returns the lines
+ */
+export function tableLines(head: string, rows: readonly string[], room: number): string[] {
+  if (rows.length <= room) return [head, ...rows]
+  const kept = Math.max(0, room - 1)
+  return [head, ...rows.slice(0, kept), paint('dim', `+${String(rows.length - kept)} more`)]
+}
+
+/**
  * Fits the route rows to the room left: when they do not fit, the last one says how many more
  * there are.
  *

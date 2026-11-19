@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { DatabaseSync } from 'node:sqlite'
 
+import type { ProjectMinute } from '@proxy/stats/project-store'
 import {
   type AttemptMinute,
   openStatsStore,
@@ -119,17 +120,38 @@ function attemptRow(
   }
 }
 
+/**
+ * Builds one minute of the project `j5`: one request, no tokens, unless fields say otherwise.
+ *
+ * @param fields - the minute and any counts
+ * @returns the row
+ */
+function projectRow(fields: Partial<ProjectMinute> & Pick<ProjectMinute, 'minute'>): ProjectMinute {
+  return {
+    project: 'j5',
+    requests: 1,
+    failed: 0,
+    inputTokens: 0,
+    outputTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    costUsd: 0,
+    ...fields
+  }
+}
+
 describe('the stats store', () => {
   // Catches a second batch for the same minute and route replacing the first instead of adding to
   // it, or the slowest time being summed instead of kept as the largest.
   test('adds batches for the same minute and route together', () => {
     const store = memoryStore()
     const row = requestRow({ minute: 10, model: 'a/m', durationMsTotal: 100, durationMsMax: 100 })
-    store.add({ requests: [row], attempts: [], failures: [] })
+    store.add({ requests: [row], attempts: [], failures: [], projects: [] })
     store.add({
       requests: [{ ...row, durationMsTotal: 300, durationMsMax: 300 }],
       attempts: [],
-      failures: []
+      failures: [],
+      projects: []
     })
 
     expect(store.models({ fromMinute: 0, toMinute: 60 })).toEqual([
@@ -149,7 +171,8 @@ describe('the stats store', () => {
         requestRow({ minute: 120, model: 'a/m', requests: 9 })
       ],
       attempts: [],
-      failures: []
+      failures: [],
+      projects: []
     })
 
     expect(store.timeline({ fromMinute: 100, toMinute: 120 }, 5)).toEqual([
@@ -192,7 +215,8 @@ describe('the stats store', () => {
         attemptRow({ minute: 3, model: 'b/slow', fallbacks: 1, outputTokens: 7 }),
         attemptRow({ minute: 3, model: 'c/refused', failures: 1 })
       ],
-      failures: []
+      failures: [],
+      projects: []
     })
 
     expect(store.models({ fromMinute: 0, toMinute: 10 })).toEqual([
@@ -244,7 +268,8 @@ describe('the stats store', () => {
         { minute: 1, model: 'a/m', failureClass: 'timeout', failures: 1 },
         { minute: 1, model: 'a/m', failureClass: 'rate_limit', failures: 2 },
         { minute: 2, model: 'b/m', failureClass: 'rate_limit', failures: 1 }
-      ]
+      ],
+      projects: []
     })
 
     expect(store.errors({ fromMinute: 0, toMinute: 10 })).toEqual({
@@ -268,7 +293,8 @@ describe('the stats store', () => {
       failures: [
         { minute: 5, model: 'a/m', failureClass: 'timeout', failures: 1 },
         { minute: 6, model: 'a/m', failureClass: 'timeout', failures: 1 }
-      ]
+      ],
+      projects: [projectRow({ minute: 5 }), projectRow({ minute: 6 })]
     })
     store.prune(6)
 
@@ -277,6 +303,9 @@ describe('the stats store', () => {
     ])
     expect(store.errors({ fromMinute: 0, toMinute: 10 }).failures).toEqual([
       { failureClass: 'timeout', count: 1 }
+    ])
+    expect(store.projects({ fromMinute: 0, toMinute: 10 })).toEqual([
+      expect.objectContaining({ project: 'j5', requests: 1 })
     ])
   })
 
@@ -287,7 +316,12 @@ describe('the stats store', () => {
     directories.push(directory)
     const path = join(directory, 'stats.sqlite')
     const first = openStatsStore(path)
-    first.add({ requests: [requestRow({ minute: 1, model: 'a/m' })], attempts: [], failures: [] })
+    first.add({
+      requests: [requestRow({ minute: 1, model: 'a/m' })],
+      attempts: [],
+      failures: [],
+      projects: []
+    })
     first.close()
 
     const second = openStatsStore(path)
@@ -300,12 +334,13 @@ describe('the stats store', () => {
     const newer = new DatabaseSync(path)
     newer.exec('PRAGMA user_version = 99')
     newer.close()
-    expect(() => openStatsStore(path)).toThrow(/newer than this pi-switchboard's \(2\): upgrade/)
+    expect(() => openStatsStore(path)).toThrow(/newer than this pi-switchboard's \(3\): upgrade/)
     expect(() => openStatsStore(path, { readOnly: true })).toThrow(/upgrade/)
   })
 
-  // Catches the first migration (#299) losing an existing file's rows, leaving the new column out
-  // (every later write would fail), or not recording the new version (it would run again).
+  // Catches the migrations (#299, #366) losing an existing file's rows, leaving a new column or
+  // table out (every later write would fail), or not recording the new version (they would run
+  // again).
   test('migrates a version 1 file in place, keeping its rows', () => {
     const directory = mkdtempSync(join(tmpdir(), 'pi-switchboard-stats-'))
     directories.push(directory)
@@ -325,7 +360,8 @@ describe('the stats store', () => {
         requestRow({ minute: 1, alias: 'coding', model: 'a/m', promptCacheKeyRequests: 1 })
       ],
       attempts: [],
-      failures: []
+      failures: [],
+      projects: [projectRow({ minute: 1 })]
     })
 
     expect(store.models({ fromMinute: 0, toMinute: 10 })).toEqual([
@@ -336,8 +372,11 @@ describe('the stats store', () => {
         averageMs: 80
       })
     ])
+    expect(store.projects({ fromMinute: 0, toMinute: 10 })).toEqual([
+      expect.objectContaining({ project: 'j5', requests: 1 })
+    ])
     const check = new DatabaseSync(path, { readOnly: true })
-    expect(check.prepare('PRAGMA user_version').get()).toEqual({ user_version: 2 })
+    expect(check.prepare('PRAGMA user_version').get()).toEqual({ user_version: 3 })
     check.close()
   })
 
@@ -385,7 +424,12 @@ describe('the stats store', () => {
     directories.push(directory)
     const path = join(directory, 'stats.sqlite')
     const writer = openStatsStore(path)
-    writer.add({ requests: [requestRow({ minute: 1, model: 'a/m' })], attempts: [], failures: [] })
+    writer.add({
+      requests: [requestRow({ minute: 1, model: 'a/m' })],
+      attempts: [],
+      failures: [],
+      projects: []
+    })
     const whileWriting = openStatsStore(path, { readOnly: true })
     expect(whileWriting.models({ fromMinute: 0, toMinute: 10 })).toEqual([
       expect.objectContaining({ model: 'a/m', requests: 1 })
@@ -403,7 +447,8 @@ describe('the stats store', () => {
       reader.add({
         requests: [requestRow({ minute: 2, model: 'a/m' })],
         attempts: [],
-        failures: []
+        failures: [],
+        projects: []
       })
     }).toThrow(/readonly/i)
     reader.close()
@@ -427,7 +472,8 @@ describe('the stats store', () => {
           cacheWriteTokens: 50
         })
       ],
-      failures: []
+      failures: [],
+      projects: []
     })
 
     expect(store.models({ fromMinute: 0, toMinute: 10 })).toEqual([
@@ -448,7 +494,12 @@ describe('the stats store', () => {
     const started = performance.now()
 
     expect(() => {
-      store.add({ requests: [requestRow({ minute: 1, model: 'a/m' })], attempts: [], failures: [] })
+      store.add({
+        requests: [requestRow({ minute: 1, model: 'a/m' })],
+        attempts: [],
+        failures: [],
+        projects: []
+      })
     }).toThrow(/locked|busy/i)
     expect(performance.now() - started).toBeLessThan(2000)
     other.exec('ROLLBACK')
