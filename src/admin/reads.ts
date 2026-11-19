@@ -14,7 +14,9 @@
  */
 
 import { getSupportedThinkingLevels } from '@earendil-works/pi-ai'
+import { type AliasOptions, aliasOptions } from '@proxy/admin/aliases'
 import type { ServerConfig } from '@proxy/config/env'
+import { type LoginPlace, loginPlaces } from '@proxy/config/login-routing'
 import type { AliasTarget, FamilyTarget } from '@proxy/config/schema'
 import {
   configFileProblem,
@@ -25,7 +27,7 @@ import type { SettingOverrides } from '@proxy/config/settings'
 import { readStats, judgeDoctorInputs, serverSettingsOf } from '@proxy/doctor/collect'
 import type { DoctorReport } from '@proxy/doctor/findings'
 import type { AliasDiagnostic } from '@proxy/openai/model-aliases'
-import { computeModelExposure } from '@proxy/openai/model-exposure'
+import { computeModelExposure, type ModelExposureOutcome } from '@proxy/openai/model-exposure'
 import { type LoginDiagnostic, loginBase } from '@proxy/openai/model-logins'
 import { buildPiModelList, type PiModelList } from '@proxy/openai/models'
 import { activeCooldowns, type Cooldown } from '@proxy/pi/cooldowns'
@@ -48,7 +50,6 @@ import { type HttpRequest, httpRequests } from '@proxy/server/http-requests'
 import { providerBelowReserve, type ReserveSkip } from '@proxy/server/route-reserve'
 import { fileConfigReader } from '@proxy/server/routes'
 import type { StatsWindow } from '@proxy/stats/windows'
-import { type LoginPlace, loginPlaces } from '@proxy/tui/login-routing'
 
 /** What the API listener runs with, as the admin UI reads it. */
 export interface AdminServerFacts {
@@ -106,6 +107,8 @@ export interface ModelsSnapshot {
   readonly available: number
   /** Why models.json did not load, or `null`. */
   readonly modelsJsonError: string | null
+  /** What the alias editor offers: the models with their efforts, the families, the failures. */
+  readonly options: AliasOptions
 }
 
 /** The Models page when the exposure config can't be applied: why. */
@@ -161,6 +164,19 @@ export async function accountsSnapshot(now: number): Promise<AccountSnapshot[]> 
 }
 
 /**
+ * Works out the exposure as a request would now, from the config file and pi's models.
+ *
+ * @returns the exposure, or why the exposure config can't be applied
+ */
+export async function readExposure(): Promise<ModelExposureOutcome> {
+  return computeModelExposure(
+    getAvailableModels(),
+    await fileConfigReader(),
+    getSupportedThinkingLevels
+  )
+}
+
+/**
  * Reads the Models page's snapshot from the config file and pi's models, as a request would see
  * them now.
  *
@@ -168,8 +184,7 @@ export async function accountsSnapshot(now: number): Promise<AccountSnapshot[]> 
  */
 export async function modelsSnapshot(): Promise<ModelsSnapshot | ModelsUnavailable> {
   const config = await fileConfigReader()
-  const available = getAvailableModels()
-  const exposure = computeModelExposure(available, config, getSupportedThinkingLevels)
+  const exposure = await readExposure()
   if (!exposure.ok) return { unavailable: exposure.message }
   return {
     models: buildPiModelList(exposure.models).data,
@@ -178,8 +193,9 @@ export async function modelsSnapshot(): Promise<ModelsSnapshot | ModelsUnavailab
     latest: exposure.latestAliases,
     aliasDiagnostics: exposure.aliasDiagnostics,
     loginDiagnostics: exposure.loginDiagnostics,
-    available: available.length,
-    modelsJsonError: getModelsJsonError() ?? null
+    available: getAvailableModels().length,
+    modelsJsonError: getModelsJsonError() ?? null,
+    options: aliasOptions(exposure)
   }
 }
 

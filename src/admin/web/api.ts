@@ -149,6 +149,19 @@ const ExposedSchema = z.looseObject({
   input: z.array(z.string().trim())
 })
 
+/** A model an alias may name, with the efforts it runs at. */
+const ModelOptionSchema = z.looseObject({
+  id: z.string().trim(),
+  efforts: z.array(z.string().trim())
+})
+
+/** A family an alias may follow. */
+const FamilyOptionSchema = z.looseObject({
+  family: z.string().trim(),
+  members: z.array(z.string().trim()),
+  newest: z.string().trim().nullable()
+})
+
 /** `GET /admin/api/models`. */
 export const ModelsSchema = z.looseObject({
   models: z.array(ExposedSchema),
@@ -159,8 +172,15 @@ export const ModelsSchema = z.looseObject({
     z.looseObject({ alias: z.string().trim().optional(), message: z.string().trim() })
   ),
   available: z.int(),
-  modelsJsonError: z.string().trim().nullable()
+  modelsJsonError: z.string().trim().nullable(),
+  options: z.looseObject({
+    models: z.array(ModelOptionSchema),
+    families: z.array(FamilyOptionSchema),
+    failures: z.array(z.string().trim())
+  })
 })
+/** What the alias editor offers. */
+export type AliasOptions = Models['options']
 /** The Models page's data. */
 export type Models = z.infer<typeof ModelsSchema>
 /** One exposed model or alias. */
@@ -338,6 +358,36 @@ export async function readApi<T>(path: string, schema: z.ZodType<T>): Promise<T>
   return checked(schema, await response.json(), path)
 }
 
+/** One write to the API. */
+export interface ApiWrite {
+  readonly method: 'PUT' | 'POST' | 'DELETE'
+  /** The path under `/admin/api`, with its query. */
+  readonly path: string
+  /** The JSON body, for a write that sends one. */
+  readonly body?: unknown
+}
+
+/**
+ * Sends one write, as an editor. The browser adds the page's `Origin`, which the proxy requires.
+ *
+ * @typeParam T - the answer's type
+ * @param write - the method, path and body
+ * @param schema - what the answer must look like
+ * @returns the answer: the page's data after the change
+ * @throws NotSignedInError when there is no session; ApiError when the proxy refused it, with its
+ *   code (`confirm_required` asks for a confirmation)
+ */
+export async function sendApi<T>(write: ApiWrite, schema: z.ZodType<T>): Promise<T> {
+  const response = await fetch(`/admin/api${write.path}`, {
+    method: write.method,
+    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
+    ...(write.body === undefined ? {} : { body: JSON.stringify(write.body) })
+  })
+  if (response.status === UNAUTHORIZED) throw new NotSignedInError('Not signed in')
+  if (!response.ok) throw await failure(response)
+  return checked(schema, await response.json(), write.path)
+}
+
 /**
  * Changes one setting, as an editor.
  *
@@ -345,19 +395,18 @@ export async function readApi<T>(path: string, schema: z.ZodType<T>): Promise<T>
  * @param value - its new value
  * @param confirm - whether the operator confirmed what the proxy asked them to
  * @returns the settings after the change
- * @throws NotSignedInError when there is no session; ApiError when the proxy refused it, with its
- *   code (`confirm_required` asks for the confirmation)
  */
-export async function putSetting(key: string, value: unknown, confirm = false): Promise<Settings> {
-  const response = await fetch(`/admin/api/settings/${encodeURIComponent(key)}`, {
-    method: 'PUT',
-    headers: { 'Accept': 'application/json', 'Content-Type': 'application/json' },
-    body: JSON.stringify({ value, confirm })
-  })
-  if (response.status === UNAUTHORIZED) throw new NotSignedInError('Not signed in')
-  if (!response.ok) throw await failure(response)
-  return checked(SettingsSchema, await response.json(), '/settings')
+export function putSetting(key: string, value: unknown, confirm = false): Promise<Settings> {
+  return sendApi(
+    { method: 'PUT', path: `/settings/${encodeURIComponent(key)}`, body: { value, confirm } },
+    SettingsSchema
+  )
 }
+
+/** The answer to ending cooldowns: those it ended. */
+export const EndedCooldownsSchema = z.looseObject({
+  ended: z.array(z.looseObject({ provider: z.string().trim() }))
+})
 
 /**
  * Signs out: clears the session cookie, then reloads the page, which shows the sign-in screen.

@@ -7,16 +7,10 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 
+import { loginLabels, saveLoginLabel } from '@proxy/config/login-routing'
 import { getRuntime } from '@proxy/pi/registry'
 import { consoleEvents } from '@proxy/server/console-events'
-import {
-  loginLabels,
-  loginOptions,
-  logoutOptions,
-  runLogin,
-  runLogout,
-  saveLoginLabel
-} from '@proxy/tui/login'
+import { loginOptions, logoutOptions, runLogin, runLogout } from '@proxy/tui/login'
 import { isRecord } from '@proxy/utils/guards'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 

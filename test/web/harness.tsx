@@ -27,6 +27,9 @@ export interface Call {
 /** The signed-in operator most tests use. */
 export const VIEWER = { login: 'alice', role: 'viewer' }
 
+/** An editor, for the pages' writes. */
+export const EDITOR = { login: 'alice', role: 'editor' }
+
 /** Minutes the status's sparkline covers. */
 const SPARK_MINUTES = 30
 /** The scripted proxy's uptime: 3h 12m. */
@@ -104,6 +107,20 @@ export function stubApi(scripted: Readonly<Record<string, Answer>>): Call[] {
       : Response.json(answer)
   })
   return calls
+}
+
+/**
+ * Reads the bodies the page sent in its writes to one path.
+ *
+ * @param calls - every request made
+ * @param method - the write's method
+ * @param path - the path under `/admin/api`, with its query
+ * @returns each body, parsed; `null` for a write without one
+ */
+export function writesTo(calls: readonly Call[], method: string, path: string): unknown[] {
+  return calls
+    .filter((call) => call.method === method && call.path === `/admin/api${path}`)
+    .map((call): unknown => JSON.parse(call.body ?? 'null'))
 }
 
 /** A listener for one kind of stream event. */

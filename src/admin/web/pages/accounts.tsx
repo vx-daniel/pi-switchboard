@@ -6,10 +6,17 @@
  * @packageDocumentation
  */
 
+import {
+  AccountActions,
+  type LoginWrite,
+  refusalFor,
+  useLoginWrites
+} from '@proxy/admin/web/account-actions'
 import type { Account } from '@proxy/admin/web/api'
 import { percent, until } from '@proxy/admin/web/format'
 import { Loaded } from '@proxy/admin/web/loaded'
 import { useAccounts } from '@proxy/admin/web/queries'
+import type { PageView } from '@proxy/admin/web/router'
 import type { ReactElement } from 'react'
 
 /** A quota share used past this is a warning. */
@@ -65,14 +72,23 @@ function QuotaBars(quota: { readonly account: Account }): ReactElement | null {
   )
 }
 
+/** What a login's card is given. */
+interface AccountCardView {
+  readonly account: Account
+  /** How an editor changes it; absent for a viewer. */
+  readonly write: ((write: LoginWrite) => void) | undefined
+  readonly busy: boolean
+  /** Why the last change to it was refused, if it was. */
+  readonly refusal: string | undefined
+}
+
 /**
- * Shows one login.
+ * Shows one login, and for an editor what can be changed about it.
  *
- * @param card - the login
- * @param card.account - its status
+ * @param card - the login, and how to change it
  * @returns the card
  */
-function AccountCard(card: { readonly account: Account }): ReactElement {
+function AccountCard(card: AccountCardView): ReactElement {
   const { account } = card
   const place = placeText(account)
   const now = Date.now()
@@ -110,6 +126,14 @@ function AccountCard(card: { readonly account: Account }): ReactElement {
             {until(cooldown.until, now)}
           </div>
         ))}
+        {card.write === undefined ? null : (
+          <AccountActions account={account} write={card.write} busy={card.busy} />
+        )}
+        {card.refusal === undefined ? null : (
+          <div role="alert" className="alert alert-error alert-soft text-sm">
+            {card.refusal}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -140,10 +164,17 @@ function providerGroups(
 /**
  * The Accounts page.
  *
+ * @param page - who is signed in, as every page is given it
  * @returns the page
  */
-export function AccountsPage(): ReactElement {
+export function AccountsPage(page: PageView): ReactElement {
   const query = useAccounts()
+  const writes = useLoginWrites()
+  const write = page.editor
+    ? (change: LoginWrite): void => {
+        writes.mutate(change)
+      }
+    : undefined
   return (
     <Loaded query={query}>
       {(accounts) =>
@@ -151,6 +182,20 @@ export function AccountsPage(): ReactElement {
           <p className="p-4 text-base-content/60">No logins yet: see the Logins page.</p>
         ) : (
           <div className="flex flex-col gap-6">
+            {write !== undefined && accounts.some((account) => account.cooldowns.length > 0) ? (
+              <div>
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  disabled={writes.isPending}
+                  onClick={() => {
+                    write({ kind: 'cooldowns', login: undefined })
+                  }}
+                >
+                  End all cooldowns
+                </button>
+              </div>
+            ) : null}
             {providerGroups(accounts).map((group) => (
               <section key={group.base} className="flex flex-col gap-2">
                 <h2 className="text-lg font-semibold">
@@ -161,7 +206,13 @@ export function AccountsPage(): ReactElement {
                 </h2>
                 <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
                   {group.logins.map((account) => (
-                    <AccountCard key={account.provider} account={account} />
+                    <AccountCard
+                      key={account.provider}
+                      account={account}
+                      write={write}
+                      busy={writes.isPending}
+                      refusal={refusalFor(writes, account.provider)}
+                    />
                   ))}
                 </div>
               </section>
