@@ -9,8 +9,8 @@
  *   routing therefore never disagree, however `routing.logins.fallbackOn`, an alias's
  *   `fallbackOn` or `routing.reserve` are set.
  * - **No credential check, so `next` assumes credentials resolve.** Before calling anything, a
- *   request checks the credential of each candidate it reaches by cooldowns alone (the reserve is
- *   not applied there), and a refused one fails the request unless the hop names `auth`. Resolving
+ *   request checks the credential of each candidate it reaches past cooldowns and reserves (#381),
+ *   and a refused one fails the request unless the hop names `auth`. Resolving
  *   a credential can refresh an OAuth login, so a preview never does: with a login whose
  *   credential no longer resolves, a request can fail before reaching `next`. Nothing here
  *   records that; `availability` is only the provider's answer to a call.

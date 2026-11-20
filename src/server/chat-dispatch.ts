@@ -265,26 +265,29 @@ export type CredentialedStart =
 /**
  * Finds the first candidate whose credential resolves, moving past the others when the hop's
  * `fallbackOn` names `auth`. Run before remote images are fetched, so a request no provider can
- * take fetches nothing (#109 review).
+ * take fetches nothing (#109 review). A candidate the dispatch would pass over, cooling down or
+ * below its quota reserve, is passed over here too, before its credential is checked (#381):
+ * otherwise a login the reserve routes around could fail the request with its credential.
  *
- * @param route - the planned candidates and fallback classes
+ * @param route - the planned candidates, fallback classes and quota reserve (none when absent)
  * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined`
  * @param alias - the alias whose chain it is, for the log
  * @param project - the project the request named, for the stats; `undefined` for none
  * @returns the candidates from that one on, with the attempts skipped, or the last 502 answer
  */
 export async function findCredentialedStart(
-  route: ChatRoute,
+  route: ChatRoute & { readonly reserve?: Reserve | undefined },
   upstreamApiKey: string | undefined,
   alias: string | undefined,
   project: string | undefined
 ): Promise<CredentialedStart> {
   const attempts: Attempt[] = []
+  const chain = { ...route, reserve: route.reserve ?? {}, alias }
   let position = 0
   while (position < route.candidates.length) {
     const candidate = route.candidates[position]
     if (candidate === undefined) break
-    if (skipCooling({ ...route, alias }, position, attempts)) {
+    if (skipsCandidate(chain, position, attempts)) {
       position += 1
       continue
     }
@@ -636,14 +639,19 @@ function answerWith(
 
 /**
  * Skips a candidate the chain does not call: cooling down (#68) or below its quota reserve (#69).
+ * The credential preflight and the dispatch both ask it, so they pass over the same ones (#381).
  *
- * @param job - the chain
- * @param position - the candidate's index in `job.candidates`
+ * @param chain - the candidates, fallback classes, quota reserve and alias
+ * @param position - the candidate's index in `chain.candidates`
  * @param attempts - the attempts so far; a skip is added to them
  * @returns whether the candidate is skipped
  */
-function skipsCandidate(job: DispatchJob, position: number, attempts: Attempt[]): boolean {
-  return skipCooling(job, position, attempts) || skipBelowReserve(job, position, attempts)
+function skipsCandidate(
+  chain: ChatRoute & { readonly reserve: Reserve; readonly alias: string | undefined },
+  position: number,
+  attempts: Attempt[]
+): boolean {
+  return skipCooling(chain, position, attempts) || skipBelowReserve(chain, position, attempts)
 }
 
 /**

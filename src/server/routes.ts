@@ -411,7 +411,12 @@ async function runChat(
   // Upstream credentials first: a request that cannot reach any provider must not make the proxy
   // fetch anything on its behalf (#109 review).
   const project = context.get('project')
-  const start = await findCredentialedStart(route, upstreamApiKey, resolved.alias, project)
+  const start = await findCredentialedStart(
+    { ...route, reserve: requestConfig.reserve },
+    upstreamApiKey,
+    resolved.alias,
+    project
+  )
   if (start.kind === 'refused') return context.json(start.answer.body, start.answer.status)
 
   const prepared = await inlineImages(context, request, config, remoteImageFetch)

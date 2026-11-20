@@ -140,7 +140,7 @@ Subscriptions report on every response how much of each usage window the account
   ```
 
   - **The worse window decides.** With 20% reserved, Anthropic is skipped once either its 5-hour or its 7-day window has less than 20% left.
-  - **Between candidates only.** A request with one candidate is always sent. The candidates are an alias chain's models and a model's [logins](logins.md#several-logins-per-provider): with `{ "anthropic": 0.2 }`, a request for `claude-opus-5-5` goes to `anthropic-2` while `anthropic` has less than 20% left, even without an alias. A reserve is keyed by login, so each login can have its own.
+  - **Between candidates only.** A request with one candidate is always sent. The candidates are an alias chain's models and a model's [logins](logins.md#several-logins-per-provider): with `{ "anthropic": 0.2 }`, a request for `claude-opus-5-5` goes to `anthropic-2` while `anthropic` has less than 20% left, even without an alias. A reserve is keyed by login, so each login can have its own. A login skipped for its reserve isn't checked for a credential either, so one that no longer resolves doesn't fail a request the reserve sends elsewhere (#381).
   - **Never skips them all.** When every remaining target is below its reserve, the one with the most left is called, so a reserve never fails a request by itself.
   - **Needs a report.** A provider that has reported no quota yet, or never does (Google, API keys), is never skipped.
   - **Visible.** A skip is listed in `x_pi.attempts` as `{ "model": "anthropic/claude-opus-5-5", "reason": "quota", "skipped": true }` and logged at info with the provider, the window and the share left. The console's Accounts view marks a provider `below reserve`.
