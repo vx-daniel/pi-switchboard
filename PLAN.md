@@ -695,8 +695,13 @@ per login (`routing.reserve` entries name logins). Route totals (#70) and the st
 the login. `/healthz/creds` and the console's Accounts view list each login. The response reports
 the login under `x_pi.login`, and each attempt's `login`, only when the model has more than one
 (a single-login model's response is unchanged); the chat log lines carry `login`.
-`/v1/switchboard/models` lists each model's `logins` with cooldown and quota; the entry's own
-`cooldown` and `quota` are the first login's.
+`/v1/switchboard/models` lists each model's `logins` with cooldown and quota. The entry's own
+`cooldown` and `quota` are those of `routing.next`, the login a request would call now (#379):
+`src/server/route-preview.ts` walks the candidates `planLogins` plans for a text request with the
+dispatch's own `cooldownSkip` and `reserveSkip`, so the preview and routing cannot disagree, and
+resolves no credential (that can refresh an OAuth login). They used to be the first login's, which
+read as "cooling down" while a second login served (j5 held its workers on it). The console's
+Models view shows the same login's cooldown.
 
 **Labels.** After a login, the console asks what to call it (`work`); **Set a label** in the
 account's menu changes it. Labels live in `proxy-config.json` as `labels` (provider → text,

@@ -73,8 +73,7 @@ export function planRoute(
   loginFallbackOn: readonly FailureClass[]
 ): ChatRoute {
   const chain = resolved.route
-  const targets = chain === undefined ? [resolved] : chain.candidates
-  const [first] = targets
+  const [first] = chain === undefined ? [resolved] : chain.candidates
   if (upstreamApiKey !== undefined && first !== undefined) {
     if (chain !== undefined) {
       chatLogger.debug('No fallback for {alias}: the request carries its own upstream key', {
@@ -83,8 +82,28 @@ export function planRoute(
     }
     return { candidates: [first], fallbackOn: new Set(), loginFallbackOn: new Set() }
   }
+  return planLogins(resolved, hasImage(request), loginFallbackOn)
+}
+
+/**
+ * Plans the candidates of a request on the proxy's own logins: the resolved model or the alias's
+ * chain, each under every login, with the chain's text-only models left out of an image request
+ * when another model takes images. The route preview (#379) plans a text request with it.
+ *
+ * @param resolved - the exposed model or alias
+ * @param images - whether the request carries an image
+ * @param loginFallbackOn - `routing.logins.fallbackOn`
+ * @returns the candidates, never empty, and the failures that move between them
+ */
+export function planLogins(
+  resolved: ExposedModel,
+  images: boolean,
+  loginFallbackOn: readonly FailureClass[]
+): ChatRoute {
+  const chain = resolved.route
+  const targets = chain === undefined ? [resolved] : chain.candidates
   const imageCapable = targets.filter((candidate) => candidate.model.input.includes('image'))
-  const skipTextOnly = hasImage(request) && imageCapable.length > 0
+  const skipTextOnly = images && imageCapable.length > 0
   if (skipTextOnly && imageCapable.length < targets.length) {
     chatLogger.debug('Skipping {skippedCount} text-only models of {alias} for an image request', {
       alias: resolved.alias,

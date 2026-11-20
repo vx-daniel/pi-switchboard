@@ -19,7 +19,8 @@ import type { FamilyResolution } from '@proxy/openai/model-aliases'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
-import { activeCooldown, loginSubject } from '@proxy/pi/cooldowns'
+import { activeCooldown, type Cooldown, loginSubject } from '@proxy/pi/cooldowns'
+import { nextCooldown, type PreviewRules, previewRoute } from '@proxy/server/route-preview'
 import { compactDuration, FRAME_COLUMNS, panel } from '@proxy/tui/panel'
 import { paint, tabAccent } from '@proxy/tui/theme'
 import { MS_PER_SECOND } from '@proxy/utils/time'
@@ -34,15 +35,34 @@ export type ModelsItem =
 
 /**
  * Renders a model's cooldown, if it has one: the time left (`cooling 42s`, `cooling 3m00s`), and
- * the reason when it fits too, so a narrow cell keeps the countdown.
+ * the reason when it fits too, so a narrow cell keeps the countdown. The cooldown is that of the
+ * login a request would call now (#379): none while routing would pass a cooling login over for a
+ * free one.
  *
  * @param model - the exposed model
  * @param now - the time now, in milliseconds since the epoch
  * @param room - the cell's columns
+ * @param routing - the reserve and the logins' fallback classes, as the config sets them
  * @returns the cell, or `''`
  */
-export function cooldownCell(model: ExposedModel, now: number, room: number): string {
-  const cooldown = activeCooldown(loginSubject(model), now)
+export function cooldownCell(
+  model: ExposedModel,
+  now: number,
+  room: number,
+  routing: PreviewRules
+): string {
+  return cooldownText(nextCooldown(model, routing, now), now, room)
+}
+
+/**
+ * Renders a cooldown as {@link cooldownCell} does.
+ *
+ * @param cooldown - the cooldown, or `undefined` for none
+ * @param now - the time now, in milliseconds since the epoch
+ * @param room - the cell's columns
+ * @returns the text, or `''`
+ */
+function cooldownText(cooldown: Cooldown | undefined, now: number, room: number): string {
   if (cooldown === undefined) return ''
   // Rounded up to the second: a cooldown with a moment left still reads `1s`, not `0s`.
   const left = Math.max(0, Math.ceil((cooldown.until - now) / MS_PER_SECOND)) * MS_PER_SECOND
@@ -143,18 +163,31 @@ function effortFacts(model: ExposedModel): { range: string; skips: readonly Reas
 }
 
 /**
- * Lists the detail pane's lines for a model: its full public ID, provider and login, its efforts
- * and the levels it skips, its cooldown with the reason, and what Enter does.
+ * Lists the detail pane's lines for a model: its full public ID, provider and the login a request
+ * would call now (#379) when it isn't the provider's own, its efforts and the levels it skips, that
+ * login's cooldown with the reason, and what Enter does. The login and the cooldown come from the
+ * same preview, so they never name two logins.
  *
  * @param model - the exposed model
  * @param width - the pane's content columns
  * @param now - the time now, for the cooldown
+ * @param routing - the reserve and the logins' fallback classes, for the login it would call
  * @returns the lines
  */
-function modelDetailLines(model: ExposedModel, width: number, now: number): string[] {
+function modelDetailLines(
+  model: ExposedModel,
+  width: number,
+  now: number,
+  routing: PreviewRules
+): string[] {
   const { range, skips } = effortFacts(model)
-  const login = model.login === model.provider ? [] : detailField('login', model.login, width)
-  const cooldown = cooldownCell(model, now, Number.POSITIVE_INFINITY)
+  const { next } = previewRoute(model, routing, now)
+  const login = next.login === model.provider ? [] : detailField('login', next.login, width)
+  const cooldown = cooldownText(
+    activeCooldown(loginSubject(next), now),
+    now,
+    Number.POSITIVE_INFINITY
+  )
   return [
     ...detailField('id', model.publicId, width),
     ...detailField('provider', model.provider, width),
@@ -206,20 +239,23 @@ function aliasDetailLines(
  * built-in alias.
  *
  * @param item - the selected item
- * @param families - what the family targets resolve to now
+ * @param view - what the family targets resolve to now, and the routing config for a cooldown
+ * @param view.families - what the family targets resolve to now
+ * @param view.routing - the reserve and the logins' fallback classes; routing's defaults if absent
  * @param width - the pane's columns, its frame included
  * @param now - the time now, for a model's cooldown
  * @returns the pane's rows
  */
 export function detailPane(
   item: ModelsItem,
-  families: readonly FamilyResolution[],
+  view: { readonly families: readonly FamilyResolution[]; readonly routing?: PreviewRules },
   width: number,
   now: number
 ): string[] {
+  const { families } = view
   const inner = Math.max(1, width - FRAME_COLUMNS)
   if (item.kind === 'model') {
-    return panel('MODEL', modelDetailLines(item.model, inner, now), width)
+    return panel('MODEL', modelDetailLines(item.model, inner, now, view.routing ?? {}), width)
   }
   if (item.kind === 'new') {
     const hint = enterHint('names a new alias, then picks its models and efforts')

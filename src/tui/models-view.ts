@@ -21,13 +21,14 @@ import {
   aliasFallbackOn,
   aliasModels,
   type FamilyTarget,
-  isAliasChain
+  isAliasChain,
+  type ProxyConfig
 } from '@proxy/config/schema'
 import type { AliasDiagnostic, FamilyResolution } from '@proxy/openai/model-aliases'
 import type { ExposedModel, ModelExposureResult } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
-import { activeCooldown, loginSubject } from '@proxy/pi/cooldowns'
+import { nextCooldown, type PreviewRules } from '@proxy/server/route-preview'
 import { cooldownCell, detailPane, type ModelsItem, targetCell } from '@proxy/tui/models-detail'
 import { firstShown, FRAME_COLUMNS, panel } from '@proxy/tui/panel'
 import { highlight, paint, strong, tabAccent } from '@proxy/tui/theme'
@@ -103,6 +104,8 @@ export interface ModelsData {
   readonly families: readonly FamilyResolution[]
   /** Why nothing is listed: the exposure config's error. */
   readonly unavailable?: string
+  /** The reserve and the logins' fallback classes, for each model's cooldown (#379). */
+  readonly routing?: PreviewRules
 }
 
 /** What the Models view shows. */
@@ -119,6 +122,8 @@ export interface ModelsStatus {
   readonly aliases: Readonly<Record<string, AliasTarget>>
   /** The exposed model count, or why the exposure config is invalid. */
   readonly exposed: number | string
+  /** The config file, for routing's rules (#379); routing's defaults when absent. */
+  readonly file?: Pick<ProxyConfig, 'routing'>
 }
 
 /**
@@ -130,14 +135,22 @@ export interface ModelsStatus {
  */
 export function modelsViewData(status: ModelsStatus | undefined): ModelsData {
   if (status === undefined) return { models: [], aliases: {}, diagnostics: [], families: [] }
-  const { exposure, exposed } = status
+  const { exposure, exposed, file } = status
   return {
     models: exposure?.models ?? [],
     aliases: status.aliases,
     latest: exposure?.latestAliases ?? {},
     diagnostics: exposure?.aliasDiagnostics ?? [],
     families: exposure?.familyResolutions ?? [],
-    ...(typeof exposed === 'string' ? { unavailable: exposed } : {})
+    ...(typeof exposed === 'string' ? { unavailable: exposed } : {}),
+    ...(file === undefined
+      ? {}
+      : {
+          routing: {
+            reserve: file.routing.reserve,
+            loginFallbackOn: file.routing.logins.fallbackOn
+          }
+        })
   }
 }
 
@@ -229,15 +242,21 @@ function effortCell(text: string): string {
  * @param model - the exposed model
  * @param columns - the model column's and the cooldown's widths
  * @param now - the time now, for the cooldown
+ * @param routing - the reserve and the logins' fallback classes, for the cooldown
  * @returns the row's text, without its selection mark
  */
-function modelRow(model: ExposedModel, columns: MatrixColumns, now: number): string {
+function modelRow(
+  model: ExposedModel,
+  columns: MatrixColumns,
+  now: number,
+  routing: PreviewRules
+): string {
   const supported = new Set<ReasoningEffort>(supportedReasoningEfforts(model.model))
   const cells = REASONING_EFFORTS.map((effort) =>
     effortCell(supported.has(effort) ? paint('accent', '●') : paint('border', '·'))
   )
   const name = truncateToWidth(model.publicId, columns.name, '…', true)
-  return `${name}${cells.join('')} ${cooldownCell(model, now, columns.cooldown)}`
+  return `${name}${cells.join('')} ${cooldownCell(model, now, columns.cooldown, routing)}`
 }
 
 /**
@@ -345,7 +364,8 @@ function matrixPart(view: ModelsView, columns: MatrixColumns, now: number): View
     for (const model of group.models) {
       if (position === view.selected) selectedLine = lines.length
       modelLines.push(lines.length)
-      lines.push(selectable(modelRow(model, columns, now), position === view.selected))
+      const row = modelRow(model, columns, now, view.routing ?? {})
+      lines.push(selectable(row, position === view.selected))
       position += 1
     }
   }
@@ -573,14 +593,15 @@ function fitted(row: string, width: number): string {
 }
 
 /**
- * Checks whether any exposed model is cooling down now.
+ * Checks whether any exposed model is cooling down now, as the login a request would call.
  *
- * @param models - the exposed models
+ * @param view - the exposed models, and routing's rules
  * @param now - the time now
  * @returns whether one is
  */
-function anyCooling(models: readonly ExposedModel[], now: number): boolean {
-  return models.some((model) => activeCooldown(loginSubject(model), now) !== undefined)
+function anyCooling(view: ModelsData, now: number): boolean {
+  const routing = view.routing ?? {}
+  return view.models.some((model) => nextCooldown(model, routing, now) !== undefined)
 }
 
 /**
@@ -615,7 +636,7 @@ function withDetailPane(
 ): string[] {
   const left = size.height - box.length
   if (left < DETAIL_LEAST_ROWS) return [...box]
-  const pane = detailPane(modelsItemAt(view, view.selected), view.families, size.width, now)
+  const pane = detailPane(modelsItemAt(view, view.selected), view, size.width, now)
   if (pane.length <= left) return [...box, ...pane]
   return [...box, ...pane.slice(0, left - 1), ...pane.slice(-1)]
 }
@@ -637,9 +658,7 @@ function sideBySideRows(
   now: number
 ): ModelsLayout {
   // Room for a cooldown's reason only while a model is cooling: the box takes it otherwise.
-  const cooldownColumns = anyCooling(view.models, now)
-    ? COOLDOWN_COLUMNS.most
-    : COOLDOWN_COLUMNS.least
+  const cooldownColumns = anyCooling(view, now) ? COOLDOWN_COLUMNS.most : COOLDOWN_COLUMNS.least
   const matrixWidth = Math.min(
     MARK_COLUMNS + NAME_COLUMNS.most + EFFORTS_WIDTH + cooldownColumns,
     size.width - PANE_GAP - ALIAS_BOX_LEAST_WIDTH

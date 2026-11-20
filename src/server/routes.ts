@@ -26,6 +26,7 @@ import { proxyLogger } from '@proxy/logging'
 import { convertMessages } from '@proxy/openai/messages'
 import {
   computeModelExposure,
+  type ExposedModel,
   type ModelExposureConfig,
   type ModelExposureResult,
   resolveExposedModel
@@ -75,6 +76,7 @@ import {
 import { rejectionResponse } from '@proxy/server/request-rejection'
 import { registerResponsesRoute } from '@proxy/server/responses-route'
 import { planRoute } from '@proxy/server/route-plan'
+import { previewRoute, type RoutePreview } from '@proxy/server/route-preview'
 import type { ProxyEnv } from '@proxy/server/types'
 import { createUsageAnswer } from '@proxy/server/usage'
 import { type Context, Hono } from 'hono'
@@ -477,12 +479,15 @@ function addSwitchboardRoutes(
     `${SWITCHBOARD_PREFIX}/models`,
     describeRoute(listModelCapabilitiesDescription),
     async (context) => {
-      const exposure = await getExposure(configReader)
+      const requestConfig = await configReader()
+      const exposure = exposureFrom(requestConfig)
       chatLogger.debug('Listing capabilities of {modelCount} models and {aliasCount} aliases', {
         modelCount: exposure.models.length,
         aliasCount: exposure.aliases.length
       })
-      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
+      const previewOf = (exposed: ExposedModel): RoutePreview =>
+        previewRoute(exposed, requestConfig)
+      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases], previewOf))
     }
   )
 
