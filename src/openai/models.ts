@@ -199,8 +199,8 @@ const routingSchema = z
       'What a text request naming the model would do now (#379), by the same rules routing ' +
       "follows: the config's `fallbackOn` classes, cooldowns and `routing.reserve`. Routing never " +
       'skips every candidate, so there is always a `next`. No credential is resolved for it, so it ' +
-      'assumes each one on the way resolves: a request first checks the credential of every ' +
-      'candidate it reaches past cooldowns (a reserve skip included), and a refused one fails the ' +
+      'assumes each one on the way resolves: a request first checks the credential of each ' +
+      'candidate it reaches past cooldowns and reserves, and a refused one fails the ' +
       'request (502 `upstream_credentials_missing`) unless the hop names `auth`.'
   })
 
