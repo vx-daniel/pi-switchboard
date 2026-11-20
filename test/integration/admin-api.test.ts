@@ -77,7 +77,7 @@ function adminApp(overrides: Partial<AdminAppOptions> = {}): Hono {
 function viewerCookie(): string {
   const sealed = createSealer(SESSION_KEY).seal(
     'session',
-    { login: 'alice', id: 1, role: 'viewer' },
+    { sid: 'test-session', login: 'alice', id: 1, role: 'viewer', team: null, iat: Date.now() },
     Date.now() + MINUTE_MS
   )
   return `pi_switchboard_admin=${sealed}`

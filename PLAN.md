@@ -1919,13 +1919,25 @@ repository from GitHub's public documentation (j5's code is private and is not c
   logged, put in a cookie or in an error.
 
 An editor team gives the editor role (writes), a viewer team the viewer role (reads). A sign-in
-cookie (10 minutes: `state` and the verifier) and a session cookie (8 hours: login and role) are
-each a base64url JSON payload and an HMAC-SHA256 of it under the session key, checked in constant
-time. Each names its purpose and version, so neither passes for the other and a change of shape
-signs everyone out. Both are `HttpOnly`, `Secure` and `SameSite=Lax`: Lax because GitHub's
-redirect back is a navigation from another site. The App's client ID and secret and the session
-key come from the environment or Docker secrets, never from `proxy-config.json` or the stats
-file.
+cookie (10 minutes: `state` and the verifier) and a session cookie (8 hours: a random session ID,
+the login, the role and the team that gave it, if one did) are each a base64url JSON payload and
+an HMAC-SHA256 of it under the session key, checked in constant time. Each names its purpose and
+version, so neither passes for the other and a change of shape signs everyone out. Both are
+`HttpOnly`, `Secure` and `SameSite=Lax`: Lax because GitHub's redirect back is a navigation from
+another site. The App's client ID and secret and the session key come from the environment or
+Docker secrets, never from `proxy-config.json` or the stats file.
+
+**Sessions after sign-in (#383)** (`src/admin/sessions.ts`). Sign-out revokes the session ID
+until the session would have expired, in `pi-switchboard-admin-revoked.json` in pi's agent
+directory, so a copied cookie stops working and stays refused after a restart (sessions survive
+one: the key is a file). Each request checks the role again against the lists the proxy runs with
+(`currentRole`), by login and by the team sign-in recorded, with no GitHub call: a login or team
+taken off its list loses the role at once, and a change in a team's members shows at the next
+sign-in. An open requests stream checks its session on every flush and closes when it ends. A
+sign-out the file didn't take answers `500` (refused in memory until a restart); a file unusable
+at startup refuses every session signed in before (`signedOutBefore`, written to a fresh file)
+rather than reading as empty. Refused writes (no session, a viewer's, a foreign `Origin`) and
+foreign `Host` requests are logged under `admin.audit`.
 
 **Threat model.**
 

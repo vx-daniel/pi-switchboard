@@ -27,21 +27,21 @@ const SESSION_KEY = 'notarealsecret-session-key-0123456789abcdef'
 const MINUTE_MS = 60_000
 /** The editor the app lists. */
 export const EDITOR = 'alice'
-/** A viewer: anyone signed in who is not an editor. */
+/** The one viewer `adminUi.viewers` lists: each request checks the role against the lists (#383). */
 const VIEWER = 'bob'
 
 /** A session's role. */
 export type TestRole = 'editor' | 'viewer'
 
 /**
- * Creates the admin app over a running proxy, with `alice` its one editor.
+ * Creates the admin app over a running proxy, with `alice` its one editor and `bob` its viewer.
  *
  * @param server - what the running proxy differs in: by default no proxy auth and no overrides
  * @returns the app
  */
 export function adminApp(server: Partial<AdminServerFacts> = {}): Hono {
   const settings = resolveAdminUi(
-    { ...ADMIN_UI_DEFAULTS, enabled: true, editors: [EDITOR] },
+    { ...ADMIN_UI_DEFAULTS, enabled: true, editors: [EDITOR], viewers: [VIEWER] },
     {
       PI_SWITCHBOARD_GITHUB_CLIENT_ID: 'Iv1.notarealclient',
       PI_SWITCHBOARD_GITHUB_CLIENT_SECRET: 'notarealsecret-client-secret',
@@ -65,7 +65,14 @@ export function adminApp(server: Partial<AdminServerFacts> = {}): Hono {
 export function sessionCookie(role: TestRole): string {
   const sealed = createSealer(SESSION_KEY).seal(
     'session',
-    { login: role === 'editor' ? EDITOR : VIEWER, id: 1, role },
+    {
+      sid: `test-${role}`,
+      login: role === 'editor' ? EDITOR : VIEWER,
+      id: 1,
+      role,
+      team: null,
+      iat: Date.now()
+    },
     Date.now() + MINUTE_MS
   )
   return `pi_switchboard_admin=${sealed}`

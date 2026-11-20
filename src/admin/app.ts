@@ -26,7 +26,7 @@
 
 import { timingSafeEqual } from 'node:crypto'
 
-import { type AdminSession, createAdminApi } from '@proxy/admin/api'
+import { createAdminApi } from '@proxy/admin/api'
 import type { AdminAssets } from '@proxy/admin/assets'
 import {
   authorizeUrl,
@@ -39,6 +39,13 @@ import { addPageRoutes } from '@proxy/admin/pages'
 import type { AdminServerFacts } from '@proxy/admin/reads'
 import { roleFor, type TeamCheck } from '@proxy/admin/roles'
 import { createSealer, pkceChallenge, randomToken, type Sealer } from '@proxy/admin/sealed'
+import {
+  fileRevocations,
+  openSession,
+  type Revocations,
+  type SessionData,
+  SessionDataSchema
+} from '@proxy/admin/sessions'
 import type { AdminSignIn, AdminUiSettings } from '@proxy/config/admin'
 import { proxyLogger } from '@proxy/logging'
 import {
@@ -46,6 +53,7 @@ import {
   HTTP_BAD_REQUEST,
   HTTP_FORBIDDEN,
   HTTP_FOUND,
+  HTTP_INTERNAL_SERVER_ERROR,
   HTTP_NO_CONTENT,
   HTTP_NOT_FOUND,
   HTTP_TOO_MANY_REQUESTS
@@ -56,8 +64,8 @@ import { Hono, type MiddlewareHandler } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import * as z from 'zod'
 
-/** Logger for the admin listener. */
-const adminLogger = proxyLogger('admin')
+/** Logger for requests the guards refuse, as for every refused change (#383). */
+const auditLogger = proxyLogger('admin', 'audit')
 /** Logger for sign-in and sign-out. */
 const authLogger = proxyLogger('admin', 'auth')
 
@@ -122,14 +130,8 @@ const SignInSchema = z.object({
   verifier: z.string().trim().min(1)
 })
 
-/** What the session cookie carries. */
-const SessionSchema = z.object({
-  login: z.string().trim().min(1),
-  id: z.int().positive(),
-  role: z.enum(['editor', 'viewer'])
-})
-/** The session cookie's payload must satisfy {@link AdminSession}. */
-const sessionShape: z.ZodType<AdminSession> = SessionSchema
+/** What a sign-in gives: the session's data but its ID and time, which the callback adds. */
+type SignedIn = Omit<SessionData, 'sid' | 'iat'>
 
 /** What the admin app runs with. */
 export interface AdminAppOptions {
@@ -150,6 +152,8 @@ export interface AdminAppOptions {
   readonly server: AdminServerFacts
   /** The built pages, or `undefined` when this build has none (`/admin/` then says so). */
   readonly assets?: AdminAssets | undefined
+  /** The signed-out sessions; kept in pi's agent directory by default. */
+  readonly revocations?: Revocations
 }
 
 /** What the route groups share. */
@@ -164,6 +168,8 @@ interface AdminDeps {
   readonly secure: boolean
   /** The API listener's settings, for the doctor and the stats. */
   readonly server: AdminServerFacts
+  /** The signed-out sessions. */
+  readonly revocations: Revocations
 }
 
 /** A refusal a callback answers with: its status and its text. */
@@ -248,13 +254,13 @@ function addGuards(app: Hono, deps: AdminDeps, clientKey: (env: unknown) => stri
   app.use('*', async (context, next) => {
     const request = { method: context.req.method, path: context.req.path }
     if (context.req.header('host') !== publicOrigin.host) {
-      adminLogger.warn('Refused {method} {path}: Host is not the admin UI address', request)
+      auditLogger.warn('Refused {method} {path}: Host is not the admin UI address', request)
       return context.text('Not the admin UI address', HTTP_FORBIDDEN)
     }
     const origin = context.req.header('origin')
     const write = request.method !== 'GET' && request.method !== 'HEAD'
     if (origin === undefined ? write : origin !== publicOrigin.origin) {
-      adminLogger.warn('Refused {method} {path}: Origin is not the admin UI', request)
+      auditLogger.warn('Refused {method} {path}: Origin is not the admin UI', request)
       return context.text('Refused: the request does not come from the admin UI', HTTP_FORBIDDEN)
     }
     await next()
@@ -306,13 +312,13 @@ function teamCheck(deps: AdminDeps, token: string, login: string): TeamCheck {
  * @param deps - what the routes share
  * @param code - GitHub's code
  * @param verifier - the sign-in's PKCE verifier
- * @returns the session, or the refusal to answer with
+ * @returns what the session carries but its ID, or the refusal to answer with
  */
 async function finishSignIn(
   deps: AdminDeps,
   code: string,
   verifier: string
-): Promise<AdminSession | Refusal> {
+): Promise<SignedIn | Refusal> {
   const { settings, fetchFn } = deps
   try {
     const exchanged = await exchangeCode(fetchFn, {
@@ -328,8 +334,8 @@ async function finishSignIn(
       return { status: HTTP_BAD_GATEWAY, text: 'GitHub refused the sign-in; try again' }
     }
     const user = await readUser(fetchFn, settings.apiUrl, exchanged.token)
-    const role = await roleFor(settings, user.login, teamCheck(deps, exchanged.token, user.login))
-    if (role === undefined) {
+    const grant = await roleFor(settings, user.login, teamCheck(deps, exchanged.token, user.login))
+    if (grant === undefined) {
       // GitHub answers 404 for a team in an org the App is not installed on, as for a team the
       // operator is not in, so the log names that cause whenever a list names a team.
       const namesTeams = [...settings.editors, ...settings.viewers].some((principal) =>
@@ -341,7 +347,7 @@ async function finishSignIn(
       })
       return { status: HTTP_FORBIDDEN, text: `${user.login} may not use this admin UI` }
     }
-    return { login: user.login, id: user.id, role }
+    return { login: user.login, id: user.id, role: grant.role, team: grant.team }
   } catch (error) {
     authLogger.warn('GitHub sign-in failed: {error}', { error: errorMessage(error) })
     return { status: HTTP_BAD_GATEWAY, text: 'GitHub could not be asked; try again' }
@@ -405,7 +411,8 @@ function addSignIn(app: Hono, deps: AdminDeps): void {
     }
     const outcome = await finishSignIn(deps, code, pending.verifier)
     if ('status' in outcome) return context.text(outcome.text, outcome.status)
-    const sealed = sealer.seal('session', outcome, now() + SESSION_SECONDS * MS_PER_SECOND)
+    const session: SessionData = { ...outcome, sid: randomToken(), iat: now() }
+    const sealed = sealer.seal('session', session, now() + SESSION_SECONDS * MS_PER_SECOND)
     setCookie(context, SESSION_COOKIE, sealed, {
       path: '/admin',
       httpOnly: true,
@@ -425,27 +432,36 @@ function addSignIn(app: Hono, deps: AdminDeps): void {
  * @param deps - what the routes share
  */
 function addSession(app: Hono, deps: AdminDeps): void {
-  const { sealer, now, secure } = deps
-  /**
-   * Opens a session cookie.
-   *
-   * @param cookie - the cookie, or `undefined` when there was none
-   * @returns the operator, or `undefined` when there is no valid session
-   */
-  const sessionOf = (cookie: string | undefined): AdminSession | undefined =>
-    sealer.unseal('session', cookie, sessionShape, now())
+  const { sealer, now, secure, revocations } = deps
+  const rules = { sealer, revocations, lists: deps.settings }
 
+  // A signed-out session is revoked, not only forgotten by this browser: a copy of its cookie
+  // stops working too (#383). Revoked until it would have expired, which sealing bounds.
   app.post('/admin/auth/sign-out', (context) => {
-    const session = sessionOf(getCookie(context, SESSION_COOKIE))
+    const time = now()
+    const data = sealer.unseal(
+      'session',
+      getCookie(context, SESSION_COOKIE),
+      SessionDataSchema,
+      time
+    )
     deleteCookie(context, SESSION_COOKIE, { path: '/admin', secure })
-    if (session !== undefined) authLogger.info('Signed out {login}', { login: session.login })
-    return context.body(null, HTTP_NO_CONTENT)
+    if (data === undefined) return context.body(null, HTTP_NO_CONTENT)
+    const saved = revocations.revoke(data.sid, time + SESSION_SECONDS * MS_PER_SECOND, time)
+    authLogger.info('Signed out {login}', { login: data.login })
+    if (saved) return context.body(null, HTTP_NO_CONTENT)
+    // Refused at once, but not after a restart: the operator must know it didn't hold (#385 review).
+    return context.text(
+      'Signed out here, but the sign-out could not be saved, so the session works again after a restart until it expires; see the proxy log',
+      HTTP_INTERNAL_SERVER_ERROR
+    )
   })
 
   app.route(
     '/admin/api',
     createAdminApi({
-      sessionOf: (cookieHeader) => sessionOf(cookieValue(cookieHeader, SESSION_COOKIE)),
+      sessionOf: (cookieHeader) =>
+        openSession(rules, cookieValue(cookieHeader, SESSION_COOKIE), now()),
       server: deps.server,
       now
     })
@@ -471,7 +487,8 @@ export function createAdminApp(options: AdminAppOptions): Hono {
     // A `Secure` cookie is kept from an `http` origin only on localhost; the admin UI is https
     // beyond loopback (`adminUiProblems`), so `Secure` exactly when it is https.
     secure: publicOrigin.protocol === 'https:',
-    server: options.server
+    server: options.server,
+    revocations: options.revocations ?? fileRevocations()
   }
   const app = new Hono()
   addGuards(app, deps, options.clientKey ?? socketKey)

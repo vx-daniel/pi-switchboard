@@ -55,6 +55,8 @@ import * as z from 'zod'
 
 /** Logger for the admin UI's reads. */
 const adminLogger = proxyLogger('admin')
+/** Logger for the changes operators make, and those refused (#383). */
+const auditLogger = proxyLogger('admin', 'audit')
 
 /** How often a changed snapshot is sent at most, in milliseconds. */
 const STREAM_FLUSH_MS = 500
@@ -112,12 +114,19 @@ function windowOf(value: string | undefined): StatsWindow | undefined {
 /**
  * Adds the requests routes: the snapshot, and the stream that sends it again on each change.
  *
+ * @remarks
+ * A stream checks its session again on every flush (#385 review), whether anything changed or
+ * only heartbeats flow: one signed out, expired or no longer admitted by the lists is closed
+ * within {@link STREAM_FLUSH_MS}, as a new request would be refused.
+ *
  * @param api - the API app
+ * @param deps - what the API reads with: the session check
  */
-function addRequests(api: Hono<AdminApiEnv>): void {
+function addRequests(api: Hono<AdminApiEnv>, deps: AdminApiDeps): void {
   api.get('/requests', (context) => context.json(requestsSnapshot()))
   api.get('/requests/stream', (context) =>
     streamSSE(context, async (stream) => {
+      const cookie = context.req.header('cookie')
       let changed = true
       const mark = (): void => {
         changed = true
@@ -133,6 +142,10 @@ function addRequests(api: Hono<AdminApiEnv>): void {
         close = resolve
       })
       const flush = setInterval(() => {
+        if (deps.sessionOf(cookie) === undefined) {
+          close()
+          return
+        }
         if (!changed) return
         changed = false
         stream
@@ -439,9 +452,19 @@ export function createAdminApi(deps: AdminApiDeps): Hono<AdminApiEnv> {
   const api = new Hono<AdminApiEnv>()
   api.use('*', async (context, next) => {
     const session = deps.sessionOf(context.req.header('cookie'))
-    if (session === undefined) return context.json(NOT_SIGNED_IN, HTTP_UNAUTHORIZED)
+    const write = !READ_METHODS.has(context.req.method)
+    const request = { method: context.req.method, path: context.req.path }
+    if (session === undefined) {
+      // A read without a session is the page before sign-in; a write is an attempted change.
+      if (write) auditLogger.warn('Refused {method} {path}: not signed in', request)
+      return context.json(NOT_SIGNED_IN, HTTP_UNAUTHORIZED)
+    }
     // Every write is an editor's: a viewer's is refused before it reaches any route.
-    if (!READ_METHODS.has(context.req.method) && session.role !== 'editor') {
+    if (write && session.role !== 'editor') {
+      auditLogger.warn('Refused {login} {method} {path}: only an editor may change the proxy', {
+        login: session.login,
+        ...request
+      })
       return context.json(EDITOR_ONLY, HTTP_FORBIDDEN)
     }
     context.set('session', session)
@@ -462,7 +485,7 @@ export function createAdminApi(deps: AdminApiDeps): Hono<AdminApiEnv> {
     const { login, role } = context.get('session')
     return context.json({ login, role })
   })
-  addRequests(api)
+  addRequests(api, deps)
   addPages(api, deps)
   addSettings(api, deps)
   addAliases(api)
