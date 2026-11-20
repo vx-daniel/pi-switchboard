@@ -4,8 +4,11 @@
  * around can't fail the request with a credential that doesn't resolve.
  */
 
+import { readExposure } from '@proxy/admin/reads'
 import { clearAllQuotas, recordQuota } from '@proxy/pi/quota'
 import { createApp } from '@proxy/server/app'
+import { findCredentialedStart } from '@proxy/server/chat-dispatch'
+import { planLogins } from '@proxy/server/route-plan'
 import { fileConfigReader } from '@proxy/server/routes'
 import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from 'vite-plus/test'
 
@@ -71,6 +74,20 @@ function nearlyUsedUp(): void {
 }
 
 /**
+ * Writes the alias, and the reserve when there is one, to the config file.
+ *
+ * @param reserve - `routing.reserve`, or `undefined` for none
+ */
+function configure(reserve: Record<string, number> | undefined): void {
+  writeProxyConfig(agentDir.path, {
+    aliases: {
+      [ALIAS]: { targets: ['no-credential/cold-mock', `healthy/${HEALTHY_MODEL}`], fallbackOn: [] }
+    },
+    ...(reserve === undefined ? {} : { routing: { reserve } })
+  })
+}
+
+/**
  * Asks the alias for a completion, through the proxy as deployed (its config file read).
  *
  * @param reserve - `routing.reserve`, or `undefined` for none
@@ -79,12 +96,7 @@ function nearlyUsedUp(): void {
 async function askAlias(
   reserve: Record<string, number> | undefined
 ): Promise<{ status: number; body: unknown }> {
-  writeProxyConfig(agentDir.path, {
-    aliases: {
-      [ALIAS]: { targets: ['no-credential/cold-mock', `healthy/${HEALTHY_MODEL}`], fallbackOn: [] }
-    },
-    ...(reserve === undefined ? {} : { routing: { reserve } })
-  })
+  configure(reserve)
   const response = await createApp(testConfig(), fileConfigReader).request('/v1/chat/completions', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -118,5 +130,35 @@ describe('the credential preflight', () => {
 
     expect(status).toBe(502)
     expect(body).toMatchObject({ error: { code: 'upstream_credentials_missing' } })
+  })
+
+  // Pins when a reserve skip is decided (#386 review): once, before images are fetched, as a
+  // cooldown skip is. The plan handed to the dispatch starts past the skipped login and lists the
+  // skip, so a quota window that resets meanwhile doesn't bring the login back: the request
+  // keeps to what `x_pi.attempts` says it did.
+  test('decides a reserve skip once: a reset before the dispatch keeps the plan', async () => {
+    configure({ 'no-credential': 0.2 })
+    nearlyUsedUp()
+    const exposure = await readExposure()
+    const alias = exposure.ok
+      ? exposure.aliases.find((exposed) => exposed.publicId === ALIAS)
+      : undefined
+    if (alias === undefined) throw new Error('the alias should be exposed')
+    const route = planLogins(alias, false, [])
+
+    const start = await findCredentialedStart(
+      { ...route, reserve: { 'no-credential': 0.2 } },
+      undefined,
+      ALIAS,
+      undefined
+    )
+    clearAllQuotas()
+
+    expect(start).toMatchObject({
+      kind: 'ready',
+      candidates: [{ canonicalId: `healthy/${HEALTHY_MODEL}` }],
+      attempts: [{ model: 'no-credential/cold-mock', reason: 'quota', skipped: true }]
+    })
+    expect(start.kind === 'ready' ? start.candidates : []).toHaveLength(1)
   })
 })

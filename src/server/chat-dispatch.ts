@@ -267,7 +267,10 @@ export type CredentialedStart =
  * `fallbackOn` names `auth`. Run before remote images are fetched, so a request no provider can
  * take fetches nothing (#109 review). A candidate the dispatch would pass over, cooling down or
  * below its quota reserve, is passed over here too, before its credential is checked (#381):
- * otherwise a login the reserve routes around could fail the request with its credential.
+ * otherwise a login the reserve routes around could fail the request with its credential. A skip
+ * here is final, as a cooldown skip always was: the dispatch starts past it, so a window that
+ * resets while images are fetched doesn't bring the login back, and the request keeps to what
+ * `x_pi.attempts` lists (#386 review).
  *
  * @param route - the planned candidates, fallback classes and quota reserve (none when absent)
  * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined`
