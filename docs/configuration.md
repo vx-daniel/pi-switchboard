@@ -141,6 +141,36 @@ The proxy reads two files from pi's configuration directory (`~/.pi/agent/`):
 
 From pi's `settings.json` the proxy reads only `enabledModels`, for `scoped` exposure. It does **not** read installed packages, enabled extensions, or session-level model filters (`--models` flag).
 
+## Local models
+
+A model served on your own machine or network (Ollama, LM Studio, vLLM, SGLang, llama.cpp's router, or any other server that speaks OpenAI's API) joins through pi's `models.json`, as any provider of your own does. The proxy has nothing local-specific: it serves every model pi has a credential for, so once pi lists the model, the proxy lists it too, and aliases, fallback chains, cooldowns, stats and the console all apply.
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "ollama",
+      "models": [
+        { "id": "qwen3:32b", "reasoning": true, "contextWindow": 131072, "maxTokens": 16384 }
+      ]
+    }
+  }
+}
+```
+
+- **The key.** pi lists a model only when its provider has a credential, so a server that checks none still needs an `apiKey`: any value. For one that checks keys, use the key, or `$NAME` or `!command` to keep it out of the file ([pi: Choose a Model](https://docs.pi.dev/latest/models), which also covers llama.cpp's router). The proxy never shows it.
+- **Exposure.** Under the default `scoped` mode with no `enabledModels` in pi's `settings.json`, every model with a credential is exposed, the local ones included. Once `enabledModels` lists models, add the local ones there too (`ollama/*`), or switch to `all`, or list them in `customModels` (`custom`) ([Exposure modes](api.md#exposure-modes)).
+- **Its ID.** A client names the model by its ID (`qwen3:32b`) or with the provider (`ollama/qwen3:32b`). An ID that holds a `/` itself, as a router's `marvin/big` does, works too; in `GET /v1/models/{model}` it is URL-encoded (`marvin%2Fbig`).
+- **What it can do comes from the entry.** `reasoning`, `input` (add `"image"` for a vision model), `contextWindow` and `maxTokens` are what the proxy reports and checks requests against. It doesn't ask the server, so make them match it.
+- **Cost.** Without a `cost` in the entry, the stats and [budgets](projects.md) count a local model at `$0`. To price it, add `"cost": { "input": …, "output": …, "cacheRead": …, "cacheWrite": … }` in US dollars per million tokens.
+- **No quota.** A local server sends no quota headers, so it shows no quota and a [reserve](routing.md#quota) never skips it. A `429` or `503` from it still starts a [cooldown](routing.md#cooldowns).
+- **A model that loads on demand.** A server that loads a model on its first request (llama.cpp's router, Ollama, a model-swapping router) takes that load time before it answers. The [upstream timeout](#what-the-proxy-adds) counts it (120 s by default): raise `upstreamTimeoutSec` if a load takes longer, or the request ends in `504`.
+- **In Docker.** Inside the container, `localhost` is the container. Point `baseUrl` at the host instead: `http://host.docker.internal:11434/v1`, which on Linux also needs `--add-host=host.docker.internal:host-gateway` (or `extra_hosts` in Compose). A server on a tailnet or a LAN name is reached only when the container can resolve and route that name.
+
+Checked on 2026-11-20 against an OpenAI-compatible router serving Qwen models over a tailnet: listed, plain and streamed requests answered (with `reasoning_effort`), usage counted and the model marked `verified`.
+
 ## What the proxy adds
 
 Proxy-specific settings are configured via CLI flags, environment variables, the JSON config file (`~/.pi/agent/proxy-config.json`), the console's Settings view (`pi-switchboard tui`, `5`), or the `/proxy config` panel (when installed as a pi package). Priority: flag > env var > config file > default:
