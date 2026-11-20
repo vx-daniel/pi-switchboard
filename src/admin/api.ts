@@ -55,6 +55,8 @@ import * as z from 'zod'
 
 /** Logger for the admin UI's reads. */
 const adminLogger = proxyLogger('admin')
+/** Logger for the changes operators make, and those refused (#383). */
+const auditLogger = proxyLogger('admin', 'audit')
 
 /** How often a changed snapshot is sent at most, in milliseconds. */
 const STREAM_FLUSH_MS = 500
@@ -442,6 +444,11 @@ export function createAdminApi(deps: AdminApiDeps): Hono<AdminApiEnv> {
     if (session === undefined) return context.json(NOT_SIGNED_IN, HTTP_UNAUTHORIZED)
     // Every write is an editor's: a viewer's is refused before it reaches any route.
     if (!READ_METHODS.has(context.req.method) && session.role !== 'editor') {
+      auditLogger.warn('Refused {login} {method} {path}: only an editor may change the proxy', {
+        login: session.login,
+        method: context.req.method,
+        path: context.req.path
+      })
       return context.json(EDITOR_ONLY, HTTP_FORBIDDEN)
     }
     context.set('session', session)

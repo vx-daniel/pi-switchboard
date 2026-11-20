@@ -1,4 +1,4 @@
-import { roleFor, type TeamCheck } from '@proxy/admin/roles'
+import { currentRole, roleFor, type TeamCheck } from '@proxy/admin/roles'
 import { describe, expect, test } from 'vite-plus/test'
 
 const LISTS = { editors: ['Alice', 'my-org/Ops'], viewers: ['bob', 'my-org/readers'] }
@@ -49,7 +49,18 @@ describe('roleFor', () => {
       role: undefined
     }
   ])('$who', async ({ login, active, role }) => {
-    expect(await roleFor(LISTS, login, teamsOf(active).check)).toBe(role)
+    expect((await roleFor(LISTS, login, teamsOf(active).check))?.role).toBe(role)
+  })
+
+  // Catches sign-in not recording what admitted the operator, which each request re-checks
+  // (#383): their login as `null`, or the listed team, lowercase.
+  test.each([
+    { login: 'alice', active: [], grant: { role: 'editor', team: null } },
+    { login: 'carol', active: ['my-org/ops'], grant: { role: 'editor', team: 'my-org/ops' } },
+    { login: 'bob', active: ['my-org/ops'], grant: { role: 'editor', team: 'my-org/ops' } },
+    { login: 'dave', active: ['my-org/readers'], grant: { role: 'viewer', team: 'my-org/readers' } }
+  ])('$login is admitted by $grant.team', async ({ login, active, grant }) => {
+    expect(await roleFor(LISTS, login, teamsOf(active).check)).toEqual(grant)
   })
 
   // Catches GitHub asked about teams when a login already decides: an editor by login must sign in
@@ -67,7 +78,23 @@ describe('roleFor', () => {
   test('asks a viewer by login about the editor teams only', async () => {
     const teams = teamsOf([])
 
-    expect(await roleFor(LISTS, 'bob', teams.check)).toBe('viewer')
+    expect((await roleFor(LISTS, 'bob', teams.check))?.role).toBe('viewer')
     expect(teams.asked).toEqual(['my-org/ops'])
+  })
+})
+
+describe('currentRole', () => {
+  // Catches a session keeping a role the lists no longer give (#383): a login or team taken off
+  // its list loses it at once, one moved to the viewers is a viewer, and a team still listed keeps
+  // its members in, compared without case as sign-in compares them.
+  test.each([
+    { who: 'an editor by login, still listed', login: 'ALICE', team: null, role: 'editor' },
+    { who: 'an editor by login, taken off', login: 'carol', team: null, role: undefined },
+    { who: 'an editor by team, still listed', login: 'carol', team: 'my-org/ops', role: 'editor' },
+    { who: 'an editor by a team taken off', login: 'carol', team: 'my-org/gone', role: undefined },
+    { who: 'a viewer by login', login: 'bob', team: null, role: 'viewer' },
+    { who: 'a login now only among the viewers', login: 'bob', team: 'my-org/gone', role: 'viewer' }
+  ])('$who', ({ login, team, role }) => {
+    expect(currentRole(LISTS, login, team)).toBe(role)
   })
 })

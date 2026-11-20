@@ -41,7 +41,7 @@ The callback URL must match the admin UI's address exactly: its scheme, host and
 
 `adminUi.editors` and `adminUi.viewers` take GitHub logins (`alice`) and teams (`my-org/ops`, the organization and the team's slug), matched without regard to case. Someone on both lists is an editor. Anyone on neither is refused at sign-in.
 
-The role is decided at sign-in and lasts for the session (8 hours): someone removed from a list keeps their session until it ends or they sign out. To end every session at once, change the session key and restart. The lists are checked in order: editors by login, editor teams, viewers by login, viewer teams; GitHub is asked about a team only when no login before it decided, and only an active membership counts (a pending invitation doesn't).
+The role is checked again on every request, against the lists the proxy runs with: change a list and restart, and someone taken off it has no session from their next request, while someone moved to the viewers is a viewer. A role a team gave lasts as long as that team is listed; a change in the team's members on GitHub shows at the member's next sign-in, since the proxy asks GitHub about teams only then. A session lasts 8 hours at most. To end every session at once, change the session key and restart. The lists are checked in order: editors by login, editor teams, viewers by login, viewer teams; GitHub is asked about a team only when no login before it decided, and only an active membership counts (a pending invitation doesn't).
 
 ### 3. Give it its secrets
 
@@ -128,9 +128,9 @@ The flow is GitHub's [web application flow for GitHub Apps](https://docs.github.
 
 1. `GET /admin/auth/sign-in` sends the browser to GitHub with a random `state` and a PKCE challenge, and sets a short cookie (10 minutes, path `/admin/auth`) holding the `state` and the verifier, signed with the session key.
 2. GitHub sends the browser back to `/admin/auth/callback`. The admin UI checks that the `state` matches its cookie, exchanges the code (with the verifier and the client secret), reads the login and, for each team a list names until one decides, asks whether the login is an active member (`GET /orgs/{org}/teams/{team}/memberships/{login}`), and drops the token.
-3. When a list names that login or one of its teams, it sets the session cookie (8 hours, path `/admin`, `HttpOnly`, `SameSite=Lax`, `Secure` over `https`), signed with the session key and holding only the login, the role and the expiry.
+3. When a list names that login or one of its teams, it sets the session cookie (8 hours, path `/admin`, `HttpOnly`, `SameSite=Lax`, `Secure` over `https`), signed with the session key and holding only a random session ID, the login, the role, the team that gave it (if one did) and the expiry.
 
-`POST /admin/auth/sign-out` clears the session cookie. Sign-in and the callback (not sign-out) allow 20 requests a minute from one address; every response forbids framing, caching and sending a `Referer`; and a request that changes something must carry the admin UI's own `Origin`.
+`POST /admin/auth/sign-out` clears the session cookie and revokes the session: a copy of the cookie stops working too, and stays refused after a restart. The revoked session IDs are kept, until they would have expired, in `pi-switchboard-admin-revoked.json` in pi's agent directory (a session ID opens nothing without the signed cookie). Sign-in and the callback (not sign-out) allow 20 requests a minute from one address; every response forbids framing, caching and sending a `Referer`; and a request that changes something must carry the admin UI's own `Origin`.
 
 Behind a reverse proxy every request comes from the reverse proxy's address, so everyone shares those 20 a minute. The admin UI doesn't trust `X-Forwarded-For`, which a client can write. Limit per client at the reverse proxy if several people sign in at once.
 
@@ -187,7 +187,7 @@ An editor sets each [project](projects.md)'s budget on the Stats tab, under **Bu
 
 ## The API
 
-Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. Every route that writes (`PUT`, `POST`, `DELETE`) is an editor's: a viewer's write is a `403` `editor_only`, and a write without the admin page's `Origin` (from another site) is a `403` too. None calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, proxy auth is `on` or `off`, and the requests carry no message content. A write refused for its content answers `{ "error": { "code", "message" } }`; one over a config file that can't be read is a `409` `file_unusable`, and one the file didn't take a `500` `not_written`.
+Every route under `/admin/api/` needs a session, editor or viewer, and answers `401` `not_signed_in` without one, whatever the path. Every route that writes (`PUT`, `POST`, `DELETE`) is an editor's: a viewer's write is a `403` `editor_only`, logged under `pi-switchboard.admin.audit` with the viewer's login, the method and the path, and a write without the admin page's `Origin` (from another site) is a `403` too, logged under `pi-switchboard.admin`. None calls a provider or resolves a credential, and none returns one: the logins are what `/healthz/creds` shows, the models what `GET /v1/switchboard/models` shows, proxy auth is `on` or `off`, and the requests carry no message content. A write refused for its content answers `{ "error": { "code", "message" } }`; one over a config file that can't be read is a `409` `file_unusable`, and one the file didn't take a `500` `not_written`.
 
 | Route | Answers |
 |---|---|

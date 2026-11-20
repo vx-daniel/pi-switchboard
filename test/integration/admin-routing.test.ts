@@ -11,6 +11,7 @@ import { join } from 'node:path'
 import { resetSync } from '@logtape/logtape'
 import { configureLogging } from '@proxy/logging'
 import { activeCooldowns, clearAllCooldowns, startCooldown } from '@proxy/pi/cooldowns'
+import { isRecord } from '@proxy/utils/guards'
 import type { Hono } from 'hono'
 import {
   afterAll,
@@ -234,7 +235,13 @@ describe('admin aliases', () => {
     expect(response.status).toBe(refusal.status)
     expect(await response.json()).toMatchObject({ error: { code: refusal.code } })
     expect(savedConfig(agentDir.path)).toEqual(before)
-    expect(auditRecords(lines)).toEqual([])
+    // No change is logged; a viewer's refused write is, as a refusal (#383).
+    const changes = auditRecords(lines).filter(
+      (record) =>
+        isRecord(record) && isRecord(record['properties']) && 'after' in record['properties']
+    )
+    expect(changes).toEqual([])
+    expect(auditRecords(lines)).toHaveLength(refusal.code === 'editor_only' ? 1 : 0)
   })
 
   // Catches a delete that leaves the alias, or one of an alias that was never there answered as

@@ -24,7 +24,7 @@
  *   stats              the stats store and recorder (src/stats/)
  *   admin              the admin listener (#367): start, refusals, requests
  *   admin.auth         operator sign-in and sign-out: who, with which role; never a token
- *   admin.audit        every change an operator makes: who, what, old and new (phase 2)
+ *   admin.audit        every change an operator makes (who, what, old and new); refused writes
  *   tui                the console (src/tui/)      tui.login          the console's logins
  *   extension          the pi extension's command handler (extensions/proxy/index.ts)
  *   extension.*        the pi extension's parts (process, settings, reports, zed-sync)
