@@ -1933,7 +1933,11 @@ directory, so a copied cookie stops working and stays refused after a restart (s
 one: the key is a file). Each request checks the role again against the lists the proxy runs with
 (`currentRole`), by login and by the team sign-in recorded, with no GitHub call: a login or team
 taken off its list loses the role at once, and a change in a team's members shows at the next
-sign-in. A viewer's refused write is logged under `admin.audit`.
+sign-in. An open requests stream checks its session on every flush and closes when it ends. A
+sign-out the file didn't take answers `500` (refused in memory until a restart); a file unusable
+at startup refuses every session signed in before (`signedOutBefore`, written to a fresh file)
+rather than reading as empty. Refused writes (no session, a viewer's, a foreign `Origin`) and
+foreign `Host` requests are logged under `admin.audit`.
 
 **Threat model.**
 

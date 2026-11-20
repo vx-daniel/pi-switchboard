@@ -53,6 +53,7 @@ import {
   HTTP_BAD_REQUEST,
   HTTP_FORBIDDEN,
   HTTP_FOUND,
+  HTTP_INTERNAL_SERVER_ERROR,
   HTTP_NO_CONTENT,
   HTTP_NOT_FOUND,
   HTTP_TOO_MANY_REQUESTS
@@ -63,8 +64,8 @@ import { Hono, type MiddlewareHandler } from 'hono'
 import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import * as z from 'zod'
 
-/** Logger for the admin listener. */
-const adminLogger = proxyLogger('admin')
+/** Logger for requests the guards refuse, as for every refused change (#383). */
+const auditLogger = proxyLogger('admin', 'audit')
 /** Logger for sign-in and sign-out. */
 const authLogger = proxyLogger('admin', 'auth')
 
@@ -129,8 +130,8 @@ const SignInSchema = z.object({
   verifier: z.string().trim().min(1)
 })
 
-/** What a sign-in gives: the session's data but its ID. */
-type SignedIn = Omit<SessionData, 'sid'>
+/** What a sign-in gives: the session's data but its ID and time, which the callback adds. */
+type SignedIn = Omit<SessionData, 'sid' | 'iat'>
 
 /** What the admin app runs with. */
 export interface AdminAppOptions {
@@ -253,13 +254,13 @@ function addGuards(app: Hono, deps: AdminDeps, clientKey: (env: unknown) => stri
   app.use('*', async (context, next) => {
     const request = { method: context.req.method, path: context.req.path }
     if (context.req.header('host') !== publicOrigin.host) {
-      adminLogger.warn('Refused {method} {path}: Host is not the admin UI address', request)
+      auditLogger.warn('Refused {method} {path}: Host is not the admin UI address', request)
       return context.text('Not the admin UI address', HTTP_FORBIDDEN)
     }
     const origin = context.req.header('origin')
     const write = request.method !== 'GET' && request.method !== 'HEAD'
     if (origin === undefined ? write : origin !== publicOrigin.origin) {
-      adminLogger.warn('Refused {method} {path}: Origin is not the admin UI', request)
+      auditLogger.warn('Refused {method} {path}: Origin is not the admin UI', request)
       return context.text('Refused: the request does not come from the admin UI', HTTP_FORBIDDEN)
     }
     await next()
@@ -410,7 +411,7 @@ function addSignIn(app: Hono, deps: AdminDeps): void {
     }
     const outcome = await finishSignIn(deps, code, pending.verifier)
     if ('status' in outcome) return context.text(outcome.text, outcome.status)
-    const session: SessionData = { ...outcome, sid: randomToken() }
+    const session: SessionData = { ...outcome, sid: randomToken(), iat: now() }
     const sealed = sealer.seal('session', session, now() + SESSION_SECONDS * MS_PER_SECOND)
     setCookie(context, SESSION_COOKIE, sealed, {
       path: '/admin',
@@ -445,11 +446,15 @@ function addSession(app: Hono, deps: AdminDeps): void {
       time
     )
     deleteCookie(context, SESSION_COOKIE, { path: '/admin', secure })
-    if (data !== undefined) {
-      revocations.revoke(data.sid, time + SESSION_SECONDS * MS_PER_SECOND, time)
-      authLogger.info('Signed out {login}', { login: data.login })
-    }
-    return context.body(null, HTTP_NO_CONTENT)
+    if (data === undefined) return context.body(null, HTTP_NO_CONTENT)
+    const saved = revocations.revoke(data.sid, time + SESSION_SECONDS * MS_PER_SECOND, time)
+    authLogger.info('Signed out {login}', { login: data.login })
+    if (saved) return context.body(null, HTTP_NO_CONTENT)
+    // Refused at once, but not after a restart: the operator must know it didn't hold (#385 review).
+    return context.text(
+      'Signed out here, but the sign-out could not be saved, so the session works again after a restart until it expires; see the proxy log',
+      HTTP_INTERNAL_SERVER_ERROR
+    )
   })
 
   app.route(

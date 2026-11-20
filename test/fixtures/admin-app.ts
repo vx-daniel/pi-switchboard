@@ -65,7 +65,14 @@ export function adminApp(server: Partial<AdminServerFacts> = {}): Hono {
 export function sessionCookie(role: TestRole): string {
   const sealed = createSealer(SESSION_KEY).seal(
     'session',
-    { sid: `test-${role}`, login: role === 'editor' ? EDITOR : VIEWER, id: 1, role, team: null },
+    {
+      sid: `test-${role}`,
+      login: role === 'editor' ? EDITOR : VIEWER,
+      id: 1,
+      role,
+      team: null,
+      iat: Date.now()
+    },
     Date.now() + MINUTE_MS
   )
   return `pi_switchboard_admin=${sealed}`

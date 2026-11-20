@@ -4,7 +4,7 @@
  * runs with; and a viewer's refused write is in the audit log.
  */
 
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -44,9 +44,13 @@ afterEach(() => {
  * @param lists - who may sign in
  * @param lists.editors - who may change settings
  * @param lists.viewers - who may only read
+ * @param file - the revocations file, under the temporary directory
  * @returns the app
  */
-function startedWith(lists: { editors?: string[]; viewers?: string[] }): Hono {
+function startedWith(
+  lists: { editors?: string[]; viewers?: string[] },
+  file = 'revoked.json'
+): Hono {
   const settings = resolveAdminUi(
     { ...ADMIN_UI_DEFAULTS, enabled: true, ...lists },
     {
@@ -60,7 +64,7 @@ function startedWith(lists: { editors?: string[]; viewers?: string[] }): Hono {
   return createAdminApp({
     settings: { ...settings, signIn },
     server: { running: testConfig(), overrides: {}, proxyAuth: false },
-    revocations: fileRevocations(join(directory, 'revoked.json'))
+    revocations: fileRevocations(join(directory, file))
   })
 }
 
@@ -93,7 +97,8 @@ const ALICE: SessionData = {
   login: 'alice',
   id: 1,
   role: 'editor',
-  team: null
+  team: null,
+  iat: Date.now()
 }
 
 describe('signing out', () => {
@@ -113,6 +118,61 @@ describe('signing out', () => {
     expect((await whoIs(app, copied)).status).toBe(401)
     expect((await whoIs(startedWith({ editors: ['alice'] }), copied)).status).toBe(401)
     expect((await whoIs(app, cookieOf({ ...ALICE, sid: 'another-session' }))).status).toBe(200)
+  })
+  // Catches a sign-out reported as done that a restart would undo (#385 review): when the
+  // revocation can't be saved, the session is refused here at once, but the answer says it didn't
+  // hold rather than 204.
+  test('that could not be saved is refused here, and answered as a failure', async () => {
+    const app = startedWith({ editors: ['alice'] }, join('no-such-directory', 'revoked.json'))
+    const cookie = cookieOf(ALICE)
+
+    const signOut = await app.request('/admin/auth/sign-out', {
+      method: 'POST',
+      headers: { host: HOST, origin: ORIGIN, cookie }
+    })
+
+    expect(signOut.status).toBe(500)
+    expect(await signOut.text()).toMatch(/could not be saved/u)
+    expect((await whoIs(app, cookie)).status).toBe(401)
+  })
+
+  // Catches a malformed store taken for an empty one (#385 review), which would let every session
+  // it revoked in again: every session signed in before the proxy started is refused, and still
+  // after the next restart, while one signed in since is not.
+  test('a revocations file that is unusable refuses every session signed in before', async () => {
+    writeFileSync(join(directory, 'revoked.json'), 'not json')
+    const cookie = cookieOf(ALICE)
+
+    const app = startedWith({ editors: ['alice'] })
+    const later = cookieOf({ ...ALICE, sid: 'later-session', iat: Date.now() + HOUR_MS })
+
+    expect((await whoIs(app, cookie)).status).toBe(401)
+    expect((await whoIs(app, later)).status).toBe(200)
+    expect((await whoIs(startedWith({ editors: ['alice'] }), cookie)).status).toBe(401)
+  })
+
+  // Catches a live requests stream outliving its session (#385 review): once signed out, an open
+  // stream ends at the next flush, though nothing changed and only heartbeats would flow.
+  test('ends an open requests stream', async () => {
+    const app = startedWith({ editors: ['alice'] })
+    const cookie = cookieOf(ALICE)
+    const stream = await app.request('/admin/api/requests/stream', {
+      headers: { host: HOST, cookie }
+    })
+    const reader = stream.body?.getReader()
+    if (reader === undefined) throw new Error('the stream should have a body')
+    await reader.read()
+
+    await app.request('/admin/auth/sign-out', {
+      method: 'POST',
+      headers: { host: HOST, origin: ORIGIN, cookie }
+    })
+    // The server checks the session on its 500 ms flush: a stream that never ends fails this test
+    // at its timeout, so no wait is guessed here. What was sent before it ended is read past.
+    let chunk = await reader.read()
+    while (!chunk.done) chunk = await reader.read()
+
+    expect(await reader.read()).toEqual({ done: true, value: undefined })
   })
 })
 
@@ -165,6 +225,29 @@ describe('a refused write', () => {
     expect(answer.status).toBe(403)
     expect(auditRecords(lines)).toMatchObject([
       { properties: { login: 'bob', method: 'PUT', path: '/admin/api/budgets/team%2Fother' } }
+    ])
+  })
+
+  // Catches a refused write reaching only the general log (#385 review): a write without a
+  // session, and one the guards refuse for its Host or Origin, are in the audit log too.
+  test.each([
+    { refused: 'no session', headers: { host: HOST, origin: ORIGIN }, status: 401 },
+    {
+      refused: 'a foreign Origin',
+      headers: { host: HOST, origin: 'https://evil.example' },
+      status: 403
+    },
+    { refused: 'a foreign Host', headers: { host: 'evil.example', origin: ORIGIN }, status: 403 }
+  ])('with $refused is in the audit log', async ({ headers, status }) => {
+    const answer = await adminApp().request('/admin/api/budgets/x', {
+      method: 'PUT',
+      headers: { ...headers, 'content-type': 'application/json' },
+      body: '{"today":1}'
+    })
+
+    expect(answer.status).toBe(status)
+    expect(auditRecords(lines)).toMatchObject([
+      { properties: { method: 'PUT', path: '/admin/api/budgets/x' } }
     ])
   })
 })

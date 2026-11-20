@@ -434,8 +434,11 @@ export const EndedCooldownsSchema = z.looseObject({
 
 /**
  * Signs out: clears the session cookie, then reloads the page, which shows the sign-in screen.
+ * When the proxy could not save the sign-out, it says so first (#385 review): the session would
+ * work again after a restart.
  */
 export async function signOut(): Promise<void> {
-  await fetch('/admin/auth/sign-out', { method: 'POST' })
+  const response = await fetch('/admin/auth/sign-out', { method: 'POST' })
+  if (!response.ok) window.alert(await response.text())
   window.location.reload()
 }
