@@ -111,9 +111,28 @@ const quotaSchema = z
       .int()
       .nonnegative()
       .meta({ description: 'When the response that reported it arrived, in Unix seconds.' }),
-    status: z.string().trim().nullable().meta({
-      description: "The provider's overall status, such as Anthropic's `allowed`."
+    status: z
+      .string()
+      .trim()
+      .nullable()
+      .meta({
+        description:
+          "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once " +
+          'it has reset until the next response: at `status_resets_at` when the provider sent ' +
+          'it, else once any window has reset.'
+      }),
+    status_resets_at: z.int().nonnegative().nullable().meta({
+      description: 'When the overall status resets, in Unix seconds (Anthropic, #382).'
     }),
+    status_window: z
+      .string()
+      .trim()
+      .nullable()
+      .meta({
+        description:
+          'The window that decided the overall status, as the provider names it, such as ' +
+          "Anthropic's `five_hour` (#382)."
+      }),
     plan: z.string().trim().nullable().meta({ description: "The plan, such as Codex's `plus`." }),
     windows: z.array(
       z.object({
@@ -308,6 +327,9 @@ function quotaField(quota: ProviderQuota | undefined): PiModelList['data'][numbe
   return {
     observed_at: Math.floor(quota.observedAt / MS_PER_SECOND),
     status: quota.status ?? null,
+    status_resets_at:
+      quota.statusResetsAt === undefined ? null : Math.ceil(quota.statusResetsAt / MS_PER_SECOND),
+    status_window: quota.statusWindow ?? null,
     plan: quota.plan ?? null,
     windows: quota.windows.map((window) => ({
       name: window.name,

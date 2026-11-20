@@ -108,6 +108,10 @@ describe('quota from recorded subscription traffic', () => {
     expect(await quotaAfterReplaying(anthropic)).toEqual({
       observedAt: new Date(anthropic.recordedAt).toISOString(),
       status: header(anthropic, 'anthropic-ratelimit-unified-status'),
+      statusResetsAt: new Date(
+        Number(header(anthropic, 'anthropic-ratelimit-unified-reset')) * MS_PER_SECOND
+      ).toISOString(),
+      statusWindow: header(anthropic, 'anthropic-ratelimit-unified-representative-claim'),
       plan: null,
       windows: [window('5h'), window('7d')]
     })
