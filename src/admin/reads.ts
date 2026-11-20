@@ -47,6 +47,7 @@ import {
 import { type ConsoleEvent, consoleEvents } from '@proxy/server/console-events'
 import { credentialsHealthReport } from '@proxy/server/health'
 import { type HttpRequest, httpRequests } from '@proxy/server/http-requests'
+import { previewRoute } from '@proxy/server/route-preview'
 import { providerBelowReserve, type ReserveSkip } from '@proxy/server/route-reserve'
 import { fileConfigReader } from '@proxy/server/routes'
 import type { StatsWindow } from '@proxy/stats/windows'
@@ -187,8 +188,8 @@ export async function modelsSnapshot(): Promise<ModelsSnapshot | ModelsUnavailab
   const exposure = await readExposure()
   if (!exposure.ok) return { unavailable: exposure.message }
   return {
-    models: buildPiModelList(exposure.models).data,
-    aliases: buildPiModelList(exposure.aliases).data,
+    models: buildPiModelList(exposure.models, (exposed) => previewRoute(exposed, config)).data,
+    aliases: buildPiModelList(exposure.aliases, (exposed) => previewRoute(exposed, config)).data,
     configured: config.aliases,
     latest: exposure.latestAliases,
     aliasDiagnostics: exposure.aliasDiagnostics,

@@ -239,8 +239,9 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
 | `input` | What it accepts: `text`, `image` |
 | `context_window`, `max_output_tokens` | In tokens |
 | `cost` | USD per million tokens: `input` (uncached), `output`, `cache_read`, `cache_write`; `0` where pi has no price |
-| `cooldown` | `null`, or the cooldown its first login is under after a 429, 503 or 529: `reason`, `scope` (`provider` or `model`), `until` (Unix seconds) ([Cooldowns](routing.md#cooldowns)) |
-| `quota` | `null`, or its first login's latest usage windows ([Quota](routing.md#quota)) |
+| `cooldown` | `null`, or the cooldown of the login a request naming the model would call now (`routing.next`): `reason`, `scope` (`provider` or `model`), `until` (Unix seconds). `null` while routing would pass a cooling login over for a free one; when every login is cooling, the one that ends first, which routing calls ([Cooldowns](routing.md#cooldowns)) |
+| `quota` | `null`, or the latest usage windows of `routing.next`'s login ([Quota](routing.md#quota)) |
+| `routing` | What a text request naming it would do now, by the rules routing follows (the configured `fallbackOn` classes, cooldowns and `routing.reserve`; no credential is resolved): `next`, the `model` (canonical ID; for an alias, a later target when the chain would move past the first) and `login` it would call first, and `skipped`, those it would pass over before it, each with its `model`, `login` (when the model has more than one), `reason` (the failure it is cooling down from, or `quota` below its reserve) and `until` (Unix seconds; `null` for `quota`). Routing never skips every candidate, so there is always a `next` |
 | `availability` | `refused` after the proxy's login refused the model (answered as `404 model_not_found`), `verified` after a whole answer, `unknown` before either. Kept in memory since the proxy started; the latest result wins, and a request with its own upstream key does not count. The first refusal of a model is logged at `info` |
 | `logins` | The logins that may serve it ([Several logins per provider](logins.md#several-logins-per-provider)), in the order routing tries them, then the disabled ones, which it never calls: each with its `id` (`anthropic`, `anthropic-2`), `disabled`, and its own `cooldown` and `quota` |
 
@@ -250,6 +251,7 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
   "input": ["text", "image"], "context_window": 200000, "max_output_tokens": 64000,
   "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null,
   "quota": null, "availability": "unknown",
+  "routing": { "next": { "model": "anthropic/claude-sonnet-4-5", "login": "anthropic" }, "skipped": [] },
   "logins": [{ "id": "anthropic", "disabled": false, "cooldown": null, "quota": null }] }] }
 ```
 

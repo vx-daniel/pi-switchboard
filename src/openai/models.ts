@@ -9,12 +9,14 @@
  * @packageDocumentation
  */
 
+import { FailureClassSchema } from '@proxy/config/schema'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
 import { modelAvailability } from '@proxy/pi/availability'
 import { activeCooldown, type Cooldown, loginSubject } from '@proxy/pi/cooldowns'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
+import type { RoutePreview } from '@proxy/server/route-preview'
 import { MS_PER_SECOND, unixSecondsNow } from '@proxy/utils/time'
 import * as z from 'zod'
 
@@ -98,7 +100,7 @@ const cooldownSchema = z
   .nullable()
   .meta({
     description:
-      'The cooldown the model is under (#68), or null. A route that names the reason in its ' +
+      'The cooldown the login is under (#68), or null. A route that names the reason in its ' +
       '`fallbackOn` skips it until then; one that names neither still calls it.'
   })
 
@@ -135,6 +137,49 @@ const quotaSchema = z
       "The login's latest subscription quota, from its response headers (#69), or null when it " +
       'reports none (Google, API keys, or no call since the proxy started). A window that has ' +
       'reset since is left out.'
+  })
+
+/** What a request naming the model would do now (#379). Documents the response; never parsed. */
+const routingSchema = z
+  .object({
+    next: z
+      .object({
+        model: z.string().trim().meta({ description: 'Its canonical ID.' }),
+        login: z.string().trim().meta({ description: 'The login it would be called under.' })
+      })
+      .meta({
+        description:
+          'The model and login a request would call first: for an alias, a later target when ' +
+          'the chain would move past the first.'
+      }),
+    skipped: z
+      .array(
+        z.object({
+          model: z.string().trim().meta({ description: 'Its canonical ID.' }),
+          login: z.string().trim().optional().meta({
+            description: 'The login, when the model has more than one (#227).'
+          }),
+          reason: z.enum([...FailureClassSchema.options, 'quota']).meta({
+            description:
+              'Why it would be passed over: the failure it is cooling down from, or `quota` when ' +
+              "its login has less than the config's `routing.reserve` left (#69)."
+          }),
+          until: z.int().nonnegative().nullable().meta({
+            description: 'When its cooldown ends, in Unix seconds; null for `quota`.'
+          })
+        })
+      )
+      .meta({
+        description:
+          'The candidates it would pass over before `next`, in order, as `x_pi.attempts` lists ' +
+          'skips.'
+      })
+  })
+  .meta({
+    description:
+      'What a text request naming the model would do now (#379), by the same rules routing ' +
+      "follows: the config's `fallbackOn` classes, cooldowns and `routing.reserve`. Routing never " +
+      'skips every candidate, so there is always a `next`. No credential is resolved for it.'
   })
 
 /**
@@ -178,8 +223,19 @@ const piModelCapabilitiesSchema = z
           "pi's prices, in USD per million tokens: uncached input, output, cache reads and " +
           'cache writes. 0 where pi has no price.'
       }),
-    cooldown: cooldownSchema,
-    quota: quotaSchema,
+    cooldown: cooldownSchema.meta({
+      description:
+        'The cooldown of the login a request would call now (`routing.next`, #379), or null when ' +
+        "it is free. Routing passes a cooling login over when the config's `fallbackOn` names the " +
+        'reason and another candidate is free, and when every one is cooling it calls the one ' +
+        'that ends first: this is then that cooldown. Each login has its own in `logins`.'
+    }),
+    quota: quotaSchema.meta({
+      description:
+        "The subscription quota of `routing.next`'s login (#69, #379), or null when it reports " +
+        'none. Each login has its own in `logins`.'
+    }),
+    routing: routingSchema,
     availability: z.enum(['verified', 'refused', 'unknown']).meta({
       description:
         'Whether the provider login serves the model, from calls this process made (#174): ' +
@@ -207,7 +263,7 @@ const piModelCapabilitiesSchema = z
         description:
           'The logins that may serve the model, in the order routing tries them (#227), as ' +
           '`routing.logins.order` sets it (#233); then the disabled ones, which it never tries. ' +
-          "The model's own `cooldown` and `quota` are the first login's."
+          "Each login's own `cooldown` and `quota`; the model's are those of `routing.next`."
       })
   })
   .meta({ id: 'ModelCapabilities', description: 'What pi knows about an exposed model.' })
@@ -281,21 +337,41 @@ function loginField(
 }
 
 /**
+ * Reports what a request would do now (#379): the model and login it would call first, and the
+ * candidates it would pass over.
+ *
+ * @param preview - the route preview
+ * @returns the `routing` field
+ */
+function routingField(preview: RoutePreview): PiModelList['data'][number]['routing'] {
+  return {
+    next: { model: preview.next.canonicalId, login: preview.next.login },
+    skipped: preview.skipped.map((skip) => ({ ...skip }))
+  }
+}
+
+/**
  * Builds the `/v1/switchboard/models` response: every exposed model, with pi's catalogue entry,
- * its cooldown (#68) and its provider's quota (#69), and each of its logins (#227). An alias
- * carries its first target's (#66), with that target's effort when it sets one (#230).
+ * each of its logins (#227) with its cooldown (#68) and quota (#69), and what a request naming it
+ * would do now (#379), whose login's cooldown and quota are the model's. An alias carries its
+ * first target's catalogue entry (#66), with that target's effort when it sets one (#230).
  *
  * @param models - the exposed models, in list order
+ * @param previewOf - previews a model's route, as routing would take it now
  * @returns the list response
  */
-export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
+export function buildPiModelList(
+  models: readonly ExposedModel[],
+  previewOf: (exposed: ExposedModel) => RoutePreview
+): PiModelList {
   return {
     object: 'list',
     data: models.map((exposed) => {
       const { publicId, model } = exposed
       const enabled = (exposed.logins ?? [exposed]).map((login) => loginField(login, false))
       const disabled = (exposed.disabledLogins ?? []).map((login) => loginField(login, true))
-      const [first] = enabled
+      const preview = previewOf(exposed)
+      const next = loginField(preview.next, false)
       return {
         id: publicId,
         provider: exposed.provider,
@@ -315,8 +391,9 @@ export function buildPiModelList(models: readonly ExposedModel[]): PiModelList {
           cache_read: model.cost.cacheRead,
           cache_write: model.cost.cacheWrite
         },
-        cooldown: first?.cooldown ?? null,
-        quota: first?.quota ?? null,
+        cooldown: next.cooldown,
+        quota: next.quota,
+        routing: routingField(preview),
         availability: modelAvailability(exposed.canonicalId),
         logins: [...enabled, ...disabled]
       }
