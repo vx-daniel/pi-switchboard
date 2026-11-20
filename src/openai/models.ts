@@ -118,7 +118,8 @@ const quotaSchema = z
       .meta({
         description:
           "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once " +
-          'it has reset (`status_resets_at` passed, or a window reset) until the next response.'
+          'it has reset until the next response: at `status_resets_at` when the provider sent ' +
+          'it, else once any window has reset.'
       }),
     status_resets_at: z.int().nonnegative().nullable().meta({
       description: 'When the overall status resets, in Unix seconds (Anthropic, #382).'

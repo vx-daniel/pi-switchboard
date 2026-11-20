@@ -76,6 +76,11 @@ const MINUTES_PER: ReadonlyMap<string, number> = new Map([
 ])
 /** A Codex percentage's whole. */
 const PERCENT = 100
+/**
+ * The latest time a `Date` holds, in milliseconds since the epoch (ECMAScript's ±8.64e15 range):
+ * a reset past it would make `toISOString()` throw where a time is shown.
+ */
+const LATEST_DATE_MS = 8_640_000_000_000_000
 
 /** The fields of one window, as read so far. */
 interface WindowFields {
@@ -87,6 +92,20 @@ interface WindowFields {
 
 /** The latest report per provider. */
 const quotas = new Map<string, ProviderQuota>()
+
+/**
+ * Reads a reset time sent in Unix seconds.
+ *
+ * @param text - the header value, or `null` when the response has none
+ * @returns the time in milliseconds since the epoch, or `undefined` when it isn't a plain number
+ *   or falls outside what a `Date` can hold (#384 review)
+ */
+function resetTime(text: string | null): number | undefined {
+  const seconds = text === null ? undefined : parsePlainNumber(text)
+  if (seconds === undefined) return undefined
+  const milliseconds = seconds * MS_PER_SECOND
+  return milliseconds >= 0 && milliseconds <= LATEST_DATE_MS ? milliseconds : undefined
+}
 
 /**
  * Reads a status or plan word, lower-cased.
@@ -129,8 +148,8 @@ function addField(fields: WindowFields, field: string, value: string): void {
     }
     case 'reset':
     case 'reset-at': {
-      const seconds = parsePlainNumber(value)
-      if (seconds !== undefined) fields.resetsAt = seconds * MS_PER_SECOND
+      const resetsAt = resetTime(value)
+      if (resetsAt !== undefined) fields.resetsAt = resetsAt
       return
     }
     case 'window-minutes': {
@@ -192,10 +211,9 @@ function readWindows(headers: Headers): QuotaWindow[] {
 export function readQuota(headers: Headers): QuotaReport | undefined {
   const windows = readWindows(headers)
   if (windows.length === 0) return undefined
-  const resetSeconds = parsePlainNumber(headers.get('anthropic-ratelimit-unified-reset') ?? '')
   return {
     status: word(headers.get('anthropic-ratelimit-unified-status')),
-    statusResetsAt: resetSeconds === undefined ? undefined : resetSeconds * MS_PER_SECOND,
+    statusResetsAt: resetTime(headers.get('anthropic-ratelimit-unified-reset')),
     statusWindow: word(headers.get('anthropic-ratelimit-unified-representative-claim')),
     plan: word(headers.get('x-codex-plan-type')),
     windows
@@ -217,9 +235,10 @@ export function recordQuota(provider: string, headers: Headers, now: number = Da
 
 /**
  * Returns a provider's latest quota, without the windows that have reset since: their share used
- * is no longer known. The overall status is dropped once its own reset time passes (#382), or once
- * any window has reset, as it may have been that window's (#189 review): a login nobody calls
- * after a `rejected` would otherwise keep showing it after the limit lifts.
+ * is no longer known. The overall status lapses at its own reset time when the provider sent one
+ * (#382): a login nobody calls after a `rejected` stops showing it once the limit lifts, and a
+ * window that resets first (a 5-hour one under a 7-day rejection) does not end it. Without one, it
+ * lapses once any window has reset, as it may have been that window's (#189 review).
  *
  * @param provider - the provider
  * @param now - the current time
@@ -235,8 +254,11 @@ export function providerQuota(
     (window) => window.resetsAt === undefined || window.resetsAt > now
   )
   if (windows.length === 0) return undefined
-  const statusLapsed = quota.statusResetsAt !== undefined && quota.statusResetsAt <= now
-  if (windows.length === quota.windows.length && !statusLapsed) return quota
+  const statusLapsed =
+    quota.statusResetsAt === undefined
+      ? windows.length < quota.windows.length
+      : quota.statusResetsAt <= now
+  if (!statusLapsed) return windows.length === quota.windows.length ? quota : { ...quota, windows }
   return {
     ...quota,
     status: undefined,

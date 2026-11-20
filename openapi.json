@@ -820,7 +820,7 @@
                     "description": "When the response that reported it arrived, in Unix seconds."
                   },
                   "status": {
-                    "description": "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset (`status_resets_at` passed, or a window reset) until the next response.",
+                    "description": "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset until the next response: at `status_resets_at` when the provider sent it, else once any window has reset.",
                     "type": [
                       "string",
                       "null"
@@ -1080,7 +1080,7 @@
                           "description": "When the response that reported it arrived, in Unix seconds."
                         },
                         "status": {
-                          "description": "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset (`status_resets_at` passed, or a window reset) until the next response.",
+                          "description": "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset until the next response: at `status_resets_at` when the provider sent it, else once any window has reset.",
                           "type": [
                             "string",
                             "null"
