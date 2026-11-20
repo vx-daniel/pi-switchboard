@@ -8,9 +8,12 @@
  *   `cooldownSkip` or `reserveSkip` says so, the two checks `dispatchChat` makes. The preview and
  *   routing therefore never disagree, however `routing.logins.fallbackOn`, an alias's
  *   `fallbackOn` or `routing.reserve` are set.
- * - **No credential check.** A request checks the first candidate's credential before calling
- *   it, and resolving one can refresh an OAuth login: a preview never does. A refused credential
- *   shows as the model's `availability` instead.
+ * - **No credential check, so `next` assumes credentials resolve.** Before calling anything, a
+ *   request checks the credential of each candidate it reaches by cooldowns alone (the reserve is
+ *   not applied there), and a refused one fails the request unless the hop names `auth`. Resolving
+ *   a credential can refresh an OAuth login, so a preview never does: with a login whose
+ *   credential no longer resolves, a request can fail before reaching `next`. Nothing here
+ *   records that; `availability` is only the provider's answer to a call.
  * - **Never empty.** Routing never skips every candidate (the last one left is always called), so
  *   there is always a next one.
  *

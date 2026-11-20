@@ -19,7 +19,8 @@ import type { FamilyResolution } from '@proxy/openai/model-aliases'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
-import { nextCooldown, type PreviewRules } from '@proxy/server/route-preview'
+import { activeCooldown, type Cooldown, loginSubject } from '@proxy/pi/cooldowns'
+import { nextCooldown, type PreviewRules, previewRoute } from '@proxy/server/route-preview'
 import { compactDuration, FRAME_COLUMNS, panel } from '@proxy/tui/panel'
 import { paint, tabAccent } from '@proxy/tui/theme'
 import { MS_PER_SECOND } from '@proxy/utils/time'
@@ -50,7 +51,18 @@ export function cooldownCell(
   room: number,
   routing: PreviewRules
 ): string {
-  const cooldown = nextCooldown(model, routing, now)
+  return cooldownText(nextCooldown(model, routing, now), now, room)
+}
+
+/**
+ * Renders a cooldown as {@link cooldownCell} does.
+ *
+ * @param cooldown - the cooldown, or `undefined` for none
+ * @param now - the time now, in milliseconds since the epoch
+ * @param room - the cell's columns
+ * @returns the text, or `''`
+ */
+function cooldownText(cooldown: Cooldown | undefined, now: number, room: number): string {
   if (cooldown === undefined) return ''
   // Rounded up to the second: a cooldown with a moment left still reads `1s`, not `0s`.
   const left = Math.max(0, Math.ceil((cooldown.until - now) / MS_PER_SECOND)) * MS_PER_SECOND
@@ -151,13 +163,15 @@ function effortFacts(model: ExposedModel): { range: string; skips: readonly Reas
 }
 
 /**
- * Lists the detail pane's lines for a model: its full public ID, provider and login, its efforts
- * and the levels it skips, its cooldown with the reason, and what Enter does.
+ * Lists the detail pane's lines for a model: its full public ID, provider and the login a request
+ * would call now (#379) when it isn't the provider's own, its efforts and the levels it skips, that
+ * login's cooldown with the reason, and what Enter does. The login and the cooldown come from the
+ * same preview, so they never name two logins.
  *
  * @param model - the exposed model
  * @param width - the pane's content columns
  * @param now - the time now, for the cooldown
- * @param routing - the reserve and the logins' fallback classes, for the cooldown
+ * @param routing - the reserve and the logins' fallback classes, for the login it would call
  * @returns the lines
  */
 function modelDetailLines(
@@ -167,8 +181,13 @@ function modelDetailLines(
   routing: PreviewRules
 ): string[] {
   const { range, skips } = effortFacts(model)
-  const login = model.login === model.provider ? [] : detailField('login', model.login, width)
-  const cooldown = cooldownCell(model, now, Number.POSITIVE_INFINITY, routing)
+  const { next } = previewRoute(model, routing, now)
+  const login = next.login === model.provider ? [] : detailField('login', next.login, width)
+  const cooldown = cooldownText(
+    activeCooldown(loginSubject(next), now),
+    now,
+    Number.POSITIVE_INFINITY
+  )
   return [
     ...detailField('id', model.publicId, width),
     ...detailField('provider', model.provider, width),

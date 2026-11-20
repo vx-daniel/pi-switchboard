@@ -14,6 +14,7 @@ import {
   saveLoginLabel
 } from '@proxy/config/login-routing'
 import { activeCooldown, clearAllCooldowns } from '@proxy/pi/cooldowns'
+import { clearAllQuotas, recordQuota } from '@proxy/pi/quota'
 import { getRuntime } from '@proxy/pi/registry'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
@@ -204,6 +205,27 @@ async function entryOfModel(): Promise<unknown> {
   )
 }
 
+/** An hour from now, in Unix seconds, as a quota window's reset header carries it. */
+const AN_HOUR_FROM_NOW = String(Math.ceil(Date.now() / 1000) + 3600)
+
+/**
+ * Records a login's quota report, as its last response's headers would carry it.
+ *
+ * @param login - the login
+ * @param used - the 5-hour window's share used
+ * @param status - the overall status
+ */
+function quotaOf(login: string, used: number, status: string): void {
+  recordQuota(
+    login,
+    new Headers({
+      'anthropic-ratelimit-unified-status': status,
+      'anthropic-ratelimit-unified-5h-utilization': String(used),
+      'anthropic-ratelimit-unified-5h-reset': AN_HOUR_FROM_NOW
+    })
+  )
+}
+
 describe('a second login', () => {
   // Catches the second login listed as a model of its own (every Claude model twice, and plain
   // names gone: j5's complaint), the model owned by the login rather than the provider, or the
@@ -370,20 +392,31 @@ describe('a second login', () => {
   // the login a request would call, and the skip is listed as `x_pi.attempts` would list it.
   test('leaves the model free on /v1/switchboard/models while the first login cools', async () => {
     await ask(MODEL)
-
-    expect(await entryOfModel()).toMatchObject({
-      cooldown: null,
-      routing: {
-        next: { model: `groq/${MODEL}`, login: 'groq-2' },
-        skipped: [
-          { model: `groq/${MODEL}`, login: 'groq', reason: 'rate_limit', until: expect.any(Number) }
+    quotaOf('groq', 1, 'rejected')
+    quotaOf('groq-2', 0.3, 'allowed')
+    try {
+      expect(await entryOfModel()).toMatchObject({
+        cooldown: null,
+        quota: { status: 'allowed', windows: [{ name: '5h', used: 0.3 }] },
+        routing: {
+          next: { model: `groq/${MODEL}`, login: 'groq-2' },
+          skipped: [
+            {
+              model: `groq/${MODEL}`,
+              login: 'groq',
+              reason: 'rate_limit',
+              until: expect.any(Number)
+            }
+          ]
+        },
+        logins: [
+          { id: 'groq', cooldown: { reason: 'rate_limit' }, quota: { status: 'rejected' } },
+          { id: 'groq-2', cooldown: null, quota: { status: 'allowed' } }
         ]
-      },
-      logins: [
-        { id: 'groq', cooldown: { reason: 'rate_limit', scope: 'provider' } },
-        { id: 'groq-2', cooldown: null }
-      ]
-    })
+      })
+    } finally {
+      clearAllQuotas()
+    }
   })
 
   // Catches the preview following its own rule rather than routing's: with

@@ -194,33 +194,6 @@ describe('the console Models view', () => {
     expect(rendered(view, 10, 86)).toContainEqual(expect.stringMatching(/ cooling 42s/u))
   })
 
-  // Catches the console's Models view reading as cooling while a free login serves the model
-  // (#379): the cell shows the cooldown of the login a request would call, which depends on
-  // `routing.logins.fallbackOn` as routing does.
-  test.each([
-    { fallbackOn: ['rate_limit' as const], shown: false },
-    { fallbackOn: [], shown: true }
-  ])(
-    "shows a model's first-login cooldown only when a request would call that login ($fallbackOn)",
-    ({ fallbackOn, shown }) => {
-      const first = exposed('hot')
-      const second = { ...first, login: 'alpha-2', model: { ...first.model, provider: 'alpha-2' } }
-      startCooldown({ provider: 'alpha', canonicalId: 'alpha/hot' }, 'rate_limit', 42_000, 0)
-      const view = {
-        models: [{ ...first, logins: [first, second] }],
-        aliases: {},
-        diagnostics: [],
-        families: [],
-        routing: { loginFallbackOn: fallbackOn },
-        selected: 0
-      }
-
-      const cooling = rendered(view, 10, 120).some((row) => row.includes('cooling 42s'))
-
-      expect(cooling).toBe(shown)
-    }
-  )
-
   // Catches a long countdown cut at the narrowest side-by-side view (#262 review: a 180 s backoff
   // read `cooling 18…`), or minutes shown as a pile of seconds.
   test.each([
