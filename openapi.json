@@ -492,6 +492,21 @@
                           "description": "When the response that reported it arrived, as an ISO 8601 time."
                         },
                         "status": {
+                          "description": "The overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset until the next response.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "statusResetsAt": {
+                          "description": "When the overall status resets, as an ISO 8601 time (Anthropic, #382).",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "statusWindow": {
+                          "description": "The window that decided it, such as Anthropic's `five_hour` (#382).",
                           "type": [
                             "string",
                             "null"
@@ -556,6 +571,8 @@
                       "required": [
                         "observedAt",
                         "status",
+                        "statusResetsAt",
+                        "statusWindow",
                         "plan",
                         "windows"
                       ],
@@ -803,7 +820,27 @@
                     "description": "When the response that reported it arrived, in Unix seconds."
                   },
                   "status": {
-                    "description": "The provider's overall status, such as Anthropic's `allowed`.",
+                    "description": "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset (`status_resets_at` passed, or a window reset) until the next response.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status_resets_at": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "When the overall status resets, in Unix seconds (Anthropic, #382)."
+                  },
+                  "status_window": {
+                    "description": "The window that decided the overall status, as the provider names it, such as Anthropic's `five_hour` (#382).",
                     "type": [
                       "string",
                       "null"
@@ -876,6 +913,8 @@
                 "required": [
                   "observed_at",
                   "status",
+                  "status_resets_at",
+                  "status_window",
                   "plan",
                   "windows"
                 ],
@@ -1041,7 +1080,27 @@
                           "description": "When the response that reported it arrived, in Unix seconds."
                         },
                         "status": {
-                          "description": "The provider's overall status, such as Anthropic's `allowed`.",
+                          "description": "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset (`status_resets_at` passed, or a window reset) until the next response.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status_resets_at": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When the overall status resets, in Unix seconds (Anthropic, #382)."
+                        },
+                        "status_window": {
+                          "description": "The window that decided the overall status, as the provider names it, such as Anthropic's `five_hour` (#382).",
                           "type": [
                             "string",
                             "null"
@@ -1114,6 +1173,8 @@
                       "required": [
                         "observed_at",
                         "status",
+                        "status_resets_at",
+                        "status_window",
                         "plan",
                         "windows"
                       ],

@@ -46,6 +46,8 @@ function quota(provider: string, used: readonly [number, number]): ProviderQuota
     provider,
     observedAt: NOW,
     status: 'allowed',
+    statusResetsAt: undefined,
+    statusWindow: undefined,
     plan: undefined,
     windows: [
       {

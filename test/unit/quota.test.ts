@@ -26,6 +26,8 @@ describe('readQuota', () => {
   test("Anthropic's unified windows, as 0–1 shares", () => {
     expect(readQuota(ANTHROPIC)).toEqual({
       status: 'allowed',
+      statusResetsAt: 1_792_639_800_000,
+      statusWindow: 'five_hour',
       plan: undefined,
       windows: [
         { name: '5h', used: 0, resetsAt: 1_792_639_800_000, windowMinutes: 300, status: 'allowed' },
@@ -44,6 +46,8 @@ describe('readQuota', () => {
   test("Codex's primary and secondary windows, from percentages", () => {
     expect(readQuota(CODEX)).toEqual({
       status: undefined,
+      statusResetsAt: undefined,
+      statusWindow: undefined,
       plan: 'plus',
       windows: [
         {
@@ -113,6 +117,37 @@ describe('the latest report per provider', () => {
     expect(providerQuota('anthropic', 1_792_639_800_000)).toMatchObject({
       status: undefined,
       windows: [{ name: '7d' }]
+    })
+  })
+
+  // Catches a `rejected` kept after the limit lifted (#382): a login nobody routes to keeps its
+  // last report, so the status must lapse at Anthropic's own `unified-reset`, even while every
+  // window it reported is still running.
+  test('the overall status lapses at its own reset, before any window has reset', () => {
+    const inSeconds = (hours: number): string => String(NOW / 1000 + hours * 3600)
+    recordQuota(
+      'anthropic',
+      new Headers({
+        'anthropic-ratelimit-unified-status': 'rejected',
+        'anthropic-ratelimit-unified-reset': inSeconds(1),
+        'anthropic-ratelimit-unified-representative-claim': 'five_hour',
+        'anthropic-ratelimit-unified-5h-utilization': '1',
+        'anthropic-ratelimit-unified-5h-reset': inSeconds(2)
+      }),
+      NOW
+    )
+    const anHourOn = NOW + 3_600_000
+
+    expect(providerQuota('anthropic', anHourOn - 1)).toMatchObject({
+      status: 'rejected',
+      statusResetsAt: anHourOn,
+      statusWindow: 'five_hour'
+    })
+    expect(providerQuota('anthropic', anHourOn)).toMatchObject({
+      status: undefined,
+      statusResetsAt: undefined,
+      statusWindow: undefined,
+      windows: [{ name: '5h', used: 1 }]
     })
   })
 })

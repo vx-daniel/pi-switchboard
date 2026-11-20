@@ -123,13 +123,15 @@ A provider that answers 429 is cooled down, so a chain stops calling it first on
 Subscriptions report on every response how much of each usage window the account has used. The proxy keeps the latest report per login and shows it on `/healthz/creds` and, per model and per login, on `/v1/switchboard/models` (below, with Unix-second times; `/healthz/creds` gives the same fields in camelCase with ISO 8601 times). A client can check whether a model has room before starting a long run, without making a call.
 
 ```json
-"quota": { "observed_at": 1792622040, "status": "allowed", "plan": null, "windows": [
+"quota": { "observed_at": 1792622040, "status": "allowed", "status_resets_at": 1792639800,
+  "status_window": "five_hour", "plan": null, "windows": [
   { "name": "5h", "used": 0, "resets_at": 1792639800, "window_minutes": 300, "status": "allowed" },
   { "name": "7d", "used": 0.47, "resets_at": 1792893600, "window_minutes": 10080, "status": "allowed" }] }
 ```
 
 - **Who reports.** Anthropic subscriptions (`5h` and `7d` windows) and ChatGPT plans signed in as **OpenAI Codex (legacy)** (`openai-codex`: `primary`, 5 hours, and `secondary`, 7 days). A ChatGPT plan signed in through pi 1.4's **OpenAI** login ("Sign in with ChatGPT") reports nothing: OpenAI sends no quota headers on that route (recorded 2026-10-28), so it shows `null` and a reserve never skips it. Google and API-key logins report nothing either, and show `null`.
 - **`used`** is the share of the window used, from 0 to 1. A window that has reset since is left out, and a provider with nothing left to show is `null` until its next response.
+- **`status`** is the provider's overall status (Anthropic's `allowed` or `rejected`). Anthropic also says when it resets (`status_resets_at`) and which window decided it (`status_window`, such as `five_hour`). Once that time passes, or any window resets, the status is `null` until the login's next response. A login nobody routes to after a `rejected` so stops showing it once the limit has lifted (#382).
 - **Only the shared login.** A request that sends its own key records nothing. Only the window fields, status and plan are kept, never an account or organization ID.
 - **Keep some in reserve.** A fallback chain can skip a provider before it runs out. Set the share of each window to keep free, per provider, in `proxy-config.json`:
 
