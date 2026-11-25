@@ -389,6 +389,9 @@ describe('route totals', () => {
     'count a credential refusal as an auth failure, and the fallback past it: %s',
     async (_when, alias) => {
       expect(await ask('locked-mock')).toBe(502)
+      // The refusal cooled the login (#357), and the alias names `auth`, so it would skip the
+      // login unchecked; this case counts a refusal the chain moves past, so it checks it again.
+      clearAllCooldowns()
       expect(await ask(alias)).toBe(200)
 
       const locked = { ...EMPTY, provider: 'keyless', model: 'keyless/locked-mock', requests: 1 }
