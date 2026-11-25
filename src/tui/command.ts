@@ -5,8 +5,13 @@
  * @packageDocumentation
  */
 
+import { join } from 'node:path'
+
+import { piAgentDir } from '@proxy/config/agent-dir'
+import type { ServerConfig } from '@proxy/config/env'
 import { settingOverrides } from '@proxy/config/settings'
-import { configureLogging, type LoggingOptions } from '@proxy/logging'
+import { configureLogging, type LoggingOptions, proxyLogger } from '@proxy/logging'
+import { recordConsoleEvent } from '@proxy/server/console-events'
 import {
   buildCliOverrides,
   type CliArgs,
@@ -24,6 +29,46 @@ import { defineCommand } from 'citty'
 const LOG_LINES_KEPT = 5000
 /** The log lines printed with a failure, for its context. */
 const RECENT_LINES = 20
+/** The console's log file in pi's agent dir, unless `PI_SWITCHBOARD_CONSOLE_LOG_FILE` names one. */
+const LOG_FILE = 'pi-switchboard.log'
+
+/** Logger for the console. */
+const consoleLogger = proxyLogger('tui')
+
+/**
+ * Names the console's log file (#389).
+ *
+ * @returns `PI_SWITCHBOARD_CONSOLE_LOG_FILE` when set and not empty, else `pi-switchboard.log` in
+ *   pi's agent dir
+ */
+function consoleLogPath(): string {
+  const named = process.env.PI_SWITCHBOARD_CONSOLE_LOG_FILE
+  return named === undefined || named === '' ? join(piAgentDir(), LOG_FILE) : named
+}
+
+/**
+ * Makes the console's logging: the buffer always, and the log file while `consoleLog` is on
+ * (#389). Turning the file on or off, at the start or a restart, is one line and one event.
+ *
+ * @param output - the buffer's format and writer
+ * @returns the function that logs as a config says
+ */
+function consoleLogging(output: Omit<LoggingOptions, 'level'>): (running: ServerConfig) => void {
+  let writing: string | undefined
+  return (running) => {
+    const file = running.consoleLogEnabled ? consoleLogPath() : undefined
+    configureLogging({ ...output, level: running.logLevel, file })
+    if (file === writing) return
+    writing = file
+    if (file === undefined) {
+      consoleLogger.info('Stopped writing the log file')
+      recordConsoleEvent('Stopped writing the log file')
+      return
+    }
+    consoleLogger.info('Writing the log to {path} too', { path: file })
+    recordConsoleEvent(`Writing the log to ${file}`)
+  }
+}
 
 /** Why the console cannot run without a terminal to draw on and read keys from. */
 const NOT_INTERACTIVE =
@@ -68,13 +113,15 @@ export const tuiCommand = defineCommand({
       process.exitCode = 1
       return
     }
+    const logAs = consoleLogging(output)
+    logAs(config)
     logEffectiveConfig(config)
     // The console has restored the terminal and closed the server by the time it settles or
     // throws; open keep-alive connections and pi's timers would keep the process up, so it exits.
     const failure = await runConsole(config, logs, {
       overrides: settingOverrides(buildCliOverrides(args), process.env),
       reload: () => reloadConfig(args),
-      logAt: (level) => configureLogging({ ...output, level })
+      logAs
     }).then(
       () => undefined,
       (error: unknown) =>

@@ -334,6 +334,7 @@ describe('normalizeConfig', () => {
       docsUi: true,
       responsesApi: true,
       stats: false,
+      consoleLog: false,
       maxBodySizeMb: 100,
       upstreamTimeoutSec: 300,
       publicModelIdMode: 'always-prefixed',

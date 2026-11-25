@@ -488,6 +488,7 @@ describe('starting the server', () => {
       docsUiEnabled: true,
       responsesApiEnabled: true,
       statsEnabled: false,
+      consoleLogEnabled: true,
       maxBodySize: BODY_SIZE_MB * BYTES_PER_MB,
       upstreamTimeoutMs: UPSTREAM_TIMEOUT_SEC * MS_PER_SECOND,
       publicModelIdMode: expect.any(String) as string,

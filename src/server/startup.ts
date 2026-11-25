@@ -350,6 +350,7 @@ export function logEffectiveConfig(config: ServerConfig): void {
     docsUiEnabled: config.docsUiEnabled,
     responsesApiEnabled: config.responsesApiEnabled,
     statsEnabled: config.statsEnabled,
+    consoleLogEnabled: config.consoleLogEnabled,
     maxBodySize: config.maxBodySize,
     upstreamTimeoutMs: config.upstreamTimeoutMs,
     publicModelIdMode: config.publicModelIdMode,

@@ -2828,6 +2828,15 @@ on a TTY and JSON Lines with a UTC `@timestamp` otherwise; `--log-format` / `PI_
 (`pretty`, `json`) overrides that choice. Passing `/healthz` checks log at `debug`. The pi
 extension logs to a file only when `PI_SWITCHBOARD_EXTENSION_LOG_FILE` is set.
 
+`pi-switchboard tui` logs to its in-memory buffer (the last 5000 lines) and, unless `consoleLog`
+is off, to a file as well (#389): `pi-switchboard.log` in pi's agent dir or
+`PI_SWITCHBOARD_CONSOLE_LOG_FILE`, JSON Lines through the same redaction, written per record and
+owner-only, rotated at 20 MiB into one `.1` file (`src/logging/rotating-file.ts`; not
+`@logtape/file`'s rotating sink, which opens each new file with the umask). The path is taken
+from the environment only, never from `proxy-config.json`, so neither the console's Settings
+nor an admin UI editor can point the proxy's writes at another file. A file that fails is one
+warning, never a stopped proxy. The headless CLI writes no file; whatever runs it keeps stderr.
+
 A JSON line's `message` keeps LogTape's rendering, which quotes every string value
 (`Listening on http://"0.0.0.0":4141`). This is deliberate (#159): values such as the requested
 model, a path or `X-Client-Request-Id` come from clients, and the quotes keep a crafted one from

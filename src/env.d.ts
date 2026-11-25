@@ -25,6 +25,9 @@ declare namespace NodeJS {
     PI_SWITCHBOARD_DOCS_UI?: string | undefined
     PI_SWITCHBOARD_RESPONSES_API?: string | undefined
     PI_SWITCHBOARD_STATS?: string | undefined
+    PI_SWITCHBOARD_CONSOLE_LOG?: string | undefined
+    /** Where `pi-switchboard tui` writes its log file (#389). Unset or empty: in pi's agent dir. */
+    PI_SWITCHBOARD_CONSOLE_LOG_FILE?: string | undefined
     PI_SWITCHBOARD_MAX_BODY_SIZE?: string | undefined
     PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS?: string | undefined
     PI_SWITCHBOARD_LOG_LEVEL?: string | undefined

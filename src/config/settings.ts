@@ -30,6 +30,7 @@ export const SETTING_KEYS = [
   'responsesApi',
   'docsUi',
   'stats',
+  'consoleLog',
   'authToken',
   'publicModelIdMode',
   'modelExposureMode',
@@ -200,6 +201,14 @@ const SPECS: Readonly<Record<SettingKey, SettingSpec>> = {
     running: (config) => onOff(config.statsEnabled),
     flag: '--stats',
     env: 'PI_SWITCHBOARD_STATS'
+  },
+  consoleLog: {
+    section: 'features',
+    label: 'Console log file',
+    help: "Also write pi-switchboard tui's log to pi-switchboard.log in pi's agent dir (PI_SWITCHBOARD_CONSOLE_LOG_FILE moves it): JSON Lines, owner-only, two files of 20 MiB at most. Redacted like every log.",
+    saved: (file) => onOff(file.consoleLog),
+    running: (config) => onOff(config.consoleLogEnabled),
+    env: 'PI_SWITCHBOARD_CONSOLE_LOG'
   },
   authToken: {
     section: 'auth',

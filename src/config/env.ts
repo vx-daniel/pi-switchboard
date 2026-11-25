@@ -168,6 +168,8 @@ export interface ServerConfig {
   readonly responsesApiEnabled: boolean
   /** Whether per-minute traffic stats are kept in the stats file (#216). */
   readonly statsEnabled: boolean
+  /** Whether `pi-switchboard tui` also writes its log to a file (#389). */
+  readonly consoleLogEnabled: boolean
   /** Maximum request body size in bytes. */
   readonly maxBodySize: number
   /**
@@ -209,6 +211,8 @@ const RUNTIME_ENV_SUFFIXES = [
   'DOCS_UI',
   'RESPONSES_API',
   'STATS',
+  'CONSOLE_LOG',
+  'CONSOLE_LOG_FILE',
   'MAX_BODY_SIZE',
   'UPSTREAM_TIMEOUT_MS',
   'LOG_LEVEL',
@@ -291,6 +295,7 @@ type Switches = Pick<
   | 'docsUiEnabled'
   | 'responsesApiEnabled'
   | 'statsEnabled'
+  | 'consoleLogEnabled'
 >
 
 /**
@@ -328,7 +333,12 @@ function resolveSwitches(cli: CliOverrides, file: ProxyConfig): Switches {
       ),
     statsEnabled:
       cli.stats ??
-      parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats)
+      parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats),
+    consoleLogEnabled: parseBoolean(
+      'PI_SWITCHBOARD_CONSOLE_LOG',
+      process.env.PI_SWITCHBOARD_CONSOLE_LOG,
+      file.consoleLog
+    )
   }
 }
 

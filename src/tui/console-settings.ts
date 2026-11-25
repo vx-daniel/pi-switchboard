@@ -176,7 +176,7 @@ async function askSwitch(
  */
 function switchEdit(
   key: SettingKey,
-  field: 'hostOriginGuard' | 'remoteImages' | 'responsesApi' | 'docsUi' | 'stats'
+  field: 'hostOriginGuard' | 'remoteImages' | 'responsesApi' | 'docsUi' | 'stats' | 'consoleLog'
 ): SettingEdit {
   return async (editor, file) => {
     const on = await askSwitch(editor, key, file[field])
@@ -471,6 +471,7 @@ const EDITS: Readonly<Record<Exclude<SettingKey, 'authToken'>, SettingEdit>> = {
   responsesApi: switchEdit('responsesApi', 'responsesApi'),
   docsUi: switchEdit('docsUi', 'docsUi'),
   stats: switchEdit('stats', 'stats'),
+  consoleLog: switchEdit('consoleLog', 'consoleLog'),
   publicModelIdMode: async (editor, file) => {
     const mode = await editor.screens.select(
       `Public model IDs (now ${file.publicModelIdMode})`,

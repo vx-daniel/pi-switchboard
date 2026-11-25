@@ -389,6 +389,12 @@ export const ProxyConfigSchema = z.object({
   responsesApi: z.boolean(),
   /** Keep per-minute traffic stats in a SQLite file in pi's agent dir, for the console (#216). */
   stats: z.boolean(),
+  /**
+   * Also write the console's log to a file (#389): `pi-switchboard.log` in pi's agent dir, or
+   * `PI_SWITCHBOARD_CONSOLE_LOG_FILE`. `pi-switchboard tui` only; the headless proxy logs to
+   * stderr.
+   */
+  consoleLog: z.boolean(),
   /** Max request body in MB. */
   maxBodySizeMb: boundedInt(1, MAX_BODY_SIZE_MB),
   /** Seconds the upstream provider may send nothing before a call is aborted. */
@@ -459,6 +465,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   docsUi: false,
   responsesApi: false,
   stats: true,
+  consoleLog: true,
   maxBodySizeMb: 50,
   upstreamTimeoutSec: 120,
   lifetime: 'detached',
@@ -691,6 +698,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     docsUi: field('docsUi', fields.docsUi, () => DEFAULT_CONFIG.docsUi),
     responsesApi: field('responsesApi', fields.responsesApi, () => DEFAULT_CONFIG.responsesApi),
     stats: field('stats', fields.stats, () => DEFAULT_CONFIG.stats),
+    consoleLog: field('consoleLog', fields.consoleLog, () => DEFAULT_CONFIG.consoleLog),
     maxBodySizeMb: field(
       'maxBodySizeMb',
       fields.maxBodySizeMb,
