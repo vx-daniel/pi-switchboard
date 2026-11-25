@@ -28,7 +28,11 @@ import { testConfig } from '../helpers'
 function input(fields: Partial<SettingsInput> = {}): SettingsInput {
   return {
     file: DEFAULT_CONFIG,
-    running: { ...testConfig(), statsEnabled: DEFAULT_CONFIG.stats },
+    running: {
+      ...testConfig(),
+      statsEnabled: DEFAULT_CONFIG.stats,
+      consoleLogEnabled: DEFAULT_CONFIG.consoleLog
+    },
     authOn: false,
     authInvalid: false,
     overrides: {},

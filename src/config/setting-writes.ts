@@ -111,6 +111,8 @@ const WRITERS: Readonly<
     checked(FIELDS.responsesApi, value, (responsesApi) => ({ ...file, responsesApi })),
   docsUi: (file, value) => checked(FIELDS.docsUi, value, (docsUi) => ({ ...file, docsUi })),
   stats: (file, value) => checked(FIELDS.stats, value, (stats) => ({ ...file, stats })),
+  consoleLog: (file, value) =>
+    checked(FIELDS.consoleLog, value, (consoleLog) => ({ ...file, consoleLog })),
   publicModelIdMode: (file, value) =>
     checked(FIELDS.publicModelIdMode, value, (publicModelIdMode) => ({
       ...file,

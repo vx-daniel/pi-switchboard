@@ -171,6 +171,35 @@ describe('redaction', () => {
       rmSync(directory, { recursive: true, force: true })
     }
   })
+
+  // Catches the console's log file (#389) skipping the redaction its log view gets: the file is a
+  // second sink beside the buffer, and a log file outlives the screen.
+  test('console log file: every listed property is replaced there too, as on the other sink', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pi-proxy-console-log-'))
+    const path = join(directory, 'pi-switchboard.log')
+    try {
+      lines = []
+      configureLogging({
+        level: 'info',
+        format: 'console',
+        write: (line) => lines.push(line),
+        file: path
+      })
+      proxyLogger('pi', 'registry').warn('Credential resolution failed', {
+        ...credentialProperties,
+        promptTokens: 12
+      })
+      resetSync()
+
+      const text = readFileSync(path, 'utf8')
+      expect(text).not.toContain('notarealsecret')
+      expect(lines.join('')).not.toContain('notarealsecret')
+      const [record] = text.trim().split('\n')
+      expect(JSON.parse(record ?? '{}')).toMatchObject({ properties: expectedProperties })
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
 })
 
 describe('pretty output', () => {

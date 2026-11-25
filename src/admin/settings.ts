@@ -130,6 +130,7 @@ const INPUTS: Readonly<Record<SettingKey, (choices: Choices) => SettingInput>> =
   responsesApi: () => SWITCH_INPUT,
   docsUi: () => SWITCH_INPUT,
   stats: () => SWITCH_INPUT,
+  consoleLog: () => SWITCH_INPUT,
   logLevel: () => ({ kind: 'choice', options: getLogLevels() }),
   publicModelIdMode: () => ({ kind: 'choice', options: PublicModelIdModeSchema.options }),
   modelExposureMode: () => ({ kind: 'choice', options: ModelExposureModeSchema.options }),

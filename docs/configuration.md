@@ -31,6 +31,7 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | `settings.json` | pi | pi's settings; the proxy reads only `enabledModels`, for `scoped` exposure |
 | `proxy-config.json` | pi-switchboard | The settings below. A missing file means every default |
 | `pi-switchboard-stats.sqlite` | pi-switchboard | Per-minute traffic stats for the console and the usage route, kept 30 days (`stats`) |
+| `pi-switchboard.log`, `pi-switchboard.log.1` | pi-switchboard | `pi-switchboard tui`'s log as JSON Lines, 20 MiB each at most (`consoleLog`, [Logging](#logging)) |
 
 ## Every setting
 
@@ -44,6 +45,7 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | [Responses API](api.md#responses-api-experimental) | `--responses-api` | `PI_SWITCHBOARD_RESPONSES_API` | `responsesApi` | `false` | `true`, `false` |
 | [Docs page](api.md#api-documentation) | `--docs-ui` | `PI_SWITCHBOARD_DOCS_UI` | `docsUi` | `false` | `true`, `false` |
 | [Stats](#what-the-proxy-adds) | `--stats`, `--no-stats` | `PI_SWITCHBOARD_STATS` | `stats` | `true` | `true`, `false` |
+| [Console log file](#logging) | — | `PI_SWITCHBOARD_CONSOLE_LOG` | `consoleLog` | `true` | `true`, `false` |
 | Max request body | `--max-body-size` (MB) | `PI_SWITCHBOARD_MAX_BODY_SIZE` (bytes) | `maxBodySizeMb` (MB) | 50 MB | 1–500 MB |
 | [Upstream idle timeout](#what-the-proxy-adds) | `--upstream-timeout` (s) | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` (ms) | `upstreamTimeoutSec` (s) | 120 s | 5–600 s |
 | [Log level](#logging) | `--log-level` | `PI_SWITCHBOARD_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warning`, `error`, `fatal` |
@@ -69,6 +71,7 @@ Environment variables with no flag or file key:
 |---|---|
 | `PI_CODING_AGENT_DIR` | pi's agent directory, where every file above is ([Where the files are](#where-the-files-are)) |
 | `PI_SWITCHBOARD_EXTENSION_LOG_FILE` | Where the pi extension writes its log, which it otherwise keeps quiet ([Logging](#logging)) |
+| `PI_SWITCHBOARD_CONSOLE_LOG_FILE` | Where `pi-switchboard tui` writes its log file, instead of `pi-switchboard.log` in pi's agent dir ([Logging](#logging)) |
 | `NO_COLOR` | Any value but empty turns off the console's colors and the pretty log's |
 | `PI_CACHE_RETENTION` | pi's own: `long` asks every provider that has one for its longer prompt cache. pi reads it from the proxy's environment; `pi-switchboard doctor` reads it from its own to judge whether that pays ([Retention](caching.md#retention)) |
 | `PI_SWITCHBOARD_GITHUB_CLIENT_ID`, `PI_SWITCHBOARD_GITHUB_CLIENT_SECRET`, `PI_SWITCHBOARD_ADMIN_SESSION_KEY` (each also as `…_FILE`) | The admin UI's sign-in: its GitHub App and the key that signs its cookies ([Give it its secrets](admin-ui.md#3-give-it-its-secrets)) |
@@ -185,6 +188,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 | Responses API | `PI_SWITCHBOARD_RESPONSES_API` | `false` | Answer the experimental `POST /v1/responses` ([Responses API](api.md#responses-api-experimental)) (`--responses-api`, `responsesApi`) |
 | Docs UI | `PI_SWITCHBOARD_DOCS_UI` | `false` | Serve Swagger UI at `/docs` ([API documentation](api.md#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
 | Stats | `PI_SWITCHBOARD_STATS` | `true` | Keep per-minute traffic stats in `pi-switchboard-stats.sqlite` in pi's agent dir for the console's Stats view (#216) and `pi-switchboard doctor`: requests by model, outcome and status, their timings, how many sent a `prompt_cache_key` (a count, never the key), attempts, failures by class, fallbacks, tokens and cost. Never message content, the request's `user`, or a credential; a rejected request's model name, which the client chose, is cut to 128 characters, and past 20 names a minute the rest count as `(other)`. Rows older than 30 days are deleted. A write that can't get the file's lock within 250 ms is dropped, so stats never stall requests. A file that can't be opened (one from a newer pi-switchboard included) is a warning, and the proxy runs without stats; an older one is migrated in place, keeping its rows ([`doctor`](#checking-the-setup-pi-switchboard-doctor)) (`--stats` / `--no-stats`, `stats`) |
+| Console log file | `PI_SWITCHBOARD_CONSOLE_LOG` | `true` | `pi-switchboard tui` also writes its log to a file (#389); see [Logging](#logging) (`consoleLog`) |
 | Max body size | `PI_SWITCHBOARD_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes, `1048576`–`524288000` (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
 | Upstream timeout | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds, `5000`–`600000` (`--upstream-timeout` in seconds and `upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
 | Log level | `PI_SWITCHBOARD_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
@@ -263,6 +267,8 @@ Message content and credentials are never logged. Credential-named properties ar
 A failed upstream call's raw error text can quote the request back, so it is logged at `debug` only, once per failure, by `pi-switchboard.pi.complete`: as "Upstream error detail", with the call's `provider`, `modelId`, `alias` and `attempt`, after the warning that the call failed or threw; or, for a provider stream that throws once it has started, as "Upstream stream failure detail", after the warning that reading it failed. The route (`server.chat`) and the stream writer (`openai.sse`) log what the failure was mapped to, not the text again.
 
 The pi extension logs nothing by default, because output would corrupt pi's terminal UI. To capture its logs, set `PI_SWITCHBOARD_EXTENSION_LOG_FILE=/path/to/extension.log` before starting pi; the extension then appends JSON Lines there at the configured log level.
+
+`pi-switchboard tui` shows its log in the console, and keeps only the last 5000 lines there. So that a failure's cause outlives the screen and a restart, it also appends every line to `pi-switchboard.log` in pi's agent dir (#389), or to the file `PI_SWITCHBOARD_CONSOLE_LOG_FILE` names. The file takes JSON Lines at the configured log level, with the same redaction as every other log. It is owner-only (`0600`, as `auth.json` is; a file that was there before is narrowed to it), and each line is written as it is logged. Past 20 MiB it becomes `pi-switchboard.log.1`, replacing the one before, so the two take 40 MiB at most. The Requests view says where it writes (`◇ Writing the log to …`). A file that can't be opened or written is one warning in the console, and the proxy runs on without it. `consoleLog: false` (or `PI_SWITCHBOARD_CONSOLE_LOG=false`) turns it off, from the next restart (`r`). The headless `pi-switchboard` writes no file: its stderr goes wherever whatever runs it (systemd, Docker) keeps it.
 
 ## Proxy authentication
 

@@ -148,6 +148,7 @@ export function testConfig(): ServerConfig {
     docsUiEnabled: false,
     responsesApiEnabled: false,
     statsEnabled: false,
+    consoleLogEnabled: false,
     maxBodySize: 52428800,
     upstreamTimeoutMs: 120000,
     publicModelIdMode: 'collision-prefixed',
