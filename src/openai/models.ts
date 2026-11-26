@@ -15,6 +15,7 @@ import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import { REASONING_EFFORTS } from '@proxy/openai/schemas'
 import { modelAvailability } from '@proxy/pi/availability'
 import { activeCooldown, type Cooldown, loginSubject } from '@proxy/pi/cooldowns'
+import { type LoginHealth, loginHealth } from '@proxy/pi/login-health'
 import { providerQuota, type ProviderQuota } from '@proxy/pi/quota'
 import type { RoutePreview } from '@proxy/server/route-preview'
 import { MS_PER_SECOND, unixSecondsNow } from '@proxy/utils/time'
@@ -104,6 +105,47 @@ const cooldownSchema = z
     description:
       'The cooldown the login is under (#68), or null. A route that names the reason in its ' +
       '`fallbackOn` skips it until then; one that names neither still calls it.'
+  })
+
+/** A login's credential health on `/v1/switchboard/models` (#388). Documents the response. */
+const credentialSchema = z
+  .object({
+    status: z.enum(['working', 'failing', 'unknown']).meta({
+      description:
+        '`failing` while its latest result is a failure, `working` while it is a success, ' +
+        '`unknown` before this process saw either. Learned from calls and verifications only: a ' +
+        'login no request reaches keeps its last status, and `GET /healthz/creds?verify=true` ' +
+        'checks every login now.'
+    }),
+    last_ok: z
+      .int()
+      .nonnegative()
+      .nullable()
+      .meta({
+        description:
+          'When it was last shown good, in Unix seconds: a whole answer under it, or a passing ' +
+          'verification of an OAuth login. Null before either.'
+      }),
+    last_failure: z
+      .object({
+        at: z.int().nonnegative().meta({ description: 'When, in Unix seconds.' }),
+        reason: z
+          .string()
+          .trim()
+          .meta({
+            description:
+              "Why: pi's summary of a credential it could not resolve (an OAuth refresh the " +
+              'provider rejected, with its HTTP status), or the provider refusing it (401 or 403). ' +
+              "Never the credential or the token endpoint's body."
+          })
+      })
+      .nullable()
+      .meta({ description: 'Its last failure, or null.' })
+  })
+  .meta({
+    description:
+      "Whether the login's credential works (#388), from what this process saw since it started. " +
+      'A login logged in or out in the console starts over.'
   })
 
 /** A login's quota on `/v1/switchboard/models`. Documents the response; never parsed. */
@@ -259,6 +301,13 @@ const piModelCapabilitiesSchema = z
         "The subscription quota of `routing.next`'s login (#69, #379), or null when it reports " +
         'none. Each login has its own in `logins`.'
     }),
+    credential: credentialSchema.meta({
+      description:
+        "The credential health of `routing.next`'s login (#388): `failing` there means a request " +
+        'naming the model now is answered with that failure, since routing passes a failing ' +
+        'login over only while it cools down (2 minutes) and the hop past it names `auth`. Each ' +
+        'login has its own in `logins`.'
+    }),
     routing: routingSchema,
     availability: z.enum(['verified', 'refused', 'unknown']).meta({
       description:
@@ -280,14 +329,16 @@ const piModelCapabilitiesSchema = z
               'credential, but routing never calls it.'
           }),
           cooldown: cooldownSchema,
-          quota: quotaSchema
+          quota: quotaSchema,
+          credential: credentialSchema
         })
       )
       .meta({
         description:
           'The logins that may serve the model, in the order routing tries them (#227), as ' +
           '`routing.logins.order` sets it (#233); then the disabled ones, which it never tries. ' +
-          "Each login's own `cooldown` and `quota`; the model's are those of `routing.next`."
+          "Each login's own `cooldown`, `quota` and `credential`; the model's are those of " +
+          '`routing.next`.'
       })
   })
   .meta({ id: 'ModelCapabilities', description: 'What pi knows about an exposed model.' })
@@ -344,12 +395,32 @@ function quotaField(quota: ProviderQuota | undefined): PiModelList['data'][numbe
 }
 
 /**
- * Reports one login of a model: whether it is disabled (#233), its cooldown (#68) and its quota
- * (#69).
+ * Reports what is known of a login's credential (#388), as `/v1/switchboard/models` shows it.
+ *
+ * @param health - the login's health
+ * @returns its status, and its last success and failure in Unix seconds
+ */
+function credentialField(health: LoginHealth): PiModelList['data'][number]['credential'] {
+  return {
+    status: health.status,
+    last_ok: health.lastOk === undefined ? null : Math.floor(health.lastOk / MS_PER_SECOND),
+    last_failure:
+      health.lastFailure === undefined
+        ? null
+        : {
+            at: Math.floor(health.lastFailure.at / MS_PER_SECOND),
+            reason: health.lastFailure.reason
+          }
+  }
+}
+
+/**
+ * Reports one login of a model: whether it is disabled (#233), its cooldown (#68), its quota
+ * (#69) and its credential's health (#388).
  *
  * @param login - the login's entry: its provider is the login
  * @param disabled - whether `routing.logins.disabled` names it
- * @returns the login's ID, whether it is disabled, its cooldown and its quota
+ * @returns the login's ID, whether it is disabled, its cooldown, quota and credential
  */
 function loginField(
   login: ExposedModel,
@@ -359,7 +430,8 @@ function loginField(
     id: login.login,
     disabled,
     cooldown: cooldownField(activeCooldown(loginSubject(login))),
-    quota: quotaField(providerQuota(login.login))
+    quota: quotaField(providerQuota(login.login)),
+    credential: credentialField(loginHealth(login.login))
   }
 }
 
@@ -420,6 +492,7 @@ export function buildPiModelList(
         },
         cooldown: next.cooldown,
         quota: next.quota,
+        credential: next.credential,
         routing: routingField(preview),
         availability: modelAvailability(exposed.canonicalId),
         logins: [...enabled, ...disabled]

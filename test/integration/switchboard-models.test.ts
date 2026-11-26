@@ -58,6 +58,9 @@ async function catalogue(): Promise<Map<unknown, unknown>> {
   return new Map(data.map((listed: unknown) => [isRecord(listed) ? listed['id'] : listed, listed]))
 }
 
+/** A login no call has reached yet (#388). */
+const UNKNOWN_CREDENTIAL = { status: 'unknown', last_ok: null, last_failure: null }
+
 describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
   // Catches a field missing, renamed, or taken from the wrong pi field (`maxTokens` as the context
   // window, `cacheWrite` as the read price): a client prices and sizes its runs from these.
@@ -74,9 +77,12 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       cost: { input: 2.5, output: 15, cache_read: 0.25, cache_write: 3.125 },
       cooldown: null,
       quota: null,
+      credential: UNKNOWN_CREDENTIAL,
       routing: { next: { model: 'acme/big-mock', login: 'acme' }, skipped: [] },
       availability: 'unknown',
-      logins: [{ id: 'acme', disabled: false, cooldown: null, quota: null }]
+      logins: [
+        { id: 'acme', disabled: false, cooldown: null, quota: null, credential: UNKNOWN_CREDENTIAL }
+      ]
     })
   })
 
@@ -104,9 +110,12 @@ describe("GET /v1/switchboard/models: pi's catalogue entry per model", () => {
       cost: { input: 0, output: 0, cache_read: 0, cache_write: 0 },
       cooldown: null,
       quota: null,
+      credential: UNKNOWN_CREDENTIAL,
       routing: { next: { model: 'acme/plain-mock', login: 'acme' }, skipped: [] },
       availability: 'unknown',
-      logins: [{ id: 'acme', disabled: false, cooldown: null, quota: null }]
+      logins: [
+        { id: 'acme', disabled: false, cooldown: null, quota: null, credential: UNKNOWN_CREDENTIAL }
+      ]
     })
   })
 })

@@ -929,6 +929,68 @@
             ],
             "description": "The subscription quota of `routing.next`'s login (#69, #379), or null when it reports none. Each login has its own in `logins`."
           },
+          "credential": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "working",
+                  "failing",
+                  "unknown"
+                ],
+                "description": "`failing` while its latest result is a failure, `working` while it is a success, `unknown` before this process saw either. Learned from calls and verifications only: a login no request reaches keeps its last status, and `GET /healthz/creds?verify=true` checks every login now."
+              },
+              "last_ok": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "When it was last shown good, in Unix seconds: a whole answer under it, or a passing verification of an OAuth login. Null before either."
+              },
+              "last_failure": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "at": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991,
+                        "description": "When, in Unix seconds."
+                      },
+                      "reason": {
+                        "type": "string",
+                        "description": "Why: pi's summary of a credential it could not resolve (an OAuth refresh the provider rejected, with its HTTP status), or the provider refusing it (401 or 403). Never the credential or the token endpoint's body."
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its last failure, or null."
+              }
+            },
+            "required": [
+              "status",
+              "last_ok",
+              "last_failure"
+            ],
+            "additionalProperties": false,
+            "description": "The credential health of `routing.next`'s login (#388): `failing` there means a request naming the model now is answered with that failure, since routing passes a failing login over only while it cools down (2 minutes) and the hop past it names `auth`. Each login has its own in `logins`."
+          },
           "routing": {
             "type": "object",
             "properties": {
@@ -1189,17 +1251,80 @@
                     }
                   ],
                   "description": "The login's latest subscription quota, from its response headers (#69), or null when it reports none (Google, API keys, or no call since the proxy started). A window that has reset since is left out."
+                },
+                "credential": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "working",
+                        "failing",
+                        "unknown"
+                      ],
+                      "description": "`failing` while its latest result is a failure, `working` while it is a success, `unknown` before this process saw either. Learned from calls and verifications only: a login no request reaches keeps its last status, and `GET /healthz/creds?verify=true` checks every login now."
+                    },
+                    "last_ok": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "When it was last shown good, in Unix seconds: a whole answer under it, or a passing verification of an OAuth login. Null before either."
+                    },
+                    "last_failure": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991,
+                              "description": "When, in Unix seconds."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Why: pi's summary of a credential it could not resolve (an OAuth refresh the provider rejected, with its HTTP status), or the provider refusing it (401 or 403). Never the credential or the token endpoint's body."
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Its last failure, or null."
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "last_ok",
+                    "last_failure"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Whether the login's credential works (#388), from what this process saw since it started. A login logged in or out in the console starts over."
                 }
               },
               "required": [
                 "id",
                 "disabled",
                 "cooldown",
-                "quota"
+                "quota",
+                "credential"
               ],
               "additionalProperties": false
             },
-            "description": "The logins that may serve the model, in the order routing tries them (#227), as `routing.logins.order` sets it (#233); then the disabled ones, which it never tries. Each login's own `cooldown` and `quota`; the model's are those of `routing.next`."
+            "description": "The logins that may serve the model, in the order routing tries them (#227), as `routing.logins.order` sets it (#233); then the disabled ones, which it never tries. Each login's own `cooldown`, `quota` and `credential`; the model's are those of `routing.next`."
           }
         },
         "required": [
@@ -1214,6 +1339,7 @@
           "cost",
           "cooldown",
           "quota",
+          "credential",
           "routing",
           "availability",
           "logins"

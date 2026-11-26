@@ -36,6 +36,7 @@ import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { noteAvailability } from '@proxy/pi/availability'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
 import { clearCooldowns, loginSubject } from '@proxy/pi/cooldowns'
+import { noteCredentialFailure, noteCredentialOk } from '@proxy/pi/login-health'
 import { canonicalModelId } from '@proxy/pi/model-id'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
@@ -219,6 +220,7 @@ async function checkCredential(
     model: canonicalModelId(model),
     reason: requestAuth.error
   })
+  noteCredentialFailure(model.provider, requestAuth.error)
   return CREDENTIALS_MISSING
 }
 
@@ -485,6 +487,7 @@ async function attemptStream(
         // A started stream is not yet an answer: a refusal can still come as an error event.
         if (!failed && options.signal?.aborted !== true) {
           noteAvailability(candidate.canonicalId, job.options, 'answered')
+          if (job.options.upstreamApiKey === undefined) noteCredentialOk(candidate.login)
         }
         active.end(requestOutcome(failed, options.signal))
       }
@@ -529,6 +532,7 @@ async function attemptComplete(
       return final(upstreamFailure(mapFailedCall(message), options))
     }
     noteAvailability(candidate.canonicalId, job.options, 'answered')
+    if (job.options.upstreamApiKey === undefined) noteCredentialOk(candidate.login)
     return {
       kind: 'answered',
       respond: (route) => honoContext.json(job.format.complete(message, route))
@@ -729,6 +733,12 @@ async function tryCandidate(
   recordRouteFailure(key, failed)
   const waitMs = captured === undefined ? undefined : resetAfterMs(captured)
   if (sharedLogin) recordCooldown(candidate, failed, waitMs)
+  // The provider refused the login's credential; one pi could not resolve was recorded, with its
+  // reason, when it was checked.
+  const missing = outcome.answer.body.error.code === CREDENTIALS_MISSING.body.error.code
+  if (sharedLogin && failed === 'auth' && !missing) {
+    noteCredentialFailure(candidate.login, 'the provider refused the credential (401 or 403)')
+  }
   const next = moveOn(job, position, failed, attempts)
   if (next !== undefined) return { next }
   outcome.report()
