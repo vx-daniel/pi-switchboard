@@ -1,13 +1,17 @@
 /**
- * A refused credential cools its login (#357): a 401 from the provider, or a credential pi can't
- * resolve, is remembered for 2 minutes, so a route whose `fallbackOn` names `auth` passes the dead
- * login over instead of paying its round trip on every request. Two logins of pi's built-in Groq
- * provider against the mock, the proxy as deployed (its config file read per request).
+ * A refused credential cools its login (#357) and marks it failing (#388): a 401 from the
+ * provider, or a credential pi can't resolve, is remembered for 2 minutes, so a route whose
+ * `fallbackOn` names `auth` passes the dead login over instead of paying its round trip on every
+ * request, and `/v1/switchboard/models` says the login fails until it works again. Two logins of
+ * pi's built-in Groq provider against the mock, the proxy as deployed (its config file read per
+ * request).
  */
 
 import { activeCooldown, clearAllCooldowns } from '@proxy/pi/cooldowns'
+import { clearLoginHealth } from '@proxy/pi/login-health'
 import { createApp } from '@proxy/server/app'
 import { fileConfigReader } from '@proxy/server/routes'
+import { isRecord } from '@proxy/utils/guards'
 import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vite-plus/test'
 
 import { type FixtureAgentDir, loadFixtureAgentDir, writeProxyConfig } from '../fixtures/agent-dir'
@@ -85,6 +89,7 @@ beforeAll(async () => {
 
 beforeEach(() => {
   clearAllCooldowns()
+  clearLoginHealth()
   writeProxyConfig(agentDir.path, {})
 })
 
@@ -125,6 +130,22 @@ async function ask(
     .slice(before)
     .map((request) => request.headers.authorization?.replace('Bearer ', ''))
   return { status: response.status, body, upstreamKeys }
+}
+
+/**
+ * Reads a model's entry on `/v1/switchboard/models`.
+ *
+ * @param id - the model's public ID
+ * @returns the entry, or `undefined` when it isn't listed
+ */
+async function switchboardEntry(id: string): Promise<unknown> {
+  const body = await jsonBody(
+    await createApp(testConfig(), fileConfigReader).request('/v1/switchboard/models')
+  )
+  const data: unknown = isRecord(body) ? body['data'] : undefined
+  return Array.isArray(data)
+    ? (data as unknown[]).find((model) => isRecord(model) && model['id'] === id)
+    : undefined
 }
 
 describe('a refused credential', () => {
@@ -195,6 +216,64 @@ describe('a refused credential', () => {
     const second = await ask('pair')
     expect(second.body).toMatchObject({
       x_pi: { attempts: [{ model: `no-credential/${COLD_MODEL}`, reason: 'auth', skipped: true }] }
+    })
+  })
+})
+
+describe("a login's credential health (#388)", () => {
+  // Catches the LAN host's blind spot: a login that answers 401 was reported enabled, free and
+  // within quota while every request failed. With the default `fallbackOn` the dead login is the
+  // one a request calls, so the model itself reads failing, with why; the other login, never
+  // reached, stays unknown.
+  test('a login the provider refuses reads failing, and so does the model routing would call it for', async () => {
+    await ask()
+
+    const failing = {
+      status: 'failing',
+      last_ok: null,
+      last_failure: {
+        at: expect.any(Number) as number,
+        reason: 'the provider refused the credential (401 or 403)'
+      }
+    }
+    expect(await switchboardEntry(MODEL)).toMatchObject({
+      credential: failing,
+      logins: [
+        { id: 'groq', credential: failing },
+        { id: 'groq-2', credential: { status: 'unknown', last_ok: null, last_failure: null } }
+      ]
+    })
+  })
+
+  // Catches a login reading failing after it worked again, or working before anything proved it:
+  // the latest result wins, and an answer under the login is what shows it good.
+  test('a login that answers reads working, with when; the model follows the login routing calls', async () => {
+    loginFallbackOn(['rate_limit', 'auth'])
+    await ask()
+
+    const entry = await switchboardEntry(MODEL)
+
+    expect(entry).toMatchObject({
+      routing: { next: { login: 'groq-2' } },
+      credential: { status: 'working', last_ok: expect.any(Number) as number },
+      logins: [{ id: 'groq', credential: { status: 'failing' } }, { id: 'groq-2' }]
+    })
+  })
+
+  // Catches a credential pi can't resolve (#388: an OAuth refresh rejected) reported without why,
+  // or learned only from a request: a verification checks every login, and gives pi's summary.
+  test("a credential that doesn't resolve reads failing with pi's reason, from a verification too", async () => {
+    const verified = await createApp(testConfig(), fileConfigReader).request(
+      '/healthz/creds?verify=true'
+    )
+    // A provider whose credential fails makes the check fail: 503, and the details in the body.
+    expect(verified.status).toBe(503)
+
+    expect(await switchboardEntry(COLD_MODEL)).toMatchObject({
+      credential: {
+        status: 'failing',
+        last_failure: { reason: expect.stringMatching(/no-credential/) as string }
+      }
     })
   })
 })

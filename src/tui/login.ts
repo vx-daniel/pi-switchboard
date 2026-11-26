@@ -28,6 +28,7 @@ import {
   registerAccountProvider,
   unregisterAccountProvider
 } from '@proxy/pi/accounts'
+import { forgetLoginHealth } from '@proxy/pi/login-health'
 import { recordConsoleEvent } from '@proxy/server/console-events'
 
 /** One entry of pi's login provider selector. */
@@ -283,6 +284,7 @@ export async function runLogin(
   }
   loginLogger.info('Logged in to {provider} ({type})', { provider: providerId, type })
   recordConsoleEvent(`Logged in to ${providerId} (${type})`)
+  forgetLoginHealth(providerId)
   const refreshed = await runtime.refresh({
     providers: [providerId],
     signal: AbortSignal.timeout(CATALOG_REFRESH_MS)
@@ -315,6 +317,7 @@ export async function runLogout(
   await runtime.logout(providerId, { signal })
   loginLogger.info('Logged out of {provider}', { provider: providerId })
   recordConsoleEvent(`Logged out of ${providerId}`)
+  forgetLoginHealth(providerId)
   unregisterAccountProvider(runtime, providerId)
   if (loginLabels()[providerId] !== undefined) saveLoginLabel(providerId, '')
 }

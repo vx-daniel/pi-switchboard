@@ -14,6 +14,7 @@ import type { Api, Model } from '@earendil-works/pi-ai'
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
 import { registerStoredAccounts } from '@proxy/pi/accounts'
+import { noteCredentialFailure, noteCredentialOk } from '@proxy/pi/login-health'
 import { errorMessage } from '@proxy/utils/guards'
 import * as z from 'zod'
 
@@ -410,7 +411,9 @@ export const providerCredentialStatusSchema = z.object({
 export type ProviderCredentialStatus = z.infer<typeof providerCredentialStatusSchema>
 
 /**
- * Resolves one provider's credential now, which may refresh an OAuth token over the network.
+ * Resolves one provider's credential now, which may refresh an OAuth token over the network, and
+ * records the result as the login's credential health (#388): a failure, or for an OAuth login a
+ * success (an API key that resolves is only set, not shown good).
  *
  * @param provider - the provider ID
  * @returns `verified: true`, or `verified: false` with a summary of why
@@ -420,14 +423,16 @@ async function verifyProvider(
 ): Promise<Pick<ProviderCredentialStatus, 'verified' | 'error'>> {
   try {
     const resolved = await getRuntime().getAuth(provider)
-    return resolved === undefined
-      ? { verified: false, error: 'no credentials configured' }
-      : { verified: true }
-  } catch (error) {
-    return {
-      verified: false,
-      error: reportAuthFailure({ action: 'verification', provider }, error)
+    if (resolved === undefined) {
+      noteCredentialFailure(provider, 'no credentials configured')
+      return { verified: false, error: 'no credentials configured' }
     }
+    if (getRuntime().isUsingOAuth(provider)) noteCredentialOk(provider)
+    return { verified: true }
+  } catch (error) {
+    const reason = reportAuthFailure({ action: 'verification', provider }, error)
+    noteCredentialFailure(provider, reason)
+    return { verified: false, error: reason }
   }
 }
 
