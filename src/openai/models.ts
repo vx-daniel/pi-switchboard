@@ -89,11 +89,13 @@ const pricePerMillionSchema = z
 /** A login's cooldown on `/v1/switchboard/models`. Documents the response; never parsed. */
 const cooldownSchema = z
   .object({
-    reason: z.enum(['rate_limit', 'unavailable']).meta({
-      description: 'The failure it is cooling down from: a 429, or a 503 or 529.'
+    reason: z.enum(['rate_limit', 'unavailable', 'auth']).meta({
+      description:
+        'The failure it is cooling down from: a 429, a 503 or 529, or a refused or unresolvable ' +
+        'credential (#357: a 401 or 403, or a token pi could not refresh).'
     }),
     scope: z.enum(['provider', 'model']).meta({
-      description: 'A 429 cools the whole login; an overload, the model.'
+      description: 'A 429 or a refused credential cools the whole login; an overload, the model.'
     }),
     until: z.int().nonnegative().meta({ description: 'When it ends, in Unix seconds.' })
   })

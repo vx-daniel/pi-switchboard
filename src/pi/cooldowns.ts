@@ -1,15 +1,20 @@
 /**
- * Cooldowns after rate limits and overload (#68): which providers and models are failing, and
- * until when, kept in memory for the life of the process.
+ * Cooldowns after rate limits, overload and refused credentials (#68, #357): which providers and
+ * models are failing, and until when, kept in memory for the life of the process.
  *
  * @remarks
  * - **Scope.** A 429 (`rate_limit`) cools the **login** that met it (#227), every model it serves:
- *   a subscription's limits apply to the account. A 503 or 529 (`unavailable`) cools the **model**.
+ *   a subscription's limits apply to the account. So does a refused or unresolvable credential
+ *   (`auth`, #357): a 401 or 403, or a token pi can't refresh. A 503 or 529 (`unavailable`) cools
+ *   the **model**.
  * - **Length.** The time the failed response gives (`src/pi/reset-time.ts`), however long. When it
  *   gives none, a growing default: 60 s, then 180 s, then doubling (360 s, 720 s, …) for each
- *   failure in a row, until a time is given or a call succeeds.
- * - **Recorded from every request; applied only by routing.** Every 429, 503 or 529 is recorded,
- *   whichever request met it, so `/healthz/models` and `/v1/switchboard/models` show it. Routing
+ *   failure in a row, until a time is given or a call succeeds. An `auth` cooldown is a fixed
+ *   2 minutes: a dead credential stays dead, and the next look after it costs one check. It never
+ *   shortens a longer cooldown its login is under (a weekly limit outlasts it).
+ * - **Recorded from every request; applied only by routing.** Every 429, 503 or 529, and every
+ *   refused credential, is recorded whichever request met it (a request with its own upstream key
+ *   excepted), so `/healthz/models` and `/v1/switchboard/models` show it. Routing
  *   skips a cooling candidate only when the hop past it names the class (principle VI): an
  *   alias's `fallbackOn` between models, `routing.logins.fallbackOn` between a model's logins
  *   (`src/server/route-cooldowns.ts`). With neither, the model is still called.
@@ -29,7 +34,7 @@ import { MS_PER_SECOND } from '@proxy/utils/time'
 const cooldownLogger = proxyLogger('server', 'chat')
 
 /** The failure classes that start a cooldown. */
-export type CooldownReason = 'rate_limit' | 'unavailable'
+export type CooldownReason = 'rate_limit' | 'unavailable' | 'auth'
 
 /** The model a cooldown is recorded or looked up for. */
 export interface CooldownSubject {
@@ -56,7 +61,7 @@ export function loginSubject(candidate: {
 
 /** One provider's or model's cooldown. */
 export interface Cooldown {
-  /** `provider` after a 429, `model` after a 503 or 529. */
+  /** `provider` after a 429 or a refused credential, `model` after a 503 or 529. */
   readonly scope: 'provider' | 'model'
   readonly provider: string
   /** The canonical ID, for a model's cooldown. */
@@ -80,6 +85,8 @@ const SECOND_BACKOFF_MS = 180_000
 const BACKOFF_GROWTH = 2
 /** The streak whose cooldown is {@link SECOND_BACKOFF_MS}. */
 const SECOND_STREAK = 2
+/** An `auth` cooldown, in milliseconds: fixed, with no backoff (#357). */
+const AUTH_COOLDOWN_MS = 120_000
 
 /** Cooldowns by key ({@link keyOf}), active or expired; an expired one keeps its streak. */
 const cooldowns = new Map<string, Cooldown>()
@@ -125,9 +132,10 @@ function keyOf(scope: Cooldown['scope'], name: string): string {
  *
  * @param subject - the model that failed
  * @param reason - its failure class
- * @param waitMs - the wait the failed response gave, or `undefined` when it gave none
+ * @param waitMs - the wait the failed response gave, or `undefined` when it gave none; an `auth`
+ *   cooldown ignores it
  * @param now - the current time
- * @returns the cooldown
+ * @returns the cooldown now in force: an `auth` failure keeps a longer one its login is under
  */
 export function startCooldown(
   subject: CooldownSubject,
@@ -135,9 +143,14 @@ export function startCooldown(
   waitMs: number | undefined,
   now: number = Date.now()
 ): Cooldown {
-  const scope = reason === 'rate_limit' ? 'provider' : 'model'
+  const scope = reason === 'unavailable' ? 'model' : 'provider'
   const key = keyOf(scope, nameOf(scope, subject))
-  const streak = waitMs === undefined ? (cooldowns.get(key)?.streak ?? 0) + 1 : 0
+  const before = cooldowns.get(key)
+  if (reason === 'auth' && before !== undefined && before.until >= now + AUTH_COOLDOWN_MS) {
+    return before
+  }
+  const fixed = reason === 'auth'
+  const streak = fixed || waitMs !== undefined ? 0 : (before?.streak ?? 0) + 1
   const cooldown: Cooldown = {
     scope,
     provider: subject.provider,
@@ -145,8 +158,11 @@ export function startCooldown(
     reason,
     since: now,
     // A long enough streak of failures would grow the default past what a Date can hold.
-    until: Math.min(now + (waitMs ?? backoffMs(streak)), LATEST_DATE_MS),
-    source: waitMs === undefined ? 'backoff' : 'response',
+    until: Math.min(
+      now + (fixed ? AUTH_COOLDOWN_MS : (waitMs ?? backoffMs(streak))),
+      LATEST_DATE_MS
+    ),
+    source: waitMs === undefined || fixed ? 'backoff' : 'response',
     streak
   }
   cooldowns.set(key, cooldown)

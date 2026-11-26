@@ -94,6 +94,34 @@ describe('cooldowns', () => {
     expect(() => new Date(until).toISOString()).not.toThrow()
   })
 
+  // Catches a refused credential (#357) cooling more than its login, growing like a rate limit's
+  // backoff, or taking a wait a response stated; and a dead login re-checked on every request.
+  test("a refused credential cools its login, not the provider's others, for a fixed 2 minutes", () => {
+    for (let failure = 0; failure < 3; failure += 1) {
+      expect(startCooldown(OPUS, 'auth', 5000, NOW)).toMatchObject({
+        scope: 'provider',
+        reason: 'auth',
+        until: NOW + 2 * MINUTE,
+        streak: 0
+      })
+    }
+    expect(activeCooldown(SONNET, NOW)).toMatchObject({ reason: 'auth' })
+    expect(activeCooldown(loginSubject(OPUS_2), NOW)).toBeUndefined()
+  })
+
+  // Catches a refused credential cutting short the cooldown of a login at its weekly limit (the
+  // LAN host's case in #388: a 4-day cooldown replaced by 2 minutes would call it again at once).
+  test('a refused credential never shortens a longer cooldown its login is under', () => {
+    const fourDays = 4 * 24 * 60 * MINUTE
+    startCooldown(OPUS, 'rate_limit', fourDays, NOW)
+
+    startCooldown(OPUS, 'auth', undefined, NOW)
+
+    expect(activeCooldown(OPUS, NOW)).toMatchObject({ reason: 'rate_limit', until: NOW + fourDays })
+    startCooldown(OPUS, 'rate_limit', 30_000, NOW)
+    expect(startCooldown(OPUS, 'auth', undefined, NOW)).toMatchObject({ reason: 'auth' })
+  })
+
   // Catches a cooldown outliving its end, or one a success doesn't clear.
   test('ends at its time, or when a model of it answers', () => {
     startCooldown(OPUS, 'rate_limit', 30_000, NOW)

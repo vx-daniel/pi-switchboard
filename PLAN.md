@@ -503,7 +503,16 @@ State is in memory (`src/pi/cooldowns.ts`), and routing on it is in `src/server/
 
 - **Scope.** A 429 (`rate_limit`) cools the **login** that met it (#227: `anthropic-2` apart from
   `anthropic`): a subscription's limit covers the account. A 503 or 529 (`unavailable`) cools the
-  **model**, under every login.
+  **model**, under every login. A refused or unresolvable credential (`auth`, #357) cools the
+  **login**: an upstream 401 or 403 (`upstream_auth_error`), or the credential preflight finding
+  one pi can't resolve (`upstream_credentials_missing`: an OAuth token whose refresh is rejected,
+  #388). It lasts a fixed 2 minutes (`AUTH_COOLDOWN_MS`), with no backoff and no wait read from
+  the response, and never replaces a longer cooldown its login is under, so a weekly limit isn't
+  cut to 2 minutes. A login cooling for `auth` is skipped only where the hop past it names `auth`
+  (principle VI); with the default `routing.logins.fallbackOn` it is still called, and the
+  cooldown only shows on `/healthz/models` and `/v1/switchboard/models`. A 401 raced by a token
+  refresh is unlikely (pi refreshes under a lock, five minutes before expiry), and costs 2 minutes
+  of skipping at most; a success sent after the cooldown started clears it, as for any cooldown.
 - **Length: from the failed response, no cap** (`src/pi/reset-time.ts`). pi calls `onResponse`
   only after a success (except Codex), so the proxy passes pi a `fetch` (`capturingFetch`) that
   copies each 429, 503 and 529 (status, headers, and up to 16 KiB of the body, from a clone).

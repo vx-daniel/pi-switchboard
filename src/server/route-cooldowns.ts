@@ -4,16 +4,17 @@
  *
  * @remarks
  * - **Skipped only where the route names the class.** A candidate cooling down after a 429 is
- *   skipped only when the hop past it is named for `rate_limit`, and after a 503 or 529 only when
- *   it is named for `unavailable` (principle VI): the alias's `fallbackOn` between models, and
- *   `routing.logins.fallbackOn` between a model's logins (#227). A chain that names neither calls
- *   it as before #68.
+ *   skipped only when the hop past it is named for `rate_limit`, after a 503 or 529 only when it
+ *   is named for `unavailable`, and after a refused credential only when it is named for `auth`
+ *   (principle VI): the alias's `fallbackOn` between models, and `routing.logins.fallbackOn`
+ *   between a model's logins (#227). A chain that names none calls it as before #68.
  * - **Never skip them all.** When every remaining candidate is cooling down, the one whose cooldown
  *   ends first is tried, so the request still makes one real call.
- * - **Every failure is recorded.** A `rate_limit` or `unavailable` failure from any request starts
- *   a cooldown, so the operator and clients see it even before a chain uses it.
- * - **Keyed by login.** A 429 cools the login that met it (`candidate.login`), not the provider's
- *   other logins; a 503 or 529 cools the model, under every login (#227).
+ * - **Every failure is recorded.** A `rate_limit`, `unavailable` or `auth` failure from any
+ *   request starts a cooldown, so the operator and clients see it even before a chain uses it.
+ * - **Keyed by login.** A 429 or a refused credential cools the login that met it
+ *   (`candidate.login`), not the provider's other logins; a 503 or 529 cools the model, under
+ *   every login (#227).
  *
  * @packageDocumentation
  */
@@ -158,8 +159,9 @@ export function attemptOf(
 }
 
 /**
- * Starts the cooldown a failed attempt calls for: after a 429 its login's, after a 503 or 529
- * its model's, for as long as the failed response says (`src/pi/reset-time.ts`).
+ * Starts the cooldown a failed attempt calls for: after a 429 its login's, for as long as the
+ * failed response says (`src/pi/reset-time.ts`); after a 503 or 529 its model's, likewise; after
+ * a refused credential (`auth`, #357) its login's, for a fixed 2 minutes.
  *
  * @param candidate - the model that failed
  * @param failure - the failure's class
@@ -170,6 +172,6 @@ export function recordCooldown(
   failure: FailureClass | undefined,
   waitMs: number | undefined
 ): void {
-  if (failure !== 'rate_limit' && failure !== 'unavailable') return
+  if (failure !== 'rate_limit' && failure !== 'unavailable' && failure !== 'auth') return
   startCooldown(loginSubject(candidate), failure, waitMs)
 }

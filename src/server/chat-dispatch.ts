@@ -265,9 +265,11 @@ export type CredentialedStart =
 /**
  * Finds the first candidate whose credential resolves, moving past the others when the hop's
  * `fallbackOn` names `auth`. Run before remote images are fetched, so a request no provider can
- * take fetches nothing (#109 review). A candidate the dispatch would pass over, cooling down or
- * below its quota reserve, is passed over here too, before its credential is checked (#381):
- * otherwise a login the reserve routes around could fail the request with its credential. A skip
+ * take fetches nothing (#109 review). A refused credential cools its login for 2 minutes (#357),
+ * so a route whose `fallbackOn` names `auth` passes it over without checking it again. A candidate
+ * the dispatch would pass over, cooling down or below its quota reserve, is passed over here too,
+ * before its credential is checked (#381): otherwise a login the reserve routes around could fail
+ * the request with its credential. A skip
  * here is final, as a cooldown skip always was: the dispatch starts past it, so a window that
  * resets while images are fetched doesn't bring the login back, and the request keeps to what
  * `x_pi.attempts` lists (#386 review).
@@ -298,10 +300,12 @@ export async function findCredentialedStart(
     if (refused === undefined) {
       return { kind: 'ready', candidates: route.candidates.slice(position), attempts }
     }
-    // A refused credential is an attempt that failed `auth`, as `x_pi.attempts` lists it.
+    // A refused credential is an attempt that failed `auth`, as `x_pi.attempts` lists it. Only the
+    // proxy's own login is checked (a request's own upstream key always passes), so it cools.
     const key = routeKey(alias, candidate, project)
     recordRouteAttempt(key)
     recordRouteFailure(key, failureClass(refused))
+    recordCooldown(candidate, 'auth', undefined)
     const nextPosition = nextFor(route.candidates, position, route, 'auth')
     const next = nextPosition === undefined ? undefined : route.candidates[nextPosition]
     if (nextPosition === undefined || next === undefined) {
