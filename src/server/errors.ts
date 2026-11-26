@@ -400,9 +400,11 @@ function upstreamStatusIn(message: string): number | undefined {
  * A plan's usage limit in a provider's words: Codex's "You have hit your ChatGPT usage limit" and
  * `usage_limit_reached` (#185). No leading word boundary, so it also matches
  * `subscription_sharing_usage_limit_exceeded`; it ends where a letter would follow, so "usage
- * limitations" is not one.
+ * limitations" is not one. Also Zhipu/Z.ai's error code `1308` (a 429 whose limit resets after
+ * hours), matched as pi 1.5's retry classifier matches it (`pi-ai/utils/retry`, #360), whatever
+ * its message says.
  */
-const USAGE_LIMIT_WORDING = /usage[\s_-]?limits?(?![a-z])/i
+const USAGE_LIMIT_WORDING = /usage[\s_-]?limits?(?![a-z])|"code"\s*:\s*"?1308(?![0-9])/i
 
 /**
  * Wording that identifies a failure when the message carries no status: Bedrock, network

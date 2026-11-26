@@ -52,6 +52,7 @@ function request(fields: Partial<ActiveRequest>, ageMs = 12_000): ActiveRequest 
     attempt: 1,
     stream: true,
     promptCacheKey: false,
+    project: null,
     firstEventAt: undefined,
     startedAt: NOW - ageMs,
     ...fields
@@ -137,6 +138,8 @@ function login(provider: string, shares: readonly number[]): SidebarAccount {
       provider,
       observedAt: NOW,
       status: undefined,
+      statusResetsAt: undefined,
+      statusWindow: undefined,
       plan: undefined,
       windows: shares.map((used, index) => ({
         name: `w${String(index)}`,
@@ -175,6 +178,8 @@ describe('the console sidebar', () => {
               provider: 'a-provider-with-a-very-long-name-indeed',
               observedAt: NOW,
               status: undefined,
+              statusResetsAt: undefined,
+              statusWindow: undefined,
               plan: undefined,
               windows: [
                 {
@@ -342,6 +347,8 @@ describe('the console sidebar', () => {
                 provider: 'anthropic',
                 observedAt: NOW,
                 status: 'allowed',
+                statusResetsAt: undefined,
+                statusWindow: undefined,
                 plan: undefined,
                 windows: [
                   {

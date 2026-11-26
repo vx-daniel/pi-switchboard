@@ -36,6 +36,7 @@ import type { ChatCompletionRequest } from '@proxy/openai/schemas'
 import { noteAvailability } from '@proxy/pi/availability'
 import { type CompletionOptions, piComplete, piStream } from '@proxy/pi/complete'
 import { clearCooldowns, loginSubject } from '@proxy/pi/cooldowns'
+import { noteCredentialFailure, noteCredentialOk } from '@proxy/pi/login-health'
 import { canonicalModelId } from '@proxy/pi/model-id'
 import { recordQuota } from '@proxy/pi/quota'
 import { getRequestAuth } from '@proxy/pi/registry'
@@ -130,16 +131,6 @@ export function failureClass(answer: FailedAnswer): FailureClass | undefined {
 }
 
 /**
- * Logs a failed call's raw upstream message at debug, never higher: some providers quote parts of
- * the request back.
- *
- * @param detail - the raw upstream error message, or `undefined` when there is none
- */
-function logUpstreamDetail(detail: string | undefined): void {
-  if (detail !== undefined) chatLogger.debug('Upstream error detail: {detail}', { detail })
-}
-
-/**
  * Logs a mapped upstream failure.
  *
  * @remarks
@@ -149,17 +140,14 @@ function logUpstreamDetail(detail: string | undefined): void {
  * so their line is a warning; any other failure is an error. The level follows the mapped status
  * on purpose: mapping decides whose fault a failure is (a credential problem a provider answers
  * with 400 maps to a 502, so it stays an error), and any future mapping to 400 is a client error
- * too. The raw upstream `detail` stays at debug ({@link logUpstreamDetail}). The request's IDs
- * come from the logging context.
+ * too. The provider's raw text is not logged here: `pi.complete` logs it once, at debug, beside
+ * the line that names the call's model, alias and attempt (#339). The request's IDs come from the
+ * logging context.
  *
  * @param mapped - the status and body the client gets
- * @param detail - the raw upstream error message, or `undefined` when there is none
  * @returns `mapped`, unchanged
  */
-function reportUpstreamFailure(
-  mapped: MappedUpstreamError,
-  detail: string | undefined
-): MappedUpstreamError {
+function reportUpstreamFailure(mapped: MappedUpstreamError): MappedUpstreamError {
   const properties = {
     status: mapped.status,
     message: mapped.body.error.message,
@@ -170,7 +158,6 @@ function reportUpstreamFailure(
   } else {
     chatLogger.error('Upstream call failed with {status}: {message}', properties)
   }
-  logUpstreamDetail(detail)
   if (mapped.status === HTTP_TOO_MANY_REQUESTS || mapped.status === HTTP_SERVICE_UNAVAILABLE) {
     chatLogger.warn('Upstream overloaded ({upstreamStatus}, {code})', {
       upstreamStatus: mapped.status,
@@ -181,16 +168,23 @@ function reportUpstreamFailure(
 }
 
 /**
- * Maps and logs a thrown upstream failure, as {@link reportUpstreamFailure} does.
+ * Maps and logs a throw out of a started stream, as {@link reportUpstreamFailure} does, with the
+ * thrown message at debug, never higher: some providers quote parts of the request back.
+ *
+ * @remarks
+ * The one failure whose text the route logs: such a throw ends no upstream call, so `pi.complete`
+ * never sees it (#339). It reaches the route only when the call has no idle timeout; with one, the
+ * relay logs the text and sends on an error event instead.
  *
  * @param err - the thrown value; an `Error`'s message is both mapped and logged as the detail
  * @returns the status and body the client gets
  */
 function reportThrownFailure(err: unknown): MappedUpstreamError {
-  return reportUpstreamFailure(
-    mapUpstreamError(err),
-    err instanceof Error ? err.message : undefined
-  )
+  const mapped = reportUpstreamFailure(mapUpstreamError(err))
+  if (err instanceof Error) {
+    chatLogger.debug('Upstream error detail: {detail}', { detail: err.message })
+  }
+  return mapped
 }
 
 /**
@@ -226,6 +220,7 @@ async function checkCredential(
     model: canonicalModelId(model),
     reason: requestAuth.error
   })
+  noteCredentialFailure(model.provider, requestAuth.error)
   return CREDENTIALS_MISSING
 }
 
@@ -272,24 +267,34 @@ export type CredentialedStart =
 /**
  * Finds the first candidate whose credential resolves, moving past the others when the hop's
  * `fallbackOn` names `auth`. Run before remote images are fetched, so a request no provider can
- * take fetches nothing (#109 review).
+ * take fetches nothing (#109 review). A refused credential cools its login for 2 minutes (#357),
+ * so a route whose `fallbackOn` names `auth` passes it over without checking it again. A candidate
+ * the dispatch would pass over, cooling down or below its quota reserve, is passed over here too,
+ * before its credential is checked (#381): otherwise a login the reserve routes around could fail
+ * the request with its credential. A skip
+ * here is final, as a cooldown skip always was: the dispatch starts past it, so a window that
+ * resets while images are fetched doesn't bring the login back, and the request keeps to what
+ * `x_pi.attempts` lists (#386 review).
  *
- * @param route - the planned candidates and fallback classes
+ * @param route - the planned candidates, fallback classes and quota reserve (none when absent)
  * @param upstreamApiKey - the `X-Switchboard-Upstream-Api-Key` value, or `undefined`
  * @param alias - the alias whose chain it is, for the log
+ * @param project - the project the request named, for the stats; `undefined` for none
  * @returns the candidates from that one on, with the attempts skipped, or the last 502 answer
  */
 export async function findCredentialedStart(
-  route: ChatRoute,
+  route: ChatRoute & { readonly reserve?: Reserve | undefined },
   upstreamApiKey: string | undefined,
-  alias: string | undefined
+  alias: string | undefined,
+  project: string | undefined
 ): Promise<CredentialedStart> {
   const attempts: Attempt[] = []
+  const chain = { ...route, reserve: route.reserve ?? {}, alias }
   let position = 0
   while (position < route.candidates.length) {
     const candidate = route.candidates[position]
     if (candidate === undefined) break
-    if (skipCooling({ ...route, alias }, position, attempts)) {
+    if (skipsCandidate(chain, position, attempts)) {
       position += 1
       continue
     }
@@ -297,10 +302,12 @@ export async function findCredentialedStart(
     if (refused === undefined) {
       return { kind: 'ready', candidates: route.candidates.slice(position), attempts }
     }
-    // A refused credential is an attempt that failed `auth`, as `x_pi.attempts` lists it.
-    const key = routeKey(alias, candidate)
+    // A refused credential is an attempt that failed `auth`, as `x_pi.attempts` lists it. Only the
+    // proxy's own login is checked (a request's own upstream key always passes), so it cools.
+    const key = routeKey(alias, candidate, project)
     recordRouteAttempt(key)
     recordRouteFailure(key, failureClass(refused))
+    recordCooldown(candidate, 'auth', undefined)
     const nextPosition = nextFor(route.candidates, position, route, 'auth')
     const next = nextPosition === undefined ? undefined : route.candidates[nextPosition]
     if (nextPosition === undefined || next === undefined) {
@@ -319,6 +326,8 @@ export interface DispatchJob extends RouteHops {
   readonly requestId: string
   /** The alias the request named (#66): reported as `x_pi.alias`. */
   readonly alias: string | undefined
+  /** The project the request named (`X-Switchboard-Project`, #366), for the stats. */
+  readonly project: string | undefined
   /** The candidates in order. The first one's credential was already checked. */
   readonly candidates: readonly ExposedModel[]
   /** The quota reserve per login (`routing.reserve`, #69). */
@@ -345,7 +354,6 @@ type AttemptOutcome =
   | {
       readonly kind: 'failed'
       readonly answer: FailedAnswer
-      readonly detail: string | undefined
       /** Logs the failure when it is the one the client gets. */
       readonly report: () => void
     }
@@ -356,22 +364,16 @@ type AttemptOutcome =
  * An attempt that failed with an upstream error.
  *
  * @param mapped - the mapped error
- * @param detail - the raw upstream message, or `undefined`
  * @param options - the call's options: with the client's own upstream key, a refused credential
  *   is answered as that key's ({@link forClientKey})
  * @returns the outcome, logging the failure only if the client gets it
  */
-function upstreamFailure(
-  mapped: MappedUpstreamError,
-  detail: string | undefined,
-  options: CompletionOptions
-): AttemptOutcome {
+function upstreamFailure(mapped: MappedUpstreamError, options: CompletionOptions): AttemptOutcome {
   const answer = options.upstreamApiKey === undefined ? mapped : forClientKey(mapped)
   return {
     kind: 'failed',
     answer,
-    detail,
-    report: () => reportUpstreamFailure(answer, detail)
+    report: () => reportUpstreamFailure(answer)
   }
 }
 
@@ -429,20 +431,15 @@ async function attemptStream(
     started = await piStream(candidate.model, context, request, options)
   } catch (err: unknown) {
     if (options.signal?.aborted === true) return clientLeft()
-    return upstreamFailure(
-      mapUpstreamError(err),
-      err instanceof Error ? err.message : undefined,
-      options
-    )
+    return upstreamFailure(mapUpstreamError(err), options)
   }
   const { first, events } = started
   if (first.done !== true && first.value.type === 'error') {
     if (options.signal?.aborted === true) return clientLeft()
-    const failed = first.value.error
-    return upstreamFailure(mapFailedCall(failed), failed.errorMessage, options)
+    return upstreamFailure(mapFailedCall(first.value.error), options)
   }
 
-  const key = routeKey(job.alias, candidate)
+  const key = routeKey(job.alias, candidate, job.project)
   const respond = (route: ResponseRoute): Response => {
     honoContext.header('content-type', 'text/event-stream')
     honoContext.header('cache-control', 'no-cache')
@@ -490,6 +487,7 @@ async function attemptStream(
         // A started stream is not yet an answer: a refusal can still come as an error event.
         if (!failed && options.signal?.aborted !== true) {
           noteAvailability(candidate.canonicalId, job.options, 'answered')
+          if (job.options.upstreamApiKey === undefined) noteCredentialOk(candidate.login)
         }
         active.end(requestOutcome(failed, options.signal))
       }
@@ -531,21 +529,16 @@ async function attemptComplete(
       durationMs: Math.round(performance.now() - start)
     })
     if (message.stopReason === 'error' || message.stopReason === 'aborted') {
-      return final(upstreamFailure(mapFailedCall(message), message.errorMessage, options))
+      return final(upstreamFailure(mapFailedCall(message), options))
     }
     noteAvailability(candidate.canonicalId, job.options, 'answered')
+    if (job.options.upstreamApiKey === undefined) noteCredentialOk(candidate.login)
     return {
       kind: 'answered',
       respond: (route) => honoContext.json(job.format.complete(message, route))
     }
   } catch (err: unknown) {
-    return final(
-      upstreamFailure(
-        mapUpstreamError(err),
-        err instanceof Error ? err.message : undefined,
-        options
-      )
-    )
+    return final(upstreamFailure(mapUpstreamError(err), options))
   }
 }
 
@@ -584,16 +577,11 @@ async function runAttempt(
     : undefined
   if (refused !== undefined) {
     // checkCredential already logged why.
-    const outcome: AttemptOutcome = {
-      kind: 'failed',
-      answer: refused,
-      detail: undefined,
-      report: () => undefined
-    }
+    const outcome: AttemptOutcome = { kind: 'failed', answer: refused, report: () => undefined }
     return { outcome, captured: undefined }
   }
   let captured: FailedResponse | undefined
-  const key = routeKey(job.alias, candidate)
+  const key = routeKey(job.alias, candidate, job.project)
   const capturing: DispatchJob = {
     ...job,
     request: withAliasEffort(job.request, job.alias, candidate),
@@ -662,14 +650,19 @@ function answerWith(
 
 /**
  * Skips a candidate the chain does not call: cooling down (#68) or below its quota reserve (#69).
+ * The credential preflight and the dispatch both ask it, so they pass over the same ones (#381).
  *
- * @param job - the chain
- * @param position - the candidate's index in `job.candidates`
+ * @param chain - the candidates, fallback classes, quota reserve and alias
+ * @param position - the candidate's index in `chain.candidates`
  * @param attempts - the attempts so far; a skip is added to them
  * @returns whether the candidate is skipped
  */
-function skipsCandidate(job: DispatchJob, position: number, attempts: Attempt[]): boolean {
-  return skipCooling(job, position, attempts) || skipBelowReserve(job, position, attempts)
+function skipsCandidate(
+  chain: ChatRoute & { readonly reserve: Reserve; readonly alias: string | undefined },
+  position: number,
+  attempts: Attempt[]
+): boolean {
+  return skipCooling(chain, position, attempts) || skipBelowReserve(chain, position, attempts)
 }
 
 /**
@@ -678,24 +671,21 @@ function skipsCandidate(job: DispatchJob, position: number, attempts: Attempt[])
  *
  * @param job - the route
  * @param position - the failed candidate's index
- * @param failure - the failure's class, or `undefined` for one that never moves on, and the raw
- *   upstream message, logged at debug
+ * @param failed - the failure's class, or `undefined` for one that never moves on
  * @param attempts - the attempts so far; the failed one is added when the request moves on
  * @returns the next candidate's index, or `undefined` to answer with the failure
  */
 function moveOn(
   job: DispatchJob,
   position: number,
-  failure: { readonly failed: FailureClass | undefined; readonly detail: string | undefined },
+  failed: FailureClass | undefined,
   attempts: Attempt[]
 ): number | undefined {
-  const { failed, detail } = failure
   const candidate = job.candidates[position]
   const nextPosition = nextFor(job.candidates, position, job, failed)
   const next = nextPosition === undefined ? undefined : job.candidates[nextPosition]
   if (candidate === undefined || next === undefined || failed === undefined) return undefined
-  recordRouteFallback(routeKey(job.alias, candidate))
-  logUpstreamDetail(detail)
+  recordRouteFallback(routeKey(job.alias, candidate, job.project))
   logFallback(job.alias, { failed: candidate, next, failure: failed, attempt: attempts.length + 1 })
   attempts.push({ ...attemptOf(candidate), reason: failed })
   return nextPosition
@@ -725,7 +715,7 @@ async function tryCandidate(
   // say nothing about the login other clients share (#181 review).
   const sharedLogin = job.options.upstreamApiKey === undefined
   const sentAt = Date.now()
-  const key = routeKey(job.alias, candidate)
+  const key = routeKey(job.alias, candidate, job.project)
   job.active.attempt(candidate.canonicalId, attempts.length + 1)
   recordRouteAttempt(key)
   const { outcome, captured } = await runAttempt(honoContext, candidate, job, {
@@ -743,7 +733,13 @@ async function tryCandidate(
   recordRouteFailure(key, failed)
   const waitMs = captured === undefined ? undefined : resetAfterMs(captured)
   if (sharedLogin) recordCooldown(candidate, failed, waitMs)
-  const next = moveOn(job, position, { failed, detail: outcome.detail }, attempts)
+  // The provider refused the login's credential; one pi could not resolve was recorded, with its
+  // reason, when it was checked.
+  const missing = outcome.answer.body.error.code === CREDENTIALS_MISSING.body.error.code
+  if (sharedLogin && failed === 'auth' && !missing) {
+    noteCredentialFailure(candidate.login, 'the provider refused the credential (401 or 403)')
+  }
+  const next = moveOn(job, position, failed, attempts)
   if (next !== undefined) return { next }
   outcome.report()
   const { answer, headers } = limitAnswer(outcome.answer, waitMs)

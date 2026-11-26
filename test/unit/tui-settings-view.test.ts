@@ -12,9 +12,9 @@ import {
   type SettingRow,
   settingOverrides,
   settingRows,
-  type SettingsInput,
-  settingsViewRows
-} from '@proxy/tui/settings-view'
+  type SettingsInput
+} from '@proxy/config/settings'
+import { settingsViewRows } from '@proxy/tui/settings-view'
 import { describe, expect, test } from 'vite-plus/test'
 
 import { testConfig } from '../helpers'
@@ -28,7 +28,11 @@ import { testConfig } from '../helpers'
 function input(fields: Partial<SettingsInput> = {}): SettingsInput {
   return {
     file: DEFAULT_CONFIG,
-    running: { ...testConfig(), statsEnabled: DEFAULT_CONFIG.stats },
+    running: {
+      ...testConfig(),
+      statsEnabled: DEFAULT_CONFIG.stats,
+      consoleLogEnabled: DEFAULT_CONFIG.consoleLog
+    },
     authOn: false,
     authInvalid: false,
     overrides: {},

@@ -7,7 +7,9 @@
  */
 
 import type { Api, Model } from '@earendil-works/pi-ai'
+import { resolveAdminUi } from '@proxy/config/admin'
 import type { ServerConfig } from '@proxy/config/env'
+import { DEFAULT_CONFIG } from '@proxy/config/schema'
 import type { ExposedModel } from '@proxy/openai/model-exposure'
 import type { RemoteImageFetchOptions } from '@proxy/openai/remote-image-fetch'
 import type { ChatCompletionRequest } from '@proxy/openai/schemas'
@@ -131,7 +133,7 @@ export async function jsonBody(response: Response): Promise<unknown> {
  * environment.
  *
  * @remarks
- * Auth is off and agentic mode is disabled; every other setting is the default from
+ * Auth is off; every other setting is the default from
  * `DEFAULT_CONFIG` (`src/config/schema.ts`).
  *
  * @returns the config
@@ -142,11 +144,11 @@ export function testConfig(): ServerConfig {
     port: 4141,
     proxyAuth: { kind: 'off' },
     hostOriginGuardEnabled: false,
-    agenticEnabled: false,
     remoteImagesEnabled: false,
     docsUiEnabled: false,
     responsesApiEnabled: false,
     statsEnabled: false,
+    consoleLogEnabled: false,
     maxBodySize: 52428800,
     upstreamTimeoutMs: 120000,
     publicModelIdMode: 'collision-prefixed',
@@ -154,7 +156,8 @@ export function testConfig(): ServerConfig {
     customModels: [],
     providerPrefixes: {},
     aliases: {},
-    logLevel: 'info'
+    logLevel: 'info',
+    adminUi: resolveAdminUi(DEFAULT_CONFIG.adminUi, {})
   }
 }
 

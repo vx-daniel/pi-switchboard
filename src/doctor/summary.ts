@@ -6,7 +6,8 @@
  * @packageDocumentation
  */
 
-import { bySeverity, type DoctorReport, type Finding, type Severity } from '@proxy/doctor/findings'
+import type { DoctorReport, Finding } from '@proxy/doctor/findings'
+import { bySeverity, type Severity } from '@proxy/doctor/severity'
 
 /** A severity's label in the text output, the CLI's and the console's Doctor view's. */
 export const SEVERITY_LABEL: Readonly<Record<Severity, string>> = {

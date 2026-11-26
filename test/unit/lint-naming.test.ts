@@ -4,7 +4,7 @@
  */
 
 import { RuleTester } from 'vite-plus/lint/plugins-dev'
-import { describe, it } from 'vite-plus/test'
+import { describe, expect, it } from 'vite-plus/test'
 
 import naming from '../../lint/naming'
 
@@ -129,4 +129,28 @@ tester.run('no-generic-iteration-names', rule('no-generic-iteration-names'), {
       errors: [{ messageId: 'generic' }, { messageId: 'generic' }]
     }
   ]
+})
+
+/** The names the `no-generic-iteration-names` message gives as examples to rename. */
+const genericExampleNames = [
+  ...(rule('no-generic-iteration-names').meta?.messages?.['generic'] ?? '').matchAll(
+    /\(\((\w+)\) =>|let (\w+) =/gu
+  )
+].map((match) => match[1] ?? match[2] ?? '')
+
+// Catches the message teaching a rename from a name the rule never flags (`s`, `i`; #342): each
+// example in it must be one the rule reports, in a callback and in a `for` head alike.
+it('the generic-name message gives one callback and one loop example', () => {
+  expect(genericExampleNames).toHaveLength(2)
+})
+
+tester.run('no-generic-iteration-names message examples', rule('no-generic-iteration-names'), {
+  valid: [],
+  invalid: genericExampleNames.flatMap((exampleName) => [
+    { code: `sessions.map((${exampleName}) => 0)`, errors: [{ messageId: 'generic' }] },
+    {
+      code: `for (let ${exampleName} = 0; ${exampleName} < 2; ${exampleName}++) {}`,
+      errors: [{ messageId: 'generic' }]
+    }
+  ])
 })

@@ -30,6 +30,16 @@ import { existsSync } from 'node:fs'
 import { DatabaseSync, type SQLOutputValue, type StatementSync } from 'node:sqlite'
 import { pathToFileURL } from 'node:url'
 
+import { numberOf, textOf } from '@proxy/stats/columns'
+import {
+  PROJECT_TABLE,
+  type ProjectMinute,
+  projectsOf,
+  type ProjectStats,
+  UPSERT_PROJECT,
+  writeProjectRows
+} from '@proxy/stats/project-store'
+
 /**
  * The steps that bring an older stats file up to date, in order: the step at index `n` takes a
  * file from version `n + 1` to `n + 2`. A step only adds; existing rows keep their counts, and a
@@ -37,7 +47,9 @@ import { pathToFileURL } from 'node:url'
  */
 const MIGRATIONS: readonly string[] = [
   // 1 → 2 (#299): how many finished requests sent a `prompt_cache_key`.
-  'ALTER TABLE request_minutes ADD COLUMN prompt_cache_key_requests INTEGER NOT NULL DEFAULT 0'
+  'ALTER TABLE request_minutes ADD COLUMN prompt_cache_key_requests INTEGER NOT NULL DEFAULT 0',
+  // 2 → 3 (#366): each project's requests, tokens and cost.
+  PROJECT_TABLE
 ]
 /** The schema version, in SQLite's `user_version`: 1, plus one per migration. */
 const SCHEMA_VERSION = 1 + MIGRATIONS.length
@@ -53,6 +65,7 @@ interface Statements {
   readonly upsertRequest: StatementSync
   readonly upsertAttempt: StatementSync
   readonly upsertFailure: StatementSync
+  readonly upsertProject: StatementSync
   /** One `DELETE … WHERE minute < ?` per table. */
   readonly prunes: readonly StatementSync[]
 }
@@ -95,7 +108,7 @@ CREATE TABLE IF NOT EXISTS failure_minutes (
   failures INTEGER NOT NULL,
   PRIMARY KEY (minute, model, failure_class)
 ) WITHOUT ROWID;
-`
+${PROJECT_TABLE}`
 
 /** Adds a batch row to `request_minutes`, or to the row already there. */
 const UPSERT_REQUEST = `
@@ -180,6 +193,7 @@ export interface StatsBatch {
   readonly requests: readonly RequestMinute[]
   readonly attempts: readonly AttemptMinute[]
   readonly failures: readonly FailureMinute[]
+  readonly projects: readonly ProjectMinute[]
 }
 
 /** A span of minutes: from `fromMinute`, up to but not including `toMinute`. */
@@ -291,33 +305,15 @@ export interface StatsStore {
    * @returns failures by class and rejected requests by status
    */
   errors(range: MinuteRange): ErrorStats
+  /**
+   * Adds up each project's requests, tokens and cost (#366).
+   *
+   * @param range - the minutes
+   * @returns one entry per project, most spent first
+   */
+  projects(range: MinuteRange): ProjectStats[]
   /** Closes the file; a second call does nothing. */
   close(): void
-}
-
-/**
- * Reads a number column, `0` when it is null (an empty `sum`).
- *
- * @param row - the row
- * @param column - the column
- * @returns the number
- */
-function numberOf(row: Readonly<Record<string, SQLOutputValue>>, column: string): number {
-  const value = row[column]
-  if (typeof value === 'number') return value
-  return typeof value === 'bigint' ? Number(value) : 0
-}
-
-/**
- * Reads a text column, `''` when it is not text.
- *
- * @param row - the row
- * @param column - the column
- * @returns the text
- */
-function textOf(row: Readonly<Record<string, SQLOutputValue>>, column: string): string {
-  const value = row[column]
-  return typeof value === 'string' ? value : ''
 }
 
 /**
@@ -393,6 +389,7 @@ function writeBatch(statements: Statements, batch: StatsBatch): void {
   for (const row of batch.failures) {
     statements.upsertFailure.run(row.minute, row.model, row.failureClass, row.failures)
   }
+  writeProjectRows(statements.upsertProject, batch.projects)
 }
 
 /**
@@ -667,8 +664,9 @@ export function openStatsStore(path: string, options: OpenStatsOptions = {}): St
     upsertRequest: db.prepare(UPSERT_REQUEST),
     upsertAttempt: db.prepare(UPSERT_ATTEMPT),
     upsertFailure: db.prepare(UPSERT_FAILURE),
-    prunes: ['request_minutes', 'attempt_minutes', 'failure_minutes'].map((table) =>
-      db.prepare(`DELETE FROM ${table} WHERE minute < ?`)
+    upsertProject: db.prepare(UPSERT_PROJECT),
+    prunes: ['request_minutes', 'attempt_minutes', 'failure_minutes', 'project_minutes'].map(
+      (table) => db.prepare(`DELETE FROM ${table} WHERE minute < ?`)
     )
   }
   let open = true
@@ -687,6 +685,7 @@ export function openStatsStore(path: string, options: OpenStatsOptions = {}): St
     models: (range) => usageBy(db, range, 'model').map(([model, usage]) => ({ model, ...usage })),
     aliases: (range) => usageBy(db, range, 'alias').map(([alias, usage]) => ({ alias, ...usage })),
     errors: (range) => errorsOf(db, range),
+    projects: (range) => projectsOf(db, range),
     close: () => {
       if (!open) return
       open = false

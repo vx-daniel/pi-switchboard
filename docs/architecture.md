@@ -44,8 +44,8 @@ The diagrams' sources are in [`diagrams/`](diagrams/): an HTML page per diagram 
 
 ## Pi SDK layers used
 
-- **`@earendil-works/pi-ai`** — types (`Model`, `Usage`, `AssistantMessageEvent`, `JsonObject`, …) and helpers: `getSupportedThinkingLevels` and `clampThinkingLevel` for `reasoning_effort`, `isContextOverflow` for `context_length_exceeded`, TypeBox's `Type` for tool schemas
+- **`@earendil-works/pi-ai`** — types (`Model`, `Usage`, `AssistantMessageEvent`, `JsonObject`, `Tool`, …) and helpers: `getSupportedThinkingLevels` and `clampThinkingLevel` for `reasoning_effort`, `isContextOverflow` for `context_length_exceeded`. Tool parameters go to pi as plain JSON Schema (pi 1.5 dropped TypeBox from `pi-ai`, #360).
 - **`@earendil-works/pi-coding-agent`** — `ModelRuntime` (credentials, catalog and request auth; completions run through its `streamSimple()`, non-streaming ones read the stream's final message), `SettingsManager` (pi's `enabledModels`), and the console's theme and clipboard
 - **`@earendil-works/pi-tui`** — the console's terminal rendering
 
-Requires Pi 1.x (`^1.4.0`). Pi 1.0 is the first release whose Anthropic client identifies as Claude Code 2.1.280, which Anthropic requires for Opus 5.5 and Fable 5.1; Pi 0.x identified as 2.1.75 and those models were refused.
+Requires Pi 1.5 (`^1.5.2`). Pi 1.0 is the first release whose Anthropic client identifies as Claude Code 2.1.280, which Anthropic requires for Opus 5.5 and Fable 5.1; Pi 0.x identified as 2.1.75 and those models were refused. Pi 1.5.0 is the first that takes tool parameters without TypeBox, which the proxy relies on.

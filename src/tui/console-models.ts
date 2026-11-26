@@ -2,7 +2,7 @@
  * The console's alias editor (#230): the menus behind the Models view's rows.
  *
  * @remarks
- * Every change is saved to `proxy-config.json` as soon as it is made (`src/tui/aliases.ts`), and
+ * Every change is saved to `proxy-config.json` as soon as it is made (`src/config/aliases.ts`), and
  * the next request uses it. A target is picked from the exposed models only, and its effort only
  * from that model's ladder, so the editor can't write an alias the proxy would leave out. The
  * dialogs come in as {@link AliasScreens}: pi's selector and input in the console, scripted
@@ -11,6 +11,14 @@
  * @packageDocumentation
  */
 
+import {
+  type AliasDraft,
+  type AliasSaveMode,
+  aliasNameProblem,
+  deleteAlias,
+  draftOf,
+  saveAlias
+} from '@proxy/config/aliases'
 import {
   type AliasModel,
   type AliasTarget,
@@ -24,14 +32,6 @@ import type { ModelExposureResult } from '@proxy/openai/model-exposure'
 import { familiesIn, scanFamily } from '@proxy/openai/model-families'
 import { supportedReasoningEfforts } from '@proxy/openai/reasoning-effort'
 import type { ReasoningEffort } from '@proxy/openai/schemas'
-import {
-  type AliasDraft,
-  type AliasSaveMode,
-  aliasNameProblem,
-  deleteAlias,
-  draftOf,
-  saveAlias
-} from '@proxy/tui/aliases'
 import type { ConsoleContext } from '@proxy/tui/console'
 import { inBackground } from '@proxy/tui/console-accounts'
 import { askLine, pickLabel, tickList } from '@proxy/tui/dialogs'

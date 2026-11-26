@@ -29,6 +29,7 @@ import {
   openAPIDocumentDescription,
   SWAGGER_UI_VERSION
 } from '@proxy/server/openapi'
+import { projectHeaderMiddleware } from '@proxy/server/project-header'
 import { createProxyAuthSwitch, type ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { createRoutes, type ExposureConfigReader, fileConfigReader } from '@proxy/server/routes'
 import type { ProxyEnv } from '@proxy/server/types'
@@ -117,6 +118,11 @@ export function createApp(
   // not affected.
   app.use('/v1/chat/completions', upstreamKeyHeaderMiddleware())
   app.use('/v1/responses', upstreamKeyHeaderMiddleware())
+  // The project header (#366), after proxy auth too: a label counts only with a token. One
+  // instance for both routes, so its warning about auth being off comes once per server.
+  const projectHeader = projectHeaderMiddleware(proxyAuth)
+  app.use('/v1/chat/completions', projectHeader)
+  app.use('/v1/responses', projectHeader)
   // `/healthz` itself stays open for liveness probes; its detail endpoints name providers and
   // models. Not `/healthz/*`: Hono's wildcard also matches the bare `/healthz`.
   app.use('/healthz/:check{.+}', authMiddleware)

@@ -1,7 +1,7 @@
 /**
- * Editing aliases from the console's Models view (#230): checking a name, building the config
- * entry from the editor's targets, and saving, renaming and deleting an alias in
- * `proxy-config.json`.
+ * Editing aliases (#230), shared by the console's Models view and the admin UI (#367): checking a
+ * name, building the config entry from the editor's targets, and saving, renaming and deleting an
+ * alias in `proxy-config.json`.
  *
  * @remarks
  * The proxy reads the config file on every request (`fileConfigReader`), so a saved alias is used
@@ -24,7 +24,7 @@ import {
 import { proxyLogger } from '@proxy/logging'
 import type { ModelExposureResult } from '@proxy/openai/model-exposure'
 
-/** Logger for the console's alias editor: the config category, as saves to the file are. */
+/** Logger for alias edits: the config category, as saves to the file are. */
 const configLogger = proxyLogger('config')
 
 /** An alias as the editor holds it: its models in order, and the failures that move between them. */
@@ -92,8 +92,9 @@ export type AliasWrite = 'written' | 'name-taken' | 'not-written'
  * Writes the config's aliases, keeping everything else in the file.
  *
  * @remarks
- * Read, changed and written without a lock: the console is one operator's local tool, and the
- * file is otherwise written only when that operator saves from pi or the console. The read is
+ * Read, changed and written without a lock. The read and the write are synchronous, so two edits
+ * in one process (the console's, an admin UI editor's) can't interleave; another process writing
+ * between them (a second console) is the one race left, and the later write wins. The read is
  * the file's state now, not the view's, so a name taken since the view was read is still caught.
  *
  * @param change - rewrites the aliases, or returns `undefined` to refuse the change

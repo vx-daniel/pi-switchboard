@@ -23,17 +23,20 @@
  *                with `typeCheck` on, so this gate is also the TypeScript type check — plus the
  *                zod, import-alias, vite-plus, repo (`lint/repo-rules.ts`), naming
  *                (`lint/naming.ts`) and @logtape plugins. Warnings fail it (`maxWarnings: 0`).
- *   3. test   — `vp test --project offline --coverage`: Vitest over the unit and integration suites,
- *                with no real pi login or provider credentials (test/setup/offline.ts). It writes the
- *                coverage the fallow gate reads (`coverage/coverage-final.json`). The live
+ *   3. test   — `vp test --project offline --project web --coverage`: Vitest over the unit and
+ *                integration suites, with no real pi login or provider credentials
+ *                (test/setup/offline.ts), and the admin UI's pages in jsdom (test/web/setup.ts). It
+ *                writes the coverage the fallow gate reads (`coverage/coverage-final.json`). The live
  *                conformance suite exists only under `test:live`.
  *   4. fallow — `fallow --coverage coverage/coverage-final.json --fail-on-issues`: dead code,
  *                duplication and complexity from the module graph, with CRAP scored against the
  *                test gate's coverage, so it runs after it. Any finding fails it, a new clone
  *                included (`--fail-on-issues`; by default a clone only warns); exceptions live in
  *                `.fallowrc.jsonc`, each with its reason.
- *   5. build  — `vp pack`: the tsdown build of every published entry point and its declarations.
- *                Late, because it is slow and the checks above cover the source it reads.
+ *   5. build  — `vp pack && vp build --config vite.admin.config.ts`: the tsdown build of every
+ *                published entry point and its declarations, then the admin UI's pages
+ *                (`dist/admin-ui/`), which `vp pack` would empty if it ran second. Late, because it
+ *                is slow and the checks above cover the source it reads.
  *   6. smoke  — `node dist/index.mjs --version`: runs the built CLI, as its `bin` does. The entry
  *                loads the CLI dynamically (#165), a split only the build makes, so only this
  *                sees a bundle that cannot load it, or one built without the package version
@@ -134,7 +137,7 @@ export const GATES: readonly Gate[] = [
   },
   {
     name: 'test',
-    describe: 'vitest: the unit and integration suites, with coverage',
+    describe: 'vitest: the unit and integration suites, and the admin pages, with coverage',
     script: 'test:ci'
   },
   {
@@ -144,7 +147,7 @@ export const GATES: readonly Gate[] = [
   },
   {
     name: 'build',
-    describe: 'tsdown: every published entry point and its declarations',
+    describe: 'tsdown and Vite: every published entry point, its declarations, the admin pages',
     script: 'build'
   },
   {

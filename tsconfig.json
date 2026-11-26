@@ -24,5 +24,7 @@
       "@proxy/*": ["./src/*"]
     }
   },
-  "include": ["**/*.ts"]
+  "include": ["**/*.ts"],
+  // The admin UI's pages and their tests run in a browser, under their own tsconfig.json files.
+  "exclude": ["node_modules", "dist", "dist-bin", "coverage", "src/admin/web", "test/web"]
 }

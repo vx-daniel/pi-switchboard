@@ -9,18 +9,28 @@ vp install            # Install dependencies (pnpm); also installs the Git hooks
 vp run dev            # Rebuild on change and restart the proxy on port 4142 (PI_SWITCHBOARD_DEV_PORT to change)
 pnpm run check:all    # The gate: format, lint + type check, tests with coverage, fallow, build, smoke (the built CLI starts)
 vp check --fix        # Format and apply lint fixes
-vp test               # Offline tests (unit + integration): no real login, no network beyond 127.0.0.1
+vp test               # Offline tests (unit + integration), and the admin UI's pages in jsdom (test/web): no real login, no network beyond 127.0.0.1
 pnpm run test:live    # Live conformance tests against real providers: uses your pi login and quota
 pnpm run test:live:record [<api>/<scenario> ...]  # Re-record the Anthropic and Codex replay fixtures (each base and its second login, `anthropic-2`/`openai-codex-2`), or the ones named (needs logins made for recording)
 pnpm run openai-spec:update <commit>  # Re-pin OpenAI's OpenAPI spec subset to a full commit SHA
-vp pack               # Build for npm (ESM + .d.ts)
-pnpm run build:binary # Standalone binary for this machine (dist-bin/pi-switchboard); needs Bun
+pnpm run build        # Build for npm (ESM + .d.ts, `vp pack`), then the admin UI's pages into dist/admin-ui (`vite.admin.config.ts`)
+pnpm run build:binary # Standalone binary for this machine (dist-bin/pi-switchboard), with the admin UI's pages embedded; needs Bun
 pnpm run test:binary  # Build it, then run it against the fixtures (test/binary); needs Bun, not in the gate
 ```
 
 `check:all` (`scripts/gate.ts`) is the one definition of "green": the pre-commit hook, CI, and the release workflow all run it.
 
 Offline tests run with pi pointed at an empty agent directory and credential env vars removed (`test/setup/offline.ts`). Tests that need models or an upstream build them with `test/fixtures/agent-dir.ts` and the local mock provider in `test/fixtures/mock-provider.ts`, which serves scripted replies or replays real provider traffic recorded by `test:live:record` (`test/fixtures/recording.ts`, `test/fixtures/recordings/`). Recording forwards pi's real requests to the provider through a local recorder and saves the responses without credentials; it refuses to save one that contains a credential. Set `PI_SWITCHBOARD_RECORD_AGENT_DIR` to a pi agent directory with a login made for recording: never a copy of a login another pi or proxy uses, because refreshing an expired token rotates it under every copy. Recordings go to `test/fixtures/recordings/` unless `PI_SWITCHBOARD_RECORD_OUT_DIR` names another directory (a relative path is taken from the working directory).
+
+Environment variables for the on-demand test runs:
+
+| Variable | Set by | Meaning |
+|---|---|---|
+| `PI_SWITCHBOARD_LIVE_TESTS` | `pnpm run test:live` | `1` adds the `live` test project (`test/conformance/`), which calls real providers with your pi login (`vite.config.ts`) |
+| `PI_SWITCHBOARD_BINARY_TESTS` | `pnpm run test:binary`, the `binary` CI job | `1` adds the `binary` test project (`test/binary/`), which runs the built standalone binary; build it first (`test:binary` does) |
+| `PI_SWITCHBOARD_RECORD_AGENT_DIR` | you, for `test:live:record` | The pi agent directory holding the logins made for recording |
+| `PI_SWITCHBOARD_RECORD_OUT_DIR` | you, optionally | Where recordings are saved instead of `test/fixtures/recordings/` |
+| `PI_SWITCHBOARD_RECORD_UPSTREAM` | the recorder's offline test | One origin every provider's recorder forwards to, instead of each provider's own (`https://api.anthropic.com`, `https://api.openai.com`); the test points it at its mock. Leave it unset to record real traffic |
 
 `test/integration/openai-spec.test.ts` checks the stable surface against OpenAI's published OpenAPI spec, pinned to one commit of [`openai/openai-openapi`](https://github.com/openai/openai-openapi) in `test/fixtures/openai-spec/openapi-subset.json`. Every response body, stream chunk and error body has to validate against OpenAI's schema for it. Every request field and enum value the proxy accepts has to exist in OpenAI's request, and every one OpenAI has that the proxy doesn't accept is listed in the test with the reason. To move the pin, run `openai-spec:update` with the new commit. If OpenAI added a field or value, the test fails until you accept it or list it.
 

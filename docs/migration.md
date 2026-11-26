@@ -1,5 +1,39 @@
 # Upgrading
 
+## From 0.5 to the next release (unreleased)
+
+### Upgrade every pi-switchboard that shares an agent directory
+
+The stats file is now schema version 3: it also counts each [project](projects.md)'s usage (#366). The first new proxy to start migrates a version 2 file in place and keeps its rows; a 0.5 proxy can't open a version 3 file, logs `newer than this proxy's`, and runs without stats. When two installs share one agent directory, upgrade both, as for 0.5.
+
+### API changes
+
+- **An error's `param` names a nested field as OpenAI does (#342):** an array index in brackets, `messages[0].content[1].type`, where some errors said `messages.0.content.1.type`. On `POST /v1/chat/completions` that is every `400` or `422` from request validation at a path through an array, such as inside `messages` or `tools` (a field OpenAI doesn't define, an assistant field accepted only empty, a wrong type or value, a role the proxy doesn't take, a malformed `prompt_cache_breakpoint`); message conversion, tool schema and remote-image errors already used brackets. On `POST /v1/responses` it is the same validation errors inside `input` and `tools`, the named `422` for a non-function tool (`tools[0].type`) or another `include` (`include[0]`), and the `400` for a reasoning item (`input[1].encrypted_content`, `input[1]`). A validation message that quotes the path (`Invalid value for '…'`, `Unknown parameter(s): …`) uses the same form. Top-level fields (`param: n`) are unchanged. A client that matched the dotted form should match the bracketed one.
+- **A tool's `parameters` reach the provider as the client wrote them (#360).** The proxy used to rebuild each schema as TypeBox, which pi 1.5 no longer uses: an `enum` went out as an `anyOf` of `const` branches, `type: ["string", "null"]` as an `anyOf` with `null`, and `{ "type": "object" }` with `properties: {}` added. Now the schema is checked against the same subset, refused with the same `422`s, and passed on unchanged but for `$schema`, `$id` and `$comment`. Since an enum's `type` now reaches the provider too, it must be `"string"` or `["string", "null"]`; any other is a `422`, where it used to be dropped.
+- **A connection that times out before it opens is a `timeout`, not an `upstream_error` (#360).** pi 1.5 adds the reason to a connection failure, so the proxy now tells a connect timeout (`504`) from a refused or dropped connection (still `502`). An alias's `fallbackOn` moves on it only if it names `timeout`.
+- **Zhipu/Z.ai's code `1308` is a usage limit (#360):** `429` `insufficient_quota`, as for other plans' usage limits, whatever its message says.
+- **`X-Switchboard-Project` counts a request's usage under a project (#366),** read only with proxy auth on (without a token it is ignored). With auth on, a label that isn't one (1 to 64 characters: a letter or digit, then letters, digits and `._:/@-`) is a `400` naming the header. `GET /v1/switchboard/usage` gains `projects`, each with `budget_usd`. Clients that don't send the header see no change ([Projects and budgets](projects.md)).
+- **`GET /v1/switchboard/models`: a model's `cooldown` and `quota` are those of the login a request would call now, and the new `routing` field says which (#379).** They used to be the first login's, so with several logins a model read as cooling down, with a `rejected` quota, while a request was served by the second. Now a cooling login that routing would pass over leaves the model's `cooldown` `null`; when every login is cooling, it is the one that ends first. `routing` lists the model and login a request would call (`next`) and those it would skip (`skipped`), including a login below its `routing.reserve` and, for an alias, a target whose logins are all cooling. Each login's own `cooldown` and `quota` are unchanged in `logins`. A client that read the model-level fields as the first login's should read `logins[0]` instead.
+- **A quota's `status` lapses at Anthropic's own reset time (#382).** `quota` on `/v1/switchboard/models` gains `status_resets_at` (Unix seconds) and `status_window` (such as `five_hour`), and `/healthz/creds` gains `statusResetsAt` and `statusWindow`. Once the reset time passes, `status` is `null` until the login's next response, and a window that resets earlier no longer ends it: a `rejected` used to stay until any window reset or another call replaced it.
+- **A target skipped for its quota reserve no longer fails the request with its credential (#381).** Before calling anything, a request checks the credential of the first target it would use. That check skipped targets in cooldown but not those below `routing.reserve`, so a login the reserve routed around could answer `502` `upstream_credentials_missing` when its credential didn't resolve. The check now skips the same targets the request does.
+
+### Configuration
+
+- **`budgets` (#366):** US dollars per project per stats window (`today`, `week`, `all`), shown beside each project's usage in the usage route, the console's Stats view and the admin UI's Stats tab, and checked by `pi-switchboard doctor` (`budget`). Reported, never enforced.
+
+### pi
+
+- **pi 1.5.2, up from 1.4.0 (#360).** Anthropic message threads, which pi 1.5.1 turns on for `api.anthropic.com`, stay off, and so does their beta header: every request still sends the whole conversation ([#361](https://github.com/vx-daniel/pi-switchboard/issues/361) tracks turning them on).
+- **`pi auth login <provider>` logs in from a shell**, without starting a pi session ([Installing](install.md#headless-and-scripted-setup)).
+
+### The admin UI
+
+- **An admin web UI, off by default (#367).** With `adminUi.enabled` on, `pi-switchboard` opens a second listener (`127.0.0.1:4142`) where the people its editors and viewers lists name sign in through your own GitHub App, and see the proxy's requests live, its logins, models and aliases, stats and doctor's findings at `/admin/`. Editors also change what the console changes: `proxy-config.json`'s settings, the aliases, and the logins' order, labels and disabling, and they end cooldowns; each change is logged under `pi-switchboard.admin.audit` with who made it, and the proxy token stays in the console. The npm package, the Docker image and the standalone binary all carry the pages. With it on but unsafe or unconfigured (no sign-in secrets, nobody listed, a short session key, plain `http` beyond loopback), the proxy refuses to start and logs why. Nothing changes while it is off. See [The admin UI](admin-ui.md).
+
+### The pi extension
+
+- **The settings panel has a Responses API row, and `/proxy show` lists `responses api` (#342).** Until now `responsesApi` could be set only in `proxy-config.json` or the console.
+
 ## From 0.4 to 0.5
 
 Nothing to change in `proxy-config.json`: every 0.4 file works unchanged. These are the changes a client or an operator may notice.

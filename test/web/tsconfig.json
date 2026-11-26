@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  // The admin UI's page tests run in jsdom, with the pages' own settings (src/admin/web). The paths
+  // are repeated here, relative to this file, as tools that read the nearest tsconfig.json expect.
+  "extends": "../../src/admin/web/tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@proxy/*": ["../../src/*"]
+    }
+  },
+  "include": [
+    "./**/*.ts",
+    "./**/*.tsx",
+    "../../src/admin/web/**/*.ts",
+    "../../src/admin/web/**/*.tsx"
+  ]
+}

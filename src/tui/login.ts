@@ -18,7 +18,8 @@ import type {
   ModelRuntime,
   OAuthSelectorComponent
 } from '@earendil-works/pi-coding-agent'
-import { loadConfigFromFile, type LoginLabels, saveConfigToFile } from '@proxy/config/schema'
+import { loginLabels, saveLoginLabel } from '@proxy/config/login-routing'
+import type { LoginLabels } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { parseAccountProviderId } from '@proxy/pi/account-provider'
 import {
@@ -27,6 +28,7 @@ import {
   registerAccountProvider,
   unregisterAccountProvider
 } from '@proxy/pi/accounts'
+import { forgetLoginHealth } from '@proxy/pi/login-health'
 import { recordConsoleEvent } from '@proxy/server/console-events'
 
 /** One entry of pi's login provider selector. */
@@ -191,42 +193,6 @@ export async function logoutOptions(
 }
 
 /**
- * Reads the labels the operator gave logins, from the config file.
- *
- * @returns provider -> label
- */
-export function loginLabels(): LoginLabels {
-  return loadConfigFromFile().labels
-}
-
-/**
- * Saves a login's label in the config file (`labels`), or removes it.
- *
- * @remarks
- * The label is the operator's description of an account (`work`), kept beside the proxy's own
- * settings, never in pi's credential store and never sent anywhere. A label that is only
- * whitespace removes the entry.
- *
- * @param providerId - the login
- * @param label - the label; empty removes it
- * @returns whether the config file was written
- */
-export function saveLoginLabel(providerId: string, label: string): boolean {
-  const config = loadConfigFromFile()
-  const { [providerId]: _previous, ...others } = config.labels
-  const trimmed = label.trim()
-  const labels = trimmed.length === 0 ? others : { ...others, [providerId]: trimmed }
-  const written = saveConfigToFile({ ...config, labels })
-  if (written) {
-    loginLogger.info(
-      trimmed.length === 0 ? 'Removed the label of {provider}' : 'Labelled {provider}',
-      { provider: providerId }
-    )
-  }
-  return written
-}
-
-/**
  * Rejects when `signal` aborts, with pi's own cancel message.
  *
  * @param signal - the prompt's signal
@@ -318,6 +284,7 @@ export async function runLogin(
   }
   loginLogger.info('Logged in to {provider} ({type})', { provider: providerId, type })
   recordConsoleEvent(`Logged in to ${providerId} (${type})`)
+  forgetLoginHealth(providerId)
   const refreshed = await runtime.refresh({
     providers: [providerId],
     signal: AbortSignal.timeout(CATALOG_REFRESH_MS)
@@ -350,6 +317,7 @@ export async function runLogout(
   await runtime.logout(providerId, { signal })
   loginLogger.info('Logged out of {provider}', { provider: providerId })
   recordConsoleEvent(`Logged out of ${providerId}`)
+  forgetLoginHealth(providerId)
   unregisterAccountProvider(runtime, providerId)
   if (loginLabels()[providerId] !== undefined) saveLoginLabel(providerId, '')
 }

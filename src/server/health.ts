@@ -135,7 +135,21 @@ const credentialQuotaSchema = z
     observedAt: z.string().trim().meta({
       description: 'When the response that reported it arrived, as an ISO 8601 time.'
     }),
-    status: z.string().trim().nullable(),
+    status: z
+      .string()
+      .trim()
+      .nullable()
+      .meta({
+        description:
+          "The overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset " +
+          'until the next response.'
+      }),
+    statusResetsAt: z.string().trim().nullable().meta({
+      description: 'When the overall status resets, as an ISO 8601 time (Anthropic, #382).'
+    }),
+    statusWindow: z.string().trim().nullable().meta({
+      description: "The window that decided it, such as Anthropic's `five_hour` (#382)."
+    }),
     plan: z.string().trim().nullable(),
     windows: z.array(
       z.object({
@@ -192,6 +206,9 @@ function credentialQuota(quota: ProviderQuota | undefined): z.infer<typeof crede
   return {
     observedAt: new Date(quota.observedAt).toISOString(),
     status: quota.status ?? null,
+    statusResetsAt:
+      quota.statusResetsAt === undefined ? null : new Date(quota.statusResetsAt).toISOString(),
+    statusWindow: quota.statusWindow ?? null,
     plan: quota.plan ?? null,
     windows: quota.windows.map((window) => ({
       name: window.name,

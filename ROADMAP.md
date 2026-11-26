@@ -173,7 +173,6 @@ Routes OpenAI defines that pi can back, each experimental first and then promote
 ## Later, not planned
 
 - Experimental agentic mode: a separate opt-in endpoint (`/v1/switchboard/agent/…`), never under an
-  OpenAI route. PLAN "Agentic mode" keeps the security requirements; `PI_SWITCHBOARD_AGENTIC` is
-  read but does nothing yet.
+  OpenAI route. PLAN "Agentic mode" keeps the security requirements.
 - Splitting into packages (the March 2026 plan, `docs/archive/monorepo-plan.md`): dropped for now.
   One package serves the CLI, the library entry points and the pi extension.

@@ -26,8 +26,10 @@ import {
   aliasFallbackOn,
   configFileProblem,
   describeConfigFileProblem,
-  isLoopbackHost
+  isLoopbackHost,
+  loadConfigFromFile
 } from '@proxy/config/schema'
+import { budgetFindings } from '@proxy/doctor/budget-findings'
 import {
   type CacheInputs,
   type CatalogModel,
@@ -38,10 +40,13 @@ import {
   type ServerSettings,
   type StatsState
 } from '@proxy/doctor/findings'
+import { bySeverity } from '@proxy/doctor/severity'
+import { loginBase } from '@proxy/openai/model-logins'
 import { canonicalModelId } from '@proxy/pi/model-id'
 import { getAvailableModels, initRegistry } from '@proxy/pi/registry'
 import { credentialsHealthReport, modelsHealthReport } from '@proxy/server/health'
 import { fileConfigReader, type RequestConfig } from '@proxy/server/routes'
+import type { ProjectStats } from '@proxy/stats/project-store'
 import { statsFilePath } from '@proxy/stats/recorder'
 import { openStatsStore, type StatsStore } from '@proxy/stats/store'
 import { type StatsWindow, windowMinutes } from '@proxy/stats/windows'
@@ -59,10 +64,12 @@ export interface DoctorOptions {
   readonly now: number
 }
 
-/** The stats file's state, with each alias's fallbacks when it was read. */
+/** The stats file's state, with each alias's fallbacks and each project's spend when it was read. */
 export interface DoctorStats {
   readonly state: StatsState
   readonly fallbacksByAlias: ReadonlyMap<string, number> | undefined
+  /** Each project's numbers in the window (#366), for the budget check; absent without stats. */
+  readonly projects?: readonly ProjectStats[]
 }
 
 /** Everything the doctor judges besides pi's catalog and the environment, however it was read. */
@@ -95,7 +102,7 @@ const WINDOW_FLAG_ADVICE = 'Try a longer window (--window all), or come back aft
  * @throws whatever reading the store throws
  */
 export function readDoctorStats(
-  store: Pick<StatsStore, 'models' | 'aliases'>,
+  store: Pick<StatsStore, 'models' | 'aliases' | 'projects'>,
   window: StatsWindow,
   now: number
 ): DoctorStats {
@@ -103,7 +110,11 @@ export function readDoctorStats(
   const fallbacksByAlias = new Map(
     store.aliases(range).map((alias) => [alias.alias, alias.fallbacks])
   )
-  return { state: { kind: 'read', models: store.models(range) }, fallbacksByAlias }
+  return {
+    state: { kind: 'read', models: store.models(range) },
+    fallbacksByAlias,
+    projects: store.projects(range)
+  }
 }
 
 /**
@@ -114,7 +125,7 @@ export function readDoctorStats(
  * @param now - the current time
  * @returns what could be read
  */
-function readStats(enabled: boolean, window: StatsWindow, now: number): DoctorStats {
+export function readStats(enabled: boolean, window: StatsWindow, now: number): DoctorStats {
   if (!enabled) return { state: { kind: 'off' }, fallbacksByAlias: undefined }
   const path = statsFilePath()
   if (!existsSync(path)) return { state: { kind: 'missing', path }, fallbacksByAlias: undefined }
@@ -134,15 +145,18 @@ function readStats(enabled: boolean, window: StatsWindow, now: number): DoctorSt
 }
 
 /**
- * Reads pi's catalog entry for each available model, by canonical ID: a `{provider}-N` login's
- * models under that login's ID, the first entry for an ID kept.
+ * Reads pi's catalog entry for each available model, by canonical ID under the login's base
+ * provider (`loginBase`, as exposure groups logins): the stats record a `{provider}-N` login's
+ * calls under its base's ID, which has no entry of its own when only that login has a credential
+ * (#338). The first entry for an ID is kept: a built-in provider's logins share its catalog, so
+ * their prices are the same; the base comes first in pi's registry, then `-2`, `-3`.
  *
  * @returns the catalog
  */
 function catalog(): Map<string, CatalogModel> {
   const byId = new Map<string, CatalogModel>()
   for (const model of getAvailableModels()) {
-    const id = canonicalModelId(model)
+    const id = canonicalModelId({ id: model.id, provider: loginBase(model.provider).base })
     if (!byId.has(id)) byId.set(id, { api: model.api, baseUrl: model.baseUrl, cost: model.cost })
   }
   return byId
@@ -203,7 +217,8 @@ function serverSettings(overrides: CliOverrides): GeneralInputs['server'] {
 
 /**
  * Judges the doctor's inputs with pi's catalog and `PI_CACHE_RETENTION` from this process's
- * environment: the proxy's own in the console, the shell's in the CLI.
+ * environment: the proxy's own in the console, the shell's in the CLI. With the stats read, the
+ * general section also judges each project's spend against its budget (#366).
  *
  * @param inputs - what was read
  * @returns the report
@@ -224,7 +239,11 @@ export function judgeDoctorInputs(inputs: DoctorInputs): DoctorReport {
     retentionLong: process.env.PI_CACHE_RETENTION === 'long',
     howToWiden: inputs.howToWiden ?? WINDOW_FLAG_ADVICE
   }
-  return doctorReport(general, cache, { window: inputs.window, isLoopback: isLoopbackHost })
+  const report = doctorReport(general, cache, { window: inputs.window, isLoopback: isLoopbackHost })
+  const { projects } = inputs.stats
+  if (projects === undefined) return report
+  const budgets = { budgets: loadConfigFromFile().budgets, projects, window: inputs.window }
+  return { ...report, general: bySeverity([...report.general, ...budgetFindings(budgets)]) }
 }
 
 /**

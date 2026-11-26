@@ -6,5 +6,6 @@
 !pnpm-workspace.yaml
 !tsconfig.json
 !vite.config.ts
+!vite.admin.config.ts
 !src/
 !docker/entrypoint.sh

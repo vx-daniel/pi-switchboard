@@ -13,15 +13,14 @@
  */
 
 import type { ServerType } from '@hono/node-server'
-import type { LogLevel } from '@logtape/logtape'
 import type { ServerConfig } from '@proxy/config/env'
+import type { SettingOverrides } from '@proxy/config/settings'
 import { proxyLogger } from '@proxy/logging'
 import { recordConsoleEvent } from '@proxy/server/console-events'
 import type { ProxyAuthSwitch } from '@proxy/server/proxy-auth'
 import { logEffectiveConfig, openServer } from '@proxy/server/startup'
 import { recordStatsToFile } from '@proxy/stats/recorder'
 import type { StatsView } from '@proxy/tui/dashboard'
-import type { SettingOverrides } from '@proxy/tui/settings-view'
 import { errorMessage } from '@proxy/utils/guards'
 
 /** Logger for the server's lifecycle. */
@@ -232,11 +231,11 @@ export interface ConsoleStartup {
    */
   reload(): ServerConfig | undefined
   /**
-   * Logs at another level from now on.
+   * Logs as a config says from now on: its level, and the log file on or off (#389).
    *
-   * @param level - the lowest level logged
+   * @param config - the config the server runs
    */
-  logAt(level: LogLevel): void
+  logAs(config: ServerConfig): void
 }
 
 /** What a restart from the console touches. */
@@ -254,14 +253,14 @@ export interface RestartParts {
 }
 
 /**
- * Follows a config the server now runs: its log level, and stats turned on or off.
+ * Follows a config the server now runs: its logging, and stats turned on or off.
  *
  * @param parts - the startup, the Stats view and how to open it
  * @param next - the config now running
  * @param before - the config it replaced
  */
 function followRestart(parts: RestartParts, next: ServerConfig, before: ServerConfig): void {
-  parts.startup.logAt(next.logLevel)
+  parts.startup.logAs(next)
   logEffectiveConfig(next)
   if (next.statsEnabled === before.statsEnabled) return
   parts.stats.view.close()

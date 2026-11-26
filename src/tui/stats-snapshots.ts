@@ -39,16 +39,16 @@ export function createTodayCostSource(
 }
 
 /**
- * Creates the Doctor view's reader of the stats store (#325): each model's numbers and each
- * alias's fallbacks over a window, read again only after a few seconds or for another window.
- * The Doctor tab's count reads it on every redraw, whatever view is shown.
+ * Creates the Doctor view's reader of the stats store (#325): each model's numbers, each alias's
+ * fallbacks and each project's spend over a window, read again only after a few seconds or for
+ * another window. The Doctor tab's count reads it on every redraw, whatever view is shown.
  *
  * @param store - the stats store
  * @param now - the clock
  * @returns a function from a window to what the doctor reads of it
  */
 export function createDoctorStatsSource(
-  store: Pick<StatsStore, 'models' | 'aliases'>,
+  store: Pick<StatsStore, 'models' | 'aliases' | 'projects'>,
   now: () => number = Date.now
 ): (window: StatsWindow) => DoctorStats {
   let cached: { window: StatsWindow; at: number; stats: DoctorStats } | undefined

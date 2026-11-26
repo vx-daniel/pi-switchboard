@@ -31,6 +31,7 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | `settings.json` | pi | pi's settings; the proxy reads only `enabledModels`, for `scoped` exposure |
 | `proxy-config.json` | pi-switchboard | The settings below. A missing file means every default |
 | `pi-switchboard-stats.sqlite` | pi-switchboard | Per-minute traffic stats for the console and the usage route, kept 30 days (`stats`) |
+| `pi-switchboard.log`, `pi-switchboard.log.1` | pi-switchboard | `pi-switchboard tui`'s log as JSON Lines, 20 MiB each at most (`consoleLog`, [Logging](#logging)) |
 
 ## Every setting
 
@@ -44,6 +45,7 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | [Responses API](api.md#responses-api-experimental) | `--responses-api` | `PI_SWITCHBOARD_RESPONSES_API` | `responsesApi` | `false` | `true`, `false` |
 | [Docs page](api.md#api-documentation) | `--docs-ui` | `PI_SWITCHBOARD_DOCS_UI` | `docsUi` | `false` | `true`, `false` |
 | [Stats](#what-the-proxy-adds) | `--stats`, `--no-stats` | `PI_SWITCHBOARD_STATS` | `stats` | `true` | `true`, `false` |
+| [Console log file](#logging) | — | `PI_SWITCHBOARD_CONSOLE_LOG` | `consoleLog` | `true` | `true`, `false` |
 | Max request body | `--max-body-size` (MB) | `PI_SWITCHBOARD_MAX_BODY_SIZE` (bytes) | `maxBodySizeMb` (MB) | 50 MB | 1–500 MB |
 | [Upstream idle timeout](#what-the-proxy-adds) | `--upstream-timeout` (s) | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` (ms) | `upstreamTimeoutSec` (s) | 120 s | 5–600 s |
 | [Log level](#logging) | `--log-level` | `PI_SWITCHBOARD_LOG_LEVEL` | `logLevel` | `info` | `trace`, `debug`, `info`, `warning`, `error`, `fatal` |
@@ -58,8 +60,10 @@ Everything lives in pi's agent directory: `~/.pi/agent` (on Windows, `%USERPROFI
 | [Login order](logins.md#order-and-disabled-logins) | — | — | `routing.logins.order` | `{}` | Provider → its logins to try first, in order; the others follow |
 | [Disabled logins](logins.md#order-and-disabled-logins) | — | — | `routing.logins.disabled` | `[]` | Logins routing never calls; they stay logged in |
 | [Login labels](logins.md#several-logins-per-provider) | — | — | `labels` | `{}` | Login → the label the console shows |
+| [Project budgets](projects.md#budgets) | — | — | `budgets` | `{}` | Project → US dollars per stats window (`today`, `week`, `all`); reported, never enforced |
 | [Lifetime](pi-extension.md#settings-panel) (pi package) | — | — | `lifetime` | `detached` | `detached` (outlives the pi session), `session` |
 | [Zed sync](pi-extension.md#zed-sync) (pi package) | — | — | `zed.providerName`, `zed.autoSync` | `"Pi Proxy"`, `false` | A name; `true`, `false` |
+| [Admin UI](admin-ui.md#every-setting) | — | `PI_SWITCHBOARD_ADMIN_UI`, `_ADMIN_HOST`, `_ADMIN_PORT`, `_ADMIN_URL`, `_ADMIN_EDITORS`, `_ADMIN_VIEWERS` | `adminUi.enabled`, `.host`, `.port`, `.publicUrl`, `.githubUrl`, `.editors`, `.viewers` | off, `127.0.0.1:4142` | See [The admin UI](admin-ui.md#every-setting) |
 
 Environment variables with no flag or file key:
 
@@ -67,8 +71,10 @@ Environment variables with no flag or file key:
 |---|---|
 | `PI_CODING_AGENT_DIR` | pi's agent directory, where every file above is ([Where the files are](#where-the-files-are)) |
 | `PI_SWITCHBOARD_EXTENSION_LOG_FILE` | Where the pi extension writes its log, which it otherwise keeps quiet ([Logging](#logging)) |
+| `PI_SWITCHBOARD_CONSOLE_LOG_FILE` | Where `pi-switchboard tui` writes its log file, instead of `pi-switchboard.log` in pi's agent dir ([Logging](#logging)) |
 | `NO_COLOR` | Any value but empty turns off the console's colors and the pretty log's |
 | `PI_CACHE_RETENTION` | pi's own: `long` asks every provider that has one for its longer prompt cache. pi reads it from the proxy's environment; `pi-switchboard doctor` reads it from its own to judge whether that pays ([Retention](caching.md#retention)) |
+| `PI_SWITCHBOARD_GITHUB_CLIENT_ID`, `PI_SWITCHBOARD_GITHUB_CLIENT_SECRET`, `PI_SWITCHBOARD_ADMIN_SESSION_KEY` (each also as `…_FILE`) | The admin UI's sign-in: its GitHub App and the key that signs its cookies ([Give it its secrets](admin-ui.md#3-give-it-its-secrets)) |
 
 ## A complete `proxy-config.json`
 
@@ -109,13 +115,23 @@ Every key is optional; one left out takes its default. JSON has no comments, so 
     }
   },
   "labels": { "anthropic": "work", "anthropic-2": "personal" },
+  "budgets": { "vx-daniel/pi-switchboard": { "week": 50, "all": 150 } },
   "lifetime": "detached",
-  "zed": { "providerName": "Pi Proxy", "autoSync": false }
+  "zed": { "providerName": "Pi Proxy", "autoSync": false },
+  "adminUi": {
+    "enabled": false,
+    "host": "127.0.0.1",
+    "port": 4142,
+    "publicUrl": "",
+    "githubUrl": "https://github.com",
+    "editors": [],
+    "viewers": []
+  }
 }
 ```
 
-- **`lifetime` and `zed` matter only to the pi package**, which starts the proxy from pi and syncs Zed. A standalone proxy (the binary, Docker or the npm CLI) ignores them; leave them out there.
-- **The model IDs are from pi 1.4.0's catalogue.** Catalogues change: use the IDs `GET /v1/models` lists for your logins ([Discovering available models](api.md#discovering-available-models)).
+- **`lifetime` and `zed` matter only to the pi package**, which starts the proxy from pi and syncs Zed. A standalone proxy (the binary, Docker or the npm CLI) ignores them; leave them out there. **`adminUi` matters to every `pi-switchboard` server, the pi package's included**, but not to the console (`pi-switchboard tui`).
+- **The model IDs are from pi 1.5.2's catalogue.** Catalogues change: use the IDs `GET /v1/models` lists for your logins ([Discovering available models](api.md#discovering-available-models)).
 
 ## What comes from pi
 
@@ -123,10 +139,40 @@ The proxy reads two files from pi's configuration directory (`~/.pi/agent/`):
 
 | File | Managed by | What the proxy uses |
 |---|---|---|
-| `auth.json` | `pi /login` | API keys for each provider (Anthropic, OpenAI, Google, etc.) |
+| `auth.json` | `pi auth login <provider>` (or `/login` in pi) | API keys for each provider (Anthropic, OpenAI, Google, etc.) |
 | `models.json` | pi built-in + user edits | Model definitions, capabilities, and pricing |
 
 From pi's `settings.json` the proxy reads only `enabledModels`, for `scoped` exposure. It does **not** read installed packages, enabled extensions, or session-level model filters (`--models` flag).
+
+## Local models
+
+A model served on your own machine or network (Ollama, LM Studio, vLLM, SGLang, llama.cpp's router, or any other server that speaks OpenAI's API) joins through pi's `models.json`, as any provider of your own does. The proxy has nothing local-specific: it serves every model pi has a credential for, so once pi lists the model, the proxy lists it too, and aliases, fallback chains, cooldowns, stats and the console all apply.
+
+```json
+{
+  "providers": {
+    "ollama": {
+      "baseUrl": "http://localhost:11434/v1",
+      "api": "openai-completions",
+      "apiKey": "ollama",
+      "models": [
+        { "id": "qwen3:32b", "reasoning": true, "contextWindow": 131072, "maxTokens": 16384 }
+      ]
+    }
+  }
+}
+```
+
+- **The key.** pi lists a model only when its provider has a credential, so a server that checks none still needs an `apiKey`: any value. For one that checks keys, use the key, or `$NAME` or `!command` to keep it out of the file ([pi: Choose a Model](https://docs.pi.dev/latest/models), which also covers llama.cpp's router). The proxy never shows it.
+- **Exposure.** Under the default `scoped` mode with no `enabledModels` in pi's `settings.json`, every model with a credential is exposed, the local ones included. Once `enabledModels` lists models, add the local ones there too (`ollama/*`), or switch to `all`, or list them in `customModels` (`custom`) ([Exposure modes](api.md#exposure-modes)).
+- **Its ID.** A client names the model by its ID (`qwen3:32b`) or with the provider (`ollama/qwen3:32b`). An ID that holds a `/` itself, as a router's `marvin/big` does, works too; in `GET /v1/models/{model}` it is URL-encoded (`marvin%2Fbig`).
+- **What it can do comes from the entry.** `reasoning`, `input` (add `"image"` for a vision model), `contextWindow` and `maxTokens` are what the proxy reports and checks requests against. It doesn't ask the server, so make them match it.
+- **Cost.** Without a `cost` in the entry, the stats and [budgets](projects.md) count a local model at `$0`. To price it, add `"cost": { "input": …, "output": …, "cacheRead": …, "cacheWrite": … }` in US dollars per million tokens.
+- **No quota.** A local server sends no quota headers, so it shows no quota and a [reserve](routing.md#quota) never skips it. A `429` or `503` from it still starts a [cooldown](routing.md#cooldowns).
+- **A model that loads on demand.** A server that loads a model on its first request (llama.cpp's router, Ollama, a model-swapping router) takes that load time before it answers. The [upstream timeout](#what-the-proxy-adds) counts it (120 s by default): raise `upstreamTimeoutSec` if a load takes longer, or the request ends in `504`.
+- **In Docker.** Inside the container, `localhost` is the container. Point `baseUrl` at the host instead: `http://host.docker.internal:11434/v1`, which on Linux also needs `--add-host=host.docker.internal:host-gateway` (or `extra_hosts` in Compose). A server on a tailnet or a LAN name is reached only when the container can resolve and route that name.
+
+Checked on 2026-11-20 against an OpenAI-compatible router serving Qwen models over a tailnet: listed, plain and streamed requests answered (with `reasoning_effort`), usage counted and the model marked `verified`.
 
 ## What the proxy adds
 
@@ -142,6 +188,7 @@ Proxy-specific settings are configured via CLI flags, environment variables, the
 | Responses API | `PI_SWITCHBOARD_RESPONSES_API` | `false` | Answer the experimental `POST /v1/responses` ([Responses API](api.md#responses-api-experimental)) (`--responses-api`, `responsesApi`) |
 | Docs UI | `PI_SWITCHBOARD_DOCS_UI` | `false` | Serve Swagger UI at `/docs` ([API documentation](api.md#api-documentation)); it loads its scripts from a CDN (`--docs-ui`, `docsUi`) |
 | Stats | `PI_SWITCHBOARD_STATS` | `true` | Keep per-minute traffic stats in `pi-switchboard-stats.sqlite` in pi's agent dir for the console's Stats view (#216) and `pi-switchboard doctor`: requests by model, outcome and status, their timings, how many sent a `prompt_cache_key` (a count, never the key), attempts, failures by class, fallbacks, tokens and cost. Never message content, the request's `user`, or a credential; a rejected request's model name, which the client chose, is cut to 128 characters, and past 20 names a minute the rest count as `(other)`. Rows older than 30 days are deleted. A write that can't get the file's lock within 250 ms is dropped, so stats never stall requests. A file that can't be opened (one from a newer pi-switchboard included) is a warning, and the proxy runs without stats; an older one is migrated in place, keeping its rows ([`doctor`](#checking-the-setup-pi-switchboard-doctor)) (`--stats` / `--no-stats`, `stats`) |
+| Console log file | `PI_SWITCHBOARD_CONSOLE_LOG` | `true` | `pi-switchboard tui` also writes its log to a file (#389); see [Logging](#logging) (`consoleLog`) |
 | Max body size | `PI_SWITCHBOARD_MAX_BODY_SIZE` | `52428800` (50 MB) | Maximum request body size in bytes, `1048576`–`524288000` (`--max-body-size` and `maxBodySizeMb` in the config file take MB, 1–500) |
 | Upstream timeout | `PI_SWITCHBOARD_UPSTREAM_TIMEOUT_MS` | `120000` (120s) | How long the upstream provider may send nothing (no stream event of any kind: thinking, text and tool calls, but also chunks pi makes nothing of, such as OpenAI Responses lifecycle events; SSE comment lines and Anthropic `ping` events do not count) before the call is aborted, in milliseconds, `5000`–`600000` (`--upstream-timeout` in seconds and `upstreamTimeoutSec` in the config file, 5–600). The first wait starts with the call, so it includes pi's credential lookup (an OAuth refresh, say); after that it restarts with every event, so it never cuts off a long answer that keeps arriving. A request that hits it before the provider answered gets `504`, streamed or not; a stream that already started gets an error event. |
 | Log level | `PI_SWITCHBOARD_LOG_LEVEL` | `info` | Lowest level logged: `trace`, `debug`, `info`, `warning`, `error`, `fatal` (also `--log-level`, and `logLevel` in the config file) |
@@ -161,6 +208,7 @@ Model exposure and routing are set in the config file only, and read from it on 
 | `routing.logins.order` | `{}` | Base provider -> its logins to try first, in order (`{ "anthropic": ["anthropic-2"] }`); logins left out follow in the usual order. Set from the console's Accounts view with **Use first** ([Order and disabled logins](logins.md#order-and-disabled-logins)) |
 | `routing.logins.disabled` | `[]` | Logins routing never calls, though they stay logged in; a model whose every login is disabled leaves `/v1/models`. Set from the Accounts view with **Disable** and **Enable** ([Order and disabled logins](logins.md#order-and-disabled-logins)) |
 | `labels` | `{}` | Login -> the label the console shows beside it, in your words, up to 40 characters ([Several logins per provider](logins.md#several-logins-per-provider)) |
+| `budgets` | `{}` | Project (as `X-Switchboard-Project` names it) -> its budget in US dollars for any of `today`, `week` and `all`; shown beside the project's usage and checked by the doctor, never enforced ([Projects and budgets](projects.md)) |
 
 A proxy the pi extension starts gets the file's server settings as `PI_SWITCHBOARD_*` variables when it starts, so a change there needs `/proxy restart`; it reads the settings above from the file on every request, as any proxy does.
 
@@ -180,7 +228,7 @@ pi-switchboard doctor --json          # the report as JSON, for scripts
 - **General**: what `/healthz/models` and `/healthz/creds` judge (no model exposed, an invalid exposure config, `enabledModels` patterns that match nothing, alias diagnostics, a `routing.logins` name that is no login or a provider whose every login is disabled, no login, a login that fails `--verify`), a config file that can't be read, proxy auth that is set but can't be applied (an error: the proxy would refuse to start), proxy auth off or the docs page on while bound to an address other machines reach, stats off, and an alias's or `routing.logins`'s `fallbackOn` naming `upstream_error` or `timeout` (an alias's with its fallbacks in the window; the stats can't tell a move between logins from one to another model, so `routing.logins`' has no count). Cooldowns are not findings.
 - **Cache**: from the stats file, each model with at least 20 calls in the window: a hit rate under 50%, cache writes over 40% of its cost (at catalog prices), whether `PI_CACHE_RETENTION=long` pays against its break-even (Anthropic and Bedrock only), fallbacks over 5% of its calls, and over 10% of its requests without a `prompt_cache_key` on an API that caches by key. [Prompt caching](caching.md) explains each; the doctor reads `PI_CACHE_RETENTION` from its own environment, which may not be the proxy's. Stats that are off, absent or unreadable are said so, not shown as an empty section, and so is a window in which no model had 20 calls. The section ends with what the doctor cannot tell.
 
-Each finding has a `check` (`exposure`, `alias`, `login-routing`, `credentials`, `proxy-auth`, `docs-ui`, `stats`, `fallback-on`, `config-file`, `models-json`, `enabled-models`, `logins`; `window` (no model had 20 calls), `hit-rate`, `cache-write-cost`, `retention`, `fallbacks`, `prompt-cache-key`), a `severity` (`error`, `warning` or `advice`), a `subject` when it is about one model, alias, provider, pattern or address, a `message` and a `recommendation`. `--json` prints:
+Each finding has a `check` (`exposure`, `alias`, `login-routing`, `credentials`, `proxy-auth`, `docs-ui`, `stats`, `fallback-on`, `budget`, `config-file`, `models-json`, `enabled-models`, `logins`; `window` (no model had 20 calls), `hit-rate`, `cache-write-cost`, `retention`, `fallbacks`, `prompt-cache-key`), a `severity` (`error`, `warning` or `advice`), a `subject` when it is about one model, alias, provider, project, pattern or address, a `message` and a `recommendation`. `--json` prints:
 
 ```json
 {
@@ -216,7 +264,11 @@ Every line a request causes carries its `requestId` (and `clientRequestId` when 
 
 Message content and credentials are never logged. Credential-named properties are redacted as a backstop.
 
+A failed upstream call's raw error text can quote the request back, so it is logged at `debug` only, once per failure, by `pi-switchboard.pi.complete`: as "Upstream error detail", with the call's `provider`, `modelId`, `alias` and `attempt`, after the warning that the call failed or threw; or, for a provider stream that throws once it has started, as "Upstream stream failure detail", after the warning that reading it failed. The route (`server.chat`) and the stream writer (`openai.sse`) log what the failure was mapped to, not the text again.
+
 The pi extension logs nothing by default, because output would corrupt pi's terminal UI. To capture its logs, set `PI_SWITCHBOARD_EXTENSION_LOG_FILE=/path/to/extension.log` before starting pi; the extension then appends JSON Lines there at the configured log level.
+
+`pi-switchboard tui` shows its log in the console, and keeps only the last 5000 lines there. So that a failure's cause outlives the screen and a restart, it also appends every line to `pi-switchboard.log` in pi's agent dir (#389), or to the file `PI_SWITCHBOARD_CONSOLE_LOG_FILE` names. The file takes JSON Lines at the configured log level, with the same redaction as every other log. It is owner-only (`0600`, as `auth.json` is; a file that was there before is narrowed to it), and each line is written as it is logged. Past 20 MiB it becomes `pi-switchboard.log.1`, replacing the one before, so the two take 40 MiB at most. The Requests view says where it writes (`◇ Writing the log to …`). A file that can't be opened or written is one warning in the console, and the proxy runs on without it. `consoleLog: false` (or `PI_SWITCHBOARD_CONSOLE_LOG=false`) turns it off, from the next restart (`r`). The headless `pi-switchboard` writes no file: its stderr goes wherever whatever runs it (systemd, Docker) keeps it.
 
 ## Proxy authentication
 

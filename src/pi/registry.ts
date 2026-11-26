@@ -14,6 +14,7 @@ import type { Api, Model } from '@earendil-works/pi-ai'
 import { ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent'
 import { proxyLogger } from '@proxy/logging'
 import { registerStoredAccounts } from '@proxy/pi/accounts'
+import { noteCredentialFailure, noteCredentialOk } from '@proxy/pi/login-health'
 import { errorMessage } from '@proxy/utils/guards'
 import * as z from 'zod'
 
@@ -85,8 +86,8 @@ function splitModelsJsonError(error: string): { detail: string; path: string | u
  * only where it is (V8) or, when the engine gives no location (JavaScriptCore, the Bun binary),
  * its reason if that is one known to quote nothing ({@link JSON_ERROR_JSC_REASON}). Load errors
  * (the fs message) and schema errors (property paths, which name the user's providers and models,
- * and TypeBox's fixed messages) quote no values and pass through. The file's path is dropped;
- * callers that log it take it separately.
+ * and pi-schema's fixed messages, which quote the schema's values and never the file's) quote no
+ * values and pass through. The file's path is dropped; callers that log it take it separately.
  *
  * @param error - pi's models.json error, as `ModelRuntime.getError()` returns it
  * @returns the reduced message
@@ -410,7 +411,9 @@ export const providerCredentialStatusSchema = z.object({
 export type ProviderCredentialStatus = z.infer<typeof providerCredentialStatusSchema>
 
 /**
- * Resolves one provider's credential now, which may refresh an OAuth token over the network.
+ * Resolves one provider's credential now, which may refresh an OAuth token over the network, and
+ * records the result as the login's credential health (#388): a failure, or for an OAuth login a
+ * success (an API key that resolves is only set, not shown good).
  *
  * @param provider - the provider ID
  * @returns `verified: true`, or `verified: false` with a summary of why
@@ -420,14 +423,16 @@ async function verifyProvider(
 ): Promise<Pick<ProviderCredentialStatus, 'verified' | 'error'>> {
   try {
     const resolved = await getRuntime().getAuth(provider)
-    return resolved === undefined
-      ? { verified: false, error: 'no credentials configured' }
-      : { verified: true }
-  } catch (error) {
-    return {
-      verified: false,
-      error: reportAuthFailure({ action: 'verification', provider }, error)
+    if (resolved === undefined) {
+      noteCredentialFailure(provider, 'no credentials configured')
+      return { verified: false, error: 'no credentials configured' }
     }
+    if (getRuntime().isUsingOAuth(provider)) noteCredentialOk(provider)
+    return { verified: true }
+  } catch (error) {
+    const reason = reportAuthFailure({ action: 'verification', provider }, error)
+    noteCredentialFailure(provider, reason)
+    return { verified: false, error: reason }
   }
 }
 

@@ -57,7 +57,7 @@ The stable routes are the first three rows. [`PLAN.md`](../PLAN.md) "Stable surf
 | `POST /v1/chat/completions` | Chat completions (streaming and non-streaming) |
 | `POST /v1/responses` | Off by default, experimental: OpenAI's Responses API, stateless ([below](#responses-api-experimental)) |
 | `GET /v1/switchboard/models` | Not OpenAI's: each exposed model's pi capabilities, such as its supported `reasoning_effort` values ([below](#discovering-available-models)) |
-| `GET /v1/switchboard/usage` | Not OpenAI's: usage over today, the last week or 30 days, per model and per alias, from the stats file ([below](#usage-over-http)) |
+| `GET /v1/switchboard/usage` | Not OpenAI's: usage over today, the last week or 30 days, per model, per alias and per project, from the stats file ([below](#usage-over-http)) |
 | `DELETE /v1/switchboard/cooldowns` | Not OpenAI's: ends cooldowns early, all of them or one login's or model's ([Cooldowns](routing.md#cooldowns)) |
 | `GET /v1/switchboard/openapi.json` | Not OpenAI's: this API as an OpenAPI 3.1 document ([below](#api-documentation)) |
 | `GET /docs` | Off by default: Swagger UI for the document, to read the API and try requests ([below](#api-documentation)) |
@@ -77,10 +77,11 @@ curl -s "http://localhost:4141/v1/switchboard/usage?window=week" -H "Authorizati
 - **`window`:** `today` (from midnight, the proxy's local time; the default), `week` (the last 7 days) or `all` (the 30 days the file keeps). Anything else is a `400`.
 - **`models` and `aliases`:** per served model and per alias, busiest first: `requests`, `failed`, `left` (the client went away), `average_ms`, `slowest_ms`, `average_first_event_ms`, `attempts`, `fallbacks`, `input_tokens` (the uncached input only), `output_tokens`, `cache_read_tokens` and `cache_write_tokens` (the prompt is `input_tokens` plus both; the cache hit rate is `cache_read_tokens` over that sum, see [Prompt caching](caching.md#reading-the-numbers)) and `cost_usd`. An alias counts every model its fallback chain tried; `alias: null` is the requests that named a model directly. Before #297 the reads and writes came added together as `cache_tokens`, which is gone.
 - **`failures` and `rejected`:** failed attempts by failure class, and rejected requests by HTTP status.
+- **`projects`:** per [project](projects.md) (`X-Switchboard-Project`, counted only with proxy auth on), most spent first: `requests`, `failed`, the four token counts, `cost_usd`, and `budget_usd`, the project's budget for the window (`null` without one). A project with a budget for the window but no traffic in it is listed at zero; `(other)` holds the projects past the cap of 50 a minute.
 - **`timeline`:** requests per hour (`today`), per 6 hours (`week`) or per day (`all`), with failed and rejected ones; `bucket_minutes` says which.
 - **Stats off** (`--no-stats`), or a file that can't be read, answers `503` with code `stats_unavailable`, not empty numbers.
 
-Routes, counts, timings, tokens and cost only: never message content, a request's `user`, or a credential.
+Routes, counts, timings, tokens and cost only: never message content, a request's `user`, or a credential. A project is the label the client sent, and nothing more.
 
 ### Health checks
 
@@ -109,7 +110,7 @@ curl -fsS http://localhost:4141/healthz/creds?verify=true -H "Authorization: Bea
 | `model` | Public ID, canonical (`provider/model-id`), or collision-prefixed shorthand |
 | `messages` (text) | `system`, `developer`, `user`, `assistant`, `tool` roles. `system` and `developer` before the first turn form the system prompt; a later one stays in place on models that accept mid-conversation instructions (pi's `supportsMidConvoSystemMessages`; Anthropic: just before the next answer) and is merged into the system prompt on others |
 | `messages` (base64 images) | Base64 data URI image content parts (`image/png`, `image/jpeg`, `image/gif`, `image/webp`) |
-| Fields inside messages | Checked like the top level: a field OpenAI doesn't define, or one the proxy doesn't take, is rejected with `422` at its path (`messages.0.content.0.cache_control`). `name` on a message and `image_url.detail` are accepted and dropped (pi has no equivalent; logged at `debug`). An assistant reply an OpenAI SDK echoes back is accepted as it sends it: `refusal`, `audio`, `function_call` and `tool_calls` as `null`, and the response field `annotations` as `null` or `[]` |
+| Fields inside messages | Checked like the top level: a field OpenAI doesn't define, or one the proxy doesn't take, is rejected with `422` at its path, written as OpenAI writes it (`messages[0].content[0].cache_control`). `name` on a message and `image_url.detail` are accepted and dropped (pi has no equivalent; logged at `debug`). An assistant reply an OpenAI SDK echoes back is accepted as it sends it: `refusal`, `audio`, `function_call` and `tool_calls` as `null`, and the response field `annotations` as `null` or `[]` |
 | `messages` (remote images) | Only with the remote-images setting on (off by default): the proxy downloads each `http`/`https` image URL and sends it to the provider as base64. Public hosts only, at most 8 per request and 15 MiB in all, 10 seconds each, 3 redirects; see [Security defaults](security.md#security-defaults). Off, a remote URL is rejected with `400` |
 | `stream` | SSE with `text_delta` and `toolcall_delta` mapping |
 | `temperature` | Passed through, with two exceptions, each logged (the first per model at `info`, later ones at `debug`): Codex models (`openai-codex-responses`), where the backend rejects it, so the proxy drops it; and Claude models pi marks as not accepting it (Claude 4.7 and later, which refuse a temperature below 1) or any Claude request with thinking on, where pi leaves it out itself |
@@ -145,7 +146,7 @@ It is **stateless**: nothing is stored, so a conversation is sent whole each tim
 
 - **Input:** a string, or items: `message` (`user` with `input_text` and `input_image` parts, `system`, `developer`, and `assistant` with the `output_text` of an earlier response), `function_call`, `function_call_output` and `reasoning`. `instructions` becomes the system message.
 - **Settings:** function `tools`, `tool_choice`, `parallel_tool_calls`, `temperature`, `top_p`, `max_output_tokens`, `reasoning.effort` (clamped and reported in `x_pi.reasoning_effort` as on chat), `reasoning.summary` as `auto`, `text.format` (`text`, `json_object`, `json_schema`), `metadata`, `user`, `prompt_cache_key`, `stream`.
-- **Output:** `message`, `function_call` (its `call_id` is what you send back in `function_call_output`) and `reasoning` items in the order the model produced them, with `usage` and `x_pi` as on chat. A length stop is `status: "incomplete"`. Streamed: `response.created`, `response.in_progress`, each item's `added`, deltas and `done` events, then `response.completed`, `response.incomplete` or `response.failed`.
+- **Output:** `message`, `function_call` (its `call_id` is what you send back in `function_call_output`) and `reasoning` items in the order the model produced them, with `usage` and `x_pi` as on chat. A length stop is `status: "incomplete"`. Streamed: `response.created`, `response.in_progress`, each item's `added`, deltas and `done` events, then `response.completed`, `response.incomplete` or `response.failed`. A redacted thinking block (Claude's `redacted_thinking`, Bedrock's encrypted reasoning) is a `reasoning` item with an empty `summary`, streamed and not: the stream sends no summary deltas for it and an empty summary text.
 - **Reasoning across turns:** with `include: ["reasoning.encrypted_content"]`, each `reasoning` item carries a token; send the items back in `input` and the model gets its reasoning back, the stateless loop Codex CLI runs. The token is base64url JSON, not encrypted by the proxy: anyone holding it can read the thinking text in it, in the clear, so treat it as you treat the response text, not as an opaque or safe-to-log blob. For OpenAI and Codex models it also carries OpenAI's own encrypted reasoning; for others (Claude) it carries pi's thinking block and its signature. A token is replayed only to the model that produced it, and one the proxy didn't write is refused with a 400. A `reasoning` item without a token is refused with a 400 that says to ask for `include`, as OpenAI refuses an echoed reasoning item it hasn't stored; so is reasoning that no message or function call follows.
 - **Refused by name (422):** state the proxy doesn't keep (`previous_response_id`, `conversation`, `background`, `prompt`, `store: true`; `store: false` is accepted), tools other than functions (web search, file search, code interpreter, …), any `include` but reasoning, and `top_logprobs`, `service_tier`, `truncation`, `max_tool_calls`, `context_management`, `moderation`, `access_programs`, `safety_identifier`, `prompt_cache_retention`, `prompt_cache_options`; `text.verbosity`, `reasoning.summary` other than `auto`, and `stream_options.include_obfuscation: true` are refused as unknown or invalid values. `detail` on an `input_image` is accepted and dropped, as `image_url.detail` is on chat.
 - **The other Responses operations** (`GET`/`DELETE /v1/responses/{id}`, `cancel`, `input_items`, `input_tokens`, `compact`) need stored responses, and answer 404 "not supported".
@@ -238,10 +239,12 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
 | `input` | What it accepts: `text`, `image` |
 | `context_window`, `max_output_tokens` | In tokens |
 | `cost` | USD per million tokens: `input` (uncached), `output`, `cache_read`, `cache_write`; `0` where pi has no price |
-| `cooldown` | `null`, or the cooldown its first login is under after a 429, 503 or 529: `reason`, `scope` (`provider` or `model`), `until` (Unix seconds) ([Cooldowns](routing.md#cooldowns)) |
-| `quota` | `null`, or its first login's latest usage windows ([Quota](routing.md#quota)) |
+| `cooldown` | `null`, or the cooldown of the login a request naming the model would call now (`routing.next`): `reason`, `scope` (`provider` or `model`), `until` (Unix seconds). `null` while routing would pass a cooling login over for a free one; when every login is cooling, the one that ends first, which routing calls ([Cooldowns](routing.md#cooldowns)) |
+| `quota` | `null`, or the latest usage windows of `routing.next`'s login ([Quota](routing.md#quota)) |
+| `credential` | Whether the credential of `routing.next`'s login works (#388): `status` is `failing` while its latest result is a failure, `working` while it is a success, `unknown` before this process saw either; `last_ok` is when it was last shown good (a whole answer under it, or a passing `/healthz/creds?verify=true` of an OAuth login), and `last_failure` its last failure (`at`, and `reason`: pi's summary of a credential it couldn't resolve, such as an OAuth refresh the provider rejected with its HTTP status, or `the provider refused the credential (401 or 403)`). `failing` here means a request naming the model now gets that failure. Learned from calls and verifications only: a login no request reaches keeps its last status, so poll `/healthz/creds?verify=true` to check idle logins (it refreshes a token that is due). Kept in memory; a login logged in or out in the console starts over |
+| `routing` | What a text request naming it would do now, by the rules routing follows (the configured `fallbackOn` classes, cooldowns and `routing.reserve`): `next`, the `model` (canonical ID; for an alias, a later target when the chain would move past the first) and `login` it would call first, and `skipped`, those it would pass over before it, each with its `model`, `login` (when the model has more than one), `reason` (the failure it is cooling down from, or `quota` below its reserve) and `until` (Unix seconds; `null` for `quota`). Routing never skips every candidate, so there is always a `next`. No credential is resolved for it (that can refresh an OAuth login), so `next` assumes each credential on the way resolves: a request first checks the credential of each candidate it reaches past cooldowns and reserves, and a refused one fails it with `502` `upstream_credentials_missing` unless the hop's `fallbackOn` names `auth`. `/healthz/creds` shows which logins resolve |
 | `availability` | `refused` after the proxy's login refused the model (answered as `404 model_not_found`), `verified` after a whole answer, `unknown` before either. Kept in memory since the proxy started; the latest result wins, and a request with its own upstream key does not count. The first refusal of a model is logged at `info` |
-| `logins` | The logins that may serve it ([Several logins per provider](logins.md#several-logins-per-provider)), in the order routing tries them, then the disabled ones, which it never calls: each with its `id` (`anthropic`, `anthropic-2`), `disabled`, and its own `cooldown` and `quota` |
+| `logins` | The logins that may serve it ([Several logins per provider](logins.md#several-logins-per-provider)), in the order routing tries them, then the disabled ones, which it never calls: each with its `id` (`anthropic`, `anthropic-2`), `disabled`, and its own `cooldown`, `quota` and `credential` |
 
 ```json
 { "object": "list", "data": [{ "id": "claude-sonnet-4-5", "provider": "anthropic", "reasoning": true,
@@ -249,7 +252,10 @@ Model objects follow the standard OpenAI shape (`id`, `object`, `created`, `owne
   "input": ["text", "image"], "context_window": 200000, "max_output_tokens": 64000,
   "cost": { "input": 3, "output": 15, "cache_read": 0.3, "cache_write": 3.75 }, "cooldown": null,
   "quota": null, "availability": "unknown",
-  "logins": [{ "id": "anthropic", "disabled": false, "cooldown": null, "quota": null }] }] }
+  "credential": { "status": "unknown", "last_ok": null, "last_failure": null },
+  "routing": { "next": { "model": "anthropic/claude-sonnet-4-5", "login": "anthropic" }, "skipped": [] },
+  "logins": [{ "id": "anthropic", "disabled": false, "cooldown": null, "quota": null,
+    "credential": { "status": "unknown", "last_ok": null, "last_failure": null } }] }] }
 ```
 
 docker-agent prices a model reached through a custom `base_url` only from a `cost` table in `team.yaml`, so a team can take these prices; without one it records usage but no cost. The path was `GET /v1/pi/models` before 0.1.0; the old path is gone.
@@ -268,6 +274,10 @@ curl http://localhost:4141/v1/chat/completions \
 If the provider rejects that key, the proxy answers `401` `authentication_error` with code `upstream_api_key_invalid` and a fixed message naming the header: the key is yours to fix. A rejected stored pi login stays `502` `upstream_auth_error`, as the client did nothing wrong.
 
 An empty header (`X-Switchboard-Upstream-Api-Key:` with no value, or only spaces) is refused with `400` before anything is called: leave the header out to use pi's stored login.
+
+## Counting usage by project
+
+The `X-Switchboard-Project` header names the project a chat request is for (`owner/repository`, up to 64 characters), and the proxy counts its requests, tokens and cost apart, in `GET /v1/switchboard/usage`, the console and the admin UI. It is read only with proxy auth on; without a token it is ignored. With auth on, a label that isn't one is refused with `400`. Budgets per project, and the rest: [Projects and budgets](projects.md).
 
 ## API compatibility
 

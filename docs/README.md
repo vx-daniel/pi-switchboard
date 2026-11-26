@@ -17,13 +17,15 @@ pi-switchboard is a local HTTP API over pi's models, logins and providers that s
 |---|---|
 | [Running in Docker](docker.md) | The image and its tags, Compose and `docker run`, logging in, configuration, exposure, upgrading, troubleshooting |
 | [Installing](install.md) | Which install to choose, compared; prerequisites; the npm package and the pi package; Docker; the standalone binary; running in the background |
-| [Configuration](configuration.md) | Where settings come from and where the files are, every setting in one table, a complete `proxy-config.json`; checking the setup with `pi-switchboard doctor`; then what comes from pi, logging and proxy authentication |
+| [Configuration](configuration.md) | Where settings come from and where the files are, every setting in one table, a complete `proxy-config.json`; checking the setup with `pi-switchboard doctor`; then what comes from pi, [local models](configuration.md#local-models) (Ollama, LM Studio, vLLM, llama.cpp), logging and proxy authentication |
 | [API reference](api-reference.md) | The OpenAPI document, using it in other tools, and the Swagger UI docs page |
 | [The HTTP API](api.md) | Endpoints, the API document, usage and health checks, chat completion features, the Responses API, model IDs and exposure, errors |
 | [Routing](routing.md) | Aliases, fallback chains, reasoning effort per alias, family aliases, cooldowns, quota |
 | [Several logins per provider](logins.md) | A second subscription to the same provider, and how the proxy picks the login |
 | [Prompt caching](caching.md) | How each provider caches, reading cache hits and writes, keeping a prompt cacheable, routing's effect on the cache, `PI_CACHE_RETENTION` and when it pays; what `pi-switchboard doctor` checks for you |
+| [Projects and budgets](projects.md) | Counting usage per project with `X-Switchboard-Project`, budgets per stats window, and where they show |
 | [The console](console.md) | `pi-switchboard tui`: requests, accounts and logins, stats, models and aliases, settings, and the doctor's findings |
+| [The admin UI](admin-ui.md) | Signing in to a web admin UI with your own GitHub App: setting it up, who may sign in, its settings and secrets, serving it beyond this machine, and when it refuses to start |
 | [Pi Integration](pi-extension.md) | The `/proxy` commands and the settings panel inside pi |
 | [Security](security.md) | The defaults: the bind address, remote images, size limits, timeouts |
 | [Architecture](architecture.md) | How it fits together, a chat request end to end, and where the numbers come from, as diagrams; pi's SDK layers |

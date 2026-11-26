@@ -6,9 +6,13 @@
 
 /** HTTP 200 OK, the first success status. */
 export const HTTP_OK = 200
+/** HTTP 204 No Content. */
+export const HTTP_NO_CONTENT = 204
 
 /** The first status that is not a success (2xx). */
 export const HTTP_MULTIPLE_CHOICES = 300
+/** HTTP 302 Found: a redirect, as the admin UI's sign-in answers (#367). */
+export const HTTP_FOUND = 302
 
 /** HTTP 400 Bad Request. */
 export const HTTP_BAD_REQUEST = 400
@@ -20,6 +24,8 @@ export const HTTP_FORBIDDEN = 403
 export const HTTP_NOT_FOUND = 404
 /** HTTP 408 Request Timeout. */
 export const HTTP_REQUEST_TIMEOUT = 408
+/** HTTP 409 Conflict: the admin UI's answer to a write over a config file it can't read (#367). */
+export const HTTP_CONFLICT = 409
 /** HTTP 413 Payload Too Large. */
 export const HTTP_PAYLOAD_TOO_LARGE = 413
 /** HTTP 422 Unprocessable Entity. */

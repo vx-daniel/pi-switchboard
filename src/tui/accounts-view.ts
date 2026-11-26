@@ -15,13 +15,13 @@
  */
 
 import { truncateToWidth, visibleWidth } from '@earendil-works/pi-tui'
+import { type LoginPlace, loginPlaces } from '@proxy/config/login-routing'
 import type { LoginLabels } from '@proxy/config/schema'
 import type { LoginRouting } from '@proxy/openai/model-logins'
 import type { Cooldown } from '@proxy/pi/cooldowns'
 import type { ProviderQuota, QuotaWindow } from '@proxy/pi/quota'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import type { ReserveSkip } from '@proxy/server/route-reserve'
-import { type LoginPlace, loginPlaces } from '@proxy/tui/login-routing'
 import { accountActions, clampSelection, LOGIN_ROW } from '@proxy/tui/navigation'
 import {
   compactDuration,

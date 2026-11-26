@@ -65,7 +65,10 @@ export interface RouteTotals {
   readonly costUsd: number
 }
 
-/** The route an attempt ran on: what a row is keyed by. */
+/**
+ * The route an attempt ran on, and the project it ran for. A row is keyed by the route only: the
+ * totals since start add every project together, and the stats split them (#366).
+ */
 export interface RouteKey {
   /** The alias the request named, or `null`. */
   readonly alias: string | null
@@ -73,6 +76,8 @@ export interface RouteKey {
   readonly provider: string
   /** The served model's canonical `provider/model-id`. */
   readonly model: string
+  /** The project the request named (`X-Switchboard-Project`), or `null`. */
+  readonly project: string | null
 }
 
 /** A row while it is counted: the same fields, writable. */
@@ -204,14 +209,24 @@ export function recordRouteUsage(key: RouteKey, usage: Usage): void {
 }
 
 /**
- * Names the route an attempt runs on.
+ * Names the route an attempt runs on, for the project it runs for.
  *
  * @param alias - the alias the request named, or `undefined`
  * @param candidate - the model the attempt goes to
- * @returns the alias (`null` for none), the provider and the canonical model ID
+ * @param project - the project the request named, or `undefined`
+ * @returns the alias (`null` for none), the provider, the canonical model ID and the project
  */
-export function routeKey(alias: string | undefined, candidate: ExposedModel): RouteKey {
-  return { alias: alias ?? null, provider: candidate.model.provider, model: candidate.canonicalId }
+export function routeKey(
+  alias: string | undefined,
+  candidate: ExposedModel,
+  project: string | undefined
+): RouteKey {
+  return {
+    alias: alias ?? null,
+    provider: candidate.model.provider,
+    model: candidate.canonicalId,
+    project: project ?? null
+  }
 }
 
 /**

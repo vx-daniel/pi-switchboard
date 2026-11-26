@@ -13,9 +13,9 @@ import {
   truncateToWidth,
   visibleWidth
 } from '@earendil-works/pi-tui'
+import type { LoginPlace } from '@proxy/config/login-routing'
 import type { ProviderCredentialStatus } from '@proxy/pi/registry'
 import { STATS_KEPT_DAYS, STATS_WINDOWS, type StatsWindow } from '@proxy/stats/windows'
-import type { LoginPlace } from '@proxy/tui/login-routing'
 import { keycap, paint } from '@proxy/tui/theme'
 
 /** The console's views, in tab order. */

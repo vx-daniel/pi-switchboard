@@ -26,6 +26,7 @@ import { proxyLogger } from '@proxy/logging'
 import { convertMessages } from '@proxy/openai/messages'
 import {
   computeModelExposure,
+  type ExposedModel,
   type ModelExposureConfig,
   type ModelExposureResult,
   resolveExposedModel
@@ -75,6 +76,7 @@ import {
 import { rejectionResponse } from '@proxy/server/request-rejection'
 import { registerResponsesRoute } from '@proxy/server/responses-route'
 import { planRoute } from '@proxy/server/route-plan'
+import { previewRoute, type RoutePreview } from '@proxy/server/route-preview'
 import type { ProxyEnv } from '@proxy/server/types'
 import { createUsageAnswer } from '@proxy/server/usage'
 import { type Context, Hono } from 'hono'
@@ -408,7 +410,13 @@ async function runChat(
 
   // Upstream credentials first: a request that cannot reach any provider must not make the proxy
   // fetch anything on its behalf (#109 review).
-  const start = await findCredentialedStart(route, upstreamApiKey, resolved.alias)
+  const project = context.get('project')
+  const start = await findCredentialedStart(
+    { ...route, reserve: requestConfig.reserve },
+    upstreamApiKey,
+    resolved.alias,
+    project
+  )
   if (start.kind === 'refused') return context.json(start.answer.body, start.answer.status)
 
   const prepared = await inlineImages(context, request, config, remoteImageFetch)
@@ -425,7 +433,8 @@ async function runChat(
     model: start.candidates[0]?.canonicalId ?? first.canonicalId,
     stream: request.stream === true,
     // Whether a key was sent (`null` is none), for the stats' count (#299); never the key itself.
-    promptCacheKey: typeof request.prompt_cache_key === 'string'
+    promptCacheKey: typeof request.prompt_cache_key === 'string',
+    project
   })
   context.set('chatDispatched', true)
   // The client's disconnect only. The dispatch reads it to tell a client that left from an
@@ -437,6 +446,7 @@ async function runChat(
     const response = await dispatchChat(context, {
       requestId,
       alias: resolved.alias,
+      project,
       candidates: start.candidates,
       fallbackOn: route.fallbackOn,
       loginFallbackOn: route.loginFallbackOn,
@@ -474,12 +484,15 @@ function addSwitchboardRoutes(
     `${SWITCHBOARD_PREFIX}/models`,
     describeRoute(listModelCapabilitiesDescription),
     async (context) => {
-      const exposure = await getExposure(configReader)
+      const requestConfig = await configReader()
+      const exposure = exposureFrom(requestConfig)
       chatLogger.debug('Listing capabilities of {modelCount} models and {aliasCount} aliases', {
         modelCount: exposure.models.length,
         aliasCount: exposure.aliases.length
       })
-      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases]))
+      const previewOf = (exposed: ExposedModel): RoutePreview =>
+        previewRoute(exposed, requestConfig)
+      return context.json(buildPiModelList([...exposure.models, ...exposure.aliases], previewOf))
     }
   )
 

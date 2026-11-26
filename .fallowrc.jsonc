@@ -18,8 +18,25 @@
     "src/logging/index.ts",
     "src/sync/zed.ts",
     // The standalone binary's entry, compiled by `scripts/build-binary.ts` (`bun build --compile`), not by tsdown.
-    "src/standalone/main.ts"
+    "src/standalone/main.ts",
+    // The admin UI's page (#367): `src/admin/web/index.html` loads both, built by `vite.admin.config.ts`, whose
+    // root fallow's Vite plugin does not read.
+    "src/admin/web/main.tsx",
+    "src/admin/web/styles.css"
   ],
+
+  // Exports only generated code uses.
+  "ignoreExports": [
+    // `scripts/build-binary.ts` writes `dist-bin/entry.ts`, which registers the binary's embedded admin pages
+    // with it before the proxy starts (#367).
+    { "file": "src/admin/assets.ts", "exports": ["registerEmbeddedAdminAssets"] }
+  ],
+
+  // The admin UI's pages are build input, not runtime code: Vite bundles these into `dist/admin-ui/`, so they are
+  // devDependencies and no install of the package needs them. fallow judges a dependency, not a file, so its
+  // `dev-dependencies-in-production` rule cannot be scoped to `src/admin/web/**` (an `overrides` entry has no
+  // effect on it); they are named here instead, and are then not checked for being unused either.
+  "ignoreDependencies": ["react", "react-dom", "@tanstack/react-query", "uplot", "daisyui"],
 
   "rules": {
     // No architecture zones or rule packs are defined, so these detectors have nothing to check.

@@ -3,8 +3,8 @@
  *
  * @remarks
  * Priority: CLI args > env vars > JSON config file > defaults. Not every setting has every
- * source: agentic mode is env-only (`PI_SWITCHBOARD_AGENTIC`), and model exposure, public model
- * IDs, custom models, provider prefixes and aliases come from the config file only.
+ * source: model exposure, public model IDs, custom models, provider prefixes and aliases come
+ * from the config file only.
  *
  * The env vars were `PI_PROXY_*` before the rename to pi-switchboard (#65). The old names are not
  * read; one that is still set is warned about, and an old auth token refuses to start
@@ -20,6 +20,8 @@
  */
 
 import { getLogLevels, isLogLevel, type LogLevel } from '@logtape/logtape'
+import { type AdminUiSettings, resolveAdminUi } from '@proxy/config/admin'
+import { parseBoolean, parseEnvInt } from '@proxy/config/env-values'
 import type {
   AliasTarget,
   ConfigFileProblem,
@@ -31,16 +33,13 @@ import {
   BYTES_PER_MB,
   configFileAuthTokenInvalid,
   configFileProblem,
-  intBounds,
   loadConfigFromFile,
   MaxBodySizeBytesSchema,
-  parseIntText,
   ProxyConfigSchema,
   UpstreamTimeoutMsSchema
 } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { MS_PER_SECOND } from '@proxy/utils/time'
-import type * as z from 'zod'
 
 /** Logger for config resolution (`config` category). */
 const configLogger = proxyLogger('config')
@@ -161,8 +160,6 @@ export interface ServerConfig {
   readonly proxyAuthOverride?: OverrideSource
   /** Whether requests a web page could send are refused (`hostOriginGuard`, #188). */
   readonly hostOriginGuardEnabled: boolean
-  /** Whether `PI_SWITCHBOARD_AGENTIC` is `true`; agentic mode is not built, so only logged. */
-  readonly agenticEnabled: boolean
   /** Whether remote image URL fetching is enabled. */
   readonly remoteImagesEnabled: boolean
   /** Whether the Swagger UI docs page is served. */
@@ -171,6 +168,8 @@ export interface ServerConfig {
   readonly responsesApiEnabled: boolean
   /** Whether per-minute traffic stats are kept in the stats file (#216). */
   readonly statsEnabled: boolean
+  /** Whether `pi-switchboard tui` also writes its log to a file (#389). */
+  readonly consoleLogEnabled: boolean
   /** Maximum request body size in bytes. */
   readonly maxBodySize: number
   /**
@@ -190,6 +189,8 @@ export interface ServerConfig {
   readonly aliases: Readonly<Record<string, AliasTarget>>
   /** Lowest log level written. */
   readonly logLevel: LogLevel
+  /** The admin UI (#367): its listener, the operator's GitHub App and who may sign in. */
+  readonly adminUi: AdminUiSettings
 }
 
 /** The prefix of the proxy's env vars. */
@@ -210,12 +211,25 @@ const RUNTIME_ENV_SUFFIXES = [
   'DOCS_UI',
   'RESPONSES_API',
   'STATS',
+  'CONSOLE_LOG',
+  'CONSOLE_LOG_FILE',
   'MAX_BODY_SIZE',
   'UPSTREAM_TIMEOUT_MS',
-  'AGENTIC',
   'LOG_LEVEL',
   'LOG_FORMAT',
-  'EXTENSION_LOG_FILE'
+  'EXTENSION_LOG_FILE',
+  'ADMIN_UI',
+  'ADMIN_HOST',
+  'ADMIN_PORT',
+  'ADMIN_URL',
+  'ADMIN_EDITORS',
+  'ADMIN_VIEWERS',
+  'ADMIN_SESSION_KEY',
+  'ADMIN_SESSION_KEY_FILE',
+  'GITHUB_CLIENT_ID',
+  'GITHUB_CLIENT_ID_FILE',
+  'GITHUB_CLIENT_SECRET',
+  'GITHUB_CLIENT_SECRET_FILE'
 ] as const
 
 /**
@@ -258,61 +272,6 @@ function envLogLevel(raw: string | undefined, fallback: LogLevel): LogLevel {
   return fallback
 }
 
-/**
- * Parses an integer env var against the config file's bounds for the same setting, warning and
- * using `fallback` when it is not one within them.
- *
- * @remarks
- * Warn and fall back, never clamp: an invalid env var is ignored (CONSTITUTION principle II),
- * where an invalid config-file value is repaired to the nearest bound.
- *
- * @param name - The env var's name, for the warning.
- * @param raw - The env var's value, or `undefined` when unset.
- * @param schema - The bounds, in the env var's unit.
- * @param fallback - The value to use when `raw` is unset or invalid.
- * @returns The parsed integer, or `fallback`.
- */
-function parseEnvInt(
-  name: string,
-  raw: string | undefined,
-  schema: z.ZodInt,
-  fallback: number
-): number {
-  if (raw === undefined) return fallback
-  const parsed = parseIntText(raw, schema)
-  if (parsed === undefined) {
-    const { min, max } = intBounds(schema)
-    configLogger.warn(
-      'Ignoring {name}={value}: not an integer from {min} to {max}; using {fallback}',
-      { name, value: raw, min, max, fallback }
-    )
-    return fallback
-  }
-  return parsed
-}
-
-/**
- * Parses a boolean env var: only `true` is true.
- *
- * @remarks
- * Any value other than `true` or `false` is warned about and treated as false, not as `fallback`.
- *
- * @param name - The env var's name, for the warning.
- * @param raw - The env var's value, or `undefined` when unset.
- * @param fallback - The value to use when `raw` is unset.
- * @returns `fallback` when unset, else whether `raw` is `true`.
- */
-function parseBoolean(name: string, raw: string | undefined, fallback: boolean): boolean {
-  if (raw === undefined) return fallback
-  if (raw !== 'true' && raw !== 'false') {
-    configLogger.warn('{name}={value} is not "true" or "false"; treating it as false', {
-      name,
-      value: raw
-    })
-  }
-  return raw === 'true'
-}
-
 /** Settings given as CLI flags; `undefined` means the flag was not given. */
 export interface CliOverrides {
   host?: string | undefined
@@ -336,6 +295,7 @@ type Switches = Pick<
   | 'docsUiEnabled'
   | 'responsesApiEnabled'
   | 'statsEnabled'
+  | 'consoleLogEnabled'
 >
 
 /**
@@ -373,7 +333,12 @@ function resolveSwitches(cli: CliOverrides, file: ProxyConfig): Switches {
       ),
     statsEnabled:
       cli.stats ??
-      parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats)
+      parseBoolean('PI_SWITCHBOARD_STATS', process.env.PI_SWITCHBOARD_STATS, file.stats),
+    consoleLogEnabled: parseBoolean(
+      'PI_SWITCHBOARD_CONSOLE_LOG',
+      process.env.PI_SWITCHBOARD_CONSOLE_LOG,
+      file.consoleLog
+    )
   }
 }
 
@@ -437,19 +402,12 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
         )
       : cli.upstreamTimeoutSec * MS_PER_SECOND
 
-  const agenticEnabled = parseBoolean(
-    'PI_SWITCHBOARD_AGENTIC',
-    process.env.PI_SWITCHBOARD_AGENTIC,
-    false
-  )
-
   return {
     host,
     port,
     proxyAuth,
     ...(override === undefined ? {} : { proxyAuthOverride: override.source }),
     ...resolveSwitches(cli, file),
-    agenticEnabled,
     maxBodySize,
     upstreamTimeoutMs,
     publicModelIdMode: file.publicModelIdMode,
@@ -457,6 +415,7 @@ export function loadConfig(cli: CliOverrides = {}): ServerConfig {
     customModels: file.customModels,
     providerPrefixes: file.providerPrefixes,
     aliases: file.aliases,
-    logLevel: cli.logLevel ?? envLogLevel(process.env.PI_SWITCHBOARD_LOG_LEVEL, file.logLevel)
+    logLevel: cli.logLevel ?? envLogLevel(process.env.PI_SWITCHBOARD_LOG_LEVEL, file.logLevel),
+    adminUi: resolveAdminUi(file.adminUi, process.env)
   }
 }

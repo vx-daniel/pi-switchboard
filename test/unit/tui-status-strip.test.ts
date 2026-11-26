@@ -68,6 +68,7 @@ function finishedAt(time: number): FinishedRequest {
     attempt: 1,
     stream: false,
     promptCacheKey: false,
+    project: null,
     firstEventAt: undefined,
     startedAt: time - 1000,
     endedAt: time,

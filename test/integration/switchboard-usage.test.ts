@@ -79,7 +79,8 @@ function recordTraffic(): void {
       },
       { ...attempt(minute, '', 'p/a'), attempts: 1, failures: 1 }
     ],
-    failures: [{ minute, model: 'p/a', failureClass: 'rate_limit', failures: 2 }]
+    failures: [{ minute, model: 'p/a', failureClass: 'rate_limit', failures: 2 }],
+    projects: []
   })
   store.close()
 }

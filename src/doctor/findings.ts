@@ -15,14 +15,12 @@
  */
 
 import type { FailureClass } from '@proxy/config/schema'
+import { bySeverity, type Severity } from '@proxy/doctor/severity'
 import { MISCONFIGURED_ALIAS } from '@proxy/openai/model-aliases'
 import type { CredentialsHealth, ModelsHealth } from '@proxy/server/health'
 import { cacheHitRate } from '@proxy/stats/cache'
 import type { ModelStats } from '@proxy/stats/store'
 import type { StatsWindow } from '@proxy/stats/windows'
-
-/** How much a finding matters: only a general `error` fails the doctor (exit status 1). */
-export type Severity = 'error' | 'warning' | 'advice'
 
 /**
  * Every check's name, the general section's then the cache section's: the names a finding can
@@ -41,6 +39,7 @@ export const DOCTOR_CHECKS = [
   'credentials',
   'logins',
   'fallback-on',
+  'budget',
   'window',
   'hit-rate',
   'cache-write-cost',
@@ -546,21 +545,6 @@ export function generalFindings(
     ...credentialFindings(inputs.credentials),
     ...fallbackFindings(inputs.fallback, inputs.fallbacksByAlias)
   ])
-}
-
-/** Severity order, most serious first. */
-const SEVERITY_RANK: Readonly<Record<Severity, number>> = { error: 0, warning: 1, advice: 2 }
-
-/**
- * Sorts findings by severity, keeping each severity's order.
- *
- * @param findings - the findings
- * @returns them, errors first
- */
-export function bySeverity(findings: readonly Finding[]): Finding[] {
-  return findings.toSorted(
-    (left, right) => SEVERITY_RANK[left.severity] - SEVERITY_RANK[right.severity]
-  )
 }
 
 /**

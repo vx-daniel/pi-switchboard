@@ -13,7 +13,11 @@ import { existsSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileS
 import { dirname, resolve } from 'node:path'
 
 import { isLogLevel, type LogLevel } from '@logtape/logtape'
+import { ADMIN_UI_DEFAULTS, AdminUiConfigSchema, readAdminUi } from '@proxy/config/admin-schema'
 import { piAgentDir } from '@proxy/config/agent-dir'
+import type { FieldReader } from '@proxy/config/field-reader'
+import { BudgetSchema, BudgetsSchema, ProjectLabelSchema } from '@proxy/config/projects'
+import { validEntries, validList } from '@proxy/config/repair'
 import { proxyLogger } from '@proxy/logging'
 import { REASONING_EFFORTS, type ReasoningEffort } from '@proxy/openai/schemas'
 import { errorCode, isRecord, parseJsonOrUndefined } from '@proxy/utils/guards'
@@ -385,6 +389,12 @@ export const ProxyConfigSchema = z.object({
   responsesApi: z.boolean(),
   /** Keep per-minute traffic stats in a SQLite file in pi's agent dir, for the console (#216). */
   stats: z.boolean(),
+  /**
+   * Also write the console's log to a file (#389): `pi-switchboard.log` in pi's agent dir, or
+   * `PI_SWITCHBOARD_CONSOLE_LOG_FILE`. `pi-switchboard tui` only; the headless proxy logs to
+   * stderr.
+   */
+  consoleLog: z.boolean(),
   /** Max request body in MB. */
   maxBodySizeMb: boundedInt(1, MAX_BODY_SIZE_MB),
   /** Seconds the upstream provider may send nothing before a call is aborted. */
@@ -406,10 +416,16 @@ export const ProxyConfigSchema = z.object({
    * words (`{ "anthropic-2": "work" }`). Never sent anywhere.
    */
   labels: LabelsSchema,
+  /**
+   * Project -> what it may spend in US dollars per stats window (#366): `{ "j5": { "week": 50 } }`.
+   * Reported beside the project's usage, never enforced.
+   */
+  budgets: BudgetsSchema,
   /** Lowest log level the proxy writes (LogTape levels). */
   logLevel: LogLevelSchema,
   routing: RoutingConfigSchema,
-  zed: ZedSyncConfigSchema
+  zed: ZedSyncConfigSchema,
+  adminUi: AdminUiConfigSchema
 })
 
 /** The proxy's config file contents, every field present and valid. */
@@ -449,6 +465,7 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   docsUi: false,
   responsesApi: false,
   stats: true,
+  consoleLog: true,
   maxBodySizeMb: 50,
   upstreamTimeoutSec: 120,
   lifetime: 'detached',
@@ -458,12 +475,14 @@ export const DEFAULT_CONFIG: Readonly<ProxyConfig> = {
   providerPrefixes: {},
   aliases: {},
   labels: {},
+  budgets: {},
   logLevel: 'info',
   routing: { reserve: {}, logins: { fallbackOn: ['rate_limit'], order: {}, disabled: [] } },
   zed: {
     providerName: 'Pi Proxy',
     autoSync: false
-  }
+  },
+  adminUi: ADMIN_UI_DEFAULTS
 }
 
 // ---------------------------------------------------------------------------
@@ -517,25 +536,6 @@ export const UpstreamTimeoutMsSchema = scaledInt(
   MS_PER_SECOND
 )
 
-/**
- * Returns a repairer that keeps the list entries `schema` accepts.
- *
- * @typeParam T - The entry type.
- * @param schema - The schema each entry must pass.
- * @returns The repairer: the valid entries, empty when the value is not an array.
- */
-function validList<T>(schema: z.ZodType<T>): (value: unknown) => T[] {
-  return (value) => {
-    if (!Array.isArray(value)) return []
-    const result: T[] = []
-    for (const candidate of value) {
-      const parsed = schema.safeParse(candidate)
-      if (parsed.success) result.push(parsed.data)
-    }
-    return result
-  }
-}
-
 /** Keeps the list entries {@link VerbatimNameSchema} accepts. */
 const validNames = validList(VerbatimNameSchema)
 /** Keeps the login names `routing.logins` accepts: non-empty, trimmed. */
@@ -557,40 +557,17 @@ function validNameEntries(value: unknown): Record<string, string> {
   return result
 }
 
-/**
- * Returns a repairer that keeps the map entries with a non-empty key and a value `schema` accepts.
- *
- * @typeParam T - The value type.
- * @param schema - The schema each value must pass.
- * @returns The repairer: the valid entries, empty when the value is not a plain object.
- */
-function validEntries<T>(schema: z.ZodType<T>): (value: unknown) => Record<string, T> {
-  return (value) => {
-    if (!isRecord(value)) return {}
-    const entries: Record<string, T> = {}
-    for (const [key, candidate] of Object.entries(value)) {
-      const parsed = schema.safeParse(candidate)
-      if (key.length > 0 && parsed.success) entries[key] = parsed.data
-    }
-    return entries
-  }
-}
-
 /** Keeps the `aliases` entries the schema accepts: a non-empty name for a valid target. */
 const validAliases = validEntries(AliasTargetSchema)
 /** Keeps the `routing.reserve` entries the schema accepts: a provider and a share from 0 to 1. */
 const validReserves = validEntries(ReserveShareSchema)
+/** Keeps the `budgets` entries the schema accepts: a project label and a valid budget (#366). */
+const validBudgets = validEntries(BudgetSchema, ProjectLabelSchema)
+
 /** Keeps the `labels` entries the schema accepts: a provider and a short, non-empty label. */
 const validLabels = validEntries(LabelSchema)
 /** Keeps the `routing.logins.order` entries with a provider and a list: each list's valid logins. */
 const validLoginOrder = validEntries(z.array(z.unknown()).transform(validLogins))
-
-/** Reads one field: its value when the schema accepts it, otherwise `repair(value)`. */
-type FieldReader<Key extends string> = <T>(
-  key: Key,
-  schema: z.ZodType<T>,
-  repair: (value: unknown) => T
-) => T
 
 /**
  * Returns a reader for the fields of one object in the config.
@@ -721,6 +698,7 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     docsUi: field('docsUi', fields.docsUi, () => DEFAULT_CONFIG.docsUi),
     responsesApi: field('responsesApi', fields.responsesApi, () => DEFAULT_CONFIG.responsesApi),
     stats: field('stats', fields.stats, () => DEFAULT_CONFIG.stats),
+    consoleLog: field('consoleLog', fields.consoleLog, () => DEFAULT_CONFIG.consoleLog),
     maxBodySizeMb: field(
       'maxBodySizeMb',
       fields.maxBodySizeMb,
@@ -746,9 +724,11 @@ export function normalizeConfig(raw: unknown): ProxyConfig {
     providerPrefixes: field('providerPrefixes', fields.providerPrefixes, validNameEntries),
     aliases: field('aliases', fields.aliases, validAliases),
     labels: field('labels', fields.labels, validLabels),
+    budgets: field('budgets', fields.budgets, validBudgets),
     logLevel: field('logLevel', fields.logLevel, () => DEFAULT_CONFIG.logLevel),
     routing: normalizeRoutingConfig(isRecord(raw) ? raw['routing'] : undefined, corrected),
-    zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected)
+    zed: normalizeZedSyncConfig(isRecord(raw) ? raw['zed'] : undefined, corrected),
+    adminUi: readAdminUi(isRecord(raw) ? raw['adminUi'] : undefined, corrected, fieldReader)
   }
   reportCorrections(corrected)
   return config
@@ -997,8 +977,7 @@ export function saveConfigToFile(config: ProxyConfig, options: SaveConfigOptions
  * @remarks
  * Covers host, port, auth token (only when non-empty), the host/origin guard, remote images, the
  * docs UI, the Responses API, stats, body size, upstream timeout and log level. Not `lifetime` or
- * `zed` (extension-only). Not `PI_SWITCHBOARD_AGENTIC` either, on purpose: agentic mode is not
- * built, the variable only reaches the startup log, and the extension has no setting for it.
+ * `zed` (extension-only).
  *
  * @param config - The config to translate.
  * @returns Env var names and values.

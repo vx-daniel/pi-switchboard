@@ -296,7 +296,7 @@ function restartWith(
         events.push('reload')
         return next
       },
-      logAt: (level) => events.push(`log at ${level}`)
+      logAs: (config) => events.push(`log at ${config.logLevel}`)
     },
     stats: { view: statsView('old stats', events) },
     openStats: (enabled) => {

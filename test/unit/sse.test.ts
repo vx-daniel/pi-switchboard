@@ -223,8 +223,8 @@ describe('upstream error logging', () => {
    *
    * @remarks
    * Some providers quote the request back in their error text. The tests below catch that text
-   * reaching a level a default deployment writes, while keeping it available to someone
-   * debugging.
+   * reaching a level a default deployment writes, or being logged here at all: `pi.complete` logs
+   * it once, at debug, when the call ends with the event (#339).
    *
    * @param level - the lowest log level to write
    * @returns the JSON log lines written while the stream ran
@@ -250,10 +250,11 @@ describe('upstream error logging', () => {
     expect(lines.join('')).not.toContain('echoed user prompt')
   })
 
-  test('keeps the provider text for debugging at debug', async () => {
+  // Catches the provider text logged a second time, by the SSE writer, beside the copy
+  // `pi.complete` logs at debug for the same failed call (#339).
+  test('leaves the provider text to the upstream call, even at debug', async () => {
     const lines = await logLinesFor('debug')
-    const detailLines = lines.filter((line) => line.includes('echoed user prompt'))
-    expect(detailLines).toHaveLength(1)
-    expect(detailLines[0]).toContain('"DEBUG"')
+    expect(lines.some((line) => line.includes('"ERROR"'))).toBe(true)
+    expect(lines.join('')).not.toContain('echoed user prompt')
   })
 })

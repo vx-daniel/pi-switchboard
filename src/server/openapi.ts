@@ -78,6 +78,19 @@ export const chatHeadersSchema = z.object({
         'request. Empty or only spaces is refused with 400; leave the header out to use the ' +
         'stored credential. ' +
         'Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400.'
+    }),
+  // Checked by the project middleware (`src/server/project-header.ts`) before this validator
+  // runs; here only described, since with proxy auth off any value is ignored, never refused.
+  'x-switchboard-project': z
+    .string()
+    .trim()
+    .optional()
+    .meta({
+      description:
+        'The project this request counts under in the stats and `GET /v1/switchboard/usage` ' +
+        '(1 to 64 characters: a letter or digit, then letters, digits and `._:/@-`). Read only ' +
+        'with proxy auth on: without a token it is ignored. With auth on, an invalid label is ' +
+        'refused with 400.'
     })
 })
 

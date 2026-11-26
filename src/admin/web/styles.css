@@ -1,0 +1,45 @@
+@import 'tailwindcss';
+@import 'uplot/dist/uPlot.min.css';
+@plugin "daisyui" {
+  themes: false;
+}
+/* The console's palette (src/tui/tokyonight-storm.ts): Tokyo Night Storm. */
+@plugin "daisyui/theme" {
+  name: 'storm';
+  default: true;
+  prefersdark: true;
+  color-scheme: dark;
+
+  --color-base-100: #24283b;
+  --color-base-200: #1f2335;
+  --color-base-300: #1b1e2d;
+  --color-base-content: #c0caf5;
+  --color-primary: #7aa2f7;
+  --color-primary-content: #1f2335;
+  --color-secondary: #bb9af7;
+  --color-secondary-content: #1f2335;
+  --color-accent: #7dcfff;
+  --color-accent-content: #1f2335;
+  --color-neutral: #292e42;
+  --color-neutral-content: #c0caf5;
+  --color-info: #7dcfff;
+  --color-info-content: #1f2335;
+  --color-success: #9ece6a;
+  --color-success-content: #1f2335;
+  --color-warning: #e0af68;
+  --color-warning-content: #1f2335;
+  --color-error: #f7768e;
+  --color-error-content: #1f2335;
+
+  --radius-selector: 0.5rem;
+  --radius-field: 0.25rem;
+  --radius-box: 0.5rem;
+
+  --size-selector: 0.25rem;
+  --size-field: 0.25rem;
+
+  --border: 1px;
+
+  --depth: 0;
+  --noise: 0;
+}

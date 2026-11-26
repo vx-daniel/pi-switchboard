@@ -352,8 +352,10 @@
                   "type": "string",
                   "enum": [
                     "rate_limit",
-                    "unavailable"
-                  ]
+                    "unavailable",
+                    "auth"
+                  ],
+                  "description": "A 429, a 503 or 529, or a refused or unresolvable credential (#357)."
                 },
                 "until": {
                   "type": "string",
@@ -370,7 +372,7 @@
                     "response",
                     "backoff"
                   ],
-                  "description": "Whether the failed response gave the time, or the growing default did (60 s, 180 s, then doubling)."
+                  "description": "Whether the failed response gave the time, or the default did (60 s, 180 s, then doubling; a fixed 2 minutes after a refused credential)."
                 }
               },
               "required": [
@@ -492,6 +494,21 @@
                           "description": "When the response that reported it arrived, as an ISO 8601 time."
                         },
                         "status": {
+                          "description": "The overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset until the next response.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "statusResetsAt": {
+                          "description": "When the overall status resets, as an ISO 8601 time (Anthropic, #382).",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "statusWindow": {
+                          "description": "The window that decided it, such as Anthropic's `five_hour` (#382).",
                           "type": [
                             "string",
                             "null"
@@ -556,6 +573,8 @@
                       "required": [
                         "observedAt",
                         "status",
+                        "statusResetsAt",
+                        "statusWindow",
                         "plan",
                         "windows"
                       ],
@@ -759,9 +778,10 @@
                     "type": "string",
                     "enum": [
                       "rate_limit",
-                      "unavailable"
+                      "unavailable",
+                      "auth"
                     ],
-                    "description": "The failure it is cooling down from: a 429, or a 503 or 529."
+                    "description": "The failure it is cooling down from: a 429, a 503 or 529, or a refused or unresolvable credential (#357: a 401 or 403, or a token pi could not refresh)."
                   },
                   "scope": {
                     "type": "string",
@@ -769,7 +789,7 @@
                       "provider",
                       "model"
                     ],
-                    "description": "A 429 cools the whole login; an overload, the model."
+                    "description": "A 429 or a refused credential cools the whole login; an overload, the model."
                   },
                   "until": {
                     "type": "integer",
@@ -789,7 +809,7 @@
                 "type": "null"
               }
             ],
-            "description": "The cooldown the model is under (#68), or null. A route that names the reason in its `fallbackOn` skips it until then; one that names neither still calls it."
+            "description": "The cooldown of the login a request would call now (`routing.next`, #379), or null when it is free. Routing passes a cooling login over when the config's `fallbackOn` names the reason and another candidate is free, and when every one is cooling it calls the one that ends first: this is then that cooldown. Each login has its own in `logins`."
           },
           "quota": {
             "anyOf": [
@@ -803,7 +823,27 @@
                     "description": "When the response that reported it arrived, in Unix seconds."
                   },
                   "status": {
-                    "description": "The provider's overall status, such as Anthropic's `allowed`.",
+                    "description": "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset until the next response: at `status_resets_at` when the provider sent it, else once any window has reset.",
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "status_resets_at": {
+                    "anyOf": [
+                      {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "When the overall status resets, in Unix seconds (Anthropic, #382)."
+                  },
+                  "status_window": {
+                    "description": "The window that decided the overall status, as the provider names it, such as Anthropic's `five_hour` (#382).",
                     "type": [
                       "string",
                       "null"
@@ -876,6 +916,8 @@
                 "required": [
                   "observed_at",
                   "status",
+                  "status_resets_at",
+                  "status_window",
                   "plan",
                   "windows"
                 ],
@@ -885,7 +927,148 @@
                 "type": "null"
               }
             ],
-            "description": "The login's latest subscription quota, from its response headers (#69), or null when it reports none (Google, API keys, or no call since the proxy started). A window that has reset since is left out."
+            "description": "The subscription quota of `routing.next`'s login (#69, #379), or null when it reports none. Each login has its own in `logins`."
+          },
+          "credential": {
+            "type": "object",
+            "properties": {
+              "status": {
+                "type": "string",
+                "enum": [
+                  "working",
+                  "failing",
+                  "unknown"
+                ],
+                "description": "`failing` while its latest result is a failure, `working` while it is a success, `unknown` before this process saw either. Learned from calls and verifications only: a login no request reaches keeps its last status, and `GET /healthz/creds?verify=true` checks every login now."
+              },
+              "last_ok": {
+                "anyOf": [
+                  {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "When it was last shown good, in Unix seconds: a whole answer under it, or a passing verification of an OAuth login. Null before either."
+              },
+              "last_failure": {
+                "anyOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "at": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991,
+                        "description": "When, in Unix seconds."
+                      },
+                      "reason": {
+                        "type": "string",
+                        "description": "Why: pi's summary of a credential it could not resolve (an OAuth refresh the provider rejected, with its HTTP status), or the provider refusing it (401 or 403). Never the credential or the token endpoint's body."
+                      }
+                    },
+                    "required": [
+                      "at",
+                      "reason"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Its last failure, or null."
+              }
+            },
+            "required": [
+              "status",
+              "last_ok",
+              "last_failure"
+            ],
+            "additionalProperties": false,
+            "description": "The credential health of `routing.next`'s login (#388): `failing` there means a request naming the model now is answered with that failure, since routing passes a failing login over only while it cools down (2 minutes) and the hop past it names `auth`. Each login has its own in `logins`."
+          },
+          "routing": {
+            "type": "object",
+            "properties": {
+              "next": {
+                "type": "object",
+                "properties": {
+                  "model": {
+                    "type": "string",
+                    "description": "Its canonical ID."
+                  },
+                  "login": {
+                    "type": "string",
+                    "description": "The login it would be called under."
+                  }
+                },
+                "required": [
+                  "model",
+                  "login"
+                ],
+                "additionalProperties": false,
+                "description": "The model and login a request would call first: for an alias, a later target when the chain would move past the first."
+              },
+              "skipped": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string",
+                      "description": "Its canonical ID."
+                    },
+                    "login": {
+                      "description": "The login, when the model has more than one (#227).",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "type": "string",
+                      "enum": [
+                        "rate_limit",
+                        "unavailable",
+                        "timeout",
+                        "auth",
+                        "refused",
+                        "upstream_error",
+                        "quota"
+                      ],
+                      "description": "Why it would be passed over: the failure it is cooling down from, or `quota` when its login has less than the config's `routing.reserve` left (#69)."
+                    },
+                    "until": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "When its cooldown ends, in Unix seconds; null for `quota`."
+                    }
+                  },
+                  "required": [
+                    "model",
+                    "reason",
+                    "until"
+                  ],
+                  "additionalProperties": false
+                },
+                "description": "The candidates it would pass over before `next`, in order, as `x_pi.attempts` lists skips."
+              }
+            },
+            "required": [
+              "next",
+              "skipped"
+            ],
+            "additionalProperties": false,
+            "description": "What a text request naming the model would do now (#379), by the same rules routing follows: the config's `fallbackOn` classes, cooldowns and `routing.reserve`. Routing never skips every candidate, so there is always a `next`. No credential is resolved for it, so it assumes each one on the way resolves: a request first checks the credential of each candidate it reaches past cooldowns and reserves, and a refused one fails the request (502 `upstream_credentials_missing`) unless the hop names `auth`."
           },
           "availability": {
             "type": "string",
@@ -918,9 +1101,10 @@
                           "type": "string",
                           "enum": [
                             "rate_limit",
-                            "unavailable"
+                            "unavailable",
+                            "auth"
                           ],
-                          "description": "The failure it is cooling down from: a 429, or a 503 or 529."
+                          "description": "The failure it is cooling down from: a 429, a 503 or 529, or a refused or unresolvable credential (#357: a 401 or 403, or a token pi could not refresh)."
                         },
                         "scope": {
                           "type": "string",
@@ -928,7 +1112,7 @@
                             "provider",
                             "model"
                           ],
-                          "description": "A 429 cools the whole login; an overload, the model."
+                          "description": "A 429 or a refused credential cools the whole login; an overload, the model."
                         },
                         "until": {
                           "type": "integer",
@@ -948,7 +1132,7 @@
                       "type": "null"
                     }
                   ],
-                  "description": "The cooldown the model is under (#68), or null. A route that names the reason in its `fallbackOn` skips it until then; one that names neither still calls it."
+                  "description": "The cooldown the login is under (#68), or null. A route that names the reason in its `fallbackOn` skips it until then; one that names neither still calls it."
                 },
                 "quota": {
                   "anyOf": [
@@ -962,7 +1146,27 @@
                           "description": "When the response that reported it arrived, in Unix seconds."
                         },
                         "status": {
-                          "description": "The provider's overall status, such as Anthropic's `allowed`.",
+                          "description": "The provider's overall status, such as Anthropic's `allowed` or `rejected`; null once it has reset until the next response: at `status_resets_at` when the provider sent it, else once any window has reset.",
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
+                        "status_resets_at": {
+                          "anyOf": [
+                            {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ],
+                          "description": "When the overall status resets, in Unix seconds (Anthropic, #382)."
+                        },
+                        "status_window": {
+                          "description": "The window that decided the overall status, as the provider names it, such as Anthropic's `five_hour` (#382).",
                           "type": [
                             "string",
                             "null"
@@ -1035,6 +1239,8 @@
                       "required": [
                         "observed_at",
                         "status",
+                        "status_resets_at",
+                        "status_window",
                         "plan",
                         "windows"
                       ],
@@ -1045,17 +1251,80 @@
                     }
                   ],
                   "description": "The login's latest subscription quota, from its response headers (#69), or null when it reports none (Google, API keys, or no call since the proxy started). A window that has reset since is left out."
+                },
+                "credential": {
+                  "type": "object",
+                  "properties": {
+                    "status": {
+                      "type": "string",
+                      "enum": [
+                        "working",
+                        "failing",
+                        "unknown"
+                      ],
+                      "description": "`failing` while its latest result is a failure, `working` while it is a success, `unknown` before this process saw either. Learned from calls and verifications only: a login no request reaches keeps its last status, and `GET /healthz/creds?verify=true` checks every login now."
+                    },
+                    "last_ok": {
+                      "anyOf": [
+                        {
+                          "type": "integer",
+                          "minimum": 0,
+                          "maximum": 9007199254740991
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "When it was last shown good, in Unix seconds: a whole answer under it, or a passing verification of an OAuth login. Null before either."
+                    },
+                    "last_failure": {
+                      "anyOf": [
+                        {
+                          "type": "object",
+                          "properties": {
+                            "at": {
+                              "type": "integer",
+                              "minimum": 0,
+                              "maximum": 9007199254740991,
+                              "description": "When, in Unix seconds."
+                            },
+                            "reason": {
+                              "type": "string",
+                              "description": "Why: pi's summary of a credential it could not resolve (an OAuth refresh the provider rejected, with its HTTP status), or the provider refusing it (401 or 403). Never the credential or the token endpoint's body."
+                            }
+                          },
+                          "required": [
+                            "at",
+                            "reason"
+                          ],
+                          "additionalProperties": false
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ],
+                      "description": "Its last failure, or null."
+                    }
+                  },
+                  "required": [
+                    "status",
+                    "last_ok",
+                    "last_failure"
+                  ],
+                  "additionalProperties": false,
+                  "description": "Whether the login's credential works (#388), from what this process saw since it started. A login logged in or out in the console starts over."
                 }
               },
               "required": [
                 "id",
                 "disabled",
                 "cooldown",
-                "quota"
+                "quota",
+                "credential"
               ],
               "additionalProperties": false
             },
-            "description": "The logins that may serve the model, in the order routing tries them (#227), as `routing.logins.order` sets it (#233); then the disabled ones, which it never tries. The model's own `cooldown` and `quota` are the first login's."
+            "description": "The logins that may serve the model, in the order routing tries them (#227), as `routing.logins.order` sets it (#233); then the disabled ones, which it never tries. Each login's own `cooldown`, `quota` and `credential`; the model's are those of `routing.next`."
           }
         },
         "required": [
@@ -1070,6 +1339,8 @@
           "cost",
           "cooldown",
           "quota",
+          "credential",
+          "routing",
           "availability",
           "logins"
         ],
@@ -1355,6 +1626,74 @@
               "additionalProperties": false
             }
           },
+          "projects": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "project": {
+                  "type": "string",
+                  "description": "The `X-Switchboard-Project` label (counted only with proxy auth on); `(other)` for projects past the cap a minute."
+                },
+                "requests": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Finished requests, rejected ones excluded."
+                },
+                "failed": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "input_tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Uncached input tokens. The prompt is these plus `cache_read_tokens` and `cache_write_tokens`."
+                },
+                "output_tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "cache_read_tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Input tokens read from the provider's cache."
+                },
+                "cache_write_tokens": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991,
+                  "description": "Input tokens written to the provider's cache."
+                },
+                "cost_usd": {
+                  "type": "number"
+                },
+                "budget_usd": {
+                  "description": "The project's budget for this window (`budgets` in proxy-config.json), or `null`. Reported, never enforced.",
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "project",
+                "requests",
+                "failed",
+                "input_tokens",
+                "output_tokens",
+                "cache_read_tokens",
+                "cache_write_tokens",
+                "cost_usd",
+                "budget_usd"
+              ],
+              "additionalProperties": false
+            }
+          },
           "timeline": {
             "type": "array",
             "items": {
@@ -1402,6 +1741,7 @@
           "aliases",
           "failures",
           "rejected",
+          "projects",
           "timeline"
         ],
         "additionalProperties": false,
@@ -1441,8 +1781,10 @@
                   "type": "string",
                   "enum": [
                     "rate_limit",
-                    "unavailable"
-                  ]
+                    "unavailable",
+                    "auth"
+                  ],
+                  "description": "A 429, a 503 or 529, or a refused or unresolvable credential (#357)."
                 },
                 "until": {
                   "type": "string",
@@ -1459,7 +1801,7 @@
                     "response",
                     "backoff"
                   ],
-                  "description": "Whether the failed response gave the time, or the growing default did (60 s, 180 s, then doubling)."
+                  "description": "Whether the failed response gave the time, or the default did (60 s, 180 s, then doubling; a fixed 2 minutes after a refused credential)."
                 }
               },
               "required": [
@@ -3068,6 +3410,14 @@
               "minLength": 1
             },
             "description": "An API key for the model's provider, used instead of pi's stored credential for this request. Empty or only spaces is refused with 400; leave the header out to use the stored credential. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400."
+          },
+          {
+            "in": "header",
+            "name": "x-switchboard-project",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The project this request counts under in the stats and `GET /v1/switchboard/usage` (1 to 64 characters: a letter or digit, then letters, digits and `._:/@-`). Read only with proxy auth on: without a token it is ignored. With auth on, an invalid label is refused with 400."
           }
         ],
         "requestBody": {
@@ -3831,6 +4181,14 @@
               "minLength": 1
             },
             "description": "An API key for the model's provider, used instead of pi's stored credential for this request. Empty or only spaces is refused with 400; leave the header out to use the stored credential. Before the rename it was `X-Pi-Upstream-Api-Key`, which is now rejected with 400."
+          },
+          {
+            "in": "header",
+            "name": "x-switchboard-project",
+            "schema": {
+              "type": "string"
+            },
+            "description": "The project this request counts under in the stats and `GET /v1/switchboard/usage` (1 to 64 characters: a letter or digit, then letters, digits and `._:/@-`). Read only with proxy auth on: without a token it is ignored. With auth on, an invalid label is refused with 400."
           }
         ],
         "requestBody": {

@@ -346,11 +346,11 @@ export function logEffectiveConfig(config: ServerConfig): void {
     port: config.port,
     proxyAuthMode: config.proxyAuth.kind,
     hostOriginGuardEnabled: config.hostOriginGuardEnabled,
-    agenticEnabled: config.agenticEnabled,
     remoteImagesEnabled: config.remoteImagesEnabled,
     docsUiEnabled: config.docsUiEnabled,
     responsesApiEnabled: config.responsesApiEnabled,
     statsEnabled: config.statsEnabled,
+    consoleLogEnabled: config.consoleLogEnabled,
     maxBodySize: config.maxBodySize,
     upstreamTimeoutMs: config.upstreamTimeoutMs,
     publicModelIdMode: config.publicModelIdMode,
@@ -369,6 +369,28 @@ export function logEffectiveConfig(config: ServerConfig): void {
     host: config.host,
     risk: authOffRisk(config.host, config.hostOriginGuardEnabled),
     advice
+  })
+}
+
+/**
+ * Waits until a server listens, or fails to.
+ *
+ * @param server - the server `serve` returned
+ * @throws Error when it cannot listen, such as `EADDRINUSE`
+ */
+export async function untilListening(server: ServerType): Promise<void> {
+  // The executor form: `Promise.withResolvers` is past this project's TypeScript lib.
+  await new Promise<void>((resolve, reject) => {
+    const failed = (error: Error): void => {
+      server.off('listening', listening)
+      reject(error)
+    }
+    const listening = (): void => {
+      server.off('error', failed)
+      resolve()
+    }
+    server.once('error', failed)
+    server.once('listening', listening)
   })
 }
 
@@ -394,18 +416,7 @@ export async function openServer(
 ): Promise<ServerType> {
   const app = createApp(config, undefined, undefined, proxyAuth)
   const server = serve({ fetch: app.fetch, port: config.port, hostname: config.host })
-  await new Promise<void>((resolve, reject) => {
-    const failed = (error: Error): void => {
-      server.off('listening', listening)
-      reject(error)
-    }
-    const listening = (): void => {
-      server.off('error', failed)
-      resolve()
-    }
-    server.once('error', failed)
-    server.once('listening', listening)
-  })
+  await untilListening(server)
   const modelCount = getAvailableModels().length
   lifecycleLogger.info('Listening on http://{host}:{port} with {modelCount} models', {
     host: config.host,

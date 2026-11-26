@@ -8,14 +8,23 @@
  * through its own connection, opened on the first request: the file is in WAL mode, so reading
  * doesn't wait for the recorder's writes. It answers with routes, counts, timings, tokens and cost
  * only: never message content, the request's `user`, or a credential. A rejected request's model
- * is the client's text, which the recorder already caps.
+ * and a project (#366) are the client's text, which the recorder already caps; each project comes
+ * with its budget for the window, read from the config file on each request, so a change to a
+ * budget shows at once.
  *
  * @packageDocumentation
  */
 
+import type { Budgets } from '@proxy/config/projects'
+import { loadConfigFromFile } from '@proxy/config/schema'
 import { proxyLogger } from '@proxy/logging'
 import { invalidRequest, type OpenAIError, statsUnavailable } from '@proxy/server/errors'
 import { HTTP_BAD_REQUEST, HTTP_OK, HTTP_SERVICE_UNAVAILABLE } from '@proxy/server/http-status'
+import {
+  type BudgetedProject,
+  budgetedProjects,
+  type ProjectStats
+} from '@proxy/stats/project-store'
 import { statsFilePath } from '@proxy/stats/recorder'
 import {
   type AliasStats,
@@ -43,7 +52,10 @@ const BUCKET_MINUTES: Readonly<Record<StatsWindow, number>> = { today: 60, week:
 const SNAPSHOT_MS = 5000
 
 /** The store's methods the route reads. */
-export type UsageStore = Pick<StatsStore, 'timeline' | 'models' | 'aliases' | 'errors' | 'close'>
+export type UsageStore = Pick<
+  StatsStore,
+  'timeline' | 'models' | 'aliases' | 'errors' | 'projects' | 'close'
+>
 
 /** One model's or alias's numbers, as the response shows them. */
 const usageFields = {
@@ -91,6 +103,25 @@ export const usageSchema = z
     ),
     failures: z.array(z.object({ class: z.string().trim(), count: z.int() })),
     rejected: z.array(z.object({ status: z.int(), count: z.int() })),
+    projects: z.array(
+      z.object({
+        project: z.string().trim().meta({
+          description:
+            'The `X-Switchboard-Project` label (counted only with proxy auth on); `(other)` for projects past the cap a minute.'
+        }),
+        requests: z.int().meta({ description: 'Finished requests, rejected ones excluded.' }),
+        failed: z.int(),
+        input_tokens: usageFields.input_tokens,
+        output_tokens: z.int(),
+        cache_read_tokens: usageFields.cache_read_tokens,
+        cache_write_tokens: usageFields.cache_write_tokens,
+        cost_usd: z.number(),
+        budget_usd: z.number().nullable().meta({
+          description:
+            "The project's budget for this window (`budgets` in proxy-config.json), or `null`. Reported, never enforced."
+        })
+      })
+    ),
     timeline: z.array(
       z.object({
         start: z.iso.datetime(),
@@ -139,19 +170,26 @@ function usageBody(usage: UsageStats): Omit<Usage['models'][number], 'model'> {
   }
 }
 
+/** A window's usage as the store has it: everything but the projects, and the projects' numbers. */
+interface UsageRead {
+  readonly usage: Omit<Usage, 'projects'>
+  readonly projects: readonly ProjectStats[]
+}
+
 /**
- * Reads a window's usage from the store and shapes the response.
+ * Reads a window's usage from the store and shapes the response, but for the projects, whose
+ * budgets are read on each request.
  *
  * @param store - the stats store
  * @param window - the window
  * @param now - the current time, in milliseconds since the epoch
- * @returns the body
+ * @returns the body without its projects, and the projects' numbers
  */
-function readUsage(store: UsageStore, window: StatsWindow, now: number): Usage {
+function readUsage(store: UsageStore, window: StatsWindow, now: number): UsageRead {
   const range = windowMinutes(window, now)
   const bucketMinutes = BUCKET_MINUTES[window]
   const errors: ErrorStats = store.errors(range)
-  return {
+  const usage: Omit<Usage, 'projects'> = {
     object: 'switchboard.usage',
     window,
     from: isoMinute(range.fromMinute),
@@ -173,6 +211,27 @@ function readUsage(store: UsageStore, window: StatsWindow, now: number): Usage {
       failed: bucket.failed,
       rejected: bucket.rejected
     }))
+  }
+  return { usage, projects: store.projects(range) }
+}
+
+/**
+ * Shapes one project's numbers and budget for the response.
+ *
+ * @param project - the project, with its budget for the window
+ * @returns the response fields
+ */
+function projectBody(project: BudgetedProject): Usage['projects'][number] {
+  return {
+    project: project.project,
+    requests: project.requests,
+    failed: project.failed,
+    input_tokens: project.inputTokens,
+    output_tokens: project.outputTokens,
+    cache_read_tokens: project.cacheReadTokens,
+    cache_write_tokens: project.cacheWriteTokens,
+    cost_usd: project.costUsd,
+    budget_usd: project.budgetUsd
   }
 }
 
@@ -207,19 +266,19 @@ function closeQuietly(store: UsageStore | undefined): void {
 function createUsageReader(
   statsEnabled: boolean,
   open: (path: string) => UsageStore
-): (window: StatsWindow, now: number) => Usage | UsageUnavailable {
+): (window: StatsWindow, now: number) => UsageRead | UsageUnavailable {
   let store: UsageStore | undefined
   let cached:
-    | { readonly window: StatsWindow; readonly at: number; readonly usage: Usage }
+    | { readonly window: StatsWindow; readonly at: number; readonly read: UsageRead }
     | undefined
   return (window, now) => {
     if (!statsEnabled) return 'stats-off'
-    if (cached?.window === window && now - cached.at < SNAPSHOT_MS) return cached.usage
+    if (cached?.window === window && now - cached.at < SNAPSHOT_MS) return cached.read
     try {
       store ??= open(statsFilePath())
-      const usage = readUsage(store, window, now)
-      cached = { window, at: now, usage }
-      return usage
+      const read = readUsage(store, window, now)
+      cached = { window, at: now, read }
+      return read
     } catch (error) {
       // Closed and opened again on the next request: the file may have been fixed or unlocked.
       closeQuietly(store)
@@ -240,20 +299,29 @@ export type UsageAnswer =
       readonly body: OpenAIError
     }
 
+/** Where the answer reads its stats file and its budgets. */
+export interface UsageSources {
+  /** Opens the stats file at a path; `openStatsStore` but in tests. */
+  readonly open?: (path: string) => UsageStore
+  /** Reads the budgets; the config file's but in tests. */
+  readonly budgets?: () => Budgets
+}
+
 /**
  * Creates the answer of `GET /v1/switchboard/usage`: the window's usage, a `400` for a window it
  * doesn't know, or a `503` when stats are off or the file can't be read.
  *
  * @param statsEnabled - whether the proxy keeps stats
- * @param open - opens the stats file at a path; `openStatsStore` but in tests
+ * @param sources - where the stats file and the budgets come from
  * @returns a function from the `window` query value (its first, when repeated) and the time to
  *   the answer
  */
 export function createUsageAnswer(
   statsEnabled: boolean,
-  open: (path: string) => UsageStore = openStatsStore
+  sources: UsageSources = {}
 ): (window: string | undefined, now: number) => UsageAnswer {
-  const read = createUsageReader(statsEnabled, open)
+  const readWindow = createUsageReader(statsEnabled, sources.open ?? openStatsStore)
+  const budgets = sources.budgets ?? ((): Budgets => loadConfigFromFile().budgets)
   return (window, now) => {
     const asked = window ?? 'today'
     if (!isStatsWindow(asked)) {
@@ -262,19 +330,20 @@ export function createUsageAnswer(
         body: invalidRequest('`window` must be `today`, `week` or `all`', 'window')
       }
     }
-    const usage = read(asked, now)
-    if (usage === 'stats-off') {
+    const read = readWindow(asked, now)
+    if (read === 'stats-off') {
       return {
         status: HTTP_SERVICE_UNAVAILABLE,
         body: statsUnavailable('Stats are off (--no-stats): the proxy keeps no usage to read')
       }
     }
-    if (usage === 'unreadable') {
+    if (read === 'unreadable') {
       return {
         status: HTTP_SERVICE_UNAVAILABLE,
         body: statsUnavailable('The stats file could not be read; see the proxy log')
       }
     }
-    return { status: HTTP_OK, body: usage }
+    const projects = budgetedProjects(read.projects, budgets(), asked).map(projectBody)
+    return { status: HTTP_OK, body: { ...read.usage, projects } }
   }
 }

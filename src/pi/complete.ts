@@ -34,7 +34,7 @@ import {
 import { observingFetch } from '@proxy/pi/quota'
 import { getRuntime } from '@proxy/pi/registry'
 import { capturingFetch, type FailedResponse } from '@proxy/pi/reset-time'
-import { upstreamTemperature } from '@proxy/pi/temperature'
+import { isAnthropicModel, upstreamTemperature } from '@proxy/pi/temperature'
 import { relayUpstreamActivity, startUpstreamIdleTimeout } from '@proxy/pi/upstream-idle'
 import { errorMessage, isRecord } from '@proxy/utils/guards'
 
@@ -236,21 +236,36 @@ function transportOptions(model: Model<Api>): Pick<SimpleStreamOptions, 'transpo
 }
 
 /**
- * Builds pi's `SimpleStreamOptions` from an OpenAI request.
+ * Gives pi an Anthropic model with message threads off.
+ *
+ * @remarks
+ * pi 1.5.1 turns threads on for `api.anthropic.com` (or `compat.supportsMessageThreads`) whenever
+ * a call has a `sessionId`, the request's `prompt_cache_key`. `disableContinuation` stops the
+ * `thread` field, but pi still adds the `message-threads-2026-08-12` beta; with this compat flag
+ * off it sends neither (#360, #361; the decision keeps the beta off Anthropic traffic). The copy
+ * goes to pi only: the proxy keeps reporting and logging the model as it is.
+ *
+ * @param model - the pi model
+ * @returns a copy with `compat.supportsMessageThreads: false` on the Anthropic Messages API, else
+ *   `model`
+ */
+function withoutMessageThreads(model: Model<Api>): Model<Api> {
+  if (!isAnthropicModel(model)) return model
+  return { ...model, compat: { ...model.compat, supportsMessageThreads: false } }
+}
+
+/**
+ * Takes the request's generation settings: reasoning level, temperature and output token limit.
  *
  * @param model - the pi model
  * @param request - the validated chat request
- * @param options - the per-request options; `upstreamApiKey` becomes `apiKey`
- * @param signal - the combined client and idle-timeout signal, or `undefined`
- * @returns the options for `streamSimple`
+ * @returns the options it sets, each only when the request asks for it and the model takes it
  */
-async function buildStreamOptions(
+function generationOptions(
   model: Model<Api>,
-  request: ChatCompletionRequest,
-  options: CompletionOptions,
-  signal: AbortSignal | undefined
-): Promise<SimpleStreamOptions> {
-  const opts: SimpleStreamOptions = {}
+  request: ChatCompletionRequest
+): Pick<SimpleStreamOptions, 'reasoning' | 'temperature' | 'maxTokens'> {
+  const opts: Pick<SimpleStreamOptions, 'reasoning' | 'temperature' | 'maxTokens'> = {}
 
   if (request.reasoning_effort !== undefined) {
     const level = reasoningLevel(model, request.reasoning_effort)
@@ -271,6 +286,21 @@ async function buildStreamOptions(
   if (maxTokens !== undefined) {
     opts.maxTokens = maxTokens
   }
+  return opts
+}
+
+/**
+ * Takes the request's `user` and `prompt_cache_key`, where pi has a place to send them.
+ *
+ * @param model - the pi model
+ * @param request - the validated chat request
+ * @returns `metadata` for an Anthropic model with a `user`, and `sessionId` for a cache key
+ */
+function userAndCacheKeyOptions(
+  model: Model<Api>,
+  request: ChatCompletionRequest
+): Pick<SimpleStreamOptions, 'metadata' | 'sessionId'> {
+  const opts: Pick<SimpleStreamOptions, 'metadata' | 'sessionId'> = {}
 
   // Anthropic takes OpenAI's `user` as metadata.user_id, its only metadata key. pi's Anthropic
   // adapter sends `metadata.user_id` from this option; other adapters do not read it (#48).
@@ -285,6 +315,34 @@ async function buildStreamOptions(
   // login. Elsewhere it is unused. `null` is the same as no key (#39).
   if (request.prompt_cache_key !== undefined && request.prompt_cache_key !== null) {
     opts.sessionId = request.prompt_cache_key
+  }
+  return opts
+}
+
+/**
+ * Builds pi's `SimpleStreamOptions` from an OpenAI request.
+ *
+ * @param model - the pi model
+ * @param request - the validated chat request
+ * @param options - the per-request options; `upstreamApiKey` becomes `apiKey`
+ * @param signal - the combined client and idle-timeout signal, or `undefined`
+ * @returns the options for `streamSimple`
+ */
+async function buildStreamOptions(
+  model: Model<Api>,
+  request: ChatCompletionRequest,
+  options: CompletionOptions,
+  signal: AbortSignal | undefined
+): Promise<SimpleStreamOptions> {
+  const opts: SimpleStreamOptions = {
+    ...generationOptions(model, request),
+    ...userAndCacheKeyOptions(model, request),
+    // No server-side continuation (#360, #361): pi 1.5.1 continues an Anthropic conversation on
+    // the provider's side when calls share a `sessionId`, sending only the new messages. The proxy
+    // keeps no conversation state (constitution, Scope), so every request sends the whole
+    // conversation. This is pi's general switch for any provider's continuation state;
+    // `withoutMessageThreads` also keeps Anthropic's threads beta off.
+    disableContinuation: true
   }
 
   // The client disconnect signal combined with the upstream idle timeout
@@ -323,11 +381,15 @@ function abortCause(
   return 'unknown'
 }
 
-/** One upstream call, as the logging helpers below see it. */
+/**
+ * One upstream call, as the logging helpers below see it: everything they read, so a call that
+ * threw before pi's options were built is logged from a complete value, not a stub.
+ */
 interface UpstreamCall {
   readonly model: Model<Api>
   readonly options: CompletionOptions
-  readonly opts: SimpleStreamOptions
+  /** The signal pi was given: the client's and the idle timeout's combined. */
+  readonly signal: AbortSignal | undefined
   readonly stream: boolean
   /** `performance.now()` when the call started. */
   readonly startedAt: number
@@ -357,15 +419,17 @@ function callProperties(call: UpstreamCall): Record<string, unknown> {
  * Logs the start of an upstream call at debug: what is sent where, never what it says.
  *
  * @param call - the upstream call
+ * @param opts - pi's options for it, for the thinking level and the token limit
  * @param context - pi's context, for message and tool counts
  * @param request - the validated chat request, for its reasoning effort
  */
 function logUpstreamStart(
   call: UpstreamCall,
+  opts: SimpleStreamOptions,
   context: Context,
   request: ChatCompletionRequest
 ): void {
-  const { model, options, opts, stream } = call
+  const { model, options, stream } = call
   completeLogger.debug('Calling {provider}/{modelId} via {api}', () => ({
     provider: model.provider,
     modelId: model.id,
@@ -384,17 +448,25 @@ function logUpstreamStart(
 }
 
 /**
- * Logs the provider's raw error text at debug only.
+ * Logs the provider's raw error text at debug only, with the call's properties, beside the warning
+ * that names the call.
  *
  * @remarks
  * Some providers quote parts of the request back, and request content is never logged at a level
- * a default deployment writes.
+ * a default deployment writes. This is where a failed call's text is logged, once (#339): the
+ * route and the SSE writer log what the failure maps to, never the text again. A provider stream
+ * that throws once it has started ends no call: the idle-timeout relay logs that text instead
+ * ({@link relayUpstreamActivity}), or the route when there is no idle timeout.
  *
+ * @param call - the upstream call
  * @param detail - the raw error text; nothing is logged when `undefined`
  */
-function logUpstreamErrorDetail(detail: string | undefined): void {
+function logUpstreamErrorDetail(call: UpstreamCall, detail: string | undefined): void {
   if (detail !== undefined) {
-    completeLogger.debug('Upstream error detail: {detail}', { detail })
+    completeLogger.debug('Upstream error detail: {detail}', () => ({
+      ...callProperties(call),
+      detail
+    }))
   }
 }
 
@@ -411,7 +483,7 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
       stopReason: message.stopReason,
       rawStopReason: message.rawStopReason
     }))
-    logUpstreamErrorDetail(message.errorMessage)
+    logUpstreamErrorDetail(call, message.errorMessage)
     return
   }
   if (message.stopReason === 'aborted') {
@@ -420,10 +492,10 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
       () => ({
         ...callProperties(call),
         stopReason: message.stopReason,
-        abortCause: abortCause(call.options.signal, call.opts.signal)
+        abortCause: abortCause(call.options.signal, call.signal)
       })
     )
-    logUpstreamErrorDetail(message.errorMessage)
+    logUpstreamErrorDetail(call, message.errorMessage)
     return
   }
   // A provider that accepted an over-long prompt and answered anyway (input beyond the context
@@ -466,14 +538,14 @@ function logUpstreamResult(call: UpstreamCall, message: AssistantMessage): void 
  * @param error - what was thrown
  */
 function logUpstreamThrow(call: UpstreamCall, error: unknown): void {
-  const aborted = call.opts.signal?.aborted === true
+  const aborted = call.signal?.aborted === true
   completeLogger.warn('Upstream call to {modelId} threw after {durationMs} ms', () => ({
     ...callProperties(call),
     aborted,
-    abortCause: aborted ? abortCause(call.options.signal, call.opts.signal) : undefined,
+    abortCause: aborted ? abortCause(call.options.signal, call.signal) : undefined,
     errorName: error instanceof Error ? error.name : typeof error
   }))
-  logUpstreamErrorDetail(errorMessage(error))
+  logUpstreamErrorDetail(call, errorMessage(error))
 }
 
 /** What one upstream call needs: the model, pi's context, the OpenAI request and its options. */
@@ -501,12 +573,14 @@ function endUpstream(call: UpstreamCall, message: AssistantMessage): void {
  * watches it.
  *
  * @remarks
- * The result is logged once the stream ends with done or error.
+ * The result is logged once the stream ends with done or error; a throw is logged before it is
+ * rethrown. Either way the provider's text is logged here, once ({@link logUpstreamErrorDetail}).
  *
  * @param input - the model, pi context, request and per-request options
  * @param stream - whether the client asked for a stream; used for logging only
  * @returns pi's event stream, relayed through the idle timeout when there is one
- * @throws whatever building the options or `streamSimple` throws, after disposing the timeout
+ * @throws whatever building the options or `streamSimple` throws, after disposing the timeout and
+ *   logging the throw
  */
 async function openUpstream(
   input: UpstreamInput,
@@ -517,16 +591,16 @@ async function openUpstream(
     options.upstreamTimeoutMs === undefined
       ? undefined
       : startUpstreamIdleTimeout(options.upstreamTimeoutMs)
+  const signal = combineSignals(options.signal, idle?.signal)
+  const call: UpstreamCall = { model, options, signal, stream, startedAt: performance.now() }
   let opts: SimpleStreamOptions
   try {
-    opts = await buildStreamOptions(
-      model,
-      request,
-      options,
-      combineSignals(options.signal, idle?.signal)
-    )
+    opts = await buildStreamOptions(model, request, options, signal)
   } catch (error) {
     idle?.dispose()
+    // Nothing was sent, but it is logged as the call's throw all the same: the route logs no
+    // upstream failure's text, so this is the only place it is.
+    logUpstreamThrow(call, error)
     throw error
   }
   // Every raw provider event restarts the wait, including those pi makes no event of (#50). The
@@ -536,11 +610,10 @@ async function openUpstream(
       idle.touch()
     }
   }
-  const call: UpstreamCall = { model, options, opts, stream, startedAt: performance.now() }
-  logUpstreamStart(call, context, request)
+  logUpstreamStart(call, opts, context, request)
   let eventStream: AssistantMessageEventStream
   try {
-    eventStream = getRuntime().streamSimple(model, context, opts)
+    eventStream = getRuntime().streamSimple(withoutMessageThreads(model), context, opts)
   } catch (error) {
     idle?.dispose()
     logUpstreamThrow(call, error)

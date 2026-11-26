@@ -10,7 +10,7 @@
  */
 
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -39,7 +39,8 @@ const DIRECTIVE = /^(?:\/\/|\/\*)\s*(?:(?:oxlint|eslint)-(?:disable|enable)|fall
 const EXPECTED_UNUSED_TAG = /(?:^\/\*\*|\n\s*\*)\s*@expected-unused\b/
 
 /**
- * Lists every script file git tracks.
+ * Lists every script file git tracks that the working tree still has: a file deleted but not yet
+ * committed is still tracked, and has nothing left to check.
  *
  * @returns the paths, relative to the repository root
  * @throws Error when `git ls-files` fails
@@ -47,7 +48,9 @@ const EXPECTED_UNUSED_TAG = /(?:^\/\*\*|\n\s*\*)\s*@expected-unused\b/
 function trackedScripts(): string[] {
   const listing = spawnSync('git', ['ls-files', '-z'], { cwd: REPOSITORY_ROOT, encoding: 'utf8' })
   if (listing.status !== 0) throw new Error(`git ls-files failed: ${listing.stderr}`)
-  return listing.stdout.split('\0').filter((path) => SCRIPT_FILE.test(path))
+  return listing.stdout
+    .split('\0')
+    .filter((path) => SCRIPT_FILE.test(path) && existsSync(join(REPOSITORY_ROOT, path)))
 }
 
 /**
@@ -142,13 +145,23 @@ test('leaves strings, regular expressions, prose and doc comments alone', () => 
   expect(directivesIn('sample.ts', source)).toEqual([])
 })
 
-// Catches an inline lint or fallow directive in any tracked script.
-test('no tracked script disables or re-enables a lint rule in a comment', () => {
-  const directives = trackedScripts().flatMap((path) =>
-    directivesIn(path, readFileSync(join(REPOSITORY_ROOT, path), 'utf8')).map(
-      (comment) => `${path}: ${comment}`
-    )
-  )
+/**
+ * The repository-wide check parses every tracked script: about 0.7 s alone, past 5 s (vitest's
+ * default) under the gate's coverage and parallel load. As `tsdoc.test.ts` allows its own.
+ */
+const WHOLE_REPOSITORY_TIMEOUT_MS = 30_000
 
-  expect(directives).toEqual([])
-})
+// Catches an inline lint or fallow directive in any tracked script.
+test(
+  'no tracked script disables or re-enables a lint rule in a comment',
+  () => {
+    const directives = trackedScripts().flatMap((path) =>
+      directivesIn(path, readFileSync(join(REPOSITORY_ROOT, path), 'utf8')).map(
+        (comment) => `${path}: ${comment}`
+      )
+    )
+
+    expect(directives).toEqual([])
+  },
+  WHOLE_REPOSITORY_TIMEOUT_MS
+)

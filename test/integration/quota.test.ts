@@ -125,6 +125,8 @@ describe('quota from response headers', () => {
     expect((await credsQuota()).get('subscribed')).toEqual({
       observedAt: expect.any(String),
       status: 'allowed',
+      statusResetsAt: '2026-10-22T03:30:00.000Z',
+      statusWindow: 'five_hour',
       plan: null,
       windows: [
         {
@@ -145,6 +147,8 @@ describe('quota from response headers', () => {
     })
     expect((await modelsQuota()).get('subscribed-mock')).toMatchObject({
       status: 'allowed',
+      status_resets_at: 1_792_639_800,
+      status_window: 'five_hour',
       windows: [
         { name: '5h', used: 0, resets_at: 1_792_639_800, window_minutes: 300 },
         { name: '7d', used: 0.47, resets_at: 1_792_893_600, window_minutes: 10_080 }

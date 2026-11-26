@@ -1,21 +1,33 @@
 <!--
 Sync Impact Report
-Version change: 3.11.0 → 3.12.0 (MINOR)
-Rationale: #197 accepted `store: false`, which asks for what the proxy does anyway, and recorded
-why that is not a drop in PLAN only. A reviewer flagged it as an interpretation of principle I
-living outside the constitution, and `n: 1` needed the same reasoning. Principle I now names
-honored values: a field accepted at the one value that asks for what the proxy already does, and
-refused by name at any other, with no amendment per field. Pi's own adapter sends `store: false`,
-and Elixir's LangChain sends `n: 1`, on every request.
-MINOR: materially expanded guidance in principle I; no principle added or removed.
+Version change: 3.12.1 → 3.13.0 (MINOR)
+Rationale: #367 adds an admin web UI for running the proxy in Docker. Its operators sign in with
+GitHub, as the j5 dashboard's do, and it can change the proxy's settings. Three things the
+constitution said stop it: the Scope's "does not implement logins", principle I's "only the
+cooldowns route writes state", and principle III's single network surface. The amendment
+admits the UI on its own terms and keeps every provider login and credential off the network:
+- it runs on a separate admin listener, off by default, bound to loopback;
+- it refuses to start beyond loopback unless operator sign-in is configured;
+- an operator session never admits to the API, and the proxy token never admits to the admin UI;
+- an operator's GitHub token is used once to learn who they are and is never kept.
+MINOR: materially expanded guidance in the Scope and principles I and III; no principle added or
+removed.
 Modified sections:
-- I. OpenAI Compatibility: honored values, beside the exceptions
+- Scope: operator sign-in to the admin UI, apart from provider logins
+- I. OpenAI Compatibility: a third group of routes outside the stable surface, the admin routes
+- III. Local-First Safety: the admin listener's defaults and separation
 Templates requiring updates:
-- ✅ AGENTS.md: the "Reject unsupported parameters" bullet under "Core constraints"
-- ✅ PLAN.md: "Supported fields" (`store`, `n`) and the rejected fields
-- ✅ docs/api.md; docs/reference/claude-openai-compatibility.md
+- ✅ AGENTS.md: "Core constraints" (the admin listener)
+- ✅ PLAN.md: "Admin UI (#367)", with its threat model
 Follow-up TODOs:
-- None.
+- The admin listener, sign-in and pages are built in later slices of #367; until then nothing
+  serves the admin routes.
+
+3.12.1 (2026-11-18): the Stack no longer names TypeBox (#360): pi 1.5 takes tool parameters as
+plain JSON Schema.
+
+3.12.0 (2026-10-28): principle I names honored values: a field accepted at the one value that asks
+for what the proxy already does (`store: false`, `n: 1`, #197), refused by name at any other.
 
 3.11.0 (2026-10-26): every family the exposed models name has a built-in `-latest` alias
 (principle VI's second recorded default, #231).
@@ -91,7 +103,7 @@ rule, logging limits, the lint-directive ban, verbatim exposure, and commit type
 
 ## Scope
 
-pi-switchboard is a local HTTP API over pi's models, logins and providers that speaks OpenAI's API to its clients. It grows in two directions: more of OpenAI's API where pi can back it (chat completions today, the Responses API next), and routing requests across pi's logins (aliases, fallback, cooldowns, quota awareness). It does not implement logins or store credentials of its own: pi runs every login flow and stores every credential. The proxy may present pi's own login flow, pi's screens driving pi's login, in a local terminal (the opt-in console, #61), never over HTTP or any other network surface. It does not keep conversation state, and does not speak other vendors' client protocols. It started as a fork of `pi-openai-proxy` and is maintained independently.
+pi-switchboard is a local HTTP API over pi's models, logins and providers that speaks OpenAI's API to its clients. It grows in two directions: more of OpenAI's API where pi can back it (chat completions today, the Responses API next), and routing requests across pi's logins (aliases, fallback, cooldowns, quota awareness). It does not implement logins or store credentials of its own: pi runs every login flow and stores every credential. The proxy may present pi's own login flow, pi's screens driving pi's login, in a local terminal (the opt-in console, #61), never over HTTP or any other network surface. Its operators, not its clients, may sign in with GitHub to an opt-in admin UI (#367) that shows and changes the proxy's settings. That sign-in is not a provider login: the proxy keeps no GitHub token, reads its own sign-in secrets from the environment, and every provider login and credential stays in pi and off the network. It does not keep conversation state, and does not speak other vendors' client protocols. It started as a fork of `pi-openai-proxy` and is maintained independently.
 
 ## Core Principles
 
@@ -115,11 +127,12 @@ Exceptions: a request field MAY be dropped instead of rejected only where it is 
 - `name` on a message and `detail` on an `image_url` (#146): OpenAI fields pi has no equivalent for, a participant name and an image detail level. Clients send them routinely, so a `422` would break them. They are accepted and dropped, each drop logged at `debug` by count, and `README.md` and `PLAN.md` ("Unknown field policy") say so. Every other field inside a message is accepted only as declared, and any other key is refused with a named `422`.
 - `reasoning_effort` on a request that names an alias whose target sets `reasoningEffort` (#230): the target's effort replaces the request's on that model. The operator chose the effort for that name, as a team chooses a model by job ("reviewer" is Opus at `high`), and most clients send one effort to every model, or none. It is reported, never silent: the response carries `x_pi.reasoning_effort: { requested, applied }` (`requested` the client's value or `null`) in the body and every stream chunk, each `x_pi.attempts` entry carries the effort its target set, and the log records both values, the first different client value per alias at `info` and later ones at `debug`. An effort the target's model does not support is a configuration error, never clamped: the target is left out, `/healthz/models` reports it and answers `503`. `README.md` and `PLAN.md` ("Aliases") document it.
 
-Two kinds of route sit outside the stable surface, and only these:
+Three kinds of route sit outside the stable surface, and only these:
 - Operational endpoints: `GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs` (Swagger UI for the OpenAPI document). Only `/healthz` and `/docs` may skip proxy authentication; none may return a credential, and `/docs` MUST name no model or provider.
-- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`, usage from the stats file at `GET /v1/switchboard/usage`, ending cooldowns early at `DELETE /v1/switchboard/cooldowns`, and the API's OpenAPI document at `GET /v1/switchboard/openapi.json`). Non-OpenAI capability data goes there, never onto the standard model objects. Of these, only the document may skip proxy authentication, and it MUST name no model, provider or credential. Only the cooldowns route writes state, and only the cooldowns fallback chains read: it calls no provider and changes no configuration.
+- Non-standard routes, which MUST live under `/v1/switchboard/` (today `GET /v1/switchboard/models`, usage from the stats file at `GET /v1/switchboard/usage`, ending cooldowns early at `DELETE /v1/switchboard/cooldowns`, and the API's OpenAPI document at `GET /v1/switchboard/openapi.json`). Non-OpenAI capability data goes there, never onto the standard model objects. Of these, only the document may skip proxy authentication, and it MUST name no model, provider or credential. On the API listener, only the cooldowns route writes state, and only the cooldowns fallback chains read: it calls no provider and changes no configuration.
+- Admin routes, which MUST live under `/admin/` on the opt-in admin listener and never on the API listener (#367): the admin UI and its JSON API. Apart from the sign-in routes, they require an operator's GitHub session, never proxy authentication; an operator session admits to no other route, and the proxy token admits to none of these. They may read what the console shows. An operator in the editor role may change what the console changes, except the proxy token: `proxy-config.json` settings, aliases, the logins' order, disabled list and labels, and cooldowns. Every change is logged with the operator's GitHub login. They MUST NOT show, accept, add, replace or remove a provider credential or the proxy token.
 
-Adding a route to either group, or to the stable surface, requires an explicit decision recorded in `PLAN.md`.
+Adding a route to any of these groups, or to the stable surface, requires an explicit decision recorded in `PLAN.md`.
 
 Rationale: the proxy exists to be a predictable compatibility layer. Hidden behavior or surprise API drift breaks downstream clients and makes the proxy harder to trust.
 
@@ -140,6 +153,8 @@ Rationale: the proxy translates between multiple schemas and provider APIs, so b
 
 ### III. Local-First Safety
 The default runtime posture MUST remain local and conservative. The server MUST bind to localhost by default, and upstream work MUST be canceled when the client disconnects. Any feature that increases exposure or expands attack surface, including remote image fetching or experimental agentic behavior, MUST remain off by default and require explicit opt-in. A login, or any action that adds, replaces or removes a credential, MUST NOT be reachable over HTTP or any other network surface; it is offered only in a local terminal the operator runs.
+
+The admin listener (#367) is such a feature: off by default, and bound to localhost by default. A proxy MUST refuse to start with it bound beyond localhost unless operator sign-in is configured (a GitHub App's client and a session key, read from the environment). Operator sign-in is not a login under the rule above, as it changes no credential. An operator's GitHub token is used once, to learn who they are and which team gives their role, then dropped: never stored, logged or put in a cookie.
 
 Secrets MUST never be echoed in errors or logs. Logs MUST NOT contain message content, tool arguments, image data, or credentials; credential-named properties are redacted as a backstop, not as the primary control. Warnings about configuration name fields, never values.
 
@@ -180,7 +195,7 @@ Rationale: routing changes which model and account a client is billed on. Doing 
 
 ## Development Workflow and Quality Gates
 
-- Stack: Node (≥ 24) runtime; the Vite+ toolchain (`vp`: Oxfmt, Oxlint with tsgolint, Vitest, tsdown); fallow for dead code, duplication and complexity; pnpm for packages and scripts; TypeScript, Hono, Zod v4, and TypeBox. TypeBox is used only where pi's API requires it, imported through `@earendil-works/pi-ai`'s re-export so the proxy never ships a second copy. Bun builds the standalone binary only (`bun build --compile`); the npm package and the Docker image run on Node.
+- Stack: Node (≥ 24) runtime; the Vite+ toolchain (`vp`: Oxfmt, Oxlint with tsgolint, Vitest, tsdown); fallow for dead code, duplication and complexity; pnpm for packages and scripts; TypeScript, Hono, and Zod v4. Tool parameter schemas go to pi as plain JSON Schema (pi 1.5 dropped TypeBox from `@earendil-works/pi-ai`), so the proxy uses no TypeBox. Bun builds the standalone binary only (`bun build --compile`); the npm package and the Docker image run on Node.
 - Imports: the `@proxy/*` alias for `src/*` (no relative imports across the source tree), `node:` protocol for Node built-ins, `import * as z from "zod"`, and `vite-plus/test` in tests.
 - `pnpm run check:all` (`scripts/gate.ts`: format, lint with the type check, offline tests with coverage, fallow, build) is the single definition of green. The pre-commit hook, CI, and the release workflow all run it; a new check is added there, not in a hook or a workflow. The one exception is the standalone binary's tests, which need Bun: they run in their own CI job and in the release workflow, so the gate and the pre-commit hook never require Bun.
 - Hooks in `.vite-hooks/` MUST be preserved: `commit-msg` (commitlint), `pre-commit` (the gate), `pre-push` (lockfile sync). Lint passes only with zero warnings. Do not weaken lint, type, or test gates unless the maintainer explicitly asks.
@@ -210,4 +225,4 @@ Compliance review expectations:
 - Any change to stable routes, auth semantics, model resolution, validation rules, or security defaults MUST explicitly call out the affected principle(s).
 - If implementation and docs disagree, the implementation MUST be corrected or the docs amended before release.
 
-**Version**: 3.12.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-10-28
+**Version**: 3.13.0 | **Ratified**: 2026-03-31 | **Last Amended**: 2026-11-18

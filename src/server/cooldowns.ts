@@ -27,18 +27,20 @@ export const cooldownViewSchema = z.object({
   scope: z.enum(['provider', 'model']),
   provider: z.string().trim().meta({ description: "The login's provider ID." }),
   model: z.string().trim().nullable().meta({ description: 'The canonical ID, for a model.' }),
-  reason: z.enum(['rate_limit', 'unavailable']),
+  reason: z.enum(['rate_limit', 'unavailable', 'auth']).meta({
+    description: 'A 429, a 503 or 529, or a refused or unresolvable credential (#357).'
+  }),
   until: z.string().trim().meta({ description: 'When it ends, as an ISO 8601 time.' }),
   secondsLeft: z.int().nonnegative(),
   source: z.enum(['response', 'backoff']).meta({
     description:
-      'Whether the failed response gave the time, or the growing default did (60 s, 180 s, then ' +
-      'doubling).'
+      'Whether the failed response gave the time, or the default did (60 s, 180 s, then ' +
+      'doubling; a fixed 2 minutes after a refused credential).'
   })
 })
 
 /** One active cooldown, as the API shows it. */
-type CooldownView = z.infer<typeof cooldownViewSchema>
+export type CooldownView = z.infer<typeof cooldownViewSchema>
 
 /**
  * Shows a cooldown over HTTP: login and model names only, never a credential.

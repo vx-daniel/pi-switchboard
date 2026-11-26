@@ -95,7 +95,7 @@ function namedRejection(body: unknown): ValidationError | undefined {
     const entry: unknown = tools[tool]
     const type = isRecord(entry) ? String(entry['type']) : ''
     return named(
-      `tools.${String(tool)}.type`,
+      `tools[${String(tool)}].type`,
       `Tool type '${type}' is not supported: only function tools`
     )
   }
@@ -104,7 +104,7 @@ function namedRejection(body: unknown): ValidationError | undefined {
     : -1
   if (unsupported >= 0) {
     return named(
-      `include.${String(unsupported)}`,
+      `include[${String(unsupported)}]`,
       "Only 'reasoning.encrypted_content' can be included"
     )
   }
@@ -156,7 +156,7 @@ function flush(built: Built, turn: Turn): TranslationProblem | undefined {
     return {
       message:
         'A reasoning item must be followed by the message or function call it led to, as in the response it came from',
-      param: `input.${String(turn.danglingReasoning)}`
+      param: `input[${String(turn.danglingReasoning)}]`
     }
   }
   const text = turn.text.join('')
@@ -231,7 +231,7 @@ function addReasoning(
   item: Extract<ResponsesInputItem, { type: 'reasoning' }>,
   position: number
 ): TranslationProblem | undefined {
-  const param = `input.${String(position)}.encrypted_content`
+  const param = `input[${String(position)}].encrypted_content`
   const encoded = item.encrypted_content
   if (encoded === undefined || encoded === null) {
     return {

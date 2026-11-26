@@ -362,9 +362,8 @@ function eventToFrames(
  * Logs an upstream error event.
  *
  * @remarks
- * The provider's raw message goes to debug only, as in the route's handler: some providers quote
- * parts of the request back, and request content is never logged at a level a default
- * deployment writes.
+ * The provider's raw message is not logged here: `pi.complete` logs it once, at debug only, when
+ * the call ends with this event, beside the line that names the call (#339).
  *
  * @param event - the pi `error` event
  * @param code - the OpenAI error code sent to the client
@@ -381,10 +380,6 @@ function logUpstreamStreamError(
       stopReason: event.reason,
       code
     })
-  }
-  const detail = event.error.errorMessage
-  if (detail !== undefined) {
-    sseLogger.debug('Upstream stream error detail: {detail}', { detail })
   }
 }
 

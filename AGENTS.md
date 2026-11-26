@@ -40,7 +40,8 @@ Treat these as stable unless the user explicitly changes direction:
 
 - The stable HTTP surface is the list in [`PLAN.md`](PLAN.md) "Stable surface" (today `GET /v1/models`, `GET /v1/models/{model}`, `POST /v1/chat/completions`). A route joins it only by the criteria in constitution principle I, recorded in that table; never add one silently.
 - Operational endpoints (`GET /healthz`, `/healthz/models`, `/healthz/creds`, and the opt-in docs page `GET /docs`) sit outside that surface; see [`PLAN.md`](PLAN.md). None may return a credential.
-- Non-OpenAI capability data goes on `GET /v1/switchboard/models`, never on the standard model objects; non-standard routes live under `/v1/switchboard/`. `DELETE /v1/switchboard/cooldowns` (#182) is the one route that writes state, and it writes only cooldowns: it calls no provider and changes no configuration (constitution principle I). See [`PLAN.md`](PLAN.md).
+- Non-OpenAI capability data goes on `GET /v1/switchboard/models`, never on the standard model objects; non-standard routes live under `/v1/switchboard/`. On the API listener, `DELETE /v1/switchboard/cooldowns` (#182) is the one route that writes state, and it writes only cooldowns: it calls no provider and changes no configuration (constitution principle I). See [`PLAN.md`](PLAN.md).
+- The admin UI (#367) lives under `/admin/` on its own opt-in listener, never the API listener: operators sign in with GitHub through the operator's own GitHub App (configurable, see PLAN), a GitHub session never admits to `/v1` and the proxy token never admits to `/admin/`, it never shows or changes a provider credential or the proxy token, and a proxy refuses to start with it beyond loopback unless sign-in is configured (constitution Scope, I, III). See PLAN "Admin UI (#367)".
 - Only three paths skip proxy auth: `/healthz`, `GET /v1/switchboard/openapi.json` and the opt-in docs page `GET /docs`. The document and docs page name no model, provider or credential. The document describes every route the proxy serves (a test compares it with the route table); `openapi.json` at the repo root is the committed copy, and `vp test -u` rewrites it after a deliberate contract change.
 - Canonical internal model IDs use `provider/model-id`.
 - `GET /v1/models/{model}` must support URL-encoded IDs because model IDs may contain `/`.
@@ -56,7 +57,7 @@ For detailed rationale and edge cases, defer to [`PLAN.md`](PLAN.md) instead of 
 
 ## Coding rules that matter in this repo
 
-- Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4 + TypeBox**. Bun is a build tool for the standalone binary only; the binary's tests run in their own CI job, never in the gate or a hook.
+- Runtime/tooling: **Node runtime + Vite+ toolchain (`vp`: Oxfmt, Oxlint/tsgolint, Vitest, tsdown) + pnpm + TypeScript + Hono + Zod v4**. Tool parameter schemas go to pi as plain JSON Schema; the proxy uses no TypeBox (#360). Bun is a build tool for the standalone binary only; the binary's tests run in their own CI job, never in the gate or a hook.
 - Tests import from `vite-plus/test`, not `vitest` or `bun:test`.
 - Use import alias `@proxy/*` for `src/*`. Do **not** introduce relative imports across the source tree. The one exception is `scripts/`, which runs under plain Node (no alias): it imports `src/` by relative `.ts` path, and a module it imports (`src/pi/account-provider.ts`) may import only packages and Node built-ins, which lint enforces (`vite.config.ts`).
 - Use `import type` where required.

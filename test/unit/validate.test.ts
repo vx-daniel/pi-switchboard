@@ -254,12 +254,13 @@ describe('the chat route accepts', () => {
 
 describe('the chat route refuses', () => {
   // Catches a field inside a message or part dropped silently (#146), or refused at the message
-  // instead of at its own path: the client must see which field to remove.
+  // instead of at its own path: the client must see which field to remove, in OpenAI's form
+  // (`messages[0].content[0]`, not `messages.0.content.0`; #342).
   test.each([
     [
       'a part field OpenAI does not define',
       [{ role: 'system', content: [{ type: 'text', text: 'r', cache_control: {} }] }],
-      'messages.0.content.0.cache_control'
+      'messages[0].content[0].cache_control'
     ],
     [
       'an image_url field OpenAI does not define',
@@ -271,7 +272,7 @@ describe('the chat route refuses', () => {
           ]
         }
       ],
-      'messages.0.content.0.image_url.extra'
+      'messages[0].content[0].image_url.extra'
     ],
     [
       'a tool call function field OpenAI does not define',
@@ -285,7 +286,7 @@ describe('the chat route refuses', () => {
           ]
         }
       ],
-      'messages.1.tool_calls.0.function.strict'
+      'messages[1].tool_calls[0].function.strict'
     ],
     [
       // OpenAI defines no `name` on a tool result; the call it answers names the tool.
@@ -299,7 +300,7 @@ describe('the chat route refuses', () => {
         },
         { role: 'tool', tool_call_id: 'c1', content: 'done', name: 'f' }
       ],
-      'messages.2.name'
+      'messages[2].name'
     ],
     [
       'a deprecated assistant function_call',
@@ -307,7 +308,7 @@ describe('the chat route refuses', () => {
         { role: 'user', content: 'hi' },
         { role: 'assistant', content: null, function_call: { name: 'f', arguments: '{}' } }
       ],
-      'messages.1.function_call'
+      'messages[1].function_call'
     ],
     [
       'a non-null assistant refusal',
@@ -315,7 +316,7 @@ describe('the chat route refuses', () => {
         { role: 'user', content: 'hi' },
         { role: 'assistant', content: 'x', refusal: 'I cannot' }
       ],
-      'messages.1.refusal'
+      'messages[1].refusal'
     ],
     [
       'a non-null assistant audio',
@@ -323,7 +324,7 @@ describe('the chat route refuses', () => {
         { role: 'user', content: 'hi' },
         { role: 'assistant', content: 'x', audio: { id: 'audio_1' } }
       ],
-      'messages.1.audio'
+      'messages[1].audio'
     ],
     [
       'a non-empty assistant annotations',
@@ -331,7 +332,7 @@ describe('the chat route refuses', () => {
         { role: 'user', content: 'hi' },
         { role: 'assistant', content: 'x', annotations: [{ type: 'url_citation' }] }
       ],
-      'messages.1.annotations'
+      'messages[1].annotations'
     ]
   ])('%s with a 422 at its path', async (_label, messages, param) => {
     expect(await postChatBody({ model: 'gpt-6.1-sol', messages })).toMatchObject({
@@ -345,16 +346,16 @@ describe('the chat route refuses', () => {
   // input got into, and stay at the content itself when it matches neither shape. A Zod upgrade
   // that changes how unions report their branches fails here.
   test.each([
-    ['content that is neither a string nor parts', 42, 'messages.0.content'],
+    ['content that is neither a string nor parts', 42, 'messages[0].content'],
     [
       'a part type the proxy does not take',
       [{ type: 'input_audio', input_audio: { data: 'AA', format: 'wav' } }],
-      'messages.0.content.0.type'
+      'messages[0].content[0].type'
     ],
     [
       'a text part whose text is not a string',
       [{ type: 'text', text: 5 }],
-      'messages.0.content.0.text'
+      'messages[0].content[0].text'
     ]
   ])('%s with a 400 at its own path', async (_label, content, param) => {
     const answer = await postChatBody({
@@ -374,7 +375,7 @@ describe('the chat route refuses', () => {
       messages: [{ role, content: 'x', name: 'f' }]
     })
 
-    expect(answer).toMatchObject({ status: HTTP_BAD_REQUEST, param: 'messages.0.role' })
+    expect(answer).toMatchObject({ status: HTTP_BAD_REQUEST, param: 'messages[0].role' })
   })
 
   // Catches the new shape letting through what a system message cannot carry: no parts at all,

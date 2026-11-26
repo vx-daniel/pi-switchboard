@@ -334,6 +334,7 @@ describe('normalizeConfig', () => {
       docsUi: true,
       responsesApi: true,
       stats: false,
+      consoleLog: false,
       maxBodySizeMb: 100,
       upstreamTimeoutSec: 300,
       publicModelIdMode: 'always-prefixed',
@@ -342,6 +343,7 @@ describe('normalizeConfig', () => {
       providerPrefixes: { openai: 'oai' },
       aliases: { coding: 'openai/gpt-4o' },
       labels: { 'anthropic-2': 'work' },
+      budgets: { 'vx-daniel/pi-switchboard': { today: 5, week: 25.5, all: 100 } },
       logLevel: 'debug',
       routing: {
         reserve: { anthropic: 0.2 },
@@ -351,9 +353,33 @@ describe('normalizeConfig', () => {
           disabled: ['anthropic-3']
         }
       },
-      zed: { providerName: 'My Proxy', autoSync: true }
+      zed: { providerName: 'My Proxy', autoSync: true },
+      adminUi: {
+        enabled: true,
+        host: '0.0.0.0',
+        port: 9443,
+        publicUrl: 'https://admin.example.com',
+        githubUrl: 'https://github.example.com',
+        editors: ['my-org/ops', 'alice'],
+        viewers: ['bob']
+      }
     }
     expect(normalizeConfig(full)).toEqual(full)
+  })
+
+  // Catches one bad budget costing the operator every budget, or a budget kept under a key no
+  // request can send, at an amount that isn't one, or for a window the stats don't have (#366).
+  test('keeps the valid budgets and drops the rest', () => {
+    const result = normalizeConfig({
+      budgets: {
+        'j5': { week: 50 },
+        'has space': { week: 1 },
+        'negative': { week: -1 },
+        'month': { month: 10 }
+      }
+    })
+
+    expect(result.budgets).toEqual({ j5: { week: 50 } })
   })
 
   test('normalizes zed config with defaults when missing', () => {

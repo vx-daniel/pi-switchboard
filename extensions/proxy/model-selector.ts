@@ -18,11 +18,10 @@ import { proxyLogger } from '@vx-daniel/pi-switchboard/logging'
 import { getSessionAvailableModels, type ProxyState } from './state'
 
 /**
- * Added to the model count when sizing the list. SettingsList's `maxVisible` counts model rows
- * only, so below {@link MODEL_SELECTOR_MAX_ROWS} every model shows with or without it.
+ * Cap on visible model rows in the selector. SettingsList's `maxVisible` counts model rows only
+ * (the search box, scroll hint and description are drawn outside it), and a list shorter than the
+ * cap shows every row, so the cap is passed as is.
  */
-const MODEL_SELECTOR_EXTRA_ROWS = 2
-/** Cap on visible rows in the selector. */
 const MODEL_SELECTOR_MAX_ROWS = 20
 
 /** Logger for settings changes made in the selector. */
@@ -195,7 +194,7 @@ export function buildModelSelectorSubmenu(
 
   const list = new SettingsList(
     items,
-    Math.min(items.length + MODEL_SELECTOR_EXTRA_ROWS, MODEL_SELECTOR_MAX_ROWS),
+    MODEL_SELECTOR_MAX_ROWS,
     getSettingsListTheme(),
     (id: string, newValue: string) => {
       const ticked = newValue === 'true'

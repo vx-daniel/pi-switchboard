@@ -17,11 +17,14 @@
  *   openai.messages    message conversion          openai.tools       tool conversion
  *   openai.sse         streaming responses         openai.responses   non-streaming responses
  *   openai.exposure    model exposure and IDs      openai.validate    request validation
- *   openai.schema      JSON Schema → TypeBox       openai.images      remote image fetches
+ *   openai.schema      tool JSON Schema checks     openai.images      remote image fetches
  *   openai.responses-api   the Responses API (`POST /v1/responses`): request and stream
  *   pi.registry        pi's model runtime          pi.complete        upstream calls
  *   sync.zed           Zed settings sync
  *   stats              the stats store and recorder (src/stats/)
+ *   admin              the admin listener (#367): start, failed requests
+ *   admin.auth         operator sign-in and sign-out: who, with which role; never a token
+ *   admin.audit        every change an operator makes (who, what, old and new); refused requests
  *   tui                the console (src/tui/)      tui.login          the console's logins
  *   extension          the pi extension's command handler (extensions/proxy/index.ts)
  *   extension.*        the pi extension's parts (process, settings, reports, zed-sync)
@@ -58,7 +61,9 @@ import {
 } from '@logtape/logtape'
 import { getPrettyFormatter } from '@logtape/pretty'
 import { redactByField } from '@logtape/redaction'
+import { rotatingFileSink } from '@proxy/logging/rotating-file'
 import { STORM } from '@proxy/tui/tokyonight-storm'
+import { errorMessage } from '@proxy/utils/guards'
 import * as z from 'zod'
 
 /** The category every logger in this package sits under. */
@@ -90,7 +95,10 @@ export const REDACTED_FIELDS: readonly string[] = [
   'accessToken',
   'refreshToken',
   'password',
-  'secret'
+  'secret',
+  'clientSecret',
+  'sessionKey',
+  'signIn'
 ]
 
 /** `pretty` for a person at a terminal, `json` (JSON Lines) for anything that parses logs. */
@@ -284,18 +292,21 @@ function redacted(sink: Sink): Sink {
 
 /**
  * Builds the logger configs: the package's root logger plus LogTape's own meta logger (warnings
- * and above), both on one sink.
+ * and above), both on the same sinks.
  *
  * @param level - The lowest level the package's loggers write.
- * @param sink - The name of the sink, as registered in `configureSync`'s `sinks`.
+ * @param sinks - The names of the sinks, as registered in `configureSync`'s `sinks`.
  * @returns The configs for `configureSync`'s `loggers`.
  */
-function loggerConfigs(level: LogLevel, sink: string): LoggerConfig<string, string>[] {
+function loggerConfigs(level: LogLevel, sinks: readonly string[]): LoggerConfig<string, string>[] {
   return [
-    { category: ROOT_CATEGORY, lowestLevel: level, sinks: [sink] },
-    { category: ['logtape', 'meta'], lowestLevel: 'warning', sinks: [sink] }
+    { category: ROOT_CATEGORY, lowestLevel: level, sinks: [...sinks] },
+    { category: ['logtape', 'meta'], lowestLevel: 'warning', sinks: [...sinks] }
   ]
 }
+
+/** The size a log file rotates at, 20 MiB: with the one previous file, 40 MiB on disk at most. */
+export const LOG_FILE_MAX_BYTES = 20_971_520
 
 /** Options for {@link configureLogging}. */
 export interface LoggingOptions {
@@ -309,24 +320,50 @@ export interface LoggingOptions {
    * @param line - One formatted log line, including its trailing newline.
    */
   readonly write?: ((line: string) => void) | undefined
+  /**
+   * A file that also gets every line, as JSON Lines (#389): owner-only, rotated at
+   * {@link LOG_FILE_MAX_BYTES} into `<file>.1`. Absent writes no file.
+   */
+  readonly file?: string | undefined
 }
 
 /**
- * Configures LogTape for the proxy process, writing to stderr (or `options.write`).
+ * Makes the log file's sink; a file that can't be written is one warning on the other sink.
+ *
+ * @param path - the log file
+ * @returns the redacting sink
+ */
+function logFileSink(path: string): Sink {
+  const sink = rotatingFileSink(path, LOG_FILE_MAX_BYTES, (error) => {
+    // The failure surfaces inside a sink call; the warning waits until that call has returned.
+    queueMicrotask(() => {
+      proxyLogger('server').warn('Stopped writing the log file {path}: {reason}', {
+        path,
+        reason: errorMessage(error)
+      })
+    })
+  })
+  return redacted(sink)
+}
+/**
+ * Configures LogTape for the proxy process, writing to stderr (or `options.write`), and to
+ * `options.file` when one is named.
  *
  * @remarks
- * Replaces any earlier configuration. Request handlers run inside `withContext()`, which needs the
- * async-local storage set up here.
+ * Replaces any earlier configuration, closing the file the earlier one wrote. Request handlers run
+ * inside `withContext()`, which needs the async-local storage set up here.
  *
- * @param options - The level, format and optional writer.
+ * @param options - The level, format, optional writer and optional file.
  */
 export function configureLogging(options: LoggingOptions): void {
   const formatter = formatterFor(options.format)
   const write = options.write ?? ((line: string) => process.stderr.write(line))
+  const sinks: Record<string, Sink> = { stderr: redacted((record) => write(formatter(record))) }
+  if (options.file !== undefined) sinks['file'] = logFileSink(options.file)
   configureSync({
     reset: true,
-    sinks: { stderr: redacted((record) => write(formatter(record))) },
-    loggers: loggerConfigs(options.level, 'stderr'),
+    sinks,
+    loggers: loggerConfigs(options.level, Object.keys(sinks)),
     contextLocalStorage: new AsyncLocalStorage()
   })
 }
@@ -344,7 +381,7 @@ export function configureFileLogging(path: string, level: LogLevel): void {
   configureSync({
     reset: true,
     sinks: { file: redacted(getFileSink(path, { formatter: jsonLinesFormatter })) },
-    loggers: loggerConfigs(level, 'file'),
+    loggers: loggerConfigs(level, ['file']),
     contextLocalStorage: new AsyncLocalStorage()
   })
 }
