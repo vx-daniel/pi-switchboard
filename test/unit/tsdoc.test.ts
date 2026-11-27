@@ -24,9 +24,11 @@ const REPOSITORY_ROOT = fileURLToPath(new URL('../..', import.meta.url))
 
 /**
  * The repository-wide check builds one program over every file in scope and the dependency types
- * they import: about 2 s alone, 9 s under the gate's coverage and parallel load.
+ * they import: about 2 s alone, 9 s under the gate's coverage and parallel load on an idle machine,
+ * but 40–42 s on a busy 12-core workstation (2026-11-25, three gate runs in a row), past the 30 s
+ * this allowed. 120 s leaves room for that; a check that hangs still fails.
  */
-const WHOLE_REPOSITORY_TIMEOUT_MS = 30_000
+const WHOLE_REPOSITORY_TIMEOUT_MS = 120_000
 
 /**
  * Each sample check builds a program that loads TypeScript's library and the dependency types:
