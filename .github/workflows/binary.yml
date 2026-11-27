@@ -100,11 +100,13 @@ jobs:
             unix)
               flag=--all
               sums=SHA256SUMS
-              # macos-13 is retired; macos-15-intel is GitHub's remaining x64 macOS image.
+              # macos-13 is retired; macos-15-intel is GitHub's remaining x64 macOS image. macos-14
+              # is retired too (2026-11: "configuration 'macos-14-arm64-us-default' is not
+              # supported"), so the arm64 smoke runs on macos-15.
               smoke='{"include":[
                 {"target":"linux-x64","file":"pi-switchboard-linux-x64","runner":"ubuntu-latest"},
                 {"target":"linux-arm64","file":"pi-switchboard-linux-arm64","runner":"ubuntu-24.04-arm"},
-                {"target":"darwin-arm64","file":"pi-switchboard-darwin-arm64","runner":"macos-14"},
+                {"target":"darwin-arm64","file":"pi-switchboard-darwin-arm64","runner":"macos-15"},
                 {"target":"darwin-x64","file":"pi-switchboard-darwin-x64","runner":"macos-15-intel"}]}'
               ;;
             windows)
